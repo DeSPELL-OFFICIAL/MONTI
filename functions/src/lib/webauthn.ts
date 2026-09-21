@@ -3,6 +3,14 @@ import type { Hex } from '@monti/shared';
 
 const decoder = new Encoder({ useRecords: false, mapsAsObjects: false, tagUint8Array: false });
 
+/**
+ * 챌린지는 그대로 Firestore 문서 id 가 된다. base64url 밖의 문자(`/`, `.`, 빈 문자열)는
+ * 문서 경로 자체를 깨뜨려 매핑되지 않은 500 이 되므로 id 로 쓰기 **전에** 막는다.
+ * `loginChallenge` 가 내주는 값은 32바이트 base64url(43자)다.
+ * 등록(Task 18)과 로그인(Task 20)이 같은 판정을 쓰도록 여기 한 곳에만 둔다.
+ */
+export const CHALLENGE_RE = /^[A-Za-z0-9_-]{16,128}$/;
+
 function toHex32(value: unknown, label: string): Hex {
   const bytes = value instanceof Uint8Array ? value : undefined;
   if (!bytes || bytes.length !== 32) throw new Error(label);

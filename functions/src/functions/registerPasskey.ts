@@ -7,7 +7,7 @@ import type { Hex } from '@monti/shared';
 import { RP_ID, expectedOrigins } from '../config.js';
 import { deployment, publicClient } from '../lib/chain.js';
 import { AUTH_CHALLENGES, PASSKEYS, PERSONS, USERS, db } from '../lib/db.js';
-import { challengeFromClientData, coseToP256, ownerBytes } from '../lib/webauthn.js';
+import { CHALLENGE_RE, challengeFromClientData, coseToP256, ownerBytes } from '../lib/webauthn.js';
 
 /**
  * Task 3 이 `@monti/shared` 에 팩토리 ABI 를 넣기 전까지 이 한 조각이 유일한 ABI 텍스트다.
@@ -25,13 +25,6 @@ const SUPPORTED_ALGORITHMS = [-7];
 
 /** 어테스테이션 CA 는 신뢰하지 않는다. 자기 서명(`packed`)과 무증명(`none`)만 받는다. */
 const ALLOWED_FORMATS = new Set(['none', 'packed']);
-
-/**
- * 챌린지는 그대로 Firestore 문서 id 가 된다. base64url 밖의 문자(`/`, `.`, 빈 문자열)는
- * 문서 경로 자체를 깨뜨려 매핑되지 않은 500 이 되므로 id 로 쓰기 **전에** 막는다.
- * Task 20 이 내주는 값은 32바이트 base64url(43자)다.
- */
-const CHALLENGE_RE = /^[A-Za-z0-9_-]{16,128}$/;
 
 /**
  * 웹 클라이언트는 지원하지 않는 엔진에서 `{}` 를 그대로 올려 보낸다.
@@ -86,13 +79,16 @@ export const registerPasskey = onCall(
 
     // clientDataJSON 은 클라이언트가 만든 바이트다. base64·JSON·필드가 깨진 입력은
     // 라이브러리에 닿기 전에 여기서 `invalid-argument` 로 끝낸다(500 으로 새지 않는다).
-    let challenge: string;
+    let challenge: unknown;
     try {
       challenge = challengeFromClientData(registration.response.clientDataJSON);
     } catch {
       throw new HttpsError('invalid-argument', 'BAD_ATTESTATION');
     }
-    if (!CHALLENGE_RE.test(challenge)) throw new HttpsError('invalid-argument', 'BAD_CHALLENGE');
+    // 숫자·배열 challenge 는 `RegExp.test` 가 문자열로 강제 변환해 통과시킨 뒤 문서 id 에서 터진다.
+    if (typeof challenge !== 'string' || !CHALLENGE_RE.test(challenge)) {
+      throw new HttpsError('invalid-argument', 'BAD_CHALLENGE');
+    }
 
     // 챌린지를 한 번만 쓰도록 트랜잭션으로 소비한다.
     const challengeRef = db.collection(AUTH_CHALLENGES).doc(challenge);

@@ -427,6 +427,17 @@ describe('registerPasskey', () => {
     expect(transactions).toBe(0); // 문서 id 로 쓰기 전에 끝난다
   });
 
+  it('refuses a challenge that is not a string', async () => {
+    // 숫자·배열은 `RegExp.test` 가 문자열로 바꿔 통과시킨 뒤 문서 id 로 쓸 때 터진다.
+    for (const challenge of [1234567890123456789, ['aaaaaaaaaaaaaaaaaa'], { nested: 'x' }]) {
+      const { attestation } = makeAttestation({ challenge: challenge as unknown as string });
+      await expect(
+        wrapped({ data: { personId: PERSON_ID, attestation }, auth } as never),
+      ).rejects.toThrow('BAD_CHALLENGE');
+    }
+    expect(transactions).toBe(0); // 문서 id 로 쓰기 전에 끝난다
+  });
+
   it('refuses a challenge that was issued for login, and leaves it unconsumed', async () => {
     seedChallenge('chal-login-0123456789', { purpose: 'login' });
     const { attestation } = makeAttestation({ challenge: 'chal-login-0123456789' });
