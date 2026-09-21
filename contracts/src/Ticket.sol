@@ -53,18 +53,19 @@ contract Ticket is ERC721, EIP712, ITicket {
         bytes32 nonce;
     }
 
+    /// @notice 필드 순서가 곧 저장 레이아웃이다. `nonceHash` 가 `bytes32` 라 `ts` 와 같은 슬롯에
+    ///         들어갈 수 없으므로, 그것을 `ts` **앞**으로 보내 `ts + manual + late` 가 한 칸에
+    ///         모이게 한다 — 세 슬롯(gateId | nonceHash | ts·manual·late)이고, `late = true` 는
+    ///         이미 비0인 그 칸에 얹히므로 더 이상 SSTORE 하나를 새로 만들지 않는다.
+    /// @dev    이 순서는 `checkInOf` 의 반환 튜플 순서이기도 하다. 재배포가 예정된 이번이
+    ///         아니면 바꿀 수 없는 것이므로 여기서 바로잡아 둔다.
     struct CheckIn {
         uint256 gateId;
-        uint64 ts;
         bytes32 nonceHash;
+        uint64 ts;
         bool manual;
-        /// @dev 스펙 12 의 오프라인 큐가 복구 후에 밀어 넣은 기록이다. manual 과 같은 슬롯이지만
-        ///      **저장 비용이 0은 아니다**: nonceHash 가 bytes32 라 ts 와 같은 슬롯에 못 들어가고,
-        ///      그래서 manual/late 는 현장 경로에서 통째로 0인 네 번째 슬롯에 산다. late 를 세우는
-        ///      것은 거기에 0 -> 비0 SSTORE 하나(약 20k)를 새로 만드는 일이고, checkInLate 가
-        ///      checkIn 보다 28.7k 비싼 이유의 대부분이 이것이다(TicketCheckInLate.t.sol 이 둘을
-        ///      같은 픽스처 위에서 잰다). 필드 순서를 ts/manual/late 로 바꾸면 사라지지만 그것은
-        ///      checkInOf 의 반환 튜플 순서를 바꾸는 일이라 여기서 하지 않는다.
+        /// @dev 스펙 12 의 오프라인 큐가 복구 후에 밀어 넣은 기록이다. `ts` 와 같은 슬롯이고
+        ///      `ts` 는 언제나 비0이므로, 이제 정말로 저장 비용이 0이다.
         bool late;
     }
 
@@ -468,11 +469,24 @@ contract Ticket is ERC721, EIP712, ITicket {
         emit CheckedIn(tokenId, eventId, g.gateId, nonceHash, uint64(block.timestamp));
     }
 
-    /// @notice 관객 기기가 서명하는 그 32바이트. 두 입장 경로가 모두 이것을 부르므로 정의는
-    ///         한 곳뿐이다. 인코딩은 `_admit` 의 natspec 이 바이트 단위로 적어 두었다.
-    /// @dev    `view` 인 이유는 `address(this)` 와 `block.chainid` 뿐이고 상태는 읽지 않는다.
+    /// @notice 관객 기기가 서명해야 하는 그 32바이트. `offerDigest` 와 같은 이유로 공개한다:
+    ///         03 의 지갑과 04 의 단말기가 자기 계산을 체인과 대조할 수 있어야 하고, 대조할 수
+    ///         없으면 어긋남은 현장에서 DENY DEVICE_MISMATCH 로만 드러난다.
+    /// @dev    `chainid` 와 이 컨트랙트 주소는 인자가 아니라 안에서 채운다 — 호출자가 고를 수
+    ///         있으면 교차검증용으로서 아무것도 증명하지 못한다. 인코딩은 `_admit` 의 natspec 이
+    ///         바이트 단위로 적어 두었다. 상태는 읽지 않으므로 `view` 인 이유는 그 두 값뿐이다.
+    function deviceDigest(uint256 tokenId, uint256 gateId, uint256 eventId, bytes32 nonce, uint64 issuedAt)
+        public
+        view
+        returns (bytes32)
+    {
+        return sha256(abi.encode(block.chainid, address(this), tokenId, gateId, eventId, nonce, issuedAt));
+    }
+
+    /// @dev 두 입장 경로가 부르는 얇은 껍데기. `_admit` 안에서 다섯 인자를 직접 펼치면 legacy
+    ///      코드젠이 다시 stack too deep 으로 죽는다.
     function _deviceDigest(uint256 tokenId, GateCode calldata g) private view returns (bytes32) {
-        return sha256(abi.encode(block.chainid, address(this), tokenId, g.gateId, g.eventId, g.nonce, g.issuedAt));
+        return deviceDigest(tokenId, g.gateId, g.eventId, g.nonce, g.issuedAt);
     }
 
     /// @notice Spec 13: a manager without approval rights files a request; someone with rights admits.

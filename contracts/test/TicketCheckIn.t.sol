@@ -115,6 +115,12 @@ contract TicketCheckInTest is MontiTest {
         bytes32 expected =
             sha256(abi.encode(block.chainid, address(ticket), tokenId, g.gateId, g.eventId, g.nonce, g.issuedAt));
         assertEq(_deviceDigest(tokenId, g), expected, "the helper must hash what the spec says");
+        // 03/04 가 자기 계산을 대조할 창구. 셋이 같은 값이어야 한다.
+        assertEq(
+            ticket.deviceDigest(tokenId, g.gateId, g.eventId, g.nonce, g.issuedAt),
+            expected,
+            "the public view must hand out the same bytes"
+        );
 
         vm.prank(GATE_A);
         ticket.checkIn(tokenId, g, sigA);
@@ -150,6 +156,25 @@ contract TicketCheckInTest is MontiTest {
         vm.prank(GATE_A);
         vm.expectRevert(Ticket.BadDeviceSignature.selector);
         ticket.checkIn(tokenId, g, abi.encode(r, s));
+    }
+
+    /// @dev `checkInOf` 의 **와이어 순서**를 못박는다. 구조체 필드 이름으로 읽는 Solidity 쪽은
+    ///      순서가 바뀌어도 조용히 통과하지만, viem 과 Envio 는 ABI 순서 그대로 디코딩한다.
+    ///      순서: (uint256 gateId, bytes32 nonceHash, uint64 ts, bool manual, bool late).
+    function test_checkInOfDecodesInTheDocumentedOrder() public {
+        vm.prank(GATE_A);
+        ticket.checkIn(tokenId, _code(gateAId), sigA);
+
+        (bool ok, bytes memory ret) = address(ticket).staticcall(abi.encodeWithSignature("checkInOf(uint256)", tokenId));
+        assertTrue(ok);
+        (uint256 gateId_, bytes32 nonceHash_, uint64 ts_, bool manual_, bool late_) =
+            abi.decode(ret, (uint256, bytes32, uint64, bool, bool));
+
+        assertEq(gateId_, gateAId, "word 0 is the gateId");
+        assertEq(nonceHash_, keccak256(abi.encode(P256Vectors.NONCE)), "word 1 is the nonce hash");
+        assertEq(ts_, uint64(P256Vectors.ISSUED_AT + 5), "word 2 is the timestamp");
+        assertFalse(manual_, "word 3 is manual");
+        assertFalse(late_, "word 4 is late");
     }
 
     function test_T14_fakeGateRejected() public {

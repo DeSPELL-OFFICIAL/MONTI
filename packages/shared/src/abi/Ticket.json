@@ -323,14 +323,14 @@
             "internalType": "uint256"
           },
           {
-            "name": "ts",
-            "type": "uint64",
-            "internalType": "uint64"
-          },
-          {
             "name": "nonceHash",
             "type": "bytes32",
             "internalType": "bytes32"
+          },
+          {
+            "name": "ts",
+            "type": "uint64",
+            "internalType": "uint64"
           },
           {
             "name": "manual",
@@ -536,6 +536,45 @@
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "deviceDigest",
+    "inputs": [
+      {
+        "name": "tokenId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "gateId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "eventId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "nonce",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "issuedAt",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
