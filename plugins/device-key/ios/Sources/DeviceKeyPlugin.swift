@@ -11,9 +11,10 @@ import Security
 ///   1. `sign` uses `.ecdsaSignatureDigestX962SHA256`, which signs the 32 bytes it is handed
 ///      AS-IS. The message variant (`...MessageX962SHA256`) would hash them again and produce a
 ///      signature over SHA-256(digest) — something `Ticket.checkIn` can never verify.
-///   2. One `LAContext` is retained across calls with a 60-second reuse duration, so the first
-///      Face ID inside the window arms the key and the signature that follows does not prompt.
-///      A fresh `LAContext` per call would prompt every single time.
+///   2. One `LAContext` per tag is retained with a 60-second reuse duration, and the window is
+///      clocked from the last SUCCESSFUL authentication rather than from when the context was
+///      built. Clocking it from creation makes the window routinely shorter than 60 s — a
+///      `loadKey` at app start would start the clock without ever showing a prompt.
 @objc(DeviceKeyPlugin)
 public class DeviceKeyPlugin: CAPPlugin, CAPBridgedPlugin {
     public let identifier = "DeviceKeyPlugin"
@@ -32,6 +33,13 @@ public class DeviceKeyPlugin: CAPPlugin, CAPBridgedPlugin {
     /// The 32 bytes `Ticket.checkIn` verifies over. Anything else is refused rather than signed.
     private static let digestByteCount = 32
 
+    /// The per-operation reason iOS shows in the authentication sheet. `NSFaceIDUsageDescription`
+    /// does NOT fill this in — that is the one-time Face ID permission string, a different thing.
+    /// Leaving it empty gives the holder an unexplained prompt, and Touch ID devices may refuse
+    /// the operation outright. The attendee-facing wording lives in the app's copy layer; this
+    /// is the neutral product name, deliberately not a sentence to translate here.
+    private static let localizedReason = "MONTI"
+
     /// A P-256 SubjectPublicKeyInfo (RFC 5280) is fixed except for the point, so the header is a
     /// constant: SEQUENCE SEQUENCE OID(id-ecPublicKey) OID(prime256v1) BIT STRING. The Security
     /// framework hands back the bare X9.63 point instead, so this plugin wraps it — Task 13's
@@ -49,6 +57,7 @@ public class DeviceKeyPlugin: CAPPlugin, CAPBridgedPlugin {
         static let invalidArgument = "INVALID_ARGUMENT"
         static let keyNotFound = "KEY_NOT_FOUND"
         static let userCancelled = "USER_CANCELLED"
+        static let keyInvalidated = "KEY_INVALIDATED"
         static let unavailable = "UNAVAILABLE"
         static let keyGenerationFailed = "KEY_GENERATION_FAILED"
         static let signFailed = "SIGN_FAILED"
@@ -57,8 +66,14 @@ public class DeviceKeyPlugin: CAPPlugin, CAPBridgedPlugin {
     /// The Secure Enclave is the only place a key can land on iOS; `strongBox` is Android's word.
     private static let backing = "secureEnclave"
 
-    private var armedContext: LAContext?
-    private var armedAt: Date?
+    /// One context per tag, plus when its biometric last actually succeeded. `armedAt == nil`
+    /// means "built but never authenticated", which has no clock to expire.
+    private struct ArmedContext {
+        let context: LAContext
+        var armedAt: Date?
+    }
+
+    private var contexts: [String: ArmedContext] = [:]
     private let contextLock = NSLock()
 
     // MARK: - Plugin methods
@@ -69,7 +84,7 @@ public class DeviceKeyPlugin: CAPPlugin, CAPBridgedPlugin {
               !tag.isEmpty else {
             return call.reject(Code.invalidArgument, Code.invalidArgument)
         }
-        // `accessControl` true  -> attendee key: Face ID gated, destroyed if biometrics change.
+        // `accessControl` true  -> attendee key: Face ID gated, unusable if biometrics change.
         // `accessControl` false -> gate terminal key: signs unattended, must never prompt.
         // `.biometryCurrentSet` (not `.biometryAny`) is what makes an enrolled-finger change
         // invalidate the key instead of silently widening who can sign as this device.
@@ -83,7 +98,7 @@ public class DeviceKeyPlugin: CAPPlugin, CAPBridgedPlugin {
             flags,
             &accessError
         ) else {
-            return reject(call, accessError, fallback: Code.keyGenerationFailed)
+            return reject(call, accessError, tag: tag, fallback: Code.keyGenerationFailed)
         }
 
         let attributes: [String: Any] = [
@@ -100,7 +115,7 @@ public class DeviceKeyPlugin: CAPPlugin, CAPBridgedPlugin {
         guard let privateKey = SecKeyCreateRandomKey(attributes as CFDictionary, &createError) else {
             // No software fallback: a key outside the enclave would be registered on chain in the
             // same field as a real one. A device without a usable enclave simply has no key.
-            return reject(call, createError, fallback: Code.unavailable)
+            return reject(call, createError, tag: tag, fallback: Code.unavailable)
         }
         guard let publicKey = exportPublicKey(of: privateKey) else {
             return call.reject(Code.keyGenerationFailed, Code.keyGenerationFailed)
@@ -113,8 +128,9 @@ public class DeviceKeyPlugin: CAPPlugin, CAPBridgedPlugin {
             return call.reject(Code.invalidArgument, Code.invalidArgument)
         }
         // `kSecReturnRef` hands back a handle without exercising the access control, so reading a
-        // biometric-gated key's public half raises no prompt. Only `sign` authenticates.
-        let (key, status) = copyKey(tag: tag)
+        // biometric-gated key's public half raises no prompt — and because this call never
+        // authenticates, it must not touch the arming context at all (see `copyKey`).
+        let (key, status) = copyKey(tag: tag, authenticating: false)
         guard let key else { return rejectKeychain(call, status, fallback: Code.unavailable) }
         // NOT keyNotFound: the key is there, only unreadable. `KEY_NOT_FOUND` is the code that
         // authorises minting a replacement, and replacing a key already registered on chain
@@ -136,7 +152,7 @@ public class DeviceKeyPlugin: CAPPlugin, CAPBridgedPlugin {
         guard let digest = decodeBase64Url(data), digest.count == DeviceKeyPlugin.digestByteCount else {
             return call.reject(Code.invalidArgument, Code.invalidArgument)
         }
-        let (key, status) = copyKey(tag: tag)
+        let (key, status) = copyKey(tag: tag, authenticating: true)
         guard let key else { return rejectKeychain(call, status, fallback: Code.signFailed) }
 
         var signError: Unmanaged<CFError>?
@@ -146,8 +162,11 @@ public class DeviceKeyPlugin: CAPPlugin, CAPBridgedPlugin {
             digest as CFData,
             &signError
         ) as Data? else {
-            return reject(call, signError, fallback: Code.signFailed)
+            return reject(call, signError, tag: tag, fallback: Code.signFailed)
         }
+        // The enclave authorised this signature, so a biometric succeeded at or within the reuse
+        // duration of THIS moment. That is the instant the 60-second window starts from.
+        markArmed(tag)
         call.resolve(["signature": base64Url(signature)])
     }
 
@@ -157,31 +176,55 @@ public class DeviceKeyPlugin: CAPPlugin, CAPBridgedPlugin {
         Data(tag.utf8)
     }
 
-    /// The retained context is what turns one Face ID into a 60-second window. It is reused only
-    /// while it is still inside that window; past it a fresh context forces a new prompt rather
-    /// than leaving a stale authorisation alive.
-    private func authenticationContext() -> LAContext {
+    /// The retained context is what turns one Face ID into a 60-second window. It is kept while
+    /// it has never authenticated (nothing to expire yet) or while its last success is still
+    /// inside the window; past that a fresh context forces a new prompt rather than leaving a
+    /// stale authorisation alive.
+    private func authenticationContext(for tag: String) -> LAContext {
         contextLock.lock()
         defer { contextLock.unlock() }
-        if let context = armedContext, let createdAt = armedAt,
-           Date().timeIntervalSince(createdAt) < DeviceKeyPlugin.armWindowSeconds {
-            return context
+        if let existing = contexts[tag] {
+            let stillArmed = existing.armedAt.map {
+                Date().timeIntervalSince($0) <= DeviceKeyPlugin.armWindowSeconds
+            } ?? true
+            if stillArmed { return existing.context }
         }
         let context = LAContext()
         context.touchIDAuthenticationAllowableReuseDuration = DeviceKeyPlugin.armWindowSeconds
-        armedContext = context
-        armedAt = Date()
+        context.localizedReason = DeviceKeyPlugin.localizedReason
+        contexts[tag] = ArmedContext(context: context, armedAt: nil)
         return context
     }
 
-    private func copyKey(tag: String) -> (SecKey?, OSStatus) {
-        let query: [String: Any] = [
+    /// Stamped only after the Secure Enclave actually authorised an operation.
+    private func markArmed(_ tag: String) {
+        contextLock.lock()
+        defer { contextLock.unlock() }
+        contexts[tag]?.armedAt = Date()
+    }
+
+    /// Whether this tag has ever authenticated successfully in this process. Used only to tell
+    /// "this device never had usable biometrics" apart from "it had them and lost them", which
+    /// are `UNAVAILABLE` and `KEY_INVALIDATED` respectively.
+    private func hasArmed(_ tag: String) -> Bool {
+        contextLock.lock()
+        defer { contextLock.unlock() }
+        return contexts[tag]?.armedAt != nil
+    }
+
+    private func copyKey(tag: String, authenticating: Bool) -> (SecKey?, OSStatus) {
+        var query: [String: Any] = [
             kSecClass as String: kSecClassKey,
             kSecAttrApplicationTag as String: applicationTag(tag),
             kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
-            kSecReturnRef as String: true,
-            kSecUseAuthenticationContext as String: authenticationContext()
+            kSecReturnRef as String: true
         ]
+        // Only an operation that can actually authenticate may build or reuse the context.
+        // Attaching it to a lookup that never prompts would rebuild it for free and, worse,
+        // restart the arming clock from a call the holder never saw.
+        if authenticating {
+            query[kSecUseAuthenticationContext as String] = authenticationContext(for: tag)
+        }
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
         guard status == errSecSuccess, let item, CFGetTypeID(item) == SecKeyGetTypeID() else {
@@ -233,30 +276,44 @@ public class DeviceKeyPlugin: CAPPlugin, CAPBridgedPlugin {
             call.reject(Code.keyNotFound, Code.keyNotFound)
         case errSecUserCanceled:
             call.reject(Code.userCancelled, Code.userCancelled)
+        case errSecAuthFailed:
+            call.reject(Code.keyInvalidated, Code.keyInvalidated)
         default:
             call.reject(fallback, fallback)
         }
     }
 
-    private func reject(_ call: CAPPluginCall, _ error: Unmanaged<CFError>?, fallback: String) {
+    private func reject(_ call: CAPPluginCall, _ error: Unmanaged<CFError>?, tag: String, fallback: String) {
         guard let cfError = error?.takeRetainedValue() else {
             return call.reject(fallback, fallback)
         }
-        let code = mapped(cfError as Error as NSError) ?? fallback
+        let code = mapped(cfError as Error as NSError, tag: tag) ?? fallback
         call.reject(code, code)
     }
 
-    /// A dismissed prompt and a missing key are recoverable in completely different ways — one
-    /// is retried, the other means this device must register a new key — so they never collapse
-    /// into a generic failure. iOS has no separate "invalidated" status: changing the enrolled
-    /// biometrics destroys a `.biometryCurrentSet` key outright, which surfaces here as
-    /// `errSecItemNotFound` and is the honest answer.
-    private func mapped(_ error: NSError) -> String? {
+    /// A dismissed prompt, a missing key and an invalidated key are recovered in completely
+    /// different ways — retry, register a new key, register a new key — so they never collapse
+    /// into a generic failure.
+    ///
+    /// Note what iOS does NOT do: changing the enrolled biometrics does not delete a
+    /// `.biometryCurrentSet` keychain item. The item survives and `SecItemCopyMatching` with
+    /// `kSecReturnRef` still returns the ref, because the ACL is evaluated on USE. So the
+    /// invalidation surfaces here, on `SecKeyCreateSignature`, as `errSecAuthFailed` — and
+    /// without this mapping `loadKey` would keep reporting a healthy key while every `sign`
+    /// failed forever, with no typed signal to re-register.
+    private func mapped(_ error: NSError, tag: String) -> String? {
         if error.domain == LAError.errorDomain {
             switch error.code {
-            case LAError.userCancel.rawValue, LAError.appCancel.rawValue, LAError.systemCancel.rawValue:
+            case LAError.Code.userCancel.rawValue, LAError.Code.appCancel.rawValue, LAError.Code.systemCancel.rawValue:
                 return Code.userCancelled
-            case LAError.biometryNotEnrolled.rawValue, LAError.biometryNotAvailable.rawValue:
+            case LAError.Code.biometryLockout.rawValue:
+                return Code.keyInvalidated
+            case LAError.Code.biometryNotAvailable.rawValue:
+                // Once this tag has authenticated, the hardware was there. Losing it means the
+                // `.biometryCurrentSet` key can never be used again — a re-registration, not a
+                // "this device has no enclave".
+                return hasArmed(tag) ? Code.keyInvalidated : Code.unavailable
+            case LAError.Code.biometryNotEnrolled.rawValue:
                 return Code.unavailable
             default:
                 return nil
@@ -264,6 +321,7 @@ public class DeviceKeyPlugin: CAPPlugin, CAPBridgedPlugin {
         }
         if error.code == Int(errSecUserCanceled) { return Code.userCancelled }
         if error.code == Int(errSecItemNotFound) { return Code.keyNotFound }
+        if error.code == Int(errSecAuthFailed) { return Code.keyInvalidated }
         return nil
     }
 }

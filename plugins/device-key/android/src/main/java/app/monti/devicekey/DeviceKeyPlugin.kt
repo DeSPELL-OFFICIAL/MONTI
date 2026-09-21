@@ -21,6 +21,7 @@ import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.PrivateKey
 import java.security.Signature
+import java.security.UnrecoverableKeyException
 import java.security.spec.ECGenParameterSpec
 
 /**
@@ -35,9 +36,14 @@ import java.security.spec.ECGenParameterSpec
  *      per-operation, so one successful BiometricPrompt arms the key for the next 60 seconds.
  *      That is why the prompt here carries no CryptoObject: a CryptoObject would bind the
  *      authorisation to a single signature and the window would be meaningless.
- *   3. A StrongBox downgrade is REPORTED (`backing: "tee"`), never silent. The vendor plugin
- *      this replaces downgraded quietly, which let a TEE key be registered on chain as if it
- *      were StrongBox-backed.
+ *   3. A StrongBox downgrade is REPORTED (`backing: "tee"`), never silent. Both `generateKey`
+ *      and `loadKey` read the answer back off the finished key rather than trusting the request.
+ *
+ * Every `@PluginMethod` body is wrapped in a catch-all. Kotlin has no checked exceptions, so
+ * `KeyStore.getKey`, `KeyStore.getCertificate` and `KeyFactory.getKeySpec` compile with no
+ * handler while still throwing — and Capacitor's `Bridge.callPluginMethod` rethrows anything
+ * that escapes as a `RuntimeException` from inside a Runnable on its task handler thread, which
+ * is a process crash that also leaves the JS promise pending forever.
  */
 @CapacitorPlugin(name = "DeviceKey")
 class DeviceKeyPlugin : Plugin() {
@@ -74,85 +80,90 @@ class DeviceKeyPlugin : Plugin() {
 
     @PluginMethod
     fun generateKey(call: PluginCall) {
-        val tag = call.getString("tag")?.takeIf { it.isNotEmpty() }
-            ?: return call.reject(INVALID_ARGUMENT, INVALID_ARGUMENT)
-        // Both flags are required rather than defaulted: a missing `accessControl` silently
-        // defaulting either way would mint a key whose protection nobody asked for.
-        val accessControl = call.getBoolean("accessControl")
-            ?: return call.reject(INVALID_ARGUMENT, INVALID_ARGUMENT)
-        val strongBox = call.getBoolean("strongBox")
-            ?: return call.reject(INVALID_ARGUMENT, INVALID_ARGUMENT)
+        try {
+            val tag = call.getString("tag")?.takeIf { it.isNotEmpty() }
+                ?: return call.reject(INVALID_ARGUMENT, INVALID_ARGUMENT)
+            // Both flags are required rather than defaulted: a missing `accessControl` silently
+            // defaulting either way would mint a key whose protection nobody asked for.
+            val accessControl = call.getBoolean("accessControl")
+                ?: return call.reject(INVALID_ARGUMENT, INVALID_ARGUMENT)
+            val strongBox = call.getBoolean("strongBox")
+                ?: return call.reject(INVALID_ARGUMENT, INVALID_ARGUMENT)
 
-        val generator = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, ANDROID_KEYSTORE)
-        val backing = try {
-            if (strongBox) {
-                generateWithStrongBoxFallback(generator, tag, accessControl)
-            } else {
-                generateIn(generator, tag, accessControl, strongBox = false)
-                BACKING_TEE
-            }
-        } catch (_: Exception) {
+            val generator = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, ANDROID_KEYSTORE)
+            generate(generator, tag, accessControl, strongBox)
+
+            val privateKey = keyStore.getKey(tag, null) as? PrivateKey
+                ?: return call.reject(KEY_GENERATION_FAILED, KEY_GENERATION_FAILED)
+            val publicKey = keyStore.getCertificate(tag)?.publicKey
+                ?: return call.reject(KEY_GENERATION_FAILED, KEY_GENERATION_FAILED)
+            call.resolve(
+                JSObject()
+                    .put("publicKey", encode(publicKey.encoded))
+                    // Read back off the finished key, never from which branch succeeded.
+                    .put("backing", backingOf(privateKey)),
+            )
+        } catch (error: Exception) {
             // No software fallback: a key outside secure hardware would be registered on chain
             // in the same field as a real one.
-            return call.reject(KEY_GENERATION_FAILED, KEY_GENERATION_FAILED)
+            rejectFor(call, error, KEY_GENERATION_FAILED)
         }
-        val publicKey = keyStore.getCertificate(tag)?.publicKey
-            ?: return call.reject(KEY_GENERATION_FAILED, KEY_GENERATION_FAILED)
-        call.resolve(
-            JSObject()
-                .put("publicKey", encode(publicKey.encoded))
-                .put("backing", backing),
-        )
     }
 
     @PluginMethod
     fun loadKey(call: PluginCall) {
-        val tag = call.getString("tag")?.takeIf { it.isNotEmpty() }
-            ?: return call.reject(INVALID_ARGUMENT, INVALID_ARGUMENT)
-        // Reading the public half raises no biometric prompt; only `sign` authenticates.
-        val privateKey = keyStore.getKey(tag, null) as? PrivateKey
-            ?: return call.reject(KEY_NOT_FOUND, KEY_NOT_FOUND)
-        // NOT KEY_NOT_FOUND: the key is there, only its public half is unreadable.
-        // KEY_NOT_FOUND is the code that authorises minting a replacement, and replacing a key
-        // already registered on chain cannot be undone.
-        val publicKey = keyStore.getCertificate(tag)?.publicKey
-            ?: return call.reject(UNAVAILABLE, UNAVAILABLE)
-        call.resolve(
-            JSObject()
-                .put("publicKey", encode(publicKey.encoded))
-                .put("backing", backingOf(privateKey)),
-        )
+        try {
+            val tag = call.getString("tag")?.takeIf { it.isNotEmpty() }
+                ?: return call.reject(INVALID_ARGUMENT, INVALID_ARGUMENT)
+            // Reading the public half raises no biometric prompt; only `sign` authenticates.
+            val privateKey = keyStore.getKey(tag, null) as? PrivateKey
+                ?: return call.reject(KEY_NOT_FOUND, KEY_NOT_FOUND)
+            // NOT KEY_NOT_FOUND: the key is there, only its public half is unreadable.
+            // KEY_NOT_FOUND is the code that authorises minting a replacement, and replacing a
+            // key already registered on chain cannot be undone.
+            val publicKey = keyStore.getCertificate(tag)?.publicKey
+                ?: return call.reject(UNAVAILABLE, UNAVAILABLE)
+            call.resolve(
+                JSObject()
+                    .put("publicKey", encode(publicKey.encoded))
+                    .put("backing", backingOf(privateKey)),
+            )
+        } catch (error: Exception) {
+            rejectFor(call, error, UNAVAILABLE)
+        }
     }
 
     @PluginMethod
     fun sign(call: PluginCall) {
-        val tag = call.getString("tag")?.takeIf { it.isNotEmpty() }
-            ?: return call.reject(INVALID_ARGUMENT, INVALID_ARGUMENT)
-        val data = call.getString("data")
-            ?: return call.reject(INVALID_ARGUMENT, INVALID_ARGUMENT)
-        val digest = try {
-            Base64.decode(data, BASE64_FLAGS)
-        } catch (_: IllegalArgumentException) {
-            return call.reject(INVALID_ARGUMENT, INVALID_ARGUMENT)
-        }
-        // `NONEwithECDSA` below signs whatever length it is given, so a wrong-sized input would
-        // become a valid signature over the wrong message. Refuse it here instead.
-        if (digest.size != DIGEST_BYTES) return call.reject(INVALID_ARGUMENT, INVALID_ARGUMENT)
+        try {
+            val tag = call.getString("tag")?.takeIf { it.isNotEmpty() }
+                ?: return call.reject(INVALID_ARGUMENT, INVALID_ARGUMENT)
+            val data = call.getString("data")
+                ?: return call.reject(INVALID_ARGUMENT, INVALID_ARGUMENT)
+            val digest = try {
+                Base64.decode(data, BASE64_FLAGS)
+            } catch (_: IllegalArgumentException) {
+                return call.reject(INVALID_ARGUMENT, INVALID_ARGUMENT)
+            }
+            // `NONEwithECDSA` below signs whatever length it is given, so a wrong-sized input
+            // would become a valid signature over the wrong message. Refuse it here instead.
+            if (digest.size != DIGEST_BYTES) return call.reject(INVALID_ARGUMENT, INVALID_ARGUMENT)
 
-        val privateKey = keyStore.getKey(tag, null) as? PrivateKey
-            ?: return call.reject(KEY_NOT_FOUND, KEY_NOT_FOUND)
-        val signature = try {
-            signDigest(privateKey, digest)
-        } catch (_: UserNotAuthenticatedException) {
-            // The 60-second window has lapsed (or never opened). One prompt re-arms the key and
-            // the retry inside then signs without prompting again.
-            return promptThenRetry(call, privateKey, digest)
-        } catch (_: KeyPermanentlyInvalidatedException) {
-            return call.reject(KEY_INVALIDATED, KEY_INVALIDATED)
-        } catch (_: Exception) {
-            return call.reject(SIGN_FAILED, SIGN_FAILED)
+            val privateKey = keyStore.getKey(tag, null) as? PrivateKey
+                ?: return call.reject(KEY_NOT_FOUND, KEY_NOT_FOUND)
+            val signature = try {
+                signDigest(privateKey, digest)
+            } catch (_: UserNotAuthenticatedException) {
+                // The 60-second window has lapsed (or never opened). One prompt re-arms the key
+                // and the retry inside then signs without prompting again. Every other
+                // InvalidKeyException — KeyPermanentlyInvalidatedException included — falls
+                // through to the catch-all below.
+                return promptThenRetry(call, privateKey, digest)
+            }
+            call.resolve(JSObject().put("signature", encode(signature)))
+        } catch (error: Exception) {
+            rejectFor(call, error, SIGN_FAILED)
         }
-        call.resolve(JSObject().put("signature", encode(signature)))
     }
 
     // MARK: - Key generation
@@ -160,18 +171,16 @@ class DeviceKeyPlugin : Plugin() {
     /**
      * StrongBox first, TEE only when this device has no StrongBox. `StrongBoxUnavailableException`
      * is caught on its own — a broad catch here would turn a real failure (bad spec, missing
-     * biometrics) into a silent security downgrade.
+     * biometrics) into a silent security downgrade. Which branch won is deliberately not
+     * recorded: the caller reads the answer back off the finished key instead.
      */
-    private fun generateWithStrongBoxFallback(
-        generator: KeyPairGenerator,
-        tag: String,
-        accessControl: Boolean,
-    ): String = try {
-        generateIn(generator, tag, accessControl, strongBox = true)
-        BACKING_STRONGBOX
-    } catch (_: StrongBoxUnavailableException) {
-        generateIn(generator, tag, accessControl, strongBox = false)
-        BACKING_TEE
+    private fun generate(generator: KeyPairGenerator, tag: String, accessControl: Boolean, strongBox: Boolean) {
+        if (!strongBox) return generateIn(generator, tag, accessControl, strongBox = false)
+        try {
+            generateIn(generator, tag, accessControl, strongBox = true)
+        } catch (_: StrongBoxUnavailableException) {
+            generateIn(generator, tag, accessControl, strongBox = false)
+        }
     }
 
     private fun generateIn(
@@ -233,28 +242,32 @@ class DeviceKeyPlugin : Plugin() {
         // only case worth guarding is the bridge not being attached at all.
         val host: FragmentActivity = activity ?: return call.reject(UNAVAILABLE, UNAVAILABLE)
         host.runOnUiThread {
-            val prompt = BiometricPrompt(
-                host,
-                ContextCompat.getMainExecutor(host),
-                object : BiometricPrompt.AuthenticationCallback() {
-                    override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                        val signature = try {
-                            signDigest(privateKey, digest)
-                        } catch (_: KeyPermanentlyInvalidatedException) {
-                            return call.reject(KEY_INVALIDATED, KEY_INVALIDATED)
-                        } catch (_: Exception) {
-                            return call.reject(SIGN_FAILED, SIGN_FAILED)
+            try {
+                val prompt = BiometricPrompt(
+                    host,
+                    ContextCompat.getMainExecutor(host),
+                    object : BiometricPrompt.AuthenticationCallback() {
+                        override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                            val signature = try {
+                                signDigest(privateKey, digest)
+                            } catch (error: Exception) {
+                                return rejectFor(call, error, SIGN_FAILED)
+                            }
+                            call.resolve(JSObject().put("signature", encode(signature)))
                         }
-                        call.resolve(JSObject().put("signature", encode(signature)))
-                    }
 
-                    override fun onAuthenticationError(code: Int, message: CharSequence) {
-                        val mapped = errorCodeFor(code)
-                        call.reject(mapped, mapped)
-                    }
-                },
-            )
-            prompt.authenticate(promptInfo(host))
+                        override fun onAuthenticationError(code: Int, message: CharSequence) {
+                            val mapped = errorCodeFor(code)
+                            call.reject(mapped, mapped)
+                        }
+                    },
+                )
+                // An activity that is finishing makes this throw on the main thread, where
+                // nothing would catch it and the promise would simply never settle.
+                prompt.authenticate(promptInfo(host))
+            } catch (error: Exception) {
+                rejectFor(call, error, SIGN_FAILED)
+            }
         }
     }
 
@@ -268,6 +281,27 @@ class DeviceKeyPlugin : Plugin() {
             // authentication would succeed without unlocking it.
             .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
             .build()
+
+    // MARK: - Error mapping
+
+    /**
+     * Nothing may escape a `@PluginMethod` — see the class comment for why an uncaught throw is
+     * a crash rather than a rejected promise.
+     *
+     * `UnrecoverableKeyException` is the mapping that matters in practice: after a biometric
+     * enrolment change `KeyStore.getKey()` throws it ("Failed to obtain information about key")
+     * long before `initSign` could ever throw `KeyPermanentlyInvalidatedException`, so it — not
+     * the exception named for the condition — is the real invalidated-key path.
+     */
+    private fun rejectFor(call: PluginCall, error: Throwable, fallback: String) {
+        val code = when {
+            error is UnrecoverableKeyException -> KEY_INVALIDATED
+            error is KeyPermanentlyInvalidatedException -> KEY_INVALIDATED
+            error.cause is KeyPermanentlyInvalidatedException -> KEY_INVALIDATED
+            else -> fallback
+        }
+        call.reject(code, code)
+    }
 
     /** A dismissed prompt is retried; a device without usable biometrics never will be. */
     private fun errorCodeFor(code: Int): String = when (code) {
