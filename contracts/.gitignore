@@ -4,6 +4,8 @@ broadcast/
 .env
 node_modules/
 
-# Written by Deploy.t.sol when the script runs on the local chain (id 31337).
-# The record that ships is deployments/10143.json.
-deployments/31337.json
+# Written by the deploy scripts when the tests run them on a local chain: 31337 from Deploy.t.sol,
+# 31338 and 31339 from DeployCoinbaseFactory.t.sol, which takes its own ids because forge runs the
+# suites in parallel. The record that ships is deployments/10143.json.
+deployments/*.json
+!deployments/10143.json
