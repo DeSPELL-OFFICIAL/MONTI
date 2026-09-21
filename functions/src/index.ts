@@ -10,3 +10,4 @@ export { registerIdentity } from './functions/registerIdentity.js';
 export { registerPasskey } from './functions/registerPasskey.js';
 export { resolveRecipient } from './functions/resolveRecipient.js';
 export { startSignup } from './functions/startSignup.js';
+export { tenderlyWebhook } from './functions/tenderlyWebhook.js';
