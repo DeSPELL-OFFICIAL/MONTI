@@ -334,12 +334,28 @@ contract PaymasterTest is MontiTest {
         ep.callValidate(address(paymaster), _op(_claimCall(), 0), bytes32(0), 0.01 ether + 1);
     }
 
-    function test_nonMemberSenderIsRefused() public {
+    function test_senderThatIsNeitherMemberNorGateIsRefused() public {
         paymaster.depositPlatform{value: 1 ether}();
         UserOperation memory op = _op(_claimCall(), 0);
         op.sender = BOB;
-        vm.expectRevert(MontiPaymaster.NotMember.selector);
+        vm.expectRevert(MontiPaymaster.UnknownSender.selector);
         ep.callValidate(address(paymaster), op, bytes32(0), 0.01 ether);
+    }
+
+    function test_registeredGateAccountNeedNotBeAMember() public {
+        paymaster.depositPlatform{value: 1 ether}();
+        vm.prank(ORG_OWNER);
+        organizers.registerGate(eventId, GATE_A, DEV_X, DEV_Y);
+        assertFalse(identity.isMember(GATE_A), "a gate device is not a person");
+
+        Ticket.GateCode memory g =
+            Ticket.GateCode({gateId: organizers.gateOf(GATE_A), eventId: eventId, issuedAt: T0, nonce: bytes32(0)});
+        UserOperation memory op = _op(_execute(address(ticket), abi.encodeCall(Ticket.checkIn, (tokenId, g, ""))), 0);
+        op.sender = GATE_A;
+
+        (bytes memory context,) = ep.callValidate(address(paymaster), op, bytes32(0), 0.01 ether);
+        (uint256 slot,) = abi.decode(context, (uint256, uint256));
+        assertEq(slot, 0, "the gate's check-in is sponsored");
     }
 
     function test_valueBearingCallIsRefused() public {

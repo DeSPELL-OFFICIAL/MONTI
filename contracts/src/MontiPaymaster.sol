@@ -68,7 +68,7 @@ contract MontiPaymaster is IPaymaster {
     error Unauthorized();
     error ZeroAddress();
     error NotEntryPoint();
-    error NotMember();
+    error UnknownSender();
     error TargetNotAllowed();
     error SelectorNotAllowed();
     error UnsupportedWalletCall();
@@ -149,7 +149,11 @@ contract MontiPaymaster is IPaymaster {
         returns (bytes memory context, uint256 validationData)
     {
         if (msg.sender != address(entryPoint)) revert NotEntryPoint();
-        if (!identity.isMember(userOp.sender)) revert NotMember();
+        // Attendees are Identity members; gate devices are registered in Organizers instead, and
+        // whether that gate is open is Ticket's and Organizers' business, not the paymaster's.
+        if (!identity.isMember(userOp.sender) && organizers.gateOf(userOp.sender) == 0) {
+            revert UnknownSender();
+        }
 
         uint256 orgId = _requireAllowedCall(userOp.callData);
         uint256 slot = selfSponsored[orgId] ? orgId : PLATFORM;
