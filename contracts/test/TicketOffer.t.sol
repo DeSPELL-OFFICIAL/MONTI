@@ -3,6 +3,7 @@ pragma solidity 0.8.31;
 
 import {MontiTest} from "./Base.t.sol";
 import {Ticket} from "../src/Ticket.sol";
+import {P256Vectors} from "./utils/P256Vectors.sol";
 
 contract TicketOfferTest is MontiTest {
     uint256 internal orgId;
@@ -16,7 +17,7 @@ contract TicketOfferTest is MontiTest {
 
     function setUp() public {
         _deployMonti();
-        _member(ALICE, 0xA1A1);
+        _memberWithDeviceKey(ALICE, 0xA1A1);
         _member(BOB, 0xB0B0);
         orgId = _org();
         eventId = _freeEvent(orgId, 1, 2, true);
@@ -124,5 +125,32 @@ contract TicketOfferTest is MontiTest {
         vm.prank(ALICE);
         ticket.cancelOffer(tokenId);
         assertEq(ticket.offerOf(tokenId).from, address(0));
+    }
+
+    /// @dev Admission kills a live offer, so the recipient cannot accept a ticket that is already inside.
+    function test_offerIsVoidAfterCheckIn() public {
+        vm.prank(ALICE);
+        ticket.createOffer(tokenId, COMMITMENT, uint64(P256Vectors.ISSUED_AT + 1 hours));
+
+        uint256 gateId;
+        vm.startPrank(ORG_OWNER);
+        gateId = organizers.registerGate(eventId, GATE_A, bytes32(uint256(0x6A01)), bytes32(uint256(0x6A02)));
+        organizers.openGate(gateId);
+        vm.stopPrank();
+
+        vm.warp(P256Vectors.ISSUED_AT + 5);
+        vm.prank(GATE_A);
+        ticket.checkIn(
+            tokenId,
+            Ticket.GateCode({
+                gateId: gateId, eventId: P256Vectors.EVENT_ID, issuedAt: P256Vectors.ISSUED_AT, nonce: P256Vectors.NONCE
+            }),
+            abi.encode(P256Vectors.GATE1_R, P256Vectors.GATE1_S)
+        );
+
+        assertEq(ticket.offerOf(tokenId).from, address(0));
+        vm.prank(BOB);
+        vm.expectRevert(Ticket.NoOffer.selector);
+        ticket.acceptOffer(tokenId, _sig(tokenId, COMMITMENT, BOB));
     }
 }

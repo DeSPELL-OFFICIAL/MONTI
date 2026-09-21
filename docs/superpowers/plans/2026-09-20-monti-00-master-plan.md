@@ -361,7 +361,7 @@ function offerOf(uint256 tokenId) external view returns (Offer memory);
 
 ### Reconciliation after sub-plan 04 (authoritative)
 
-- Ticket custom errors: `AlreadyCheckedIn, WrongEvent, TicketRevoked, CodeExpired, NoSuchTicket, GateNotOpen, DeviceLocked, BadDeviceSignature, EventNotPublished, EventEnded, OfferExpired, BadAttesterSig`; Identity: `NicknameTaken`. Staff DENY map keys off these selectors.
+- Ticket custom errors: `AlreadyCheckedIn, WrongEvent, TicketRevoked, CodeExpired, NoSuchTicket, GateNotOpen, GateMismatch, DeviceLocked, BadDeviceSignature, EventNotPublished, EventEnded, EventCancelled, OfferExpired, BadAttesterSig` (Delta after 01 T20/T21: `GateMismatch → GATE_MISMATCH`, `EventCancelled → EVENT_CANCELLED`; `NoActiveDevice` removed as unreachable; `checkIn` accepts `issuedAt ≤ block.timestamp + 5` forward skew); Identity: `NicknameTaken`. Staff DENY map keys off these selectors.
 - `Identity.attester()` view exists; `packages/shared` also exports `ATTESTER_ADDRESS`.
 - `SnapshotWire.attesterSig` = raw secp256k1 (r||s||v) over `keccak256(utf8(canonicalJson(snapshot without attesterSig)))`; `canonicalJson` and `snapshotDigest` live in `packages/shared/src/encoding.ts`.
 - Web shared signatures (used by 03 and 04): `sendSponsoredOp({ account, calls, orgId }) → { userOpHash, wait() }`; `subscribeLogs({ address, topics, onLog }) → unsubscribe` with `ChainLog.stage: 'speculative'|'finalized'`; `ensureDeviceKey({ alias, requireAuth, strongBox })`, `armDeviceKey({ alias })`, `signWithDeviceKey(digest, { alias })` signing the digest raw; aliases `'monti-attendee'` (requireAuth true) and `'monti-gate'` (requireAuth false); `getStaffAccount()`; staff console components `StaffShell, TapPrompt, ReceivedCard, ConfirmingCard, AdmitCard, OfflineAdmitCard, DenyCard, OverrideDialog, OfflineBadge` exported from `src/staff/components/index.ts`.
@@ -400,3 +400,27 @@ function offerOf(uint256 tokenId) external view returns (Offer memory);
 
 - Spec coverage: §5 journeys → sub-plans 02/03; §7 protocol → 03 (attendee side), 04 (gate side), 01 (`checkIn`); §8.1 shell → 03/04; §8.3–8.5 gas/paymaster/bundler → 01 (`MontiPaymaster`), 03/04 (bundler client); §9 identity/KYC/device/roles → 01/02/03; §10.4 storage rules → 02; §12 offline → 04; §13 staff screen → 03 UI + 04 logic; §15 Must list → all covered; §8.7 payments → out of MVP (voucher path in `claim` only).
 - Type consistency: all sub-plans must import names from this file; a reviewer task at the end of sub-plan 04 diffs every ABI/function/type name used in 02–04 against `packages/shared` generated from 01.
+
+## Delta after 03 Task 11 (sendSponsoredOp receipt)
+
+- `sendSponsoredOp` receipt stays `{ success, txHash, blockNumber, revertReason? }`, but `revertReason` is now `Hex | 'TIMEOUT'`. `wait(timeoutMs)` never throws: on deadline it resolves `{ success: false, txHash: '0x', blockNumber: 0n, revertReason: 'TIMEOUT' }`; transient RPC errors inside the poll are swallowed until the deadline. The `SponsoredOpTimeout` class in plan 03 §Task 11 "Produces" no longer exists.
+- Consumers in plan 04 (`mapRevertToDenyCode`, gate queue `lastError`): `'TIMEOUT'` is not a deny. Treat it as "confirmation pending" — keep the chain-event subscription as the source of truth and show the neutral "확인 중 / Confirming" state, never a red screen. Only a `Hex` revert reason maps to a DENY code.
+- viem's default `baseFeeMultiplier` is kept (fee cap only; effective price is base + priority on Monad), so it does not compound with the ×1.075 gas-limit headroom.
+
+## Delta after 01 Tasks 25–26 review (MontiPaymaster hardening)
+
+- `orgId` is derived from the verified inner call (per-selector arg-kind table → `Ticket.eventOf/eventOrg`), never from `paymasterAndData`. Slot = `selfSponsored[orgId] ? orgId : 0`.
+- `postOp` IS implemented (overrides spec §8.4 "no postOp"): validation checks `budget[slot] >= maxCost` and returns `abi.encode(slot, maxCost)`; `postOp` debits `actualGasCost`. Without it a single op with an inflated `maxFeePerGas` zeroes a slot while the EntryPoint refunds the excess to the deposit (stranded funds).
+- Validation also rejects `value != 0`, batches longer than 8, truncated calldata (named errors), and non-member senders (`Identity.isMember`). Targets are immutable constructor args; `setTargets` removed; `deposit(orgId)` requires an existing organizer.
+- Web/staff consumers: nothing in `paymasterAndData` beyond the paymaster address (no orgId hint); `sendSponsoredOp({ orgId })` keeps the field only for pre-flight budget warnings via `budgetOf`.
+
+## Delta after 02 Task 16 (phone storage)
+
+- `users/{uid}` has no plaintext `phoneE164`. The phone number exists only as the HMAC-SHA256 index document id (`phoneIndex/{hmac}`) and as `users/{uid}.phoneEnc`, a KMS envelope bound with AAD `personId:phoneE164` (`piiAad(personId, 'phoneE164')`). Every later reader (Tasks 20/21/24/25/42, SMS invite flows) decrypts with that AAD; nothing ever logs or returns the plaintext to a client except the owner's own profile screen.
+- A second Firebase uid presenting an already-indexed phone gets `already-exists / PHONE_ALREADY_REGISTERED`; recovery goes through the KYC re-verify or SMS recovery flow, never a silent rebind.
+- `encryptField(plaintext, aad = '', client?)` / `decryptField(envelope, aad = '', client?)`: AAD is mandatory for PII fields; envelope format unchanged.
+
+## Delta after 02 Task 20 (session claims)
+
+- The passkey login custom token carries only `{ personId, account }` (account checksummed). It never carries `phone_number`: a custom-token claim is client-readable PII and would force a KMS decrypt on every login. Functions that previously read `request.auth.token.phone_number` (Tasks 21, 25, 42) resolve the caller via `personId`/`account` and read `users/{uid}.phoneHmac` (the same HMAC used as the `phoneIndex/{hmac}` document id; Task 16 stores it on the user document if absent) whenever they need the phone index. `startSignup` remains the only function that reads `token.phone_number`, because that session comes from Firebase phone auth itself.
+- `authChallenges` documents get a TTL sweep (fold into the reconcile task or a scheduled function); `loginChallenge` rate limiting is post-MVP.

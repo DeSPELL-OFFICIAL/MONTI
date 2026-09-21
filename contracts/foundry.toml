@@ -1,10 +1,32 @@
+# remappings.txt rejects comments, so the note about its two context-scoped entries
+# (`<context>:<prefix>=<target>`, which apply only to files under `<context>`) lives here.
+#
+#   lib/account-abstraction/:@openzeppelin/contracts/=test/shims/openzeppelin-v4/
+#     EntryPoint v0.6 predates OpenZeppelin 5, which the rest of this repo is on. The shim gives
+#     the vendored EntryPoint the v4 layout it expects without downgrading anything else.
+#
+#   lib/smart-wallet/:{solady,account-abstraction,openzeppelin-contracts}/=lib/smart-wallet/lib/...
+#     Coinbase's wallet is audited against the dependencies it vendors -- solady 0.0.175, whose
+#     LibClone lays the ERC-1967 proxy out differently from this repo's solady 0.1.26. Resolving
+#     it against our copies would silently change the deployed wallet's bytecode, and with it every
+#     account address the factory predicts. The context keeps the two trees apart.
 [profile.default]
 src = "src"
 out = "out"
 libs = ["lib"]
 test = "test"
 script = "script"
-solc_version = "0.8.31"
+# No project-wide solc pin: lib/smart-wallet pins `pragma solidity 0.8.23` exactly, so a single
+# pinned version cannot build the tree (and compilation_restrictions cannot override a pin -- forge
+# resolves the pin first and then fails on `=0.8.23`). Nothing is lost by dropping it: every
+# first-party source pins its own exact version in its own header -- 0.8.31 everywhere except
+# DeployCoinbaseFactory.s.sol and its test, which import the Coinbase wallet and so must join its
+# 0.8.23 unit. forge builds two units: 88 files at 0.8.31, 38 at 0.8.23.
+#
+# On a cold checkout forge downloads solc 0.8.23 on the first build, once, alongside 0.8.31. Note
+# also that `evm_version` below is capped per compiler: the 0.8.23 unit is emitted for shanghai,
+# the newest target that compiler knows. That is a subset of what Monad executes, so it runs.
+auto_detect_solc = true
 evm_version = "osaka"
 optimizer = true
 optimizer_runs = 200
