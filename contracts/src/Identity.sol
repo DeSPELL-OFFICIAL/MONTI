@@ -134,6 +134,16 @@ contract Identity is IIdentity, AttesterRole {
         if (wasLocked) emit DeviceLocked(msg.sender, false);
     }
 
+    /// @notice Spec 5.5 / 9.3: the attendee (from any device or the web) or the attester can lock the
+    ///         active device instantly. While locked, Ticket.checkIn refuses this account.
+    function lockDevice(address account) external {
+        if (msg.sender != account && msg.sender != attester()) revert NotAccountOwner();
+        if (_personOf[account] == bytes32(0)) revert NotRegistered();
+
+        _devices[account].locked = true;
+        emit DeviceLocked(account, true);
+    }
+
     function nicknameOwner(bytes32 nicknameHash) external view returns (address) {
         return _nicknameOwner[nicknameHash];
     }

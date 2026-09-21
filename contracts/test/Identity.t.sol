@@ -19,6 +19,7 @@ contract IdentityTest is Test {
     event Registered(bytes32 indexed personId, address indexed account);
     event DeviceChanged(address indexed account, bytes32 x, bytes32 y);
     event KycLevelSet(address indexed account, uint8 level);
+    event DeviceLocked(address indexed account, bool locked);
 
     function setUp() public {
         identity = new Identity(ATTESTER);
@@ -157,5 +158,48 @@ contract IdentityTest is Test {
         vm.prank(ALICE);
         vm.expectRevert(Identity.InvalidDeviceKey.selector);
         identity.setActiveDevice(bytes32(0), bytes32(uint256(0x4444)));
+    }
+
+    function test_accountLocksItsOwnDevice() public {
+        vm.prank(ATTESTER);
+        identity.register(PERSON_A, ALICE, DEV_X, DEV_Y, 1);
+
+        vm.expectEmit(true, false, false, true);
+        emit DeviceLocked(ALICE, true);
+        vm.prank(ALICE);
+        identity.lockDevice(ALICE);
+
+        assertTrue(identity.isLocked(ALICE));
+    }
+
+    function test_attesterLocksDevice() public {
+        vm.prank(ATTESTER);
+        identity.register(PERSON_A, ALICE, DEV_X, DEV_Y, 1);
+
+        vm.prank(ATTESTER);
+        identity.lockDevice(ALICE);
+        assertTrue(identity.isLocked(ALICE));
+    }
+
+    function test_strangerCannotLockDevice() public {
+        vm.prank(ATTESTER);
+        identity.register(PERSON_A, ALICE, DEV_X, DEV_Y, 1);
+
+        vm.prank(BOB);
+        vm.expectRevert(Identity.NotAccountOwner.selector);
+        identity.lockDevice(ALICE);
+    }
+
+    function test_newDeviceAfterCooldownClearsLock() public {
+        vm.prank(ATTESTER);
+        identity.register(PERSON_A, ALICE, DEV_X, DEV_Y, 1);
+        vm.prank(ALICE);
+        identity.lockDevice(ALICE);
+
+        vm.warp(block.timestamp + 7 days);
+        vm.prank(ALICE);
+        identity.setActiveDevice(bytes32(uint256(0x3333)), bytes32(uint256(0x4444)));
+
+        assertFalse(identity.isLocked(ALICE));
     }
 }
