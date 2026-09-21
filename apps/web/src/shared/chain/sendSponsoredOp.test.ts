@@ -28,7 +28,8 @@ const account = {
   signUserOperation: vi.fn(async () => '0xsig' as const),
 } as never;
 
-const { applyGasBuffer, encodePaymasterAndData, sendSponsoredOp } = await import('./sendSponsoredOp');
+const { MIN_VERIFICATION_GAS, applyGasBuffer, encodePaymasterAndData, sendSponsoredOp } =
+  await import('./sendSponsoredOp');
 
 // restoreMocks only restores spies; a bare vi.fn() keeps its call history between tests.
 beforeEach(() => {
@@ -65,11 +66,13 @@ describe('sendSponsoredOp', () => {
     expect(sendMethod).toBe('eth_sendUserOperation');
     // Assert the multiplication itself, not a hand-typed hex string.
     expect(sent.callGasLimit).toBe(numberToHex(applyGasBuffer(200_000n)));
-    expect(sent.verificationGasLimit).toBe(numberToHex(applyGasBuffer(100_000n)));
     expect(sent.preVerificationGas).toBe(numberToHex(applyGasBuffer(50_000n)));
+    // 100000 * 1.075 = 107500, which is under the floor: the stub hides ~10.3k of P-256
+    // verification, so the buffered estimate would revert AA23 once the account is deployed.
+    expect(sent.verificationGasLimit).toBe(numberToHex(MIN_VERIFICATION_GAS));
     // And pin the three values so a silent change to the buffer is visible in the diff.
     expect(sent.callGasLimit).toBe('0x347d8');          // 200000 * 1.075 = 215000
-    expect(sent.verificationGasLimit).toBe('0x1a3ec');  // 100000 * 1.075 = 107500
+    expect(sent.verificationGasLimit).toBe('0x249f0');  // the 150000 floor
     expect(sent.preVerificationGas).toBe('0xd1f6');     //  50000 * 1.075 =  53750
     expect(sent.paymasterAndData).toBe(encodePaymasterAndData(PAYMASTER, 7n));
     expect(handle.userOpHash).toBe('0xuserophash');
@@ -111,6 +114,85 @@ describe('sendSponsoredOp', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  /**
+   * The floor exists because both accounts this app sends from are WebAuthn owners estimated
+   * with viem's stub signature, which fails its challenge comparison before the P-256 precompile
+   * runs and so prices ~10.3k less than a real verification. Task 13's review measured it:
+   * 5,012 estimated against 15,287 on Monad. Without the floor the first op of an account lands
+   * (its initCode estimate is large) and every one after it reverts AA23 — at a door.
+   */
+  it('floors verificationGasLimit at 150k for every account, gate and attendee alike', async () => {
+    bundlerRequest
+      .mockResolvedValueOnce({ callGasLimit: '0x30d40', verificationGasLimit: '0x4e20', preVerificationGas: '0xc350' })
+      .mockResolvedValueOnce('0xfloored');
+    await sendSponsoredOp({ account, orgId: 7n, calls: [{ to: `0x${'33'.repeat(20)}`, data: '0x01' }] });
+
+    const sent = (bundlerRequest.mock.calls[1]![1] as unknown[])[0] as Record<string, string>;
+    // 20000 * 1.075 = 21500, far under the floor.
+    expect(sent.verificationGasLimit).toBe(numberToHex(MIN_VERIFICATION_GAS));
+    expect(MIN_VERIFICATION_GAS).toBe(150_000n);
+  });
+
+  it('never lowers an estimate to a floor — Monad bills the limit, but AA13 bills the truth', async () => {
+    bundlerRequest
+      .mockResolvedValueOnce({ callGasLimit: '0x30d40', verificationGasLimit: '0x7a120', preVerificationGas: '0xc350' })
+      .mockResolvedValueOnce('0xdeploy');
+    // 500000 * 1.075 = 537500: an account still carrying initCode. The floor must not touch it.
+    await sendSponsoredOp({
+      account, orgId: 7n, calls: [{ to: `0x${'33'.repeat(20)}`, data: '0x01' }],
+      gasFloors: { verificationGasLimit: 150_000n, callGasLimit: 200_000n },
+    });
+
+    const sent = (bundlerRequest.mock.calls[1]![1] as unknown[])[0] as Record<string, string>;
+    expect(sent.verificationGasLimit).toBe(numberToHex(applyGasBuffer(500_000n)));
+    expect(sent.callGasLimit).toBe(numberToHex(applyGasBuffer(200_000n)));
+  });
+
+  it('applies a caller’s floors to every limit, the gate’s 200k callGasLimit included', async () => {
+    bundlerRequest
+      .mockResolvedValueOnce({ callGasLimit: '0x2710', verificationGasLimit: '0x2710', preVerificationGas: '0x2710' })
+      .mockResolvedValueOnce('0xfloors');
+    await sendSponsoredOp({
+      account, orgId: 7n, calls: [{ to: `0x${'33'.repeat(20)}`, data: '0x01' }],
+      gasFloors: { callGasLimit: 200_000n, verificationGasLimit: 150_000n, preVerificationGas: 60_000n },
+    });
+
+    const sent = (bundlerRequest.mock.calls[1]![1] as unknown[])[0] as Record<string, string>;
+    expect(sent.callGasLimit).toBe(numberToHex(200_000n));
+    expect(sent.verificationGasLimit).toBe(numberToHex(150_000n));
+    expect(sent.preVerificationGas).toBe(numberToHex(60_000n));
+  });
+
+  it('leaves the attendee path’s other two limits exactly where they were', async () => {
+    bundlerRequest
+      .mockResolvedValueOnce({ callGasLimit: '0x30d40', verificationGasLimit: '0x186a0', preVerificationGas: '0xc350' })
+      .mockResolvedValueOnce('0xattendee');
+    // No gasFloors at all — the attendee app never passes any.
+    await sendSponsoredOp({ account, orgId: 7n, calls: [{ to: `0x${'33'.repeat(20)}`, data: '0x01' }] });
+
+    const sent = (bundlerRequest.mock.calls[1]![1] as unknown[])[0] as Record<string, string>;
+    expect(sent.callGasLimit).toBe(numberToHex(applyGasBuffer(200_000n)));
+    expect(sent.preVerificationGas).toBe(numberToHex(applyGasBuffer(50_000n)));
+  });
+
+  it('signs the same limits it sends', async () => {
+    bundlerRequest
+      .mockResolvedValueOnce({ callGasLimit: '0x2710', verificationGasLimit: '0x2710', preVerificationGas: '0x2710' })
+      .mockResolvedValueOnce('0xsigned');
+    await sendSponsoredOp({
+      account, orgId: 7n, calls: [{ to: `0x${'33'.repeat(20)}`, data: '0x01' }],
+      gasFloors: { callGasLimit: 200_000n },
+    });
+
+    // A signature over different limits than the ones sent is an AA24 at the EntryPoint.
+    const signed = (account as unknown as { signUserOperation: { mock: { calls: unknown[][] } } })
+      .signUserOperation.mock.calls.at(-1)?.[0] as Record<string, bigint>;
+    const sent = (bundlerRequest.mock.calls[1]![1] as unknown[])[0] as Record<string, string>;
+    expect(numberToHex(signed.callGasLimit as bigint)).toBe(sent.callGasLimit);
+    expect(numberToHex(signed.verificationGasLimit as bigint)).toBe(sent.verificationGasLimit);
+    expect(numberToHex(signed.preVerificationGas as bigint)).toBe(sent.preVerificationGas);
   });
 
   it('batches two calls through the account encoder', async () => {

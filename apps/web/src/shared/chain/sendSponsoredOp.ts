@@ -12,6 +12,42 @@ export function applyGasBuffer(value: bigint): bigint {
   return (value * GAS_BUFFER_NUMERATOR) / GAS_BUFFER_DENOMINATOR;
 }
 
+/**
+ * The floor under `verificationGasLimit`, for **every** account this app sends from.
+ *
+ * Both of them are WebAuthn owners — the attendee's passkey and the gate's StrongBox key — and
+ * both are estimated with viem's stub signature. That stub carries viem's fixed challenge
+ * (`toCoinbaseSmartAccount.js:122-124`), which can never equal a real `userOpHash`, so
+ * `WebAuthn.verify` fails the challenge comparison and returns **before** the `0x100` precompile
+ * runs. The stub gets the `SignatureWrapper` shape and the calldata cost right and hides the
+ * verification itself: 5,012 gas estimated against 15,287 measured on Monad, ~10.3k short (Task
+ * 12 review). Nothing puts it back — this module applies only `applyGasBuffer` and never calls
+ * viem's `userOperation.estimateGas` hook.
+ *
+ * The first op of an account carries `initCode`, so its estimate is large and 7.5% of it dwarfs
+ * 10.3k; every op after deployment estimates a bare `validateUserOp`, where 7.5% no longer
+ * covers the gap and the EntryPoint reverts `AA23 out of gas`. Which is the worst shape of
+ * failure at a door: the first check-in works and every one after it does not.
+ *
+ * 150,000 and not viem's 800,000, because Monad bills the limit rather than the usage — an 800k
+ * floor would charge the organizer's paymaster roughly five times per check-in for gas nobody
+ * spent.
+ */
+export const MIN_VERIFICATION_GAS = 150_000n;
+
+/**
+ * Per-call floors under the simulated limits. They are floors and never replacements: an
+ * estimate above one is used as it stands, because the estimate knows things a constant cannot
+ * (the calldata, whether the account still needs deploying) and lowering it would only fail.
+ */
+export interface SponsoredGasFloors {
+  callGasLimit?: bigint;
+  verificationGasLimit?: bigint;
+  preVerificationGas?: bigint;
+}
+
+const atLeast = (value: bigint, minimum: bigint): bigint => (value > minimum ? value : minimum);
+
 /** MontiPaymaster reads abi.encodePacked(address paymaster, uint256 orgId). */
 export function encodePaymasterAndData(paymaster: Hex, orgId: bigint): Hex {
   return encodePacked(['address', 'uint256'], [paymaster, orgId]);
@@ -32,7 +68,14 @@ export interface SponsoredOpHandle {
   userOpHash: Hex;
   wait(timeoutMs?: number): Promise<SponsoredOpReceipt>;
 }
-export interface SendSponsoredOpArgs { account: SmartAccount; calls: SponsoredCall[]; orgId: bigint }
+export interface SendSponsoredOpArgs {
+  account: SmartAccount;
+  calls: SponsoredCall[];
+  orgId: bigint;
+  /** Optional per-call floors. `verificationGasLimit` is floored at {@link MIN_VERIFICATION_GAS}
+   *  whether or not this is passed — that one is not a caller's choice. */
+  gasFloors?: SponsoredGasFloors;
+}
 
 export const DEFAULT_WAIT_TIMEOUT_MS = 15_000;
 const RECEIPT_POLL_INTERVAL_MS = 300;
@@ -47,7 +90,7 @@ interface RawReceipt {
   receipt: { transactionHash: Hex; blockNumber: Hex };
 }
 
-export async function sendSponsoredOp({ account, calls, orgId }: SendSponsoredOpArgs): Promise<SponsoredOpHandle> {
+export async function sendSponsoredOp({ account, calls, orgId, gasFloors }: SendSponsoredOpArgs): Promise<SponsoredOpHandle> {
   if (calls.length === 0) throw new Error('sendSponsoredOp needs at least one call');
   const config = getConfig();
 
@@ -80,9 +123,18 @@ export async function sendSponsoredOp({ account, calls, orgId }: SendSponsoredOp
   );
 
   const limits = {
-    callGasLimit: numberToHex(applyGasBuffer(hexToBigInt(estimate.callGasLimit))),
-    verificationGasLimit: numberToHex(applyGasBuffer(hexToBigInt(estimate.verificationGasLimit))),
-    preVerificationGas: numberToHex(applyGasBuffer(hexToBigInt(estimate.preVerificationGas))),
+    callGasLimit: numberToHex(
+      atLeast(applyGasBuffer(hexToBigInt(estimate.callGasLimit)), gasFloors?.callGasLimit ?? 0n),
+    ),
+    verificationGasLimit: numberToHex(
+      atLeast(
+        applyGasBuffer(hexToBigInt(estimate.verificationGasLimit)),
+        atLeast(gasFloors?.verificationGasLimit ?? 0n, MIN_VERIFICATION_GAS),
+      ),
+    ),
+    preVerificationGas: numberToHex(
+      atLeast(applyGasBuffer(hexToBigInt(estimate.preVerificationGas)), gasFloors?.preVerificationGas ?? 0n),
+    ),
   };
 
   const signature = await account.signUserOperation({
