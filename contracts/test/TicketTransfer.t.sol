@@ -122,4 +122,41 @@ contract TicketTransferTest is MontiTest {
         vm.expectRevert(Ticket.AlreadyCheckedIn.selector);
         ticket.transferFrom(ALICE, BOB, tokenId);
     }
+
+    /// @dev 5.5 패닉 버튼. 기기 잠금은 입장만이 아니라 자산도 얼린다.
+    function test_lockedSenderCannotTransferOut() public {
+        vm.prank(ALICE);
+        identity.lockDevice(ALICE);
+
+        vm.prank(ALICE);
+        vm.expectRevert(Ticket.DeviceLocked.selector);
+        ticket.transferFrom(ALICE, BOB, tokenId);
+    }
+
+    /// @dev 회전으로 밀려난 계정은 더 이상 멤버가 아니다. 새 계정이 migrate 하기 전에
+    ///      옛 계정이 티켓을 빼돌릴 수 없어야 한다.
+    function test_rotatedAwaySenderCannotTransferOut() public {
+        vm.warp(T0 + 7 days);
+        vm.prank(attester);
+        identity.rotateAccount(bytes32(uint256(0xA1A1)), CAROL);
+
+        vm.prank(ALICE);
+        vm.expectRevert(Ticket.NotMember.selector);
+        ticket.transferFrom(ALICE, BOB, tokenId);
+    }
+
+    /// @dev 잠금이 풀리면 보내는 쪽 가드를 통과한다. 그 뒤에 걸리는 것은 양도 마감이지
+    ///      잠금이 아니다 — 가드가 마감 검사보다 앞에 놓인다는 사실까지 이 한 줄이 고정한다.
+    ///      (새 기기 등록에 7일 쿨타임이 필요해 시계를 감으므로, 이 시점엔 마감이 이미 지났다.)
+    function test_transferWorksAgainAfterTheLockIsCleared() public {
+        vm.prank(ALICE);
+        identity.lockDevice(ALICE);
+        vm.warp(T0 + 7 days);
+        vm.prank(ALICE);
+        identity.setActiveDevice(DEV_X, DEV_Y);
+
+        vm.prank(ALICE);
+        vm.expectRevert(Ticket.TransferCutoffPassed.selector);
+        ticket.transferFrom(ALICE, BOB, tokenId);
+    }
 }

@@ -542,6 +542,15 @@ contract Ticket is ERC721, ITicket {
                 emit OfferCancelled(tokenId);
             }
             if (!_internalMove) {
+                // 보내는 쪽부터 본다. "내 기기 잠금"(5.5)은 입장만이 아니라 자산도 얼려야 하고,
+                // 회전으로 밀려난 계정은 migrate 전에 티켓을 빼돌릴 수 없어야 한다(I1).
+                // 이 두 줄이 _internalMove 분기 '안'에 있는 것이 중요하다: migrate 자신이
+                // 바로 그 잠기고 탈퇴한 계정에서 빼오는 동작이므로, 밖에 두면 복구가 죽는다.
+                // isMember 를 isLocked 보다 먼저 묻는다 — 회전은 둘 다 참으로 만들고,
+                // 그때 알려줄 사실은 "계정이 바뀌었다"이지 "키가 얼었다"가 아니다.
+                if (!identity.isMember(from)) revert NotMember();
+                if (identity.isLocked(from)) revert DeviceLocked();
+
                 EventMeta storage m = _events[eventId];
                 if (_revoked[tokenId]) revert TicketRevoked();
                 if (!m.transferable) revert TransfersDisabled();
