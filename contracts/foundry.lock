@@ -1,8 +1,29 @@
 {
+  "lib/account-abstraction": {
+    "tag": {
+      "name": "v0.6.0",
+      "rev": "abff2aca61a8f0934e533d0d352978055fddbd96"
+    }
+  },
   "lib/forge-std": {
     "tag": {
       "name": "v1.16.2",
       "rev": "bf647bd6046f2f7da30d0c2bf435e5c76a780c1b"
+    }
+  },
+  "lib/openzeppelin-contracts": {
+    "tag": {
+      "name": "v5.1.0",
+      "rev": "69c8def5f222ff96f2b5beff05dfba996368aa79"
+    }
+  },
+  "lib/smart-wallet": {
+    "rev": "a4e83fd36c47b64cb4e21e1fa6bb9b04181a66da"
+  },
+  "lib/solady": {
+    "tag": {
+      "name": "v0.1.26",
+      "rev": "acd959aa4bd04720d640bf4e6a5c71037510cc4b"
     }
   }
 }
