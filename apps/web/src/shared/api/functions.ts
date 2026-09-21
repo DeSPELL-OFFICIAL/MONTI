@@ -219,3 +219,15 @@ export const api = {
  * wrapper, not a second one.
  */
 export const submitPendingGate = api.submitPendingGate;
+
+/**
+ * The gate's two callables, named for the same reason as `submitPendingGate`: the snapshot
+ * store (Task 25) depends on these two and not on the whole callable surface, so its tests can
+ * replace them without standing up every other call in this module. Same wrappers, not copies.
+ *
+ * Both take `gateAccount`, and neither is authorised by it: the request goes out on the signed-in
+ * staff member's Firebase session and the server checks that this gate is registered to this
+ * event before it decrypts one photo. That is why a stolen terminal does not leak faces.
+ */
+export const issueSnapshot = api.issueSnapshot;
+export const getPhotoForGate = api.getPhotoForGate;

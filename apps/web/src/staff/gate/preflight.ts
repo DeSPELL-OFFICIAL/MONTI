@@ -28,9 +28,10 @@ export interface SnapshotStore {
 }
 
 /**
- * The stub until Task 25 lands. A gate built on this one has no snapshot unless a test hands it
- * one, which is exactly the state a gate boots in — so the "no snapshot yet" branch below is
- * the branch that runs first in real life, not an edge case.
+ * The test double. The gate is handed the real one — `snapshotStore()` in
+ * `staff/snapshot/store.ts` (Task 25) — and a store built here has no snapshot unless a test
+ * hands it one, which is exactly the state a gate boots in: the "no snapshot yet" branch below
+ * is the branch that runs first in real life, not an edge case.
  */
 export function stubSnapshotStore(snapshot?: SnapshotWire): SnapshotStore {
   return { current: () => snapshot };
