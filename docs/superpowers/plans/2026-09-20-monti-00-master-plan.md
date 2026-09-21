@@ -419,3 +419,8 @@ function offerOf(uint256 tokenId) external view returns (Offer memory);
 - `users/{uid}` has no plaintext `phoneE164`. The phone number exists only as the HMAC-SHA256 index document id (`phoneIndex/{hmac}`) and as `users/{uid}.phoneEnc`, a KMS envelope bound with AAD `personId:phoneE164` (`piiAad(personId, 'phoneE164')`). Every later reader (Tasks 20/21/24/25/42, SMS invite flows) decrypts with that AAD; nothing ever logs or returns the plaintext to a client except the owner's own profile screen.
 - A second Firebase uid presenting an already-indexed phone gets `already-exists / PHONE_ALREADY_REGISTERED`; recovery goes through the KYC re-verify or SMS recovery flow, never a silent rebind.
 - `encryptField(plaintext, aad = '', client?)` / `decryptField(envelope, aad = '', client?)`: AAD is mandatory for PII fields; envelope format unchanged.
+
+## Delta after 02 Task 20 (session claims)
+
+- The passkey login custom token carries only `{ personId, account }` (account checksummed). It never carries `phone_number`: a custom-token claim is client-readable PII and would force a KMS decrypt on every login. Functions that previously read `request.auth.token.phone_number` (Tasks 21, 25, 42) resolve the caller via `personId`/`account` and read `users/{uid}.phoneHmac` (the same HMAC used as the `phoneIndex/{hmac}` document id; Task 16 stores it on the user document if absent) whenever they need the phone index. `startSignup` remains the only function that reads `token.phone_number`, because that session comes from Firebase phone auth itself.
+- `authChallenges` documents get a TTL sweep (fold into the reconcile task or a scheduled function); `loginChallenge` rate limiting is post-MVP.
