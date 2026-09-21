@@ -186,6 +186,14 @@ describe('NDEF file layout (NLEN + message)', () => {
     expect(file[301]).toBe(0x41);
   });
 
+  it('writes NLEN big-endian in the Kotlin itself, not just in this reference', () => {
+    // 위 벡터는 TS 참조 구현을 돌린 것이라, Kotlin 이 리틀엔디언으로 바뀌어도 그대로 통과한다.
+    // 그래서 NLEN 을 쓰는 두 줄만은 원본 대조로 묶어 둔다 (require(...) 핀과 같은 방식).
+    const source = stripComments(type4FilesKt);
+    expect(source).toContain('out[0] = ((message.size shr 8) and 0xFF).toByte()');
+    expect(source).toContain('out[1] = (message.size and 0xFF).toByte()');
+  });
+
   it('carries a 420-byte long-form record', () => {
     const file = ndefFile(new Uint8Array(420).fill(0xc4));
     expect(file).toHaveLength(422);
@@ -200,7 +208,7 @@ describe('NDEF file layout (NLEN + message)', () => {
   });
 });
 
-describe('ISO 7816-4 status words (Kotlin 원본에서 읽어낸 바이트)', () => {
+describe('ISO 7816-4 status words (Kotlin 원본에서 읽어낸 값)', () => {
   const expected: Record<string, string> = {
     SW_OK: '9000',
     SW_FILE_NOT_FOUND: '6A82',
@@ -211,9 +219,21 @@ describe('ISO 7816-4 status words (Kotlin 원본에서 읽어낸 바이트)', ()
     SW_CLASS_NOT_SUPPORTED: '6E00',
   };
 
+  const swHex = (value: number): string => value.toString(16).toUpperCase().padStart(4, '0');
+
   for (const [name, word] of Object.entries(expected)) {
     it(`${name} is ${word}`, () => {
-      expect(hex(kotlinByteArray(apduStatusKt, `val ${name}`))).toBe(word);
+      expect(swHex(kotlinConst(apduStatusKt, name))).toBe(word);
     });
   }
+
+  it('is an Int constant, never a shared mutable ByteArray', () => {
+    // ByteArray 상수로 두면 응답으로 나간 배열을 호출자가 고칠 수 있고, 그 자국이 이후
+    // 모든 탭에 남는다. Kotlin 에는 불변 ByteArray 가 없으므로 배열 자체를 두지 않는다.
+    const source = stripComments(apduStatusKt);
+    expect(source).not.toContain('byteArrayOf');
+    for (const name of Object.keys(expected)) {
+      expect(source).toContain(`const val ${name} = 0x`);
+    }
+  });
 });

@@ -79,12 +79,32 @@ class Type4FilesTest {
 
     @Test
     fun statusWordsAreTheIso7816Values() {
-        assertEquals("9000", hex(ApduStatus.SW_OK))
-        assertEquals("6A82", hex(ApduStatus.SW_FILE_NOT_FOUND))
-        assertEquals("6982", hex(ApduStatus.SW_SECURITY))
-        assertEquals("6A86", hex(ApduStatus.SW_WRONG_P1P2))
-        assertEquals("6700", hex(ApduStatus.SW_WRONG_LENGTH))
-        assertEquals("6D00", hex(ApduStatus.SW_INS_NOT_SUPPORTED))
-        assertEquals("6E00", hex(ApduStatus.SW_CLASS_NOT_SUPPORTED))
+        assertEquals(0x9000, ApduStatus.SW_OK)
+        assertEquals(0x6A82, ApduStatus.SW_FILE_NOT_FOUND)
+        assertEquals(0x6982, ApduStatus.SW_SECURITY)
+        assertEquals(0x6A86, ApduStatus.SW_WRONG_P1P2)
+        assertEquals(0x6700, ApduStatus.SW_WRONG_LENGTH)
+        assertEquals(0x6D00, ApduStatus.SW_INS_NOT_SUPPORTED)
+        assertEquals(0x6E00, ApduStatus.SW_CLASS_NOT_SUPPORTED)
+    }
+
+    @Test
+    fun respondAppendsTheStatusWordBigEndianToAFreshArray() {
+        // 데이터 없는 응답은 상태어 두 바이트뿐이다 — SELECT 가 FCI 없이 답하는 모양이다.
+        assertEquals("9000", hex(ApduStatus.respond(sw = ApduStatus.SW_OK)))
+        assertEquals("6A82", hex(ApduStatus.respond(sw = ApduStatus.SW_FILE_NOT_FOUND)))
+        // 데이터가 있으면 그 뒤에 붙는다.
+        assertEquals(
+            "0102039000",
+            hex(ApduStatus.respond(byteArrayOf(0x01, 0x02, 0x03), ApduStatus.SW_OK)),
+        )
+        assertEquals(0, ApduStatus.EMPTY.size)
+
+        // 매번 새 배열이다. 하나를 고쳐도 다음 응답에는 남지 않는다.
+        val first = ApduStatus.respond(sw = ApduStatus.SW_OK)
+        val second = ApduStatus.respond(sw = ApduStatus.SW_OK)
+        assertNotSame(first, second)
+        first[0] = 0x00
+        assertEquals("9000", hex(ApduStatus.respond(sw = ApduStatus.SW_OK)))
     }
 }
