@@ -18,7 +18,7 @@ export const EXPORT_ENTITIES = [
   { entity: 'Organizer', fields: 'id owner' },
   { entity: 'Admin', fields: 'id orgId account bits' },
   { entity: 'Manager', fields: 'id orgId account exists canApprove' },
-  { entity: 'Gate', fields: 'id eventId account kx ky open revoked' },
+  { entity: 'Gate', fields: 'id eventId account kx ky isOpen revoked' },
   {
     entity: 'Event',
     fields:
@@ -26,7 +26,7 @@ export const EXPORT_ENTITIES = [
   },
   { entity: 'Tier', fields: 'id eventId idx name priceUsdCents supply minted maxPerWallet seated' },
   { entity: 'Ticket', fields: 'id eventId tier owner transfers revoked' },
-  { entity: 'CheckIn', fields: 'id gateId ts nonceHash manual txHash block' },
+  { entity: 'CheckIn', fields: 'id gateId ts nonceHash manual late txHash block' },
   { entity: 'Override', fields: 'id tokenId gateId approver role reason requested' },
   {
     entity: 'IdentityAccount',

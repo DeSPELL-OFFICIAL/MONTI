@@ -3,4 +3,8 @@ packages:
   - packages/*
   - functions
   - indexer
+  # envio codegen 이 만드는 ReScript 패키지. 여기 없으면 그 안에서 도는
+  # pnpm install 이 루트 워크스페이스로 새어 나가 generated/node_modules 가
+  # 비고, codegen 이 "Command rescript not found" 로 멈춘다.
+  - indexer/generated
   - plugins/*

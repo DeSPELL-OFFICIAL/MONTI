@@ -25,6 +25,21 @@ describe('schema.graphql', () => {
     expect(schema).toContain('kycLevel: Int!');
   });
 
+  // 01b 번들(2026-10-05 재배포)이 채울 열을 미리 만들어 둔다. 지금 없애면
+  // 그때 스키마 마이그레이션이 필요해진다.
+  it('reserves the fields the 01b bundle fills', async () => {
+    const schema = await readFile(schemaPath, 'utf8');
+    expect(schema).toContain('late: Boolean!');
+  });
+
+  // `open` 은 Envio codegen 이 EE210 으로 거절하는 예약어다(ReScript 키워드).
+  // 컨트랙트 뷰 `isOpenGate` 와 이름을 맞춘다.
+  it('uses no Envio reserved keyword as a field name', async () => {
+    const schema = await readFile(schemaPath, 'utf8');
+    expect(schema).toContain('isOpen: Boolean!');
+    expect(schema).not.toMatch(/^\s+open:/m);
+  });
+
   it('contains no personal data field', async () => {
     // 주석까지 포함해 통째로 검사한다. 주석에도 phone/email 같은 낱말을 쓰지 않는다.
     const schema = await readFile(schemaPath, 'utf8');

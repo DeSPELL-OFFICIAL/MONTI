@@ -1,0 +1,23 @@
+{
+  "name": "monti-indexer",
+  "private": true,
+  "scripts": {
+    "gen:config": "node scripts/gen-config.mjs",
+    "codegen": "pnpm gen:config && envio codegen",
+    "dev": "pnpm codegen && envio dev",
+    "start": "envio start",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@monti/shared": "workspace:*",
+    "envio": "^2.22.0",
+    "generated": "link:./generated",
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

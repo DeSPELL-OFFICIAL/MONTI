@@ -35,13 +35,14 @@ type Manager {
 
 # Organizers.GateRegistered(gateId, eventId, gateAccount, kx, ky)
 # + GateOpened / GateClosed / GateRevoked
+# `open` 은 Envio 예약어다(codegen EE210). 컨트랙트 뷰 이름과 같은 `isOpen` 을 쓴다.
 type Gate {
   id: ID!            # gateId
   eventId: BigInt! @index
   account: String! @index
   kx: String!
   ky: String!
-  open: Boolean!
+  isOpen: Boolean!
   revoked: Boolean!
 }
 
@@ -101,12 +102,17 @@ type Ticket {
 
 # Ticket.CheckedIn(tokenId, eventId, gateId, nonceHash, ts) — manual false;
 # Ticket.ManualOverride writes the same row with manual true and a zero nonceHash.
+# late 는 01b 번들(checkInLate)이 채울 자리를 미리 비워 둔 것이다. 01b 의
+# `CheckedInLate(tokenId, gateId, issuedAt, ts)` 가 `CheckedIn` 과 **같은
+# 트랜잭션에** 오면 true 다. 재배포 전까지 핸들러는 늘 false 를 쓴다 —
+# 열을 지금 만들어 두면 01b 때 스키마 마이그레이션이 필요 없다.
 type CheckIn {
   id: ID!            # tokenId
   gateId: BigInt!
   ts: BigInt!
   nonceHash: String!
   manual: Boolean!
+  late: Boolean!
   txHash: String!
   block: BigInt!
 }
@@ -124,6 +130,8 @@ type Override {
   requested: Boolean!
 }
 
+# 01b 의 `RotationCancelled(personId, account)` 는 `AccountRotated` 를 **함께**
+# emit 하므로 "현재 계정" 로직이 그대로 맞다. 감사 로그일 뿐 새 열은 없다.
 # Identity.Registered(personId, account) creates the row; AccountRotated moves it,
 # DeviceChanged fills deviceX/deviceY, DeviceLocked sets locked,
 # NicknameSet sets nickname, KycLevelSet sets kycLevel.
@@ -140,6 +148,9 @@ type IdentityAccount {
 
 # Ticket.OfferCreated(tokenId, from, recipientCommitment, expiresAt),
 # OfferCancelled(tokenId), OfferAccepted(tokenId, from, to)
+# 01b 의 EIP-712 전환은 `acceptOffer` 가 **검증하는** 다이제스트만 바꾼다.
+# 다이제스트는 이벤트에 실리지 않고 `offerDigest(...)` 뷰로 다시 계산할 수 있으므로
+# 여기에 저장하지 않는다 — 새 열이 필요 없다.
 type Offer {
   id: ID!            # tokenId
   from: String! @index
