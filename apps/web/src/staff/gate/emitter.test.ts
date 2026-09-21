@@ -273,6 +273,48 @@ describe('a completed tap', () => {
     expect(onError.mock.calls[0]?.[0].cause.deny).toBe('DEVICE_MISMATCH');
   });
 
+  /**
+   * Both halves of a rotation cross a bridge to Android, so `stop()` can land in either gap.
+   * A rotation that finished after the stop would push a payload into a file the gate no longer
+   * serves and refill the ring `stop()` had just emptied.
+   */
+  it('abandons a rotation that was in flight when the gate stopped', async () => {
+    const emitter = await start();
+    const swapsBefore = hce.setPayload.mock.calls.length;
+
+    // The next rotation hangs inside the chip signature, which is where a real one spends its
+    // time, and the gate is stopped while it is in there.
+    let release = (): void => {};
+    signGateCode.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve({ r: `0x${'11'.repeat(32)}`, s: `0x${'22'.repeat(32)}` });
+        }),
+    );
+    await vi.advanceTimersByTimeAsync(GATE_CODE_ROTATE_MS);
+    await emitter.stop();
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Nothing was pushed into a file the gate no longer serves, and the ring stayed empty.
+    expect(hce.setPayload.mock.calls.length).toBe(swapsBefore);
+    expect(emitter.lastCode()).toBeUndefined();
+  });
+
+  it('reports a throw from the caller’s onTap instead of letting it escape the plugin', async () => {
+    const onError = vi.fn();
+    const boom = new Error('the screen blew up');
+    const onTap = vi.fn(() => {
+      throw boom;
+    });
+    await start({ onTap, onError });
+    // A throw here would land in Android's listener dispatch, where nothing catches it and the
+    // write listener can be lost — leaving a gate that looks open and reads nothing.
+    expect(() => write(encodeGateResponseMessage(answerTo(servedCodes()[0] as GateCodeWire)))).not.toThrow();
+    expect(onTap).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith(boom);
+  });
+
   it('drops a tap that lands after the gate was stopped', async () => {
     const onTap = vi.fn();
     const onError = vi.fn();

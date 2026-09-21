@@ -57,7 +57,7 @@ export interface GateTap {
 export interface StartGateEmitterParams {
   gateId: bigint;
   eventId: bigint;
-  /** One completed tap. Runs on the plugin's event, so it must not throw. */
+  /** One completed tap. Runs on the plugin's event; a throw is reported, not re-raised. */
   onTap: (tap: GateTap) => void;
   /**
    * Everything that went wrong without stopping the gate: a write that was not an answer
@@ -123,7 +123,14 @@ export async function startGateEmitter(params: StartGateEmitterParams): Promise<
       report(new GateTapError(GATE_TAP_ERROR.noLiveCode, { cause }));
       return;
     }
-    params.onTap({ response, code });
+    // `onTap` runs on the plugin's event dispatch. A throw from a caller's handler would
+    // escape into Android's listener loop, where nothing catches it and the gate can be left
+    // without a working write listener — so it is reported like any other tap failure instead.
+    try {
+      params.onTap({ response, code });
+    } catch (cause) {
+      report(cause);
+    }
   };
 
   const handle = await Hce.addListener('write', onWrite);
@@ -138,10 +145,19 @@ export async function startGateEmitter(params: StartGateEmitterParams): Promise<
    * A code enters the ring only once the plugin has taken it. A swap that failed never reached
    * the wire, so nobody can have read it, and offering it as an answer's candidate would send a
    * check-in signed over bytes no attendee ever saw.
+   *
+   * `stopped` is re-read after **every** await, and that is not defensive noise: both of them
+   * cross a bridge to Android, so `stop()` can land in either gap. Without the first check a
+   * gate that has released its AID would still push a payload into the plugin's NDEF file;
+   * without the second it would repopulate the ring `stop()` had just emptied, and the next
+   * `lastCode()` would name a code no reader can be served.
    */
   const rotate = async (): Promise<void> => {
+    if (stopped) return;
     const code = await buildGateCode({ gateId: params.gateId, eventId: params.eventId, key });
+    if (stopped) return;
     await Hce.setPayload({ ndef: toBase64(encodeGateCodeMessage(code)) });
+    if (stopped) return;
     const nowSeconds = Math.floor(Date.now() / 1000);
     ring = [code, ...ring.filter((older) => isGateCodeFresh(older, nowSeconds))];
   };
