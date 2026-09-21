@@ -1,4 +1,7 @@
 lib/account-abstraction/:@openzeppelin/contracts/=test/shims/openzeppelin-v4/
+lib/smart-wallet/:solady/=lib/smart-wallet/lib/solady/src/
+lib/smart-wallet/:account-abstraction/=lib/smart-wallet/lib/account-abstraction/contracts/
+lib/smart-wallet/:openzeppelin-contracts/=lib/smart-wallet/lib/openzeppelin-contracts/
 forge-std/=lib/forge-std/src/
 @openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/
 solady/=lib/solady/src/
