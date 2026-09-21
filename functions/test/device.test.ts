@@ -135,6 +135,7 @@ const chain = {
   isLocked: false as boolean,
   deviceUpdatedAt: 0n as bigint,
   personOf: PERSON_ID as string,
+  isMember: true as boolean,
   kycLevelOf: 0 as number,
 };
 
@@ -184,7 +185,9 @@ beforeEach(() => {
   chain.isLocked = false;
   chain.deviceUpdatedAt = 0n;
   chain.personOf = PERSON_ID;
+  chain.isMember = true;
   chain.kycLevelOf = 0;
+  process.env.PHONE_INDEX_KEY = KEY;
   sendAttesterTx.mockClear();
   readContract.mockClear();
   waitForTransactionReceipt.mockClear();
@@ -282,6 +285,14 @@ describe('startDeviceChange', () => {
     await expect(callChange({ method: 'sms' })).rejects.toThrow('BAD_PHONE');
   });
 
+  it('reports an unbound PHONE_INDEX_KEY as our fault, not a wrong phone number', async () => {
+    delete process.env.PHONE_INDEX_KEY;
+    // 번호는 멀쩡하다. 여기서 BAD_PHONE 이 나오면 모든 복구가 사용자 탓으로 뭉개진다.
+    await expect(callChange({ method: 'sms', phone: PHONE })).rejects.toThrow(
+      'MISSING_PHONE_INDEX_KEY',
+    );
+  });
+
   it('requires a fresh SMS session for the sms method', async () => {
     await expect(callChange({ method: 'sms', phone: PHONE }, passkeyAuth)).rejects.toThrow(
       'PHONE_REAUTH_REQUIRED',
@@ -291,6 +302,12 @@ describe('startDeviceChange', () => {
   it('refuses a caller whose person does not own the account on chain', async () => {
     chain.personOf = OTHER_PERSON_ID;
     await expect(callChange({ method: 'sms', phone: PHONE })).rejects.toThrow('PERSON_MISMATCH');
+  });
+
+  it('refuses a rotated-away account, which keeps its personOf but is no longer a member', async () => {
+    chain.isMember = false;
+    await expect(callChange({ method: 'sms', phone: PHONE })).rejects.toThrow('PERSON_MISMATCH');
+    expect(snapshot(`devices/${ACCOUNT}`).exists).toBe(false);
   });
 
   it('refuses invalid device key coordinates', async () => {
@@ -315,6 +332,12 @@ describe('startDeviceChange', () => {
 
     chain.kycLevelOf = 0;
     await expect(callChange({ method: 'kyc' }, passkeyAuth)).rejects.toThrow('KYC_REQUIRED');
+  });
+
+  it('accepts a KYC level above 1 — the rule is "at least verified", not "exactly 1"', async () => {
+    chain.kycLevelOf = 2;
+    const result = await callChange({ method: 'kyc' }, passkeyAuth);
+    expect(result.cooldownSeconds).toBe(COOLDOWN);
   });
 
   it('never stores or echoes the plaintext phone number', async () => {

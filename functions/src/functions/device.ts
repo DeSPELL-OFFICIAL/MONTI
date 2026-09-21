@@ -34,18 +34,35 @@ export interface DeviceChangeResult {
   pending?: { deviceX: Hex; deviceY: Hex; requestedAt: number };
 }
 
-/** 호출자의 사람과 계정이 체인에서도 같은 짝인지 본다. 원본은 언제나 체인이다(스펙 §9.4). */
+/**
+ * 호출자의 사람과 계정이 체인에서도 같은 짝인지 본다. 원본은 언제나 체인이다(스펙 §9.4).
+ *
+ * `personOf` 만으로는 부족하다 — 계정이 교체된 뒤에도 옛 계정의 `personOf` 는 그대로 남는다
+ * (`Ticket.migrate` 가 옛 티켓에서 새 계정을 찾아야 한다, `Identity.sol` `rotateAccount`).
+ * `isMember` 까지 봐야 교체되어 버려진 계정에 기기 교체를 걸어 두는 일이 없다 — 그런 계정으로
+ * 보낸 `setActiveDevice` 는 웹에서 `NotRegistered` 로 되돌아간다.
+ */
 async function requireCallerOwnsAccount(uid: string, account: Hex): Promise<void> {
   const personId = (await db.collection(USERS).doc(uid).get()).get('personId') as Hex | undefined;
   if (!personId) throw new HttpsError('failed-precondition', 'NO_PERSON');
 
-  const onChain = (await publicClient().readContract({
-    address: deployment().identity,
-    abi: identityAbi,
-    functionName: 'personOf',
-    args: [account],
-  })) as Hex;
-  if (onChain.toLowerCase() !== personId.toLowerCase()) {
+  const contracts = deployment();
+  const pc = publicClient();
+  const [onChain, member] = await Promise.all([
+    pc.readContract({
+      address: contracts.identity,
+      abi: identityAbi,
+      functionName: 'personOf',
+      args: [account],
+    }) as Promise<Hex>,
+    pc.readContract({
+      address: contracts.identity,
+      abi: identityAbi,
+      functionName: 'isMember',
+      args: [account],
+    }) as Promise<boolean>,
+  ]);
+  if (!member || onChain.toLowerCase() !== personId.toLowerCase()) {
     throw new HttpsError('permission-denied', 'PERSON_MISMATCH');
   }
 }
@@ -151,7 +168,12 @@ export const startDeviceChange = onCall(
       let provided: string;
       try {
         provided = hmacPhone(phone ?? '', PHONE_INDEX_KEY.value());
-      } catch {
+      } catch (error) {
+        // 키가 묶이지 않은 것은 우리 설정 사고다. 그걸 "번호가 틀렸다" 로 답하면
+        // 모든 SMS 복구가 조용히 막히고 아무도 원인을 못 찾는다.
+        if ((error as Error).message === 'MISSING_PHONE_INDEX_KEY') {
+          throw new HttpsError('internal', 'MISSING_PHONE_INDEX_KEY');
+        }
         throw new HttpsError('invalid-argument', 'BAD_PHONE');
       }
       const stored = (await db.collection(USERS).doc(uid).get()).get('phoneHmac') as string | undefined;
@@ -164,7 +186,9 @@ export const startDeviceChange = onCall(
         functionName: 'kycLevelOf',
         args: [account],
       })) as number;
-      if (Number(level) !== 1) throw new HttpsError('failed-precondition', 'KYC_REQUIRED');
+      // "최소한 신분 확인은 끝난 사람" 이 조건이다. 나중에 레벨 2가 생겨도
+      // 가장 많이 검증된 사람이 복구 경로를 잃으면 안 된다.
+      if (Number(level) < 1) throw new HttpsError('failed-precondition', 'KYC_REQUIRED');
     }
 
     const updatedAt = (await publicClient().readContract({
