@@ -15,12 +15,16 @@ import * as dbModule from '../src/lib/db.js';
  * 이름을 모듈에서 끌어와 해석하고, (b) 템플릿 경로를 분해하고, (c) `.set/.update/.create/.add`
  * 인자가 식별자·스프레드면 같은 파일의 선언과 **다른 파일의 함수 본문**까지 펼친다.
  *
+ * 마지막 스캔 하나는 소스가 아니라 **소스와 `firestore.indexes.json` 사이**를 본다 — 복합 질의에
+ * 대응 색인이 없으면 지금까지는 운영의 `FAILED_PRECONDITION` 만이 신호였다.
+ *
  * **스캔은 전부 순수 함수다.** 진짜 소스 트리(초록이어야 한다)와, 아래 `negative fixtures`
  * 의 메모리 상 위반 소스(각각 빨간불이어야 한다)에 같은 함수를 돌린다. 녹색인 스캔은
  * 그 자체로는 아무것도 증명하지 못하기 때문이다.
  */
 
 const SRC = fileURLToPath(new URL('../src', import.meta.url));
+const INDEX_PATH = fileURLToPath(new URL('../../firestore.indexes.json', import.meta.url));
 const ALLOWED: readonly string[] = dbModule.ALLOWED_COLLECTIONS;
 
 /** `db.ts` 가 내보내는 문자열 상수 전부. 이름→값 표가 모듈에서 오므로 표가 따로 늙지 않는다. */
@@ -255,17 +259,66 @@ interface CallSite {
   firestoreLike: boolean;
 }
 
-const FIRESTORE_RECEIVERS = [
-  /(?:\.doc|\.collection|\.collectionGroup)\s*\([^()]*\)\s*$/,
-  /(?:^|[^\w$.])(?:tx|transaction|batch)\s*$/,
-  /[\w$]*[Rr]ef\s*$/,
-];
+/** 인라인 체인 수신자 — `….doc(x)` / `….collection(x)` 로 끝나는 식. */
+const FIRESTORE_CHAIN = /(?:\.doc|\.collection|\.collectionGroup)\s*\([^()]*\)\s*$/;
+/** `*Ref`·`.ref` 로 끝나는 이름. */
+const FIRESTORE_REF = /[\w$]*[Rr]ef\s*$/;
+/** 트랜잭션·배치 수신자의 관례적 이름. 파일마다 `runTransaction(` 콜백 파라미터가 여기 더해진다. */
+const TRANSACTION_NAMES = ['tx', 'transaction', 'batch'];
+/** 점을 거치지 않은 맨 이름 수신자 — `await target.set(…)` 의 `target`. */
+const BARE_RECEIVER = /(?:^|[^\w$.])([A-Za-z_$][\w$]*)\s*$/;
+
+/**
+ * `db.runTransaction(async (t) => …)` 의 콜백 파라미터 이름을 관례 이름에 더한다.
+ * `t` 는 `tx` 만큼 흔한데 이름 모양만 보면 진짜 트랜잭션 쓰기의 경보가 꺼진다.
+ */
+function transactionNames(file: SourceFile): Set<string> {
+  const names = new Set(TRANSACTION_NAMES);
+  const pattern = /\brunTransaction\s*\(/g;
+  let match = pattern.exec(file.code);
+  while (match !== null) {
+    const open = file.code.indexOf('(', match.index);
+    const args = readArgs(file.code, open);
+    if (args !== null) {
+      const parts = splitArgs(args);
+      const handler = parts[parts.length - 1] ?? '';
+      const arrow = handler.indexOf('=>');
+      const head = arrow === -1 ? handler : handler.slice(0, arrow);
+      const parens = /\(([^)]*)\)/.exec(head);
+      const simple = /^([A-Za-z_$][\w$]*)(?:\s*:|$)/.exec(flatten(parens?.[1] ?? ''));
+      if (simple?.[1] !== undefined) names.add(simple[1]);
+    }
+    match = pattern.exec(file.code);
+  }
+  return names;
+}
+
+/**
+ * 수신자가 Firestore 쓰기 대상인지 **이름 모양이 아니라 해석**으로 판정한다.
+ * `const target = db.collection(P).doc(id); target.set(…)` 은 평범한 리팩터링인데
+ * 이름만 보면 경보가 꺼진다 — 맨 이름이면 선언을 한 번 펼쳐 같은 잣대를 다시 댄다.
+ * (`.doc(ident)` 해석에 이미 쓰는 기법이다.)
+ */
+function isFirestoreReceiver(
+  files: SourceFile[],
+  file: SourceFile,
+  prefix: string,
+  txNames: Set<string>,
+): boolean {
+  if (FIRESTORE_CHAIN.test(prefix) || FIRESTORE_REF.test(prefix)) return true;
+  const name = BARE_RECEIVER.exec(prefix)?.[1];
+  if (name === undefined) return false;
+  if (txNames.has(name)) return true;
+  const declaration = declarationOf(files, file, name);
+  return declaration !== null && FIRESTORE_CHAIN.test(declaration);
+}
 
 /** 주어진 메서드 호출을 전부 찾아 균형 잡힌 인자와 함께 돌려준다. */
 function callSites(files: SourceFile[], names: readonly string[]): CallSite[] {
   const pattern = new RegExp(`\\.(${names.join('|')})\\s*\\(`, 'g');
   const out: CallSite[] = [];
   for (const file of files) {
+    const txNames = transactionNames(file);
     pattern.lastIndex = 0;
     let match = pattern.exec(file.code);
     while (match !== null) {
@@ -278,7 +331,7 @@ function callSites(files: SourceFile[], names: readonly string[]): CallSite[] {
           line: lineOf(file.code, match.index),
           method: match[1] ?? '',
           args: splitArgs(args),
-          firestoreLike: FIRESTORE_RECEIVERS.some((pattern) => pattern.test(prefix)),
+          firestoreLike: isFirestoreReceiver(files, file, prefix, txNames),
         });
       }
       match = pattern.exec(file.code);
@@ -703,7 +756,7 @@ function scanRequestData(files: SourceFile[]): ScanResult {
         }
       }
       // `const raw = request.data …` 뒤의 `raw.account` 처럼 별칭을 거쳐 읽는 경로.
-      // 점 접근과 대괄호 접근을 함께 보고, `const w = raw;` 처럼 한 번 더 넘긴 별칭까지 따라간다.
+      // 점·대괄호 접근과 **뒤따르는 구조분해**를 함께 보고, `const w = raw;` 로 한 번 더 넘긴 별칭까지 따라간다.
       const alias = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]*)?=/.exec(statement);
       if (!alias?.[1]) continue;
       for (const holder of aliasChain(file.code, alias[1])) {
@@ -711,6 +764,11 @@ function scanRequestData(files: SourceFile[]): ScanResult {
           if (readsField(file.code, holder, field)) {
             findings.push(
               `${file.rel}:${line} 가 요청 본문 별칭 "${holder}" 에서 "${field}" 를 읽는다 — 호출자 계정은 resolveCallerAccount(request) 로만 정해진다.`,
+            );
+          }
+          if (destructuresField(file.code, holder, field)) {
+            findings.push(
+              `${file.rel}:${line} 가 요청 본문 별칭 "${holder}" 를 구조분해해 "${field}" 를 꺼낸다 — 호출자 계정은 resolveCallerAccount(request) 로만 정해진다.`,
             );
           }
         }
@@ -747,6 +805,23 @@ function aliasChain(code: string, root: string): Set<string> {
 /** `body.account` 든 `body['account']` 든 같은 읽기다. */
 function readsField(code: string, holder: string, field: string): boolean {
   return new RegExp(`\\b${holder}\\s*(?:\\.${field}\\b|\\[\\s*(['"])${field}\\1\\s*\\])`).test(code);
+}
+
+/**
+ * `const { account } = body;` — 별칭을 **뒤에서 구조분해**하면 점·대괄호 접근이 없어
+ * `readsField` 를 두 줄짜리 평범한 모양으로 빠져나간다. 이름을 바꿔 받는
+ * `const { account: a } = body` 도, 기본값을 준 `const { account = '0x' } = body` 도 같은 읽기다.
+ */
+function destructuresField(code: string, holder: string, field: string): boolean {
+  const pattern = new RegExp(`\\b(?:const|let|var)\\s*\\{([^}]*)\\}\\s*=\\s*${holder}\\b`, 'g');
+  for (const m of code.matchAll(pattern)) {
+    if (m[1] === undefined) continue;
+    // 바인딩 이름이 아니라 **꺼내는 속성 이름**을 본다(`account: a` 면 `account`).
+    for (const part of m[1].split(',')) {
+      if (/^\s*([A-Za-z_$][\w$]*)/.exec(part)?.[1] === field) return true;
+    }
+  }
+  return false;
 }
 
 /** 한 문장이 읽어 가는 이름 전부 — 구조분해 바인딩 · `as { … }` 타입 키 · 점/대괄호 속성 접근. */
@@ -803,9 +878,264 @@ function scanCallerAuthorization(files: SourceFile[]): ScanResult {
   return { findings, targets };
 }
 
+// ──────────────────────────── 복합 질의 ↔ firestore.indexes.json
+
+const INDEX_FILE = 'firestore.indexes.json';
+/** 한 값에 못 박는 연산자 — 색인에서 언제나 앞자리다. `in`·`array-contains` 도 모양은 등식이다. */
+const EQUALITY_OPS = ['==', 'in', 'array-contains'];
+/** 범위 연산자 — 색인에서 마지막 자리다. 다른 필드가 하나라도 더 있으면 복합 색인이 필요하다. */
+const INEQUALITY_OPS = ['<', '<=', '>', '>=', '!=', 'not-in'];
+/** 질의 체인의 머리. `.doc()` 는 질의가 아니라 문서 하나라 여기 없다. */
+const QUERY_ROOTS = ['collectionGroup', 'collection'] as const;
+
+interface IndexField {
+  fieldPath: string;
+  /** 질의가 방향을 말하지 않으면 `null` — 그때는 색인 방향을 따지지 않는다. */
+  order: 'ASCENDING' | 'DESCENDING' | null;
+}
+
+interface IndexEntry {
+  collectionGroup: string;
+  fields: IndexField[];
+}
+
+/** `firestore.indexes.json` 의 `indexes` 배열만 읽는다. `fieldOverrides` 는 복합 색인이 아니다. */
+function parseIndexes(text: string): IndexEntry[] {
+  const parsed = JSON.parse(text) as {
+    indexes?: Array<{ collectionGroup?: string; fields?: Array<{ fieldPath?: string; order?: string }> }>;
+  };
+  return (parsed.indexes ?? []).map((index) => ({
+    collectionGroup: index.collectionGroup ?? '',
+    fields: (index.fields ?? []).map((field) => ({
+      fieldPath: field.fieldPath ?? '',
+      order:
+        field.order === 'DESCENDING' ? 'DESCENDING' : field.order === 'ASCENDING' ? 'ASCENDING' : null,
+    })),
+  }));
+}
+
+interface WhereClause {
+  field: string;
+  op: string;
+}
+
+interface OrderClause {
+  field: string;
+  direction: 'ASCENDING' | 'DESCENDING' | null;
+}
+
+interface QueryChain {
+  file: SourceFile;
+  line: number;
+  /** 색인의 `collectionGroup` 과 맞댈 이름 — 경로의 마지막 조각. */
+  collection: string;
+  wheres: WhereClause[];
+  orders: OrderClause[];
+  /** 리터럴·상수로 풀리지 않은 인자 원문. 조용히 넘기지 않고 실패로 보고한다. */
+  unresolved: string[];
+}
+
+interface ChainStep {
+  name: string;
+  args: string[];
+}
+
+/** `open` 의 `(` 에 대응하는 `)` **다음** 인덱스. `readArgs` 가 잘라 준 길이에서 바로 나온다. */
+function argsEnd(open: number, args: string): number {
+  return open + args.length + 2;
+}
+
+/**
+ * `.collection(x)` 뒤로 이어지는 체인을 따라간다. 줄바꿈·들여쓰기와 무관하고,
+ * 새 경로(`.doc`/`.collection`)가 시작되면 거기서 끊는다 — 그 호출은 제 체인의 머리로 다시 잡힌다.
+ */
+function chainAfter(code: string, from: number): ChainStep[] {
+  const steps: ChainStep[] = [];
+  let i = from;
+  for (;;) {
+    const next = /^\s*\.\s*([A-Za-z_$][\w$]*)\s*\(/.exec(code.slice(i, i + 200));
+    const name = next?.[1];
+    if (next === null || name === undefined) break;
+    if ((PATH_METHODS as readonly string[]).includes(name)) break;
+    const open = i + next[0].length - 1;
+    const args = readArgs(code, open);
+    if (args === null) break;
+    steps.push({ name, args: splitArgs(args) });
+    i = argsEnd(open, args);
+  }
+  return steps;
+}
+
+/** `.orderBy(f, 'desc')` 의 둘째 인자 → 색인 파일이 쓰는 표기. 빠지면 오름차순이 기본이다. */
+function orderDirection(raw: string): 'ASCENDING' | 'DESCENDING' {
+  return /^desc/i.test(raw) ? 'DESCENDING' : 'ASCENDING';
+}
+
+/** 소스의 Firestore 질의 — `where`/`orderBy` 가 하나라도 붙은 체인만 모은다. */
+function queryChains(files: SourceFile[]): QueryChain[] {
+  const out: QueryChain[] = [];
+  const pattern = new RegExp(`\\.(${QUERY_ROOTS.join('|')})\\s*\\(`, 'g');
+  for (const file of files) {
+    pattern.lastIndex = 0;
+    let match = pattern.exec(file.code);
+    while (match !== null) {
+      const open = file.code.indexOf('(', match.index);
+      const args = readArgs(file.code, open);
+      if (args !== null) {
+        const steps = chainAfter(file.code, argsEnd(open, args));
+        const wheres = steps.filter((step) => step.name === 'where');
+        const orders = steps.filter((step) => step.name === 'orderBy');
+        if (wheres.length > 0 || orders.length > 0) {
+          const unresolved: string[] = [];
+          // 컬렉션도 필드도 연산자도 `db.ts` 상수·리터럴·템플릿으로 온다. 같은 기계로 푼다.
+          const literal = (raw: string): string => {
+            const value = resolvePath(files, file, raw);
+            if (value === null) {
+              unresolved.push(flatten(raw));
+              return '';
+            }
+            return value;
+          };
+          const rawCollection = splitArgs(args)[0] ?? '';
+          const segments = literal(rawCollection).split('/');
+          const collection = segments[segments.length - 1] ?? '';
+          if (collection === '*') unresolved.push(flatten(rawCollection));
+          out.push({
+            file,
+            line: lineOf(file.code, match.index),
+            collection,
+            wheres: wheres.map((step) => ({
+              field: literal(step.args[0] ?? ''),
+              op: literal(step.args[1] ?? ''),
+            })),
+            orders: orders.map((step) => {
+              const raw = step.args[1];
+              return {
+                field: literal(step.args[0] ?? ''),
+                direction: raw === undefined ? null : orderDirection(literal(raw)),
+              };
+            }),
+            unresolved,
+          });
+        }
+      }
+      match = pattern.exec(file.code);
+    }
+  }
+  return out;
+}
+
+interface RequiredIndex {
+  collection: string;
+  /** 등식 필드 — 색인 앞자리. 자기들끼리의 순서는 질의를 받는 데 영향이 없다. */
+  equality: string[];
+  /** 범위·정렬 필드 — 색인 뒷자리. 순서가 그대로 맞아야 하고, 질의가 방향을 말했으면 방향도 맞아야 한다. */
+  tail: IndexField[];
+}
+
+/**
+ * 이 질의가 복합 색인을 요구하는가, 요구한다면 어떤 모양인가.
+ *  1. `where` 둘 이상 + `orderBy`
+ *  2. 범위 연산자 하나 이상 + 다른 필드가 하나라도 더 있음(다른 `where` 든 `orderBy` 든)
+ * 등식만 쓰고 `orderBy` 가 없으면 Firestore 가 단일 필드 색인을 합쳐 받으므로 필요 없다.
+ *
+ * **아직 덮지 않는 모양**: 등식 **하나** + 다른 필드 `orderBy`(실제로는 Firestore 가 복합 색인을
+ * 요구한다). 지금 트리에 그런 질의가 없고 규칙을 위 두 절로 못박아 두었다. 생기면 여기 한 줄 더 붙인다.
+ */
+function requiredIndex(chain: QueryChain): RequiredIndex | null {
+  const inequalities = chain.wheres.filter((clause) => INEQUALITY_OPS.includes(clause.op));
+  const orderFields = chain.orders.map((clause) => clause.field);
+  const distinct = new Set([...chain.wheres.map((clause) => clause.field), ...orderFields]);
+  const needed =
+    (chain.wheres.length >= 2 && chain.orders.length >= 1) ||
+    (inequalities.length >= 1 && distinct.size >= 2);
+  if (!needed) return null;
+
+  const tail: IndexField[] = [];
+  const push = (fieldPath: string, order: IndexField['order']): void => {
+    if (!tail.some((field) => field.fieldPath === fieldPath)) tail.push({ fieldPath, order });
+  };
+  // 범위 필드가 먼저, 그다음 정렬 필드를 쓰인 순서 그대로.
+  for (const clause of inequalities) if (!orderFields.includes(clause.field)) push(clause.field, null);
+  for (const clause of chain.orders) push(clause.field, clause.direction);
+
+  const equality = [
+    ...new Set(chain.wheres.filter((c) => EQUALITY_OPS.includes(c.op)).map((c) => c.field)),
+  ];
+  return {
+    collection: chain.collection,
+    equality: equality.filter((field) => !tail.some((entry) => entry.fieldPath === field)),
+    tail,
+  };
+}
+
+/** 등식 필드가 앞, 범위·정렬 필드가 뒤. 앞자리는 집합으로, 뒷자리는 순서·방향까지 맞춰 본다. */
+function indexMatches(index: IndexEntry, required: RequiredIndex): boolean {
+  if (index.collectionGroup !== required.collection) return false;
+  if (index.fields.length !== required.equality.length + required.tail.length) return false;
+  const head = index.fields.slice(0, required.equality.length).map((field) => field.fieldPath);
+  if ([...head].sort().join('\u0000') !== [...required.equality].sort().join('\u0000')) return false;
+  return required.tail.every((want, at) => {
+    const got = index.fields[required.equality.length + at];
+    if (got === undefined || got.fieldPath !== want.fieldPath) return false;
+    return want.order === null || got.order === want.order;
+  });
+}
+
+/** 실패 메시지에 그대로 붙여 넣을 수 있는 색인 항목. */
+function indexJson(required: RequiredIndex): string {
+  return JSON.stringify({
+    collectionGroup: required.collection,
+    queryScope: 'COLLECTION',
+    fields: [
+      ...required.equality.map((fieldPath) => ({ fieldPath, order: 'ASCENDING' })),
+      ...required.tail.map((field) => ({ fieldPath: field.fieldPath, order: field.order ?? 'ASCENDING' })),
+    ],
+  });
+}
+
+/**
+ * 복합 질의마다 `firestore.indexes.json` 에 대응 색인이 있는지 본다. 없으면
+ * **넣어야 할 항목을 그대로 찍어** 실패한다 — 지금까지 유일한 신호는 운영에서 터지는
+ * `FAILED_PRECONDITION` 이었다(task-C3 리뷰 Minor 3). 쓰이지 않는 색인은 문제 삼지 않는다.
+ *
+ * **한계**: 한 식에서 이어 붙인 체인만 본다. `let q = …; if (c) q = q.where(…)` 처럼
+ * 조각내 만들면 놓친다 — 데이터 흐름 분석이 필요하고 정적 문자열 스캔의 비용 곡선 밖이다.
+ */
+function scanQueryIndexes(files: SourceFile[], indexes: IndexEntry[] = []): ScanResult {
+  const chains = queryChains(files);
+  const findings: Finding[] = [];
+  for (const chain of chains) {
+    const where = `${chain.file.rel}:${chain.line}`;
+    if (chain.unresolved.length > 0) {
+      findings.push(
+        `${where} 의 질의에서 \`${chain.unresolved.join('`, `')}\` 를 해석하지 못했다 — 컬렉션·필드·연산자가 리터럴이나 상수가 아니면 복합 색인과 대조할 수 없다.`,
+      );
+      continue;
+    }
+    const unknown = chain.wheres
+      .map((clause) => clause.op)
+      .filter((op) => !EQUALITY_OPS.includes(op) && !INEQUALITY_OPS.includes(op));
+    if (unknown.length > 0) {
+      findings.push(
+        `${where} 의 질의가 모르는 연산자 "${unknown.join('", "')}" 를 쓴다 — EQUALITY_OPS/INEQUALITY_OPS 에 넣어야 색인 요건을 판정할 수 있다.`,
+      );
+      continue;
+    }
+    const required = requiredIndex(chain);
+    if (required === null) continue;
+    if (indexes.some((index) => indexMatches(index, required))) continue;
+    findings.push(
+      `${where} 의 복합 질의에 맞는 색인이 ${INDEX_FILE} 에 없다 — indexes 배열에 이 항목을 넣어야 한다: ${indexJson(required)}`,
+    );
+  }
+  return { findings, targets: chains.length };
+}
+
 // ───────────────────────────────────────────────────────────── 진짜 소스 트리
 
 let FILES: SourceFile[] = [];
+let INDEXES: IndexEntry[] = [];
 /** 모든 실패 메시지에 붙는다 — 어떤 파일들을 봤는지 말하지 않는 스캔은 믿을 수 없다. */
 let INVENTORY = '';
 
@@ -814,6 +1144,7 @@ beforeAll(async () => {
   FILES = await Promise.all(
     paths.map(async (path) => makeSource(relative(SRC, path), await readFile(path, 'utf8'))),
   );
+  INDEXES = parseIndexes(await readFile(INDEX_PATH, 'utf8'));
   INVENTORY = `scanned ${FILES.length} files under ${SRC}: ${FILES.map((f) => f.rel).join(', ')}`;
 });
 
@@ -859,6 +1190,16 @@ describe('caller identity — the account comes from the session, never from the
     expectClean(scanCallerAuthorization));
 });
 
+describe('composite indexes — every multi-field query is backed by firestore.indexes.json', () => {
+  it('no query needs a composite index that the index file does not declare', () => {
+    expect(
+      INDEXES.length,
+      `${INDEX_FILE} 에서 색인을 하나도 읽지 못했다 — 파일이 옮겨졌거나 비었다. 통과가 아니라 실패다.`,
+    ).toBeGreaterThan(0);
+    expectClean((files) => scanQueryIndexes(files, INDEXES));
+  });
+});
+
 // ───────────────────────────────────────────────────────────── 음성 픽스처
 
 /**
@@ -875,7 +1216,7 @@ function expectCaught(result: ScanResult, expected: RegExp): void {
   expect(result.findings.join('\n'), `잡히지 않았다 — 위반이 스캔을 통과했다`).toMatch(expected);
 }
 
-describe('negative fixtures — the nine ways a violation slipped past', () => {
+describe('negative fixtures — every way a violation has slipped past, locked one by one', () => {
   it('1. a forbidden path hidden in a variable, then handed to .doc()', () => {
     const files = fixture([
       join('functions', 'evade.ts'),
@@ -1107,6 +1448,135 @@ describe('negative fixtures — the nine ways a violation slipped past', () => {
     expect(scanRequestData(files).findings, 'snap.data() 를 요청 본문으로 오진했다').toEqual([]);
   });
 
+  it('16. the request body destructured off an alias, in two ordinary lines', () => {
+    const files = fixture([
+      join('functions', 'evade.ts'),
+      `import { onCall } from 'firebase-functions/v2/https';
+       export const evade = onCall(async (request) => {
+         const body = request.data as Body;
+         const { account: caller } = body;
+         return { caller };
+       });`,
+    ]);
+    expectCaught(scanRequestData(files), /별칭 "body" 를 구조분해해 "account"/);
+  });
+
+  it('17. a Firestore reference parked in a variable, then written through', () => {
+    const files = fixture([
+      join('functions', 'evade.ts'),
+      `import { PERSONS, db } from '../lib/db.js';
+       import { buildDoc } from 'some-package';
+       export async function evade(id: string, phone: string) {
+         const target = db.collection(PERSONS).doc(id);
+         await target.set(buildDoc(phone));
+       }`,
+    ]);
+    expectCaught(scanPhone(files), /헬퍼 호출 buildDoc\(…\) 로 만들어지는데 그 선언을 찾지 못했다/);
+    expectCaught(scanTicketFields(files), /buildDoc/);
+  });
+
+  it('18. a transaction write whose callback parameter is not named tx', () => {
+    const files = fixture([
+      join('functions', 'evade.ts'),
+      `import { PERSONS, db } from '../lib/db.js';
+       import { buildDoc } from 'some-package';
+       export async function evade(id: string, phone: string) {
+         const ref = db.collection(PERSONS).doc(id);
+         await db.runTransaction(async (t) => {
+           t.set(ref, buildDoc(phone));
+         });
+       }`,
+    ]);
+    expectCaught(scanPhone(files), /헬퍼 호출 buildDoc\(…\)/);
+  });
+
+  it('19. a Map receiver is still not a Firestore write', () => {
+    // 이 게이트가 있는 이유다(`functions/snapshot.ts` 의 닉네임 표). 여기가 빨개지면 사람이 가드를 끈다.
+    const files = fixture([
+      join('functions', 'cache.ts'),
+      `import { getAddress } from 'viem';
+       export function cache(rows: Array<{ owner: string }>) {
+         const nicknames = new Map<string, string>();
+         for (const row of rows) nicknames.set(getAddress(row.owner), '');
+         return nicknames;
+       }`,
+    ]);
+    expect(scanPhone(files).findings, 'Map.set 을 Firestore 쓰기로 오진했다').toEqual([]);
+    expect(scanTicketFields(files).findings, 'Map.set 을 Firestore 쓰기로 오진했다').toEqual([]);
+  });
+
+  /** 픽스처 20~22 가 쓰는 색인 목록 — 진짜 파일의 일부를 본뜬 것. */
+  const INDEX_FIXTURE: IndexEntry[] = [
+    {
+      collectionGroup: 'persons',
+      fields: [
+        { fieldPath: 'status', order: 'ASCENDING' },
+        { fieldPath: 'updatedAt', order: 'ASCENDING' },
+      ],
+    },
+    {
+      collectionGroup: 'pendingGates',
+      fields: [
+        { fieldPath: 'eventId', order: 'ASCENDING' },
+        { fieldPath: 'status', order: 'ASCENDING' },
+        { fieldPath: 'createdAt', order: 'DESCENDING' },
+      ],
+    },
+  ];
+
+  it('20. a composite query with no matching index spells the index out', () => {
+    const files = fixture([
+      join('functions', 'evade.ts'),
+      `import { PERSONS, db } from '../lib/db.js';
+       export async function evade(cutoff: number) {
+         return db
+           .collection(PERSONS)
+           .where('status', '==', 'pending')
+           .where('createdAt', '<', cutoff)
+           .limit(50)
+           .get();
+       }`,
+    ]);
+    expectCaught(scanQueryIndexes(files, INDEX_FIXTURE), /복합 질의에 맞는 색인이 firestore\.indexes\.json 에 없다/);
+    // 실패 메시지가 **붙여 넣을 수 있는 항목**을 통째로 찍는다. 이게 없으면 사람이 다시 추측해야 한다.
+    expectCaught(
+      scanQueryIndexes(files, INDEX_FIXTURE),
+      /\{"collectionGroup":"persons","queryScope":"COLLECTION","fields":\[\{"fieldPath":"status","order":"ASCENDING"\},\{"fieldPath":"createdAt","order":"ASCENDING"\}\]\}/,
+    );
+  });
+
+  it('21. an index that exists, and an equality-only query that needs none, stay green', () => {
+    const files = fixture([
+      join('functions', 'ok.ts'),
+      `import { PENDING_GATES, PERSONS, TRANSFER_INVITES, db } from '../lib/db.js';
+       export async function sweep(cutoff: number, eventId: string, hmac: string) {
+         await db.collection(PERSONS).where('status', 'in', ['pending']).where('updatedAt', '<', cutoff).get();
+         await db
+           .collection(PENDING_GATES)
+           .where('eventId', '==', eventId)
+           .where('status', '==', 'pending')
+           .orderBy('createdAt', 'desc')
+           .limit(10)
+           .get();
+         await db.collection(TRANSFER_INVITES).where('hmacPhone', '==', hmac).where('status', '==', 'sent').get();
+       }`,
+    ]);
+    const result = scanQueryIndexes(files, INDEX_FIXTURE);
+    expect(result.findings, '있는 색인을 없다고 했거나, 필요 없는 색인을 요구했다').toEqual([]);
+    expect(result.targets, '질의 세 개를 다 보지 못했다').toBe(3);
+  });
+
+  it('22. a query whose collection cannot be resolved is reported, not waved through', () => {
+    const files = fixture([
+      join('functions', 'evade.ts'),
+      `import { db } from '../lib/db.js';
+       export async function evade(which: string, cutoff: number) {
+         return db.collection(which).where('status', '==', 'x').where('createdAt', '<', cutoff).get();
+       }`,
+    ]);
+    expectCaught(scanQueryIndexes(files, INDEX_FIXTURE), /를 해석하지 못했다 — 컬렉션·필드·연산자가/);
+  });
+
   it('an emptied source tree fails every scan instead of passing vacuously', () => {
     const empty: SourceFile[] = [];
     for (const scan of [
@@ -1117,6 +1587,7 @@ describe('negative fixtures — the nine ways a violation slipped past', () => {
       scanPhone,
       scanRequestData,
       scanCallerAuthorization,
+      scanQueryIndexes,
     ]) {
       expect(scan(empty).targets, `${scan.name} 이 빈 트리에서 대상 0을 통과시킨다`).toBe(0);
     }
