@@ -89,3 +89,153 @@ describe('permission bits', () => {
     expect(PERM_APPROVE_OVERRIDE).toBe(4);
   });
 });
+
+/** 게이트 인가 매트릭스. 판정은 전부 eth_call 이라 체인 mock 하나로 모든 행을 만든다. */
+const GATE = '0x00000000000000000000000000000000000000Ga'.toLowerCase() as `0x${string}`;
+const STAFF = '0x9999999999999999999999999999999999999999';
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+const TICKET = '0x3333333333333333333333333333333333333333';
+const ORGANIZERS = '0x2222222222222222222222222222222222222222';
+
+const chain = {
+  owner: ZERO_ADDRESS as string,
+  manager: [false, false] as readonly [boolean, boolean],
+  manageGates: false,
+  approveOverride: false,
+  openGate: false,
+  gateId: 3n,
+  gateInfo: [11n, GATE, `0x${'11'.repeat(32)}`, `0x${'22'.repeat(32)}`, false, false] as readonly unknown[],
+  /** 어느 컨트랙트에 물었는지까지 확인한다. Organizers 질문이 Ticket 으로 새면 안 된다. */
+  calls: [] as Array<{ address: string; functionName: string }>,
+};
+
+vi.mock('../src/lib/chain.js', () => ({
+  deployment: () => ({ ticket: TICKET, organizers: ORGANIZERS }),
+  publicClient: () => ({
+    readContract: async ({
+      address,
+      functionName,
+      args,
+    }: {
+      address: string;
+      functionName: string;
+      args: readonly unknown[];
+    }) => {
+      chain.calls.push({ address, functionName });
+      switch (functionName) {
+        case 'eventOrg':
+          return 1n;
+        case 'ownerOf':
+          return chain.owner;
+        case 'managerOf':
+          return chain.manager;
+        case 'hasPermission':
+          return args[2] === PERM_MANAGE_GATES ? chain.manageGates : chain.approveOverride;
+        case 'isOpenGate':
+          return chain.openGate;
+        case 'gateOf':
+          return chain.gateId;
+        case 'gateInfo':
+          return chain.gateInfo;
+        default:
+          throw new Error(`UNEXPECTED_READ:${functionName}`);
+      }
+    },
+  }),
+}));
+
+const { requireStaffForGate } = await import('../src/lib/auth.js');
+
+beforeEach(() => {
+  chain.owner = ZERO_ADDRESS;
+  chain.manager = [false, false];
+  chain.manageGates = false;
+  chain.approveOverride = false;
+  chain.openGate = false;
+  chain.gateId = 3n;
+  chain.gateInfo = [11n, GATE, `0x${'11'.repeat(32)}`, `0x${'22'.repeat(32)}`, false, false];
+  chain.calls = [];
+});
+
+describe('requireStaffForGate — condition (a): the caller is event staff', () => {
+  it('accepts the organizer owner', async () => {
+    chain.owner = STAFF.toUpperCase().replace('0X', '0x');
+    chain.openGate = true;
+    await expect(requireStaffForGate(11n, STAFF, GATE)).resolves.toBeUndefined();
+  });
+
+  it('accepts a manager', async () => {
+    chain.manager = [true, false];
+    chain.openGate = true;
+    await expect(requireStaffForGate(11n, STAFF, GATE)).resolves.toBeUndefined();
+  });
+
+  it('accepts an admin with only PERM_MANAGE_GATES', async () => {
+    chain.manageGates = true;
+    chain.openGate = true;
+    await expect(requireStaffForGate(11n, STAFF, GATE)).resolves.toBeUndefined();
+  });
+
+  it('accepts an admin with only PERM_APPROVE_OVERRIDE', async () => {
+    chain.approveOverride = true;
+    chain.openGate = true;
+    await expect(requireStaffForGate(11n, STAFF, GATE)).resolves.toBeUndefined();
+  });
+
+  it('rejects a caller with neither role even when the gate is open', async () => {
+    chain.openGate = true;
+    await expect(requireStaffForGate(11n, STAFF, GATE)).rejects.toMatchObject({
+      code: 'permission-denied',
+      message: 'NOT_EVENT_STAFF',
+    });
+  });
+
+  it('resolves the org from Ticket.eventOrg and asks Organizers about that org', async () => {
+    chain.manager = [true, false];
+    chain.openGate = true;
+    await requireStaffForGate(11n, STAFF, GATE);
+    expect(chain.calls[0]).toEqual({ address: TICKET, functionName: 'eventOrg' });
+    for (const call of chain.calls.slice(1)) expect(call.address).toBe(ORGANIZERS);
+  });
+});
+
+describe('requireStaffForGate — condition (b): the gate belongs to the event', () => {
+  it('accepts a registered but not-yet-open gate (pre-event snapshot download)', async () => {
+    chain.manager = [true, false];
+    await expect(requireStaffForGate(11n, STAFF, GATE)).resolves.toBeUndefined();
+  });
+
+  it('rejects an unregistered gate account', async () => {
+    chain.manager = [true, false];
+    chain.gateId = 0n;
+    await expect(requireStaffForGate(11n, STAFF, GATE)).rejects.toMatchObject({
+      code: 'permission-denied',
+      message: 'GATE_NOT_REGISTERED',
+    });
+  });
+
+  it('rejects a revoked gate', async () => {
+    chain.manager = [true, false];
+    chain.gateInfo = [11n, GATE, `0x${'11'.repeat(32)}`, `0x${'22'.repeat(32)}`, false, true];
+    await expect(requireStaffForGate(11n, STAFF, GATE)).rejects.toMatchObject({
+      code: 'permission-denied',
+      message: 'GATE_REVOKED',
+    });
+  });
+
+  it('rejects a gate registered to another event', async () => {
+    chain.manager = [true, false];
+    chain.gateInfo = [12n, GATE, `0x${'11'.repeat(32)}`, `0x${'22'.repeat(32)}`, false, false];
+    await expect(requireStaffForGate(11n, STAFF, GATE)).rejects.toMatchObject({
+      code: 'permission-denied',
+      message: 'GATE_WRONG_EVENT',
+    });
+  });
+
+  it('never trusts our own database for a role', async () => {
+    chain.manager = [true, false];
+    chain.openGate = true;
+    await requireStaffForGate(11n, STAFF, GATE);
+    expect(docs.size).toBe(0);
+  });
+});
