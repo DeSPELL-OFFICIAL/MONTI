@@ -13,3 +13,10 @@ android/app/build
 apps/web/ios/App/Pods
 apps/web/android/.gradle
 apps/web/android/app/build
+
+# Firebase
+functions/lib
+functions/.env.*
+!functions/.env.example
+indexer/generated
+*-debug.log
