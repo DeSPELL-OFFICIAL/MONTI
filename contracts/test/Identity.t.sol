@@ -117,4 +117,45 @@ contract IdentityTest is Test {
         vm.expectRevert(Identity.NotRegistered.selector);
         identity.setKycLevel(bytes32(uint256(0xDEAD)), 1);
     }
+
+    function test_setActiveDeviceRequiresMembership() public {
+        vm.prank(BOB);
+        vm.expectRevert(Identity.NotRegistered.selector);
+        identity.setActiveDevice(DEV_X, DEV_Y);
+    }
+
+    function test_setActiveDeviceBlockedBeforeSevenDays() public {
+        vm.prank(ATTESTER);
+        identity.register(PERSON_A, ALICE, DEV_X, DEV_Y, 1);
+
+        vm.warp(block.timestamp + 7 days - 1);
+        vm.prank(ALICE);
+        vm.expectRevert(Identity.CooldownActive.selector);
+        identity.setActiveDevice(bytes32(uint256(0x3333)), bytes32(uint256(0x4444)));
+    }
+
+    function test_setActiveDeviceAllowedAfterSevenDays() public {
+        vm.prank(ATTESTER);
+        identity.register(PERSON_A, ALICE, DEV_X, DEV_Y, 1);
+
+        vm.warp(block.timestamp + 7 days);
+        vm.expectEmit(true, false, false, true);
+        emit DeviceChanged(ALICE, bytes32(uint256(0x3333)), bytes32(uint256(0x4444)));
+        vm.prank(ALICE);
+        identity.setActiveDevice(bytes32(uint256(0x3333)), bytes32(uint256(0x4444)));
+
+        (bytes32 x, bytes32 y) = identity.activeDevice(ALICE);
+        assertEq(x, bytes32(uint256(0x3333)));
+        assertEq(y, bytes32(uint256(0x4444)));
+        assertEq(identity.deviceUpdatedAt(ALICE), uint64(block.timestamp));
+    }
+
+    function test_setActiveDeviceRejectsZeroKey() public {
+        vm.prank(ATTESTER);
+        identity.register(PERSON_A, ALICE, DEV_X, DEV_Y, 1);
+        vm.warp(block.timestamp + 7 days);
+        vm.prank(ALICE);
+        vm.expectRevert(Identity.InvalidDeviceKey.selector);
+        identity.setActiveDevice(bytes32(0), bytes32(uint256(0x4444)));
+    }
 }

@@ -114,6 +114,26 @@ contract Identity is IIdentity, AttesterRole {
         return _kycLevel[account];
     }
 
+    /// @notice Register this phone's hardware key as the one key allowed to sign check-ins.
+    ///         Spec 9.3: one active device per account, 7-day cooldown enforced by the contract.
+    ///         Registering a fresh device also clears a lock — that is the on-chain recovery path.
+    function setActiveDevice(bytes32 x, bytes32 y) external {
+        if (!isMember(msg.sender)) revert NotRegistered();
+        if (x == bytes32(0) || y == bytes32(0)) revert InvalidDeviceKey();
+
+        Device storage d = _devices[msg.sender];
+        if (d.updatedAt != 0 && block.timestamp < uint256(d.updatedAt) + DEVICE_COOLDOWN) revert CooldownActive();
+
+        bool wasLocked = d.locked;
+        d.x = x;
+        d.y = y;
+        d.updatedAt = uint64(block.timestamp);
+        d.locked = false;
+
+        emit DeviceChanged(msg.sender, x, y);
+        if (wasLocked) emit DeviceLocked(msg.sender, false);
+    }
+
     function nicknameOwner(bytes32 nicknameHash) external view returns (address) {
         return _nicknameOwner[nicknameHash];
     }
