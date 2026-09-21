@@ -59,6 +59,11 @@ export const ko = {
     categoryAll: '전체', category0: '공연', category1: '모임', category2: '전시', category3: '기타',
     empty: '조건에 맞는 행사가 없어요.', getTicket: '티켓 받기', share: '공유',
     map: '지도로 보기', publicRecord: '공개 기록', soldOut: '마감됨', cancelled: '취소된 행사예요.',
+    untitled: '제목을 불러오지 못했어요', remaining: '{{count}}자리 남음',
+    regions: {
+      'KR-11': '서울', 'KR-26': '부산', 'KR-28': '인천',
+      'KR-30': '대전', 'KR-41': '경기', 'KR-48': '경남',
+    },
   },
   tickets: {
     title: '내 티켓', empty: '아직 티켓이 없어요.', inbox: '받은 티켓', inboxEmpty: '받은 티켓이 없어요.',

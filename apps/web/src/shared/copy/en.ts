@@ -61,6 +61,11 @@ export const en: typeof ko = {
     categoryAll: 'All', category0: 'Concert', category1: 'Meetup', category2: 'Exhibition', category3: 'Other',
     empty: 'No events match your filters.', getTicket: 'Get a ticket', share: 'Share',
     map: 'Open in maps', publicRecord: 'Public record', soldOut: 'Sold out', cancelled: 'This event was cancelled.',
+    untitled: 'Title unavailable', remaining: '{{count}} left',
+    regions: {
+      'KR-11': 'Seoul', 'KR-26': 'Busan', 'KR-28': 'Incheon',
+      'KR-30': 'Daejeon', 'KR-41': 'Gyeonggi', 'KR-48': 'Gyeongnam',
+    },
   },
   tickets: {
     title: 'My tickets', empty: 'No tickets yet.', inbox: 'Received', inboxEmpty: 'Nothing received yet.',

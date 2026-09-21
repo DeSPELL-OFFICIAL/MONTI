@@ -33,6 +33,7 @@ import { VerifyIdentity } from './attendee/me/VerifyIdentity';
 import { PasskeyStep } from './attendee/signup/Passkey';
 import { DeviceStep } from './attendee/signup/Device';
 import { Done } from './attendee/signup/Done';
+import { Claim } from './attendee/claim/Claim';
 import { TicketList } from './attendee/tickets/List';
 import { TicketDetail } from './attendee/tickets/Detail';
 import { TransferRecipient } from './attendee/transfer/Recipient';
@@ -58,6 +59,7 @@ export const routes: RouteObject[] = [
       {
         element: <RequireSession />,
         children: [
+          { path: '/claim/:eventId', element: <Claim /> },
           { path: '/tickets', element: <TicketList /> },
           { path: '/tickets/:tokenId', element: <TicketDetail /> },
           { path: '/tickets/:tokenId/transfer', element: <TransferRecipient /> },

@@ -1,7 +1,100 @@
-import { Screen } from '../../shared/ui';
-import { useCopy } from '../../shared/i18n';
+import { Link, useParams } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { Alert, Button, Screen, Spinner } from '../../shared/ui';
+import { fmt, useCopy, useLocale } from '../../shared/i18n';
+import { gql } from '../../shared/envio/client';
+import { EVENT_QUERY, type EnvioEvent, type EnvioTier } from '../../shared/envio/queries';
+import { fetchEventMetadata } from '../../shared/envio/ipfs';
+import { getConfig } from '../../shared/config';
+import { formatEventDate } from './useEvents';
+
+const CANCELLED = 'Cancelled';
 
 export function EventDetail() {
   const copy = useCopy();
-  return <Screen title={copy.discover.title}>{copy.discover.publicRecord}</Screen>;
+  const locale = useLocale();
+  const { eventId = '' } = useParams();
+
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: ['event', eventId],
+    queryFn: async () => {
+      // `id` is the text primary key, `eventId` the numeric column the tiers hang off.
+      const result = await gql<{ Event: EnvioEvent[]; Tier: EnvioTier[] }>(EVENT_QUERY, {
+        id: eventId,
+        eventId,
+      });
+      const event = result.Event[0];
+      if (!event) throw new Error('EVENT_NOT_FOUND');
+      return {
+        event,
+        tiers: result.Tier.filter((tier) => String(tier.eventId) === String(event.id)),
+        metadata: await fetchEventMetadata(event.imageCid).catch(() => null),
+      };
+    },
+  });
+
+  if (isError) {
+    return (
+      <Screen title={copy.discover.title}>
+        <Alert tone="error">{copy.common.error}</Alert>
+        <Button onClick={() => void refetch()}>{copy.common.retry}</Button>
+      </Screen>
+    );
+  }
+  if (isLoading || !data) {
+    return (
+      <Screen title={copy.discover.title}>
+        <Spinner />
+      </Screen>
+    );
+  }
+
+  const { event, tiers, metadata } = data;
+  const record = `${getConfig().explorerUrl}/address/${getConfig().addresses.ticket}`;
+
+  return (
+    <Screen title={metadata?.title || copy.discover.untitled}>
+      {metadata?.image ? <img className="event-hero" src={metadata.image} alt="" /> : null}
+      {event.requireKyc ? <span className="badge">{copy.kyc.requiredBadge}</span> : null}
+      {metadata?.description ? <p>{metadata.description}</p> : null}
+      <p className="muted">{formatEventDate(event.startsAt, locale)}</p>
+      {metadata?.venue ? (
+        <p>
+          <a href={`https://maps.google.com/?q=${encodeURIComponent(metadata.venue)}`}>
+            {metadata.venue} · {copy.discover.map}
+          </a>
+        </p>
+      ) : null}
+
+      <ul className="tier-list">
+        {tiers.map((tier) => {
+          const left = Number(tier.supply) - Number(tier.minted);
+          return (
+            <li key={tier.id}>
+              <span>{tier.name}</span>
+              <span className="muted">
+                {left > 0 ? fmt(copy.discover.remaining, { count: left }) : copy.discover.soldOut}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+
+      {event.status === CANCELLED ? (
+        <Alert tone="warn">{copy.discover.cancelled}</Alert>
+      ) : (
+        <Link to={`/claim/${event.id}`} className="btn btn--primary btn--link">
+          {copy.discover.getTicket}
+        </Link>
+      )}
+
+      <Button variant="ghost" onClick={() => void navigator.share?.({ url: window.location.href })}>
+        {copy.discover.share}
+      </Button>
+
+      <p className="muted">
+        <a href={record}>{copy.discover.publicRecord}</a>
+      </p>
+    </Screen>
+  );
 }
