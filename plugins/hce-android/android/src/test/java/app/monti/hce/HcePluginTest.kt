@@ -54,11 +54,31 @@ class HcePluginTest {
     }
 
     @Test
+    /** `call.reject(` 부터 괄호가 닫힐 때까지. 줄을 넘겨 쓴 reject 도 한 덩어리로 잡는다. */
+    private fun rejectArguments(): List<String> = Regex("call\\.reject\\(").findAll(source).map { match ->
+        var cursor = match.range.last + 1
+        var depth = 1
+        while (cursor < source.length && depth > 0) {
+            if (source[cursor] == '(') depth += 1
+            if (source[cursor] == ')') depth -= 1
+            cursor += 1
+        }
+        source.substring(match.range.last + 1, cursor - 1)
+    }.toList()
+
+    @Test
     fun everyRejectionCarriesOneOfTheDeclaredCodes() {
         // definitions.ts: "Every rejection from this plugin carries one of these as its
         // Capacitor error code." 코드 없는 reject 는 JS 쪽에서 분기할 수 없는 실패가 된다.
-        val codes = setOf(HcePlugin.INVALID_ARGUMENT, HcePlugin.UNAVAILABLE, HcePlugin.NFC_DISABLED)
-        val rejections = Regex("call\\.reject\\(([^\\n]*)\\)").findAll(source).map { it.groupValues[1] }.toList()
+        val codes = listOf(
+            HcePlugin.INVALID_ARGUMENT,
+            HcePlugin.UNAVAILABLE,
+            HcePlugin.NFC_DISABLED,
+            HcePlugin.CLAIM_REFUSED,
+        )
+        val rejections = rejectArguments()
+        // 한 줄짜리만 세면 줄을 넘겨 쓴 reject 가 순회에서 통째로 빠진다.
+        assertEquals(Regex("call\\.reject\\(").findAll(source).count(), rejections.size)
         assertTrue("reject 가 하나도 없다", rejections.isNotEmpty())
         for (rejection in rejections) {
             assertTrue("code 없는 reject: $rejection", codes.any { rejection.contains(it) })
@@ -66,13 +86,41 @@ class HcePluginTest {
     }
 
     @Test
+    fun aRefusedClaimIsSurfacedInsteadOfDiscarded() {
+        // setPreferredService 는 Boolean 을 돌려준다. 버리면 같은 AID 를 등록한 지갑 앱이 탭을
+        // 가져가도 아무 흔적이 남지 않는다 — 관객 일부가 이유 없이 통과하지 못한다.
+        assertEquals("CLAIM_REFUSED", HcePlugin.CLAIM_REFUSED)
+        assertTrue(source.contains("private fun claimPreferredService(): Boolean"))
+        assertTrue(source.contains("return emulation.setPreferredService(current, serviceComponent)"))
+        assertTrue(source.contains("if (!claimPreferredService())"))
+    }
+
+    @Test
+    fun theClaimIsRetakenWheneverTheActivityResumes() {
+        // 플랫폼은 액티비티가 resumed 인 동안에만 preferred service 를 존중한다. 근무 시작에
+        // start() 한 번으로는 근무 내내 유지되지 않는다.
+        assertTrue(source.contains("override fun handleOnResume()"))
+        assertTrue(source.contains("if (started) claimPreferredService()"))
+    }
+
+    @Test
+    fun thePluginLetsGoOfTheSingletonWhenItDies() {
+        // HceBridge 는 프로세스 싱글턴이다. 회전이나 프로세스를 살린 재시작은 stop() 없이 온다.
+        assertTrue(source.contains("override fun handleOnDestroy()"))
+        assertTrue(source.contains("if (started) releaseGate()"))
+        // stop() 과 handleOnDestroy() 가 같은 한 곳을 지난다 — 순서가 두 벌로 갈라지지 않는다.
+        assertEquals(3, Regex("releaseGate\\(\\)").findAll(source).count())
+    }
+
+    @Test
     fun stopDropsTheListenerBeforeItClearsTheGate() {
         // reset() 이 onDeactivated 를 부르므로, 콜백을 나중에 떼면 이미 멈춘 게이트의 이벤트가
         // JS 로 한 번 더 새어 나갈 수 있다.
-        val dropAt = source.indexOf("HceBridge.onWrite = null")
-        val resetAt = source.indexOf("HceBridge.reset()")
-        assertTrue("stop() 이 onWrite 를 떼지 않는다", dropAt >= 0)
-        assertTrue("stop() 이 reset() 을 부르지 않는다", resetAt >= 0)
+        val teardown = source.substring(source.indexOf("private fun releaseGate()"))
+        val dropAt = teardown.indexOf("HceBridge.onWrite = null")
+        val resetAt = teardown.indexOf("HceBridge.reset()")
+        assertTrue("releaseGate() 가 onWrite 를 떼지 않는다", dropAt >= 0)
+        assertTrue("releaseGate() 가 reset() 을 부르지 않는다", resetAt >= 0)
         assertTrue("콜백을 reset() 보다 먼저 떼야 한다", dropAt < resetAt)
     }
 

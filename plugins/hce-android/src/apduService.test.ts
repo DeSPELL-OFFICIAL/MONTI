@@ -97,6 +97,13 @@ describe('the AID registration the OS reads', () => {
 describe('the service declaration the OS binds', () => {
   const service = only(manifestXml, 'service');
 
+  /** 이름으로 고른다 — <uses-feature> 는 이제 둘이다. */
+  const feature = (name: string): Attributes => {
+    const found = elements(manifestXml, 'uses-feature').filter((f) => f['android:name'] === name);
+    expect(found, `<uses-feature ${name}> 가 정확히 하나여야 한다`).toHaveLength(1);
+    return found[0] as Attributes;
+  };
+
   it('points at MontiHostApduService', () => {
     expect(service['android:name']).toBe('app.monti.hce.MontiHostApduService');
   });
@@ -129,9 +136,14 @@ describe('the service declaration the OS binds', () => {
     // 브리핑은 required="true" 였다. 이 라이브러리 매니페스트는 apps/web 한 앱으로 병합되고
     // 그 앱에는 attendee·organizer·staff 가 다 들어 있으므로, true 면 Play 가 HCE 없는
     // 기기에서 관객까지 설치하지 못하게 한다. 없는 기기는 start() 가 거절한다.
-    const feature = only(manifestXml, 'uses-feature');
-    expect(feature['android:name']).toBe('android.hardware.nfc.hce');
-    expect(feature['android:required']).toBe('false');
+    expect(feature('android.hardware.nfc.hce')['android:required']).toBe('false');
+  });
+
+  it('declares plain NFC optional too, or the permission would filter the app anyway', () => {
+    // <uses-permission android:name="android.permission.NFC" /> 는 플랫폼의 permission→feature
+    // 표에 따라 android.hardware.nfc 를 required="true" 로 **암묵 선언**한다. 명시로 덮어쓰지
+    // 않으면 위의 .hce required="false" 가 두 줄 위에서 무효가 된다.
+    expect(feature('android.hardware.nfc')['android:required']).toBe('false');
   });
 });
 

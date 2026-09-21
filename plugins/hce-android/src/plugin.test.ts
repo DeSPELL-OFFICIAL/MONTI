@@ -99,18 +99,48 @@ describe('the base64 spelling definitions.ts fixes', () => {
 });
 
 describe('the error codes every rejection carries', () => {
-  const rejections = [...hcePluginKt.matchAll(/call\.reject\(([^\n]*)\)/g)].map((m) => m[1] as string);
+  /** `call.reject(` 부터 괄호가 닫힐 때까지 — 줄을 넘겨 쓴 reject 도 한 덩어리로 잡는다. */
+  function rejectArguments(source: string): string[] {
+    const found: string[] = [];
+    for (const start of [...source.matchAll(/call\.reject\(/g)]) {
+      let cursor = (start.index as number) + start[0].length;
+      let depth = 1;
+      while (cursor < source.length && depth > 0) {
+        if (source[cursor] === '(') depth += 1;
+        if (source[cursor] === ')') depth -= 1;
+        cursor += 1;
+      }
+      found.push(source.slice((start.index as number) + start[0].length, cursor - 1));
+    }
+    return found;
+  }
+
+  const rejections = rejectArguments(hcePluginKt);
 
   it('rejects in more than one place, and never without a code', () => {
     // 코드 없는 reject 는 JS 가 분기할 수 없는 실패다 — 게이트에서는 전부 "다시 태그하세요"가 된다.
-    expect(rejections.length).toBeGreaterThanOrEqual(5);
+    // 한 줄짜리만 세는 정규식이면 줄을 넘겨 쓴 reject 가 순회에서 통째로 빠진다. 그래서
+    // 잡아낸 개수와 원본의 `call.reject(` 개수가 **같은지** 먼저 본다.
+    const occurrences = (hcePluginKt.match(/call\.reject\(/g) ?? []).length;
+    expect(rejections).toHaveLength(occurrences);
+    expect(occurrences).toBeGreaterThanOrEqual(6);
     const codes = Object.values(HCE_ERROR);
     for (const rejection of rejections) {
-      expect(codes.some((code) => rejection.includes(`"${code}"`) || rejection.includes(code))).toBe(true);
+      expect(codes.some((code) => rejection.includes(code))).toBe(true);
     }
   });
 
+  it('has a code for a refused claim, distinct from a phone that cannot emulate', () => {
+    // 카드 에뮬레이션 자체는 된다. 실패한 것은 **청구**이고, 부르는 쪽이 할 일도 다르다
+    // (QR 로 내려가는 게 아니라 "다른 HCE 앱이 같은 AID 를 잡고 있다"를 알려야 한다).
+    expect(HCE_ERROR.claimRefused).toBe('CLAIM_REFUSED');
+    expect(hcePluginKt).toContain(`const val CLAIM_REFUSED = "${HCE_ERROR.claimRefused}"`);
+    expect(squeeze(hcePluginKt)).toContain('if (!claimPreferredService()) {');
+    expect(squeeze(hcePluginKt)).toContain('CLAIM_REFUSED) return }');
+  });
+
   it('declares each code in Kotlin with the exact string definitions.ts exports', () => {
+    for (const code of Object.values(HCE_ERROR)) expect(hcePluginKt).toContain(`= "${code}"`);
     expect(hcePluginKt).toContain(`const val INVALID_ARGUMENT = "${HCE_ERROR.invalidArgument}"`);
     expect(hcePluginKt).toContain(`const val UNAVAILABLE = "${HCE_ERROR.unavailable}"`);
     expect(hcePluginKt).toContain(`const val NFC_DISABLED = "${HCE_ERROR.nfcDisabled}"`);
@@ -136,16 +166,37 @@ describe('the error codes every rejection carries', () => {
 
 describe('claiming and releasing the tap', () => {
   it('claims the preferred service so a wallet app on the same AID cannot take it', () => {
-    expect(hcePluginKt).toContain('emulation.setPreferredService(it, serviceComponent)');
+    expect(hcePluginKt).toContain('emulation.setPreferredService(current, serviceComponent)');
     expect(hcePluginKt).toContain('emulation.unsetPreferredService(it)');
+  });
+
+  it('reads the answer the claim gives instead of discarding it', () => {
+    // setPreferredService 는 Boolean 을 돌려준다. 버리면 "청구했다고 생각하는데 안 된" 상태가
+    // 아무 흔적 없이 남는다.
+    expect(squeeze(hcePluginKt)).toContain('private fun claimPreferredService(): Boolean {');
+    expect(squeeze(hcePluginKt)).toContain('return emulation.setPreferredService(current, serviceComponent)');
+  });
+
+  it('re-claims when the activity comes back, because the platform only honours it while resumed', () => {
+    // 근무 시작에 start() 한 번으로는 근무 내내 유지되지 않는다 — 화면이 꺼졌다 켜지거나 다른
+    // 앱이 앞에 왔다 가면 그 사이에 풀린다.
+    expect(squeeze(hcePluginKt)).toContain('override fun handleOnResume() { super.handleOnResume() if (started) claimPreferredService() }');
+  });
+
+  it('lets go of the bridge when the plugin dies, not only when stop() is called', () => {
+    // HceBridge 는 프로세스 싱글턴이다. 회전이나 프로세스를 살린 재시작은 stop() 없이 온다 —
+    // 떼지 않으면 죽은 플러그인과 액티비티를 붙들고, 완성된 쓰기는 아무 데도 닿지 않는다.
+    expect(squeeze(hcePluginKt)).toContain('override fun handleOnDestroy() { if (started) releaseGate() super.handleOnDestroy() }');
+    expect(squeeze(hcePluginKt)).toContain('private fun releaseGate() { HceBridge.onWrite = null HceBridge.reset() started = false }');
   });
 
   it('drops the listener before it clears the gate', () => {
     // reset() 이 onDeactivated 를 부른다. 콜백을 나중에 떼면 멈춘 게이트의 이벤트가 한 번 더 샌다.
-    const dropAt = hcePluginKt.indexOf('HceBridge.onWrite = null');
-    const resetAt = hcePluginKt.indexOf('HceBridge.reset()');
-    expect(dropAt).toBeGreaterThan(-1);
-    expect(resetAt).toBeGreaterThan(dropAt);
+    const teardown = squeeze(hcePluginKt).slice(squeeze(hcePluginKt).indexOf('private fun releaseGate()'));
+    expect(teardown.indexOf('HceBridge.onWrite = null')).toBeGreaterThan(-1);
+    expect(teardown.indexOf('HceBridge.reset()')).toBeGreaterThan(teardown.indexOf('HceBridge.onWrite = null'));
+    // stop() 과 handleOnDestroy() 둘 다 그 한 곳을 지난다 — 순서가 두 벌로 갈라지지 않는다.
+    expect((hcePluginKt.match(/releaseGate\(\)/g) ?? []).length).toBe(3);
   });
 
   it('keeps the web build refusing, so no browser pretends to be a card', () => {

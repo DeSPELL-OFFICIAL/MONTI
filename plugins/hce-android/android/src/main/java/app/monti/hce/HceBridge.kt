@@ -9,10 +9,15 @@ package app.monti.hce
  * 그걸 집을 방법이 없다(OS 가 생성자를 부른다 — 우리가 건네줄 자리가 없다). 그래서 상태 기계는
  * 프로세스 싱글턴에 둔다.
  *
- * 스레드: `processCommandApdu` 는 NFC 스택의 바인더 스레드에서 오고 `setPayload` 는 WebView 의
- * 메인 스레드에서 온다. [onWrite] 가 `@Volatile` 인 이유가 그것이다 — 플러그인이 붙이거나 떼는
- * 콜백을 바인더 스레드가 곧바로 보아야 한다. APDU 자체는 한 번에 하나씩 순서대로 들어오므로
- * 상태 기계 안쪽은 더 잠글 것이 없다.
+ * 스레드: 두 쪽은 **바인더 스레드와 메인 스레드**가 아니다. `processCommandApdu` 는 서비스의
+ * Messenger 핸들러를 타고 **앱 메인 스레드**로 들어오고, `setPayload` 를 부르는
+ * `@PluginMethod` 본문은 Capacitor 가 따로 만든 **`CapacitorPlugins` 핸들러 스레드**에서
+ * 돈다(`com.getcapacitor.Bridge` 가 그 HandlerThread 를 만들고 `callPluginMethod` 가 거기에
+ * post 한다).
+ *
+ * 그래서 [onWrite] 의 `@Volatile` 만으로는 모자란다 — 그건 이 필드 하나를 덮을 뿐이다.
+ * 상태 기계의 나머지 아홉 필드는 [ApduStateMachine] 이 스스로 잠근다(그 KDoc §스레드).
+ * APDU 끼리는 순서가 보장되지만 `setPayload` 와는 보장되지 않는다는 것이 요점이다.
  */
 object HceBridge {
 

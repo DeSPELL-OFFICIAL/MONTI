@@ -66,6 +66,18 @@ class ApduServiceManifestTest {
     }
 
     @Test
+    fun neitherNfcNorHceIsAnInstallRequirement() {
+        // NFC 권한은 android.hardware.nfc 를 required="true" 로 암묵 선언한다(플랫폼의
+        // permission→feature 표). 명시로 덮어쓰지 않으면 Play 가 NFC 없는 기기를 걸러 내고,
+        // 이 매니페스트가 병합되는 apps/web 에는 관객·주최자 화면도 같이 들어 있다.
+        for (feature in listOf("android.hardware.nfc", "android.hardware.nfc.hce")) {
+            val declared = Regex("<uses-feature[^>]*android:name=\"$feature\"[^>]*android:required=\"([a-z]+)\"")
+                .find(manifest)?.groupValues?.get(1)
+            assertEquals("<uses-feature $feature> 가 required 와 함께 선언돼야 한다", "false", declared)
+        }
+    }
+
+    @Test
     fun everyStringTheApduServiceReferencesExists() {
         // aapt 는 없는 @string 참조에서 빌드를 멈춘다. 컴파일해 볼 수 없으니 여기서 본다.
         val referenced = Regex("@string/([A-Za-z0-9_]+)").findAll(apduService).map { it.groupValues[1] }.toList()

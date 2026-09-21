@@ -25,6 +25,30 @@ package app.monti.hce
  *  5. [onMessage]는 **완성된 메시지 하나마다 정확히 한 번** 불린다. NLEN 이 마지막에 쓰이고,
  *     그 NLEN 이 말하는 길이만큼의 바이트가 **앞에서부터 빠짐없이** 모였을 때만 완성이다.
  *     끊긴 쓰기는 조용히 버려진다 — 게이트가 반쪽짜리 서명을 검증하러 가는 것보다 낫다.
+ *
+ * ## 스레드
+ *
+ * **바깥으로 열린 세 함수는 전부 이 인스턴스를 잠그고 돈다.** 두 스레드가 실제로 이 상태를
+ * 같이 쓰기 때문이다.
+ *
+ *  - [process] 는 `HostApduService.processCommandApdu` 를 타고 **앱 메인 스레드**로 들어온다
+ *    (서비스의 Messenger 핸들러가 메인 루퍼에 있다).
+ *  - [setPendingPayload] 는 Capacitor 의 `@PluginMethod` 본문에서, 즉 **`CapacitorPlugins`
+ *    핸들러 스레드**에서 들어온다 (`com.getcapacitor.Bridge` 가 그 HandlerThread 를 만들고
+ *    `callPluginMethod` 가 거기에 post 한다).
+ *
+ * APDU 끼리는 순서가 보장되지만 **`setPendingPayload` 와는 보장되지 않는다**. 잠그지 않으면
+ * 회전 스레드가 낡은 `appSelected = false` 를 보고 탭 한가운데서 승격해 버릴 수 있다 —
+ * Task 5 의 불변식이 정확히 그 경로로 깨진다. 잠금은 비어 있을 때 사실상 공짜이고, APDU 한
+ * 왕복이 ~2ms 다.
+ *
+ * [activePayload] 가 `@Volatile` 인 것은 그 위에 얹는 안전 공개다. `copyOf()` 로 만든 배열을
+ * 평범한 필드로 내보내면 읽는 스레드가 **아직 채워지지 않은(0) 원소**를 볼 수 있다 — 0으로 찬
+ * 게이트 코드가 관객 폰에 실린다.
+ *
+ * [onMessage] 는 **잠금을 쥔 채** 불린다(자바 모니터는 재진입 가능하므로 콜백이 곧장 다음
+ * APDU 를 넣어도 된다). 그 콜백이 다른 스레드를 기다리면 교착이 난다 — 실제 구현
+ * (`notifyListeners`)은 핸들러에 post 하고 바로 돌아온다.
  */
 class ApduStateMachine(
     /** 리더가 NDEF 파일에 메시지를 다 써 넣었을 때, 그 메시지 하나마다 한 번 불린다. */
@@ -42,7 +66,13 @@ class ApduStateMachine(
     private var selected = Selected.NONE
     private var pendingPayload: ByteArray = ByteArray(0)
 
-    /** 지금 세션이 읽어 가는 NDEF 메시지. 세션 중에는 바뀌지 않는다. */
+    /**
+     * 지금 세션이 읽어 가는 NDEF 메시지. 세션 중에는 바뀌지 않는다.
+     *
+     * `@Volatile` 은 **배열 내용의 안전 공개**를 위한 것이다: 쓰는 쪽이 배열을 다 채운 뒤에
+     * 이 필드에 대입하므로, 이 필드를 읽은 스레드는 그 내용까지 전부 본다.
+     */
+    @Volatile
     var activePayload: ByteArray = ByteArray(0)
         private set
 
@@ -66,6 +96,7 @@ class ApduStateMachine(
      * 다음 탭이 내보낼 메시지를 걸어 둔다. 세션이 진행 중이면 그 세션이 끝난 뒤에 승격된다
      * ([onDeactivated] 또는 다음 SELECT AID).
      */
+    @Synchronized
     fun setPendingPayload(ndef: ByteArray) {
         require(ndef.size <= Type4Files.MAX_NDEF_SIZE) {
             "NDEF message is ${ndef.size} bytes; the file declared in the CC holds ${Type4Files.MAX_NDEF_SIZE}"
@@ -75,6 +106,7 @@ class ApduStateMachine(
     }
 
     /** 리더가 떠났다. 다음 탭은 새 세션으로 시작한다. 쓰다 만 메시지는 여기서 버려진다. */
+    @Synchronized
     fun onDeactivated() {
         appSelected = false
         selected = Selected.NONE
@@ -87,6 +119,7 @@ class ApduStateMachine(
     }
 
     /** C-APDU 한 개에 R-APDU 한 개로 답한다. */
+    @Synchronized
     fun process(apdu: ByteArray): ByteArray {
         if (apdu.size < 4) return ApduStatus.respond(sw = ApduStatus.SW_WRONG_LENGTH)
         val cla = apdu[0].toInt() and 0xFF

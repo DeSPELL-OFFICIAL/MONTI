@@ -162,6 +162,9 @@ class ReferenceStateMachine {
   private declaredLength = 0;
 
   setPendingPayload(ndef: Uint8Array): void {
+    // Kotlin 은 이 함수가 @Synchronized 다. TS 는 한 스레드라 잠금 자체를 흉내 낼 수 없고,
+    // 흉내 내는 척하면 거짓 안심이 된다 — 여기서 보이는 것은 **순서**뿐이고, 잠금이 실제로
+    // 붙어 있는지는 §source pins 의 "locks every way into the state machine" 이 본다.
     if (ndef.length > MAX_NDEF_SIZE) throw new RangeError(`NDEF message is ${ndef.length} bytes`);
     this.pendingPayload = ndef.slice();
     if (!this.appSelected) this.promotePendingPayload();
@@ -1120,13 +1123,34 @@ describe('the Kotlin the vectors stand for', () => {
     expect(words).toBe(assemblies);
   });
 
+  it('locks every way into the state machine, so a swap cannot land inside a tap', () => {
+    // 두 스레드가 이 상태를 같이 쓴다: process 는 앱 메인 스레드로, setPendingPayload 는
+    // Capacitor 의 CapacitorPlugins 핸들러 스레드로 들어온다. 잠그지 않으면 회전 스레드가
+    // 낡은 appSelected 를 보고 탭 한가운데서 승격할 수 있다 — Task 5 가 막는 바로 그것이,
+    // 단일 스레드 테스트가 하나도 볼 수 없는 경로로 깨진다.
+    const declarations = [
+      ...machineSource.matchAll(/(@Synchronized\s+)?(private\s+)?fun\s+([A-Za-z0-9_]+)\s*\(/g),
+    ];
+    const entries = declarations
+      .filter((m) => m[2] === undefined)
+      .map((m) => ({ name: m[3] as string, locked: m[1] !== undefined }));
+    expect(entries.map((e) => e.name).sort()).toEqual(['onDeactivated', 'process', 'setPendingPayload']);
+    expect(entries.filter((e) => !e.locked).map((e) => e.name)).toEqual([]);
+    // 그리고 내보내는 배열은 안전하게 공개된다 — 다 채운 뒤 volatile 필드에 대입하므로
+    // 읽는 스레드가 0으로 찬 "게이트 코드"를 보는 일이 없다.
+    expect(squeeze(machineSource)).toContain('@Volatile var activePayload: ByteArray = ByteArray(0) private set');
+  });
+
   it('emits from both write paths, not just whichever one a pin happened to match', () => {
     // 리더는 두 순서 중 하나로 쓴다: 길이를 마지막에(표준) 또는 먼저. 갈래마다 하나씩,
     // 정확히 두 곳에서 이벤트가 난다. 하나를 지워도 남은 하나가 toContain 핀을 만족시키므로
     // 개수를 센다 — 지워진 갈래로 쓰는 리더는 영영 이벤트를 받지 못한다.
     const calls = squeeze(scope.handleUpdateBinary).split('emitIfComplete()').length - 1;
     expect(calls).toBe(2);
-    expect((machineSource.match(/emitIfComplete\(\)/g) ?? []).length).toBe(3); // 선언 하나 + 부르는 곳 둘
+    // 파일 전체가 아니라 선언 + 그 갈래만 센다. 전체를 세면 KDoc 이 `[emitIfComplete]` 대신
+    // `emitIfComplete()` 라고 적히기만 해도 깨진다 — 동작은 한 글자도 바뀌지 않았는데.
+    expect((squeeze(scope.emitIfComplete).match(/emitIfComplete\(\)/g) ?? []).length).toBe(0);
+    expect(machineSource).toContain('private fun emitIfComplete()');
   });
 
   it('swaps the payload in exactly the three places a session can begin or end', () => {

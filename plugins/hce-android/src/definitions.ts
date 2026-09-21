@@ -42,6 +42,13 @@ export const HCE_ERROR = {
    * to the QR fallback for the rest of the shift.
    */
   nfcDisabled: 'NFC_DISABLED',
+  /**
+   * The OS would not give this app first claim on the AID. Another installed HCE app —
+   * a wallet, typically — is registered on the same standard Type 4 Tag AID and may take
+   * taps instead, so the gate would drop some attendees with no error anywhere. Distinct
+   * from `unavailable` because the card emulation itself works; what failed is the claim.
+   */
+  claimRefused: 'CLAIM_REFUSED',
 } as const;
 
 export type HceErrorCode = (typeof HCE_ERROR)[keyof typeof HCE_ERROR];

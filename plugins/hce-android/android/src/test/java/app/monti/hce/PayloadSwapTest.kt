@@ -1,8 +1,10 @@
 package app.monti.hce
 
+import java.io.File
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -162,6 +164,29 @@ class PayloadSwapTest {
             m.setPendingPayload(ByteArray(Type4Files.MAX_NDEF_SIZE + 1))
         }
         assertEquals(0, m.activePayload.size)
+    }
+
+    @Test
+    fun everyWayIntoTheStateMachineIsLocked() {
+        // 두 스레드가 이 상태를 같이 쓴다: process 는 앱 메인 스레드로, setPendingPayload 는
+        // Capacitor 의 CapacitorPlugins 핸들러 스레드로 들어온다. 잠그지 않으면 회전 스레드가
+        // 낡은 appSelected 를 보고 탭 **한가운데서** 승격할 수 있다 — 이 파일의 다른 열
+        // 테스트는 전부 한 스레드라 그 경로를 하나도 보지 못한다.
+        val text = File("src/main/java/app/monti/hce/ApduStateMachine.kt").readText()
+        val entries = Regex("(@Synchronized\\s+)?(private\\s+)?fun\\s+([A-Za-z0-9_]+)\\s*\\(")
+            .findAll(text)
+            .filter { it.groupValues[2].isEmpty() }
+            .toList()
+        assertEquals(
+            listOf("onDeactivated", "process", "setPendingPayload"),
+            entries.map { it.groupValues[3] }.sorted(),
+        )
+        for (entry in entries) {
+            assertTrue("잠기지 않은 진입점: ${entry.groupValues[3]}", entry.groupValues[1].isNotEmpty())
+        }
+        // 그리고 내보내는 배열은 안전하게 공개된다 — 다 채운 뒤 volatile 필드에 대입한다.
+        assertTrue(text.contains("@Volatile"))
+        assertTrue(text.contains("var activePayload: ByteArray = ByteArray(0)"))
     }
 
     // ── 컨트롤러가 더 요구한 넷 ─────────────────────────────────────────────

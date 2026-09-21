@@ -4,6 +4,15 @@
     <uses-permission android:name="android.permission.NFC" />
 
     <!--
+      이 줄이 없으면 위의 NFC 권한이 `android.hardware.nfc` 를 required="true" 로 **암묵 선언**하고
+      (플랫폼의 permission→feature 표), Play 가 NFC 없는 기기를 걸러 낸다. 그러면 바로 아래
+      .hce required="false" 로 얻으려던 것이 두 줄 위에서 무효가 된다. 명시로 덮어써야 한다.
+    -->
+    <uses-feature
+        android:name="android.hardware.nfc"
+        android:required="false" />
+
+    <!--
       required="false" 는 브리핑(true)에서 의도적으로 벗어난 값이다. 이 라이브러리 매니페스트는
       apps/web 한 앱으로 병합되는데, 그 앱에는 attendee·organizer·staff 세 갈래가 다 들어 있다.
       true 로 두면 Play 가 HCE 없는 기기를 설치 대상에서 걸러 내므로, 게이트를 열 일이 없는
