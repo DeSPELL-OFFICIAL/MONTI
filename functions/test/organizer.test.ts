@@ -144,7 +144,7 @@ describe('pinEventMetadata', () => {
   it('pins venue, category and region when they are given, trimmed', async () => {
     await pin({
       data: pinRequest({
-        meta: { ...META, venue: '  올림픽공원 K-아트홀  ', category: ' 공연 ', region: '  서울  ' },
+        meta: { ...META, venue: '  올림픽공원 K-아트홀  ', category: 3, region: '  서울  ' },
       }),
       auth: ownerAuth,
     } as never);
@@ -159,8 +159,43 @@ describe('pinEventMetadata', () => {
       'venue',
     ]);
     expect(metadata.venue).toBe('올림픽공원 K-아트홀');
-    expect(metadata.category).toBe('공연');
     expect(metadata.region).toBe('서울');
+    // 관람객 화면은 `typeof fields.category === 'number'` 만 읽는다(`shared/envio/ipfs.ts`).
+    // 문자열로 박으면 거기서 조용히 `0` 이 되고, 체인의 `EventMeta.category` 도 `uint8` 이다.
+    expect(metadata.category).toBe(3);
+    expect(typeof metadata.category).toBe('number');
+  });
+
+  it('takes a numeric string category and pins it as a number', async () => {
+    // 웹 폼의 `<select>` 는 값을 문자열로 준다. 숫자로 바꿔 박는 것은 서버 몫이다.
+    await pin({
+      data: pinRequest({ meta: { ...META, category: ' 12 ' } }),
+      auth: ownerAuth,
+    } as never);
+
+    const metadata = JSON.parse(await uploadCall(1).file.text()) as Record<string, unknown>;
+    expect(metadata.category).toBe(12);
+    expect(typeof metadata.category).toBe('number');
+  });
+
+  it('takes the uint8 edges 0 and 255 as a category', async () => {
+    for (const [at, category] of [0, 255].entries()) {
+      fetchMock.mockReset();
+      fetchMock.mockResolvedValueOnce(pinataReply(IMAGE_CID)).mockResolvedValueOnce(pinataReply(METADATA_CID));
+      await pin({ data: pinRequest({ meta: { ...META, category } }), auth: ownerAuth } as never);
+      const metadata = JSON.parse(await uploadCall(1).file.text()) as Record<string, unknown>;
+      expect(metadata.category, `${at} 번째 가장자리`).toBe(category);
+    }
+  });
+
+  it('rejects a category that is not a uint8, before any upload', async () => {
+    fetchMock.mockReset();
+    for (const category of ['공연', '', 256, -1, 1.5, null, Number.NaN, ['3'], '0x10']) {
+      await expect(
+        pin({ data: pinRequest({ meta: { ...META, category } }), auth: ownerAuth } as never),
+      ).rejects.toThrow('BAD_META');
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('leaves an absent or blank optional field out of the JSON entirely', async () => {
@@ -192,10 +227,8 @@ describe('pinEventMetadata', () => {
     const long = 'a'.repeat(MAX_META_FIELD_CHARS + 1);
     for (const meta of [
       { ...META, venue: long },
-      { ...META, category: long },
       { ...META, region: long },
       { ...META, venue: 7 },
-      { ...META, category: null },
       { ...META, region: ['서울'] },
     ]) {
       await expect(pin({ data: pinRequest({ meta }), auth: ownerAuth } as never)).rejects.toThrow(

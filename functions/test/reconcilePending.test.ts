@@ -769,6 +769,66 @@ describe('reconcilePending — 버려진 본인인증 세션', () => {
     expect(snapshot(`persons/${P1}`).get('kyc.status')).toBe('open');
     expect(snapshot(`persons/${P2}`).get('kyc.status')).toBe('abandoned');
   });
+
+  /** 이 배포 **전에** 열린 세션. `kycSession.ts` 가 `openedAt` 을 찍기 시작하기 전의 모양이다. */
+  function unstamped(personId: string): void {
+    write(`persons/${personId}`, {
+      status: 'active',
+      kycLevel: 0,
+      updatedAt: stale(),
+      kyc: {
+        provider: 'didit',
+        sessionId: `sess-${personId.slice(2, 6)}`,
+        url: 'https://verify.didit.me/s/x',
+        status: 'open',
+      },
+    });
+  }
+
+  it('stamps openedAt on a session that has none instead of leaving it unsweepable', async () => {
+    // Firestore 의 `<` 는 필드가 **없는** 문서를 통째로 뺀다. 백필이 없으면 이 세션은
+    // 위 질의에 영영 걸리지 않고, 그 사람은 죽은 링크만 계속 받는다.
+    unstamped(P1);
+    const before = seconds();
+    writes.length = 0;
+
+    await run({} as never);
+
+    const stamped = snapshot(`persons/${P1}`);
+    expect(stamped.get('kyc.openedAt')).toBeGreaterThanOrEqual(before);
+    // 같은 실행에서 버린 것으로 찍지는 않는다 — 이제부터 정상적으로 늙어 24시간 뒤에 닫힌다.
+    expect(stamped.get('kyc.status')).toBe('open');
+    expect(stamped.get('kyc.sessionId')).toBe(`sess-${P1.slice(2, 6)}`);
+    expect(writes).toEqual([`persons/${P1}`]);
+  });
+
+  it('writes nothing to an open session that already carries openedAt', async () => {
+    opened(P1, 23 * HOUR);
+    writes.length = 0;
+
+    await run({} as never);
+
+    expect(writes).toEqual([]);
+  });
+
+  it('asks for the unstamped ones with an equality alone so no new index is needed', async () => {
+    await run({} as never);
+
+    const backfill = queries.filter((q) => q.name === 'persons')[2];
+    expect(backfill?.filters).toEqual([['kyc.status', '==', 'open']]);
+    expect(backfill?.max).toBe(200);
+  });
+
+  it('keeps backfilling when one stamp blows up and never throws out of the scheduler', async () => {
+    unstamped(P1);
+    unstamped(P2);
+    failWrite.add(`persons/${P1}`);
+
+    await expect(run({} as never)).resolves.not.toThrow();
+
+    expect(snapshot(`persons/${P1}`).get('kyc.openedAt')).toBeUndefined();
+    expect(snapshot(`persons/${P2}`).get('kyc.openedAt')).toEqual(expect.any(Number));
+  });
 });
 
 describe('reconcilePending — 스윕 격리', () => {
@@ -811,6 +871,8 @@ describe('reconcilePending — 스윕 격리', () => {
       ['transferInvites', 200],
       ['authChallenges', 200],
       ['pendingGates', 200],
+      ['persons', 200],
+      // 백필 갈래 — `kyc.openedAt` 이 없는 문서는 위 부등식 질의에 걸리지 않는다.
       ['persons', 200],
     ]);
   });

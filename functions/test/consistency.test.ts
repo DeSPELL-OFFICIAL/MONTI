@@ -1036,19 +1036,18 @@ interface RequiredIndex {
 
 /**
  * 이 질의가 복합 색인을 요구하는가, 요구한다면 어떤 모양인가.
- *  1. `where` 둘 이상 + `orderBy`
+ *  1. `where` 하나 이상 + `orderBy` 하나 이상 + 그 필드가 둘 이상
  *  2. 범위 연산자 하나 이상 + 다른 필드가 하나라도 더 있음(다른 `where` 든 `orderBy` 든)
  * 등식만 쓰고 `orderBy` 가 없으면 Firestore 가 단일 필드 색인을 합쳐 받으므로 필요 없다.
- *
- * **아직 덮지 않는 모양**: 등식 **하나** + 다른 필드 `orderBy`(실제로는 Firestore 가 복합 색인을
- * 요구한다). 지금 트리에 그런 질의가 없고 규칙을 위 두 절로 못박아 두었다. 생기면 여기 한 줄 더 붙인다.
+ * 1번의 `distinct >= 2` 가 빼 주는 것은 하나뿐이다 — 정렬 필드가 `where` 필드와 **같은** 경우
+ * (`where('status','==',x).orderBy('status')`). 그건 실제로 단일 필드 색인으로 받는다.
  */
 function requiredIndex(chain: QueryChain): RequiredIndex | null {
   const inequalities = chain.wheres.filter((clause) => INEQUALITY_OPS.includes(clause.op));
   const orderFields = chain.orders.map((clause) => clause.field);
   const distinct = new Set([...chain.wheres.map((clause) => clause.field), ...orderFields]);
   const needed =
-    (chain.wheres.length >= 2 && chain.orders.length >= 1) ||
+    (chain.wheres.length >= 1 && chain.orders.length >= 1 && distinct.size >= 2) ||
     (inequalities.length >= 1 && distinct.size >= 2);
   if (!needed) return null;
 
@@ -1565,6 +1564,34 @@ describe('negative fixtures — every way a violation has slipped past, locked o
     const result = scanQueryIndexes(files, INDEX_FIXTURE);
     expect(result.findings, '있는 색인을 없다고 했거나, 필요 없는 색인을 요구했다').toEqual([]);
     expect(result.targets, '질의 세 개를 다 보지 못했다').toBe(3);
+  });
+
+  it('23. one equality plus an orderBy on another field still needs a composite index', () => {
+    // Firestore 는 `where('status','==',x).orderBy('createdAt')` 에도 복합 색인을 요구한다.
+    const files = fixture([
+      join('functions', 'evade.ts'),
+      `import { PERSONS, db } from '../lib/db.js';
+       export async function evade() {
+         return db.collection(PERSONS).where('status', '==', 'pending').orderBy('createdAt', 'desc').limit(50).get();
+       }`,
+    ]);
+    expectCaught(
+      scanQueryIndexes(files, INDEX_FIXTURE),
+      /\{"collectionGroup":"persons","queryScope":"COLLECTION","fields":\[\{"fieldPath":"status","order":"ASCENDING"\},\{"fieldPath":"createdAt","order":"DESCENDING"\}\]\}/,
+    );
+
+    // 정렬 필드가 `where` 필드와 **같으면** 단일 필드 색인으로 받는다 — 여기까지 요구하면 거짓 양성이다.
+    const sameField = fixture([
+      join('functions', 'ok.ts'),
+      `import { PERSONS, db } from '../lib/db.js';
+       export async function recent() {
+         return db.collection(PERSONS).where('status', '==', 'pending').orderBy('status').limit(50).get();
+       }`,
+    ]);
+    expect(
+      scanQueryIndexes(sameField, INDEX_FIXTURE).findings,
+      '같은 필드로 정렬하는 질의에 색인을 요구했다',
+    ).toEqual([]);
   });
 
   it('22. a query whose collection cannot be resolved is reported, not waved through', () => {

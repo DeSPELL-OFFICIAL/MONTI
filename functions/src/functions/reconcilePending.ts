@@ -445,6 +445,10 @@ async function sweepPendingGates(): Promise<void> {
  * 나이는 `kyc.openedAt`(세션을 만든 시각, 초)으로 잰다. 사람 문서의 `updatedAt` 은 닉네임
  * 변경 같은 상관없는 쓰기에도 앞으로 가서, 그것으로 재면 버린 세션이 영영 늙지 않는다.
  * 판정은 **질의가** 한다(루트 `firestore.indexes.json` 의 `persons (kyc.status, kyc.openedAt)`).
+ *
+ * 뒤이어 **백필**이 한 번 돈다. Firestore 의 `<` 는 그 필드가 아예 **없는** 문서를 통째로 빼므로,
+ * `openedAt` 을 찍기 전에 열린 세션은 위 질의에 영영 걸리지 않는다 — 지금 시각을 한 번 찍어 주면
+ * 다음 실행부터 정상적으로 늙어 24시간 뒤에 위 갈래가 닫는다.
  */
 async function sweepAbandonedKyc(): Promise<void> {
   const cutoff = Math.floor(Date.now() / 1000) - KYC_OPEN_TTL_SECONDS;
@@ -459,6 +463,23 @@ async function sweepAbandonedKyc(): Promise<void> {
     try {
       // 딱지 하나만 바꾼다. `sessionId` 를 지우면 파기가 Didit 의 얼굴 자료를 못 찾는다.
       await doc.ref.set({ kyc: { status: 'abandoned' } }, { merge: true });
+    } catch (cause) {
+      error('reconcile.abandonedKyc', { personId: doc.id, reason: (cause as Error).message });
+    }
+  }
+
+  // 등식 하나뿐이라 새 복합 색인이 필요 없다. 이미 `openedAt` 이 있는 문서에는 아무것도 쓰지 않는다.
+  const open = await db
+    .collection(PERSONS)
+    .where('kyc.status', '==', 'open')
+    .limit(SWEEP_LIMIT)
+    .get();
+  const now = Math.floor(Date.now() / 1000);
+
+  for (const doc of open.docs) {
+    if (doc.get('kyc.openedAt') !== undefined) continue;
+    try {
+      await doc.ref.set({ kyc: { openedAt: now } }, { merge: true });
     } catch (cause) {
       error('reconcile.abandonedKyc', { personId: doc.id, reason: (cause as Error).message });
     }

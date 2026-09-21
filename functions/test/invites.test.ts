@@ -532,8 +532,12 @@ describe('listInvites', () => {
     await accept({ data: { inviteId: accepted }, auth: inviteeAuth } as never);
     (docs.get(`${INVITES}/${sent}`) as Record<string, unknown>).createdAt =
       Timestamp.fromMillis(1_700_000_000_000);
+    (docs.get(`${INVITES}/${sent}`) as Record<string, unknown>).expiresAt =
+      Timestamp.fromMillis(1_700_000_600_000);
     (docs.get(`${INVITES}/${accepted}`) as Record<string, unknown>).createdAt =
       Timestamp.fromMillis(1_700_000_060_000);
+    (docs.get(`${INVITES}/${accepted}`) as Record<string, unknown>).expiresAt =
+      Timestamp.fromMillis(1_700_000_660_000);
     return { sent, accepted };
   }
 
@@ -549,14 +553,18 @@ describe('listInvites', () => {
       role: 'manager',
       status: 'accepted',
       createdAt: 1_700_000_060,
+      expiresAt: 1_700_000_660,
       requiredSender: OWNER,
     });
+    // 만료가 없으면 죽은 `sent` 초대가 팀 화면에서 살아 있는 것처럼 보인다.
     expect(Object.keys(result.invites[1] as object).sort()).toEqual([
       'createdAt',
+      'expiresAt',
       'inviteId',
       'role',
       'status',
     ]);
+    expect(result.invites[1]?.expiresAt).toBe(1_700_000_600);
     expect(result.invites[1]?.requiredSender).toBeUndefined();
   });
 
@@ -593,6 +601,7 @@ describe('listInvites', () => {
     expect(result.invites[0]?.status).toBe('revoked');
     expect(Object.keys(result.invites[0] as object).sort()).toEqual([
       'createdAt',
+      'expiresAt',
       'inviteId',
       'role',
       'status',
@@ -614,14 +623,16 @@ describe('listInvites', () => {
     ]);
   });
 
-  it('tolerates a createdAt the server has not resolved yet', async () => {
+  it('tolerates a createdAt or expiresAt the server has not resolved yet', async () => {
     const inviteId = await createManagerInvite();
     (docs.get(`${INVITES}/${inviteId}`) as Record<string, unknown>).createdAt = null;
+    (docs.get(`${INVITES}/${inviteId}`) as Record<string, unknown>).expiresAt = undefined;
 
     const result = (await listTeam({ data: { orgId: '1' }, auth: ownerAuth } as never)) as {
-      invites: Array<{ createdAt: number }>;
+      invites: Array<{ createdAt: number; expiresAt: number }>;
     };
     expect(result.invites[0]?.createdAt).toBe(0);
+    expect(result.invites[0]?.expiresAt).toBe(0);
   });
 
   it('lets an admin holding PERM_MANAGE_MANAGERS read, and refuses everyone else', async () => {

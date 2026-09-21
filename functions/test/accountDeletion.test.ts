@@ -394,6 +394,21 @@ describe('processDeletions', () => {
     await expect(run()).resolves.toBeUndefined();
   });
 
+  it('logs the Didit failure under the same message even though it now carries a cause', async () => {
+    // `DiditErasureFailed` 가 원인을 싣게 됐지만 운영이 보던 줄은 그대로여야 한다 —
+    // 메시지가 바뀌면 지금까지 걸어 둔 경보가 조용히 안 울린다.
+    deleteDiditSession.mockRejectedValue(new Error('DIDIT_DELETE_FAILED:401'));
+    await call();
+    await makeDue();
+
+    await run();
+
+    expect(logs).toContainEqual([
+      'deletion.failed',
+      { uid: 'uid-1', reason: 'DIDIT_DELETE_FAILED:401' },
+    ]);
+  });
+
   it('never advances the Didit counter on a failure that is not Didit', async () => {
     const authDown = () => Object.assign(new Error('boom'), { code: 'auth/internal-error' });
     deleteUser.mockRejectedValueOnce(authDown()).mockRejectedValueOnce(authDown()).mockRejectedValueOnce(authDown());

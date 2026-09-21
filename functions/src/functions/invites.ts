@@ -49,6 +49,8 @@ export interface InviteRow {
   role: Role;
   status: string;
   createdAt: number;
+  /** 만료 시각(초). 이게 없으면 이미 죽은 `sent` 초대가 팀 화면에서 살아 있는 것처럼 보인다. */
+  expiresAt: number;
   /** `accepted` 인 줄에만 붙는다 — 그 상태에서만 calldata 가 오너의 서명을 기다린다. */
   requiredSender?: Hex;
 }
@@ -370,6 +372,7 @@ export const listInvites = onCall(async (request): Promise<{ invites: InviteRow[
       role: doc.get('role') as Role,
       status,
       createdAt: epochSeconds(doc.get('createdAt')),
+      expiresAt: epochSeconds(doc.get('expiresAt')),
     };
     // `accepted` 만이 "calldata 는 나갔는데 아직 체인에 올라가지 않은" 상태다. 그 줄에만
     // 보낼 사람을 달아 준다 — 값은 인가에 이미 쓴 `ownerOf` 그대로다(초대장에 박힌 값이 아니다).

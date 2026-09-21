@@ -40,8 +40,15 @@ type Doc = FirebaseFirestore.QueryDocumentSnapshot;
 /**
  * Didit 파기 실패에만 붙이는 표시. 연속 실패 카운터는 이것만 센다 — Auth 나 Firestore 가
  * 흔들린 날까지 같이 세면 "Didit 이 막혔다" 는 신호가 잡음에 묻힌다.
+ *
+ * `cause` 를 **받아서 넘긴다**. 메시지만 베껴 오면 스택이 여기서 끊겨, 막힌 것이 HTTP 인지
+ * JSON 인지 키인지 로그만 보고는 끝내 알 수 없다.
  */
-class DiditErasureFailed extends Error {}
+class DiditErasureFailed extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+  }
+}
 
 /**
  * 계정 파기 요청(개인정보 보호법 제36조 파기 요구).
@@ -123,7 +130,8 @@ async function eraseDiditSession(sessionId: string): Promise<void> {
       await deleteDiditSession(sessionId, DIDIT_API_KEY.value());
       return;
     } catch (cause) {
-      if (attempt === DIDIT_ATTEMPTS) throw new DiditErasureFailed((cause as Error).message);
+      // 메시지는 그대로 두고(운영이 `deletion.failed` 에서 보던 줄이다) 원인만 실어 보낸다.
+      if (attempt === DIDIT_ATTEMPTS) throw new DiditErasureFailed((cause as Error).message, { cause });
       error('deletion.didit.retry', { attempt, reason: (cause as Error).message });
     }
   }

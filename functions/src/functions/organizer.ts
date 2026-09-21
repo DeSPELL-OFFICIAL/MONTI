@@ -37,6 +37,11 @@ const CID_RE = /^baf[ky][a-z2-7]{55}$/;
 /** 선택 칸 하나의 상한. 탐색 화면의 한 줄에 들어갈 만큼만 받는다. */
 export const MAX_META_FIELD_CHARS = 200;
 
+/** 분류의 상한. 체인의 `EventMeta.category` 가 `uint8` 이라 정본이 0–255 다(`transferInvites.ts` 의 ABI 조각). */
+const MAX_CATEGORY = 255;
+/** 숫자 문자열만 받는 모양. `Number('')`·`Number('0x10')` 이 조용히 숫자가 되는 것을 여기서 막는다. */
+const CATEGORY_RE = /^[0-9]{1,3}$/;
+
 interface EventImage {
   bytes: Buffer;
   mime: string;
@@ -46,7 +51,7 @@ interface EventMetaInput {
   name: string;
   description: string;
   venue?: string;
-  category?: string;
+  category?: number;
   region?: string;
 }
 
@@ -94,6 +99,28 @@ function optionalMetaField(value: unknown): string | undefined {
   return trimmed.length === 0 ? undefined : trimmed;
 }
 
+/**
+ * 분류 칸. **숫자**다 — 관람객 화면은 `typeof fields.category === 'number'` 일 때만 읽으므로
+ * (`shared/envio/ipfs.ts`) 문자열을 핀하면 거기서 조용히 `0` 이 된다. 체인의
+ * `EventMeta.category` 도 `uint8` 이라 정본은 0–255 정수 하나뿐이다.
+ *
+ * 폼의 `<select>` 는 값을 문자열로 주므로 숫자 문자열도 받아 **숫자로** 바꿔 돌려준다.
+ * 없으면 없는 것으로 둔다 — 빈 칸을 기본값으로 채우는 쪽은 관람객 화면이다.
+ */
+function optionalCategory(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  const parsed =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && CATEGORY_RE.test(value.trim())
+        ? Number(value.trim())
+        : Number.NaN;
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > MAX_CATEGORY) {
+    throw new HttpsError('invalid-argument', 'BAD_META');
+  }
+  return parsed;
+}
+
 function requireMeta(value: unknown): EventMetaInput {
   const meta = value as
     | { name?: unknown; description?: unknown; venue?: unknown; category?: unknown; region?: unknown }
@@ -107,7 +134,7 @@ function requireMeta(value: unknown): EventMetaInput {
     name,
     description,
     venue: optionalMetaField(meta.venue),
-    category: optionalMetaField(meta.category),
+    category: optionalCategory(meta.category),
     region: optionalMetaField(meta.region),
   };
 }
