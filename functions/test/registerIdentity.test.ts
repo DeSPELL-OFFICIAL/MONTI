@@ -266,11 +266,9 @@ describe('registerIdentity — idempotency (spec §10.4 rule 3)', () => {
     expect(readContract).not.toHaveBeenCalled();
   });
 
-  it('reconciles the database and reports success when the account is already a member', async () => {
+  it('reconciles the database and sends nothing when the account is already a member', async () => {
     readContract.mockResolvedValueOnce(true as never);
-    // 이미 끝난 등록은 성공이다. 오류로 올리면 일반적인 콜러블 래퍼가
-    // 멀쩡히 가입된 사람에게 실패 화면을 보여 준다.
-    await expect(call()).resolves.toEqual({ alreadyRegistered: true });
+    await expect(call()).rejects.toThrow('ALREADY_REGISTERED_ON_CHAIN');
     expect(sendAttesterTx).not.toHaveBeenCalled();
     expect(readContract.mock.calls[0]![0]).toMatchObject({
       address: IDENTITY,
@@ -283,7 +281,7 @@ describe('registerIdentity — idempotency (spec §10.4 rule 3)', () => {
   it('refuses a second concurrent call while the first is still sending', async () => {
     write(
       `persons/${PERSON_ID}`,
-      { chain: { registerPending: true, registerPendingAt: Timestamp.now() } },
+      { chain: { registerPending: true, registerPendingAt: Date.now() } },
       { merge: true },
     );
     await expect(call()).rejects.toThrow('REGISTER_IN_FLIGHT');
@@ -295,7 +293,7 @@ describe('registerIdentity — idempotency (spec §10.4 rule 3)', () => {
     // 만료가 없으면 이 사람은 영영 가입을 못 하고, Task 23 이 쓸 해시도 없다.
     write(
       `persons/${PERSON_ID}`,
-      { chain: { registerPending: true, registerPendingAt: Timestamp.fromMillis(Date.now() - 6 * 60_000) } },
+      { chain: { registerPending: true, registerPendingAt: Date.now() - 61_000 } },
       { merge: true },
     );
     await expect(call()).resolves.toEqual({ txHash: TX });
