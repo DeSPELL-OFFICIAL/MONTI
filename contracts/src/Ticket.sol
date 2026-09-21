@@ -3,6 +3,7 @@ pragma solidity 0.8.31;
 
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {P256} from "solady/utils/P256.sol";
 import {IIdentity} from "./interfaces/IIdentity.sol";
 import {IOrganizers} from "./interfaces/IOrganizers.sol";
 import {ITicket} from "./interfaces/ITicket.sol";
@@ -299,6 +300,42 @@ contract Ticket is ERC721, ITicket {
         delete _offers[tokenId];
         _update(msg.sender, tokenId, address(0));
         emit OfferAccepted(tokenId, o.from, msg.sender);
+    }
+
+    /// @notice Spec 7.2 step 6, checks in order: gate authority, ticket state, code freshness, device
+    ///         signature. Only an open gate of this event may call it. The staff device maps each of
+    ///         these errors to a DENY code on screen (sub-plan 04), so the names are part of the ABI.
+    function checkIn(uint256 tokenId, GateCode calldata g, bytes calldata deviceSig) external {
+        address holder = _ownerOf(tokenId);
+        if (holder == address(0)) revert NoSuchTicket();
+
+        uint256 eventId = _eventOf[tokenId];
+        if (g.eventId != eventId) revert WrongEvent();
+        if (eventStatus(eventId) == EventStatus.Ended) revert EventEnded();
+        if (_revoked[tokenId]) revert TicketRevoked();
+        if (_checkIns[tokenId].ts != 0) revert AlreadyCheckedIn();
+
+        if (!organizers.isOpenGate(eventId, msg.sender)) revert GateNotOpen();
+        if (organizers.gateOf(msg.sender) != g.gateId) revert GateMismatch();
+        if (block.timestamp < g.issuedAt || block.timestamp - g.issuedAt > CODE_WINDOW) revert CodeExpired();
+
+        if (identity.isLocked(holder)) revert DeviceLocked();
+        (bytes32 x, bytes32 y) = identity.activeDevice(holder);
+        if (x == bytes32(0) && y == bytes32(0)) revert NoActiveDevice();
+
+        bytes32 h = sha256(abi.encode(tokenId, g.gateId, g.eventId, g.nonce, g.issuedAt));
+        (bytes32 r, bytes32 s) = abi.decode(deviceSig, (bytes32, bytes32));
+        if (!P256.verifySignature(h, r, s, x, y)) revert BadDeviceSignature();
+
+        bytes32 nonceHash = keccak256(abi.encode(g.nonce));
+        _checkIns[tokenId] =
+            CheckIn({gateId: g.gateId, ts: uint64(block.timestamp), nonceHash: nonceHash, manual: false});
+        if (_offers[tokenId].from != address(0)) {
+            delete _offers[tokenId];
+            emit OfferCancelled(tokenId);
+        }
+
+        emit CheckedIn(tokenId, eventId, g.gateId, nonceHash, uint64(block.timestamp));
     }
 
     function _requireEventPermission(uint256 eventId, uint32 bit) private view {
