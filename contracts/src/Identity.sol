@@ -74,6 +74,30 @@ contract Identity is IIdentity, AttesterRole {
         emit KycLevelSet(account, kycLevel);
     }
 
+    /// @notice Spec 5.5: passkey lost -> new passkey -> the attester swaps the account on chain.
+    ///         7-day cooldown is the SIM-swap defence (spec 18 risk table). The old account keeps its
+    ///         personOf entry so Ticket.migrate can find the new account from an old ticket.
+    function rotateAccount(bytes32 personId, address newAccount) external onlyAttester {
+        address oldAccount = _accountOf[personId];
+        if (oldAccount == address(0)) revert NotRegistered();
+        if (newAccount == address(0)) revert InvalidAccount();
+        if (_personOf[newAccount] != bytes32(0)) revert AccountAlreadyRegistered();
+        if (block.timestamp < uint256(_rotatedAt[personId]) + ROTATION_COOLDOWN) revert CooldownActive();
+
+        _accountOf[personId] = newAccount;
+        _personOf[newAccount] = personId;
+        _rotatedAt[personId] = uint64(block.timestamp);
+
+        bytes32 nick = _nicknameOf[oldAccount];
+        if (nick != bytes32(0)) {
+            delete _nicknameOf[oldAccount];
+            _nicknameOf[newAccount] = nick;
+            _nicknameOwner[nick] = newAccount;
+        }
+
+        emit AccountRotated(personId, oldAccount, newAccount);
+    }
+
     /// @notice Raises (or lowers) the verification level after a later Didit session. Attester only:
     ///         the chain never learns what was verified, only that our KMS key says it was.
     function setKycLevel(bytes32 personId, uint8 level) external onlyAttester {
