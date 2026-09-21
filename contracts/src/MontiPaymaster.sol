@@ -72,7 +72,7 @@ contract MontiPaymaster is IPaymaster {
     event SponsorModeSet(uint256 indexed orgId, bool selfSponsored);
     event StakeAdded(uint256 amount, uint32 unstakeDelaySec);
     event StakeUnlocked();
-    event StakeWithdrawn(address indexed to);
+    event StakeWithdrawn(address indexed to, uint256 amount);
 
     error Unauthorized();
     error ZeroAddress();
@@ -130,7 +130,13 @@ contract MontiPaymaster is IPaymaster {
     ///      `setSelfSponsored`, but only the organization's owner may pull the money back out.
     function withdraw(uint256 orgId, uint256 amount) external {
         if (msg.sender != organizers.ownerOf(orgId)) revert Unauthorized();
-        _orgBudget[orgId] -= amount;
+        uint256 available = _orgBudget[orgId];
+        // Wei an in-flight operation has reserved has already left the slot, so this is also what stops
+        // an owner withdrawing money `postOp` is about to settle.
+        if (amount > available) revert BudgetExhausted();
+        unchecked {
+            _orgBudget[orgId] = available - amount;
+        }
         _orgBudgetTotal -= amount;
         entryPoint.withdrawTo(payable(msg.sender), amount);
     }
@@ -177,8 +183,9 @@ contract MontiPaymaster is IPaymaster {
     function withdrawStake(address payable to) external {
         if (msg.sender != deployer) revert Unauthorized();
         if (to == address(0)) revert ZeroAddress();
+        uint256 amount = entryPoint.getDepositInfo(address(this)).stake;
         entryPoint.withdrawStake(to);
-        emit StakeWithdrawn(to);
+        emit StakeWithdrawn(to, amount);
     }
 
     // --- Sponsorship ---------------------------------------------------------------------------------

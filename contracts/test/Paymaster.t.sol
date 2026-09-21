@@ -2,7 +2,6 @@
 pragma solidity 0.8.31;
 
 import {MontiTest} from "./Base.t.sol";
-import {stdError} from "forge-std/StdError.sol";
 import {MontiPaymaster} from "../src/MontiPaymaster.sol";
 import {MockEntryPoint} from "./mocks/MockEntryPoint.sol";
 import {Ticket} from "../src/Ticket.sol";
@@ -552,8 +551,9 @@ contract PaymasterTest is MontiTest {
 
     /// @dev What the brief called "an empty budget refuses sponsorship" is the EntryPoint's job for the
     ///      platform slot: it has already refused an operation its deposit cannot cover (AA31), and
-    ///      reading that deposit here would be the forbidden EntryPoint call of OP-054.
-    function test_anEmptyPlatformDepositIsTheEntryPointsRefusalNotThePaymasters() public {
+    ///      reading that deposit here would be the forbidden EntryPoint call of OP-054. So validation
+    ///      sponsors a platform call on an empty deposit — the refusal happens before this frame.
+    function test_thePlatformDepositIsNotCheckedDuringValidation() public {
         assertEq(paymaster.budgetOf(0), 0, "nothing deposited");
 
         (bytes memory context,) = ep.callValidate(address(paymaster), _op(_claimCall(), 0), bytes32(0), 0.01 ether);
@@ -610,12 +610,24 @@ contract PaymasterTest is MontiTest {
         ep.callValidate(address(paymaster), _op(_claimCall(), 0), bytes32(0), 0.01 ether);
 
         vm.prank(ORG_OWNER);
-        vm.expectRevert(stdError.arithmeticError);
+        vm.expectRevert(MontiPaymaster.BudgetExhausted.selector);
         paymaster.withdraw(orgId, 1 ether);
 
         vm.prank(ORG_OWNER);
         paymaster.withdraw(orgId, 1 ether - 0.01 ether);
         assertEq(paymaster.budgetOf(orgId), 0, "withdraw is capped by what the slot still holds");
+    }
+
+    function test_withdrawingMoreThanTheSlotHoldsIsRefusedByName() public {
+        paymaster.deposit{value: 1 ether}(orgId);
+
+        vm.prank(ORG_OWNER);
+        vm.expectRevert(MontiPaymaster.BudgetExhausted.selector);
+        paymaster.withdraw(orgId, 1 ether + 1);
+
+        vm.prank(ORG_OWNER);
+        paymaster.withdraw(orgId, 1 ether);
+        assertEq(paymaster.budgetOf(orgId), 0);
     }
 
     /// @dev A reservation leaves `_orgBudget` but stays inside `_orgBudgetTotal`, so the wei an in-flight

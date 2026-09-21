@@ -3,14 +3,19 @@ pragma solidity 0.8.31;
 
 import {UserOperation} from "account-abstraction/interfaces/UserOperation.sol";
 import {IPaymaster} from "account-abstraction/interfaces/IPaymaster.sol";
+import {IStakeManager} from "account-abstraction/interfaces/IStakeManager.sol";
 
 /// @notice Just enough EntryPoint v0.6 for the paymaster tests: it holds deposits, tracks stake and
 ///         can call validatePaymasterUserOp as the real EntryPoint would (msg.sender == entryPoint).
+/// @dev    The stake functions mirror v0.6 `StakeManager` rule for rule, revert string included, so a
+///         Deploy script that would revert on chain (`addStake(0)`, a shortened delay, a withdrawal
+///         before the delay is due) reverts here too.
 contract MockEntryPoint {
     mapping(address => uint256) public deposits;
     mapping(address => uint256) public stakeOf;
     mapping(address => uint32) public unstakeDelayOf;
-    mapping(address => bool) public unlocked;
+    /// @dev First timestamp at which `withdrawStake` may be called; 0 while the stake is locked.
+    mapping(address => uint48) public withdrawTimeOf;
 
     function depositTo(address account) external payable {
         deposits[account] += msg.value;
@@ -22,22 +27,44 @@ contract MockEntryPoint {
         require(ok, "withdraw failed");
     }
 
+    /// @dev StakeManager.addStake: the delay may only grow, and any pending unstake is cancelled.
     function addStake(uint32 unstakeDelaySec) external payable {
-        stakeOf[msg.sender] += msg.value;
+        require(unstakeDelaySec > 0, "must specify unstake delay");
+        require(unstakeDelaySec >= unstakeDelayOf[msg.sender], "cannot decrease unstake time");
+        uint256 stake = stakeOf[msg.sender] + msg.value;
+        require(stake > 0, "no stake specified");
+        stakeOf[msg.sender] = stake;
         unstakeDelayOf[msg.sender] = unstakeDelaySec;
-        unlocked[msg.sender] = false;
+        withdrawTimeOf[msg.sender] = 0;
     }
 
     function unlockStake() external {
-        unlocked[msg.sender] = true;
+        require(unstakeDelayOf[msg.sender] != 0, "not staked");
+        require(withdrawTimeOf[msg.sender] == 0, "already unstaking");
+        withdrawTimeOf[msg.sender] = uint48(block.timestamp) + unstakeDelayOf[msg.sender];
     }
 
     function withdrawStake(address payable to) external {
-        require(unlocked[msg.sender], "not unlocked");
         uint256 amount = stakeOf[msg.sender];
+        require(amount > 0, "No stake to withdraw");
+        require(withdrawTimeOf[msg.sender] > 0, "must call unlockStake() first");
+        require(withdrawTimeOf[msg.sender] <= block.timestamp, "Stake withdrawal is not due");
+        unstakeDelayOf[msg.sender] = 0;
+        withdrawTimeOf[msg.sender] = 0;
         stakeOf[msg.sender] = 0;
         (bool ok,) = to.call{value: amount}("");
-        require(ok, "withdraw failed");
+        require(ok, "failed to withdraw stake");
+    }
+
+    /// @dev `staked` is v0.6's flag: true from `addStake` until `unlockStake` schedules the withdrawal.
+    function getDepositInfo(address account) external view returns (IStakeManager.DepositInfo memory) {
+        return IStakeManager.DepositInfo({
+            deposit: uint112(deposits[account]),
+            staked: unstakeDelayOf[account] != 0 && withdrawTimeOf[account] == 0,
+            stake: uint112(stakeOf[account]),
+            unstakeDelaySec: unstakeDelayOf[account],
+            withdrawTime: withdrawTimeOf[account]
+        });
     }
 
     /// @dev ERC-7562 OP-054 forbids a validation frame from calling the EntryPoint at all. Arm this and

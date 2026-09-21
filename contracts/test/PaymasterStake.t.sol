@@ -21,7 +21,7 @@ contract PaymasterStakeTest is MontiTest {
 
     event StakeAdded(uint256 amount, uint32 unstakeDelaySec);
     event StakeUnlocked();
-    event StakeWithdrawn(address indexed to);
+    event StakeWithdrawn(address indexed to, uint256 amount);
 
     function setUp() public {
         _deployMonti();
@@ -65,32 +65,80 @@ contract PaymasterStakeTest is MontiTest {
         vm.expectEmit(false, false, false, true);
         emit StakeUnlocked();
         paymaster.unlockStake();
+        vm.warp(block.timestamp + ONE_DAY);
 
         uint256 before = BOB.balance;
         vm.expectEmit(true, false, false, true);
-        emit StakeWithdrawn(BOB);
+        emit StakeWithdrawn(BOB, 1 ether);
         paymaster.withdrawStake(payable(BOB));
 
         assertEq(BOB.balance, before + 1 ether, "the stake goes where the deployer names");
         assertEq(ep.stakeOf(address(paymaster)), 0);
+
+        vm.expectRevert(bytes("No stake to withdraw"));
+        paymaster.withdrawStake(payable(BOB));
     }
 
-    /// @dev The delay is the EntryPoint's to enforce; the wrapper must not paper over its revert.
+    /// @dev The two halves of v0.6's rule are the EntryPoint's to enforce; the wrapper must not paper
+    ///      over either revert, because that is what a Deploy or retirement script hits on chain.
     function test_stakeCannotBeWithdrawnBeforeItIsUnlocked() public {
         paymaster.addStake{value: 1 ether}(ONE_DAY);
 
-        vm.expectRevert(bytes("not unlocked"));
+        vm.expectRevert(bytes("must call unlockStake() first"));
         paymaster.withdrawStake(payable(address(this)));
         assertEq(ep.stakeOf(address(paymaster)), 1 ether);
+    }
+
+    function test_stakeCannotBeWithdrawnBeforeTheDelayIsDue() public {
+        paymaster.addStake{value: 1 ether}(ONE_DAY);
+        paymaster.unlockStake();
+        assertEq(ep.withdrawTimeOf(address(paymaster)), block.timestamp + ONE_DAY, "one day from the unlock");
+
+        vm.warp(block.timestamp + ONE_DAY - 1);
+        vm.expectRevert(bytes("Stake withdrawal is not due"));
+        paymaster.withdrawStake(payable(address(this)));
+
+        vm.warp(block.timestamp + 1);
+        uint256 before = address(this).balance;
+        paymaster.withdrawStake(payable(address(this)));
+        assertEq(address(this).balance, before + 1 ether, "due to the second");
+        assertEq(ep.stakeOf(address(paymaster)), 0);
     }
 
     function test_stakeCannotBeWithdrawnToTheZeroAddress() public {
         paymaster.addStake{value: 1 ether}(ONE_DAY);
         paymaster.unlockStake();
+        vm.warp(block.timestamp + ONE_DAY);
 
         vm.expectRevert(MontiPaymaster.ZeroAddress.selector);
         paymaster.withdrawStake(payable(address(0)));
         assertEq(ep.stakeOf(address(paymaster)), 1 ether, "the stake is still there to withdraw properly");
+    }
+
+    /// @dev v0.6 rejects a zero delay outright. A Deploy script calling `addStake{value: x}(0)` must fail
+    ///      here exactly as it would on chain, at the moment the deployment is blocked on staking.
+    function test_stakingWithoutAnUnstakeDelayIsRefused() public {
+        vm.expectRevert(bytes("must specify unstake delay"));
+        paymaster.addStake{value: 1 ether}(0);
+        assertEq(ep.stakeOf(address(paymaster)), 0);
+    }
+
+    function test_stakingNothingIsRefused() public {
+        vm.expectRevert(bytes("no stake specified"));
+        paymaster.addStake{value: 0}(ONE_DAY);
+    }
+
+    /// @dev The delay may only grow: re-staking at a shorter one would otherwise shorten the window a
+    ///      bundler relies on. Topping the same delay up is the legitimate call.
+    function test_theUnstakeDelayCannotBeShortenedButTheStakeCanBeToppedUp() public {
+        paymaster.addStake{value: 1 ether}(ONE_DAY);
+
+        vm.expectRevert(bytes("cannot decrease unstake time"));
+        paymaster.addStake{value: 1 ether}(ONE_DAY - 1);
+
+        paymaster.addStake{value: 1 ether}(ONE_DAY);
+        assertEq(ep.stakeOf(address(paymaster)), 2 ether, "a top-up adds to the stake");
+        assertEq(ep.unstakeDelayOf(address(paymaster)), ONE_DAY);
     }
 
     /// @dev Stake and deposit are two different pots at the EntryPoint. Staking buys the bundler's
