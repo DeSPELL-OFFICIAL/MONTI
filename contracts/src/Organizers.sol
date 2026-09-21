@@ -89,6 +89,25 @@ contract Organizers {
         emit OwnerTransferred(orgId, current, newOwner);
     }
 
+    function setAdmin(uint256 orgId, address admin, uint32 permissionBits) external {
+        if (_owners[orgId] == address(0)) revert UnknownOrganizer();
+        if (msg.sender != _owners[orgId]) revert NotOwner();
+        if (admin == address(0)) revert ZeroAddress();
+        _adminBits[orgId][admin] = permissionBits;
+        emit AdminSet(orgId, admin, permissionBits);
+    }
+
+    /// @notice The owner implicitly holds every bit; an admin holds exactly the bits set for them.
+    function hasPermission(uint256 orgId, address account, uint32 bit) public view returns (bool) {
+        if (account == address(0)) return false;
+        if (account == _owners[orgId]) return true;
+        return (_adminBits[orgId][account] & bit) == bit && bit != 0;
+    }
+
+    function adminBitsOf(uint256 orgId, address admin) external view returns (uint32) {
+        return _adminBits[orgId][admin];
+    }
+
     function ownerOf(uint256 orgId) external view returns (address) {
         return _owners[orgId];
     }

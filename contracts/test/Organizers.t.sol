@@ -11,6 +11,7 @@ contract OrganizersTest is Test {
 
     event OrganizerCreated(uint256 indexed orgId, address indexed owner);
     event OwnerTransferred(uint256 indexed orgId, address indexed from, address indexed to);
+    event AdminSet(uint256 indexed orgId, address indexed admin, uint32 bits);
 
     function setUp() public {
         orgs = new Organizers();
@@ -53,5 +54,50 @@ contract OrganizersTest is Test {
         vm.prank(OTHER);
         vm.expectRevert(Organizers.NotDeployer.selector);
         fresh.setTicket(address(0xBEEF));
+    }
+
+    function test_permissionBitValues() public view {
+        assertEq(orgs.PERM_CREATE_EVENT(), 1);
+        assertEq(orgs.PERM_MANAGE_GATES(), 2);
+        assertEq(orgs.PERM_APPROVE_OVERRIDE(), 4);
+        assertEq(orgs.PERM_MANAGE_MANAGERS(), 8);
+        assertEq(orgs.PERM_MANAGE_BUDGET(), 16);
+    }
+
+    function test_ownerAlwaysHasEveryPermission() public {
+        orgs.createOrganizer(OWNER);
+        assertTrue(orgs.hasPermission(1, OWNER, orgs.PERM_CREATE_EVENT()));
+        assertTrue(orgs.hasPermission(1, OWNER, orgs.PERM_MANAGE_BUDGET()));
+        assertFalse(orgs.hasPermission(1, OTHER, orgs.PERM_CREATE_EVENT()));
+    }
+
+    function test_setAdminGrantsOnlyTheGivenBits() public {
+        orgs.createOrganizer(OWNER);
+        uint32 permBits = orgs.PERM_CREATE_EVENT() | orgs.PERM_MANAGE_GATES();
+        vm.expectEmit(true, true, false, true);
+        emit AdminSet(1, OTHER, 3);
+        vm.prank(OWNER);
+        orgs.setAdmin(1, OTHER, permBits);
+
+        assertTrue(orgs.hasPermission(1, OTHER, orgs.PERM_CREATE_EVENT()));
+        assertTrue(orgs.hasPermission(1, OTHER, orgs.PERM_MANAGE_GATES()));
+        assertFalse(orgs.hasPermission(1, OTHER, orgs.PERM_APPROVE_OVERRIDE()));
+        assertFalse(orgs.hasPermission(1, OTHER, orgs.PERM_MANAGE_MANAGERS()));
+    }
+
+    function test_setAdminCanRevokeByPassingZero() public {
+        orgs.createOrganizer(OWNER);
+        vm.startPrank(OWNER);
+        orgs.setAdmin(1, OTHER, orgs.PERM_MANAGE_GATES());
+        orgs.setAdmin(1, OTHER, 0);
+        vm.stopPrank();
+        assertFalse(orgs.hasPermission(1, OTHER, orgs.PERM_MANAGE_GATES()));
+    }
+
+    function test_onlyOwnerSetsAdmin() public {
+        orgs.createOrganizer(OWNER);
+        vm.prank(OTHER);
+        vm.expectRevert(Organizers.NotOwner.selector);
+        orgs.setAdmin(1, OTHER, 1);
     }
 }
