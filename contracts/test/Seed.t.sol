@@ -18,10 +18,19 @@ import {P256Vectors} from "./utils/P256Vectors.sol";
 ///         code path without the deployments file. The chain id is pinned to 31340 — Deploy.t.sol has
 ///         31337 and DeployCoinbaseFactory.t.sol 31338/31339 — so the files written here are the
 ///         gitignored local ones and never the tracked 10143 pair.
+contract SeedHarness is Seed {
+    /// @dev `record()` writes only under a broadcast, and `forge test` is not one. This is how the
+    ///      tests reach the writing half without giving the script itself a public entry point that
+    ///      could be pointed at the tracked deployments/seed-10143.json.
+    function recordAt(string memory path) external {
+        _record(path);
+    }
+}
+
 contract SeedTest is Test {
     EntryPoint internal entryPoint;
     Deploy internal deployScript;
-    Seed internal seedScript;
+    SeedHarness internal seedScript;
 
     Identity internal identity;
     Organizers internal organizers;
@@ -35,6 +44,8 @@ contract SeedTest is Test {
     address internal constant GATE = address(0x6A7E);
     address internal constant SECOND_GATE = address(0x6A7F);
     uint256 internal constant FUND = 0.02 ether;
+    /// @dev A real base32 CIDv1 of a sha2-256 digest, which is the shape Pinata hands the founder back.
+    string internal constant CID = "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi";
 
     string internal constant DEPLOY_PATH = "deployments/31340.json";
     string internal constant SEED_PATH = "deployments/seed-31340.json";
@@ -46,7 +57,7 @@ contract SeedTest is Test {
 
         entryPoint = new EntryPoint();
         deployScript = new Deploy();
-        seedScript = new Seed();
+        seedScript = new SeedHarness();
 
         deployer = vm.addr(DEPLOYER_PK);
         attester = vm.addr(ATTESTER_PK);
@@ -125,7 +136,7 @@ contract SeedTest is Test {
             assertEq(member.balance, FUND, "funded to pay for its own claim");
         }
 
-        assertEq(ticket.tiers(eventId)[0].minted, uint32(count), "one ticket per demo member");
+        assertEq(uint256(ticket.tiers(eventId)[0].minted), count, "one ticket per demo member");
     }
 
     /// @notice A gate account may be registered exactly once, so the founder re-runs the seed with the
@@ -159,6 +170,7 @@ contract SeedTest is Test {
         vm.setEnv("ATTESTER_PK", vm.toString(ATTESTER_PK));
         vm.setEnv("GATE_ACCOUNT", vm.toString(GATE));
         vm.setEnv("MEMBER_FUND_WEI", vm.toString(FUND));
+        vm.setEnv("SEED_IMAGE_CID", CID);
 
         seedScript.run();
 
@@ -166,7 +178,12 @@ contract SeedTest is Test {
         // Without this gate a `forge script --rpc-url <monad>` rehearsal would overwrite the tracked
         // deployments/seed-10143.json with ids that were never seeded.
         assertFalse(vm.exists(SEED_PATH), "a run that is not a broadcast records nothing");
+
+        // The gate lives inside `record` itself, so the signature a founder can reach directly --
+        // `forge script --sig 'record()'` -- writes nothing either.
         seedScript.record();
+        assertFalse(vm.exists(SEED_PATH), "nor does record() called on its own");
+        seedScript.recordAt(SEED_PATH);
 
         // The stack came out of the file, not out of this test.
         assertEq(address(seedScript.identity()), address(identity), "identity");
@@ -190,17 +207,52 @@ contract SeedTest is Test {
         }
     }
 
+    /// @notice The chain carries only hashes of the title and the description, so the metadata CID is
+    ///         the whole of what sub-plan 03 has to show a name and a picture with. A placeholder that
+    ///         is not a real CID leaves the demo event blank on the first screen it was seeded for.
+    function test_seedPutsTheRealMetadataCidOnTheEvent() public {
+        _seed(GATE);
+
+        assertEq(ticket.eventMeta(seedScript.eventId()).imageCid, CID, "the pinned CID reached the chain");
+        assertEq(bytes(CID).length, seedScript.CID_LENGTH(), "a base32 CIDv1 is 59 characters");
+    }
+
+    function test_seedRefusesAnImageCidThatIsNotACid() public {
+        vm.expectRevert(bytes("SEED_IMAGE_CID must be a 59-character base32 CIDv1"));
+        _seedWithCid("bafybeigdyrztseedimageplaceholdercid");
+
+        // 59 characters, but not a CID: the length alone would have let this through.
+        vm.expectRevert(bytes("SEED_IMAGE_CID must be a base32 CIDv1 starting with bafy"));
+        _seedWithCid("Qmabbeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi");
+    }
+
+    /// @notice Identity.register answers to the attester and nobody else, so the wrong key does not fail
+    ///         at the call site but on the first demo member, as an opaque NotAttester from inside
+    ///         Identity. The founder is told which key is wrong before anything is broadcast.
+    function test_seedRefusesAnAttesterKeyThatIsNotTheAttester() public {
+        vm.expectRevert(bytes("ATTESTER_PK does not match Identity.attester()"));
+        seedScript.seed(
+            address(identity), address(organizers), address(ticket), GATE, CID, DEPLOYER_PK, ATTESTER_PK + 1, FUND
+        );
+    }
+
     /// @notice Seeding a stack that was never deployed would otherwise fail deep inside an empty
     ///         address with no message. The committed deployments/10143.json is zeroed until the
     ///         founder deploys, so this is the first thing a mistimed run hits.
     function test_seedRefusesAStackThatIsNotDeployedYet() public {
         vm.expectRevert(Seed.StackNotDeployed.selector);
-        seedScript.seed(address(0), address(organizers), address(ticket), GATE, DEPLOYER_PK, ATTESTER_PK, FUND);
+        seedScript.seed(address(0), address(organizers), address(ticket), GATE, CID, DEPLOYER_PK, ATTESTER_PK, FUND);
+    }
+
+    function _seedWithCid(string memory cid) private {
+        seedScript.seed(
+            address(identity), address(organizers), address(ticket), GATE, cid, DEPLOYER_PK, ATTESTER_PK, FUND
+        );
     }
 
     function _seed(address gateAccount) private {
         seedScript.seed(
-            address(identity), address(organizers), address(ticket), gateAccount, DEPLOYER_PK, ATTESTER_PK, FUND
+            address(identity), address(organizers), address(ticket), gateAccount, CID, DEPLOYER_PK, ATTESTER_PK, FUND
         );
     }
 }

@@ -30,7 +30,9 @@ import {ITicket} from "../src/interfaces/ITicket.sol";
 ///
 ///         Inputs come from the environment only, so no key is ever written into this repository:
 ///           DEPLOYER_PK       broadcast key; becomes `deployer` on Identity, Organizers and the paymaster
-///           ATTESTER_ADDRESS  the Cloud KMS attester key (spec 9.2); the only writer of Identity.register
+///           ATTESTER_ADDRESS  the attester key's address (spec 9.2); the only writer of Identity.register.
+///                             MVP: raw EOA key in Secret Manager (ATTESTER_PK); KMS signing is the
+///                             production path
 ///           ENTRY_POINT       optional, defaults to the v0.6 singleton
 ///           STAKE_WEI         optional, defaults to 1 MON
 ///           DEPOSIT_WEI       optional, defaults to 1 MON

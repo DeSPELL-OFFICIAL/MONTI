@@ -99,7 +99,8 @@ contract Identity is IIdentity, AttesterRole {
     }
 
     /// @notice Raises (or lowers) the verification level after a later Didit session. Attester only:
-    ///         the chain never learns what was verified, only that our KMS key says it was.
+    ///         the chain never learns what was verified, only that our attester key says it was. MVP: raw
+    ///         EOA key in Secret Manager (ATTESTER_PK); KMS signing is the production path.
     function setKycLevel(bytes32 personId, uint8 level) external onlyAttester {
         address account = _accountOf[personId];
         if (account == address(0)) revert NotRegistered();
