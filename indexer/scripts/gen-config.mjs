@@ -197,6 +197,12 @@ const config = `# 생성 파일. 직접 고치지 말고 scripts/gen-config.mjs 
 name: monti
 description: MONTI on-chain index (Monad ${chainId})
 schema: schema.graphql
+# \`CheckIn.txHash\` 와 \`Override.id\`(= txHash-logIndex) 가 트랜잭션 해시를 쓴다.
+# field_selection 없이는 \`event.transaction\` 이 **빈 객체**라 해시를 읽을 수 없다
+# (Envio 기본값). 해시 하나만 고른다 — 고른 필드마다 동기화가 느려진다.
+field_selection:
+  transaction_fields:
+    - hash
 contracts:
 ${contractBlocks.join('\n')}
 networks:

@@ -91,6 +91,44 @@ describe('Identity handlers', () => {
     expect(after.entities.IdentityAccount.get(bob)).toBeUndefined();
   });
 
+  /**
+   * 등록을 못 본 계정(= 구독 시작 블록보다 앞선 것)에 대해서는 행을 **지어내지 않는다**.
+   * 이 셋은 personId 를 싣지 않아, 행을 만들면 사람 없는 계정이 생긴다.
+   */
+  it('ignores device and nickname events for an account it never saw registered', async () => {
+    let mockDb = await Identity.DeviceChanged.processEvent({
+      event: Identity.DeviceChanged.createMockEvent({
+        account: BOB,
+        x: DEVICE_X,
+        y: DEVICE_Y,
+        mockEventData: block(T0),
+      }),
+      mockDb: MockDb.createMockDb(),
+    });
+    expect(mockDb.entities.IdentityAccount.get(bob)).toBeUndefined();
+
+    mockDb = await Identity.DeviceLocked.processEvent({
+      event: Identity.DeviceLocked.createMockEvent({
+        account: BOB,
+        locked: true,
+        mockEventData: block(T0),
+      }),
+      mockDb,
+    });
+    expect(mockDb.entities.IdentityAccount.get(bob)).toBeUndefined();
+
+    const after = await Identity.NicknameSet.processEvent({
+      event: Identity.NicknameSet.createMockEvent({
+        account: BOB,
+        nicknameHash: NICK_HASH,
+        nickname: 'bob',
+        mockEventData: block(T0),
+      }),
+      mockDb,
+    });
+    expect(after.entities.IdentityAccount.get(bob)).toBeUndefined();
+  });
+
   it('fills the device keys on DeviceChanged and records deviceUpdatedAt', async () => {
     const after = await signedUp();
     const stored = after.entities.IdentityAccount.get(alice);
@@ -126,6 +164,35 @@ describe('Identity handlers', () => {
       mockDb,
     });
     expect(after.entities.IdentityAccount.get(alice)?.nickname).toBe('alex');
+  });
+
+  /**
+   * `AccountRotated` 는 다른 핸들러들과 달리 옛 행이 없어도 새 행을 세운다 —
+   * 이벤트가 `personId` 를 싣고 있어 지어낸 값이 필요 없고, 회전 뒤의 현재 계정이
+   * 인덱스에 없으면 그 사람은 목록에서 통째로 사라진다.
+   */
+  it('synthesizes the new account on AccountRotated even without a row for the old one', async () => {
+    const after = await Identity.AccountRotated.processEvent({
+      event: Identity.AccountRotated.createMockEvent({
+        personId: PERSON,
+        oldAccount: ALICE,
+        newAccount: BOB,
+        mockEventData: block(T1),
+      }),
+      mockDb: MockDb.createMockDb(),
+    });
+
+    expect(after.entities.IdentityAccount.get(alice)).toBeUndefined();
+    expect(after.entities.IdentityAccount.get(bob)).toEqual({
+      id: bob,
+      personId: PERSON,
+      nickname: undefined,
+      kycLevel: 0,
+      deviceX: ZERO32,
+      deviceY: ZERO32,
+      locked: false,
+      deviceUpdatedAt: 0n,
+    });
   });
 
   it('moves the person and the handle on AccountRotated, leaving the new account without a device', async () => {
@@ -238,6 +305,14 @@ describe('Organizers handlers', () => {
       account: alice,
       bits: 7n,
     });
+
+    // 권한 회수는 지우는 게 아니라 bits 0 인 같은 이벤트다. 행은 남고 비트만 빈다 —
+    // 행을 지우면 "한 번 관리자였다"는 사실까지 사라진다(ManagerSet 과 같은 규칙).
+    const removed = await Organizers.AdminSet.processEvent({
+      event: Organizers.AdminSet.createMockEvent({ orgId: 1n, admin: ALICE, bits: 0n }),
+      mockDb: after,
+    });
+    expect(removed.entities.Admin.get(`1-${alice}`)).toMatchObject({ account: alice, bits: 0n });
   });
 
   it('stores manager flags on ManagerSet', async () => {

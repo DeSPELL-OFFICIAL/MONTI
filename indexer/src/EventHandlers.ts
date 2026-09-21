@@ -18,7 +18,12 @@ import type { Gate, handlerContext } from 'generated';
 // "does not provide an export named 'Identity'" 로 죽는다. 타입만 `import type` 으로
 // 가져오고 값은 require 로 받으면 두 경로 모두에서 돈다. generated 의 `*.gen.ts` 들도
 // 똑같이 한다.
-const { Identity, Organizers } = require('generated') as typeof import('generated');
+const { Identity, Organizers, Ticket } = require('generated') as typeof import('generated');
+// 같은 이유로 viem 과 @monti/shared 도 require 다. 값 `import` 하나만 있어도 Node 22 의
+// 타입 스트리퍼가 이 파일을 ESM 으로 판정해 envio 의 require() 가 깨진다.
+const { createPublicClient, http } = require('viem') as typeof import('viem');
+const { EVENT_STATUS_BY_CODE, loadDeployment, ticketAbi } =
+  require('@monti/shared') as typeof import('@monti/shared');
 
 /** `register()` 가 기기 키를 이벤트에 싣지 않는 동안의 자리표시자. */
 const ZERO32 = `0x${'00'.repeat(32)}`;
@@ -70,6 +75,12 @@ Identity.KycLevelSet.handler(async ({ event, context }) => {
  *
  * 밀려난 행은 지우지 않는다. `Ticket.migrate` 가 옛 티켓에서 사람을 되찾을 때까지
  * 그 계정은 살아 있고, `personOf` 도 체인에 남는다.
+ *
+ * **옛 행이 없어도 새 행을 만든다.** 다른 핸들러들과 달리 여기서는 `previous` 가
+ * 없다고 지나가지 않는다 — `Registered` 가 구독 시작 블록보다 앞선 계정이라도
+ * 회전한 뒤의 **현재 계정**은 인덱스에 있어야 하고, 이 이벤트가 `personId` 를
+ * 싣고 있어 지어낸 값 없이 행을 세울 수 있다. 그때 kycLevel 은 0 에서 시작하고
+ * 다음 `KycLevelSet` 이 맞춘다(닉네임은 비어 있다).
  */
 Identity.AccountRotated.handler(async ({ event, context }) => {
   const from = addr(event.params.oldAccount);
@@ -193,4 +204,383 @@ Organizers.GateClosed.handler(async ({ event, context }) => {
 /** 취소된 게이트는 다시 열릴 수 없다. `isOpen` 도 같이 내려 둬야 질의 한쪽만 봐도 안전하다. */
 Organizers.GateRevoked.handler(async ({ event, context }) => {
   await patchGate(context, event.params.gateId, { revoked: true, isOpen: false });
+});
+
+// ────────────────────────────── Ticket ──────────────────────────────
+
+/**
+ * `EventCreated(eventId, orgId, creator)` 는 셋만 싣는다. 나머지 메타와 티어 배열은
+ * 컨트랙트 뷰에서 한 번 읽는다 — 공연 생성은 드물어 동기화 속도에 영향이 없고,
+ * `EventMeta` 를 이벤트에 통째로 실으면 생성 가스가 그만큼 비싸진다.
+ *
+ * 클라이언트는 **처음 쓸 때** 만든다. 모듈 로드 시점에 `RPC_URL` 을 굳혀 버리면
+ * 테스트가 로컬 스텁을 물릴 자리가 없다(`test/ticket.test.ts`).
+ */
+const DEFAULT_RPC_URL = 'https://testnet-rpc.monad.xyz';
+const deployment = loadDeployment(Number(process.env.CHAIN_ID ?? 10143));
+
+let rpcClient: ReturnType<typeof createPublicClient> | undefined;
+function rpc(): ReturnType<typeof createPublicClient> {
+  rpcClient ??= createPublicClient({ transport: http(process.env.RPC_URL ?? DEFAULT_RPC_URL) });
+  return rpcClient;
+}
+
+/** `Ticket.eventMeta(eventId)` 의 튜플. uint64 는 bigint, uint8/16/32 는 number 로 디코드된다. */
+interface ChainEventMeta {
+  orgId: bigint;
+  titleHash: string;
+  descHash: string;
+  imageCid: string;
+  startsAt: bigint;
+  endsAt: bigint;
+  venueHash: string;
+  saleStart: bigint;
+  saleEnd: bigint;
+  transferable: boolean;
+  transferCutoffSeconds: number;
+  maxTransfers: number;
+  approvalRequired: boolean;
+  category: number;
+  regionCode: string;
+  requireKyc: boolean;
+}
+
+/** `Ticket.tiers(eventId)` 의 원소. */
+interface ChainTier {
+  name: string;
+  priceUsdCents: bigint;
+  supply: number;
+  minted: number;
+  maxPerWallet: number;
+  seated: boolean;
+}
+
+/** `createEvent` 가 강제하는 티어 상한(1..8). `updateEventMeta` 도 같다. */
+const MAX_TIERS = 8;
+
+/** ABI 는 리터럴 타입이 없는 JSON 이라 결과는 여기서 캐스팅한다(`packages/shared/src/abi.ts`). */
+async function readEventMeta(eventId: bigint): Promise<ChainEventMeta> {
+  return (await rpc().readContract({
+    address: deployment.ticket,
+    abi: ticketAbi,
+    functionName: 'eventMeta',
+    args: [eventId],
+  })) as ChainEventMeta;
+}
+
+async function readTiers(eventId: bigint): Promise<readonly ChainTier[]> {
+  return (await rpc().readContract({
+    address: deployment.ticket,
+    abi: ticketAbi,
+    functionName: 'tiers',
+    args: [eventId],
+  })) as readonly ChainTier[];
+}
+
+/** 체인 메타 → `Event` 의 열. id·orgId·creator·status 는 부르는 쪽이 정한다. */
+function metaColumns(meta: ChainEventMeta) {
+  return {
+    titleHash: meta.titleHash,
+    descHash: meta.descHash,
+    imageCid: meta.imageCid,
+    startsAt: meta.startsAt,
+    endsAt: meta.endsAt,
+    venueHash: meta.venueHash,
+    saleStart: meta.saleStart,
+    saleEnd: meta.saleEnd,
+    transferable: meta.transferable,
+    transferCutoffSeconds: BigInt(meta.transferCutoffSeconds),
+    maxTransfers: meta.maxTransfers,
+    approvalRequired: meta.approvalRequired,
+    category: meta.category,
+    regionCode: meta.regionCode,
+    requireKyc: meta.requireKyc,
+  };
+}
+
+/**
+ * 티어 배열을 통째로 다시 쓴다. `updateEventMeta` 는 `delete _tiers[eventId]` 뒤에
+ * 새 배열을 넣으므로(Ticket.sol:215), 줄어든 경우 옛 행을 지워야 앱에 유령 티어가
+ * 남지 않는다. 상한이 8 이라 훑는 비용은 고정이다.
+ */
+async function writeTiers(context: handlerContext, eventId: bigint): Promise<void> {
+  const tiers = await readTiers(eventId);
+  tiers.forEach((tier, idx) => {
+    context.Tier.set({
+      id: `${eventId}-${idx}`,
+      eventId,
+      idx,
+      name: tier.name,
+      priceUsdCents: tier.priceUsdCents,
+      supply: BigInt(tier.supply),
+      minted: BigInt(tier.minted),
+      maxPerWallet: BigInt(tier.maxPerWallet),
+      seated: tier.seated,
+    });
+  });
+  for (let idx = tiers.length; idx < MAX_TIERS; idx += 1) {
+    const stale = await context.Tier.get(`${eventId}-${idx}`);
+    if (!stale) break;
+    context.Tier.deleteUnsafe(stale.id);
+  }
+}
+
+/**
+ * `createEvent` 는 한 트랜잭션에서 `EventCreated` → `EventStatusChanged(0)` 를 낸다.
+ * 여기서 Draft 로 시작해도 같은 값이라 충돌하지 않는다.
+ */
+Ticket.EventCreated.handler(async ({ event, context }) => {
+  const eventId = event.params.eventId;
+  const meta = await readEventMeta(eventId);
+  context.Event.set({
+    id: eventId.toString(),
+    orgId: event.params.orgId,
+    creator: addr(event.params.creator),
+    ...metaColumns(meta),
+    status: 'Draft',
+  });
+  await writeTiers(context, eventId);
+});
+
+/**
+ * `updateEventMeta` 는 Draft 인 공연에서만 되고 `orgId` 는 지킨다(Ticket.sol:210).
+ * 그래서 여기서도 orgId·creator·status 는 그대로 두고 메타와 티어만 갈아 끼운다.
+ */
+Ticket.EventMetaUpdated.handler(async ({ event, context }) => {
+  const eventId = event.params.eventId;
+  const current = await context.Event.get(eventId.toString());
+  if (!current) return;
+  const meta = await readEventMeta(eventId);
+  context.Event.set({ ...current, ...metaColumns(meta) });
+  await writeTiers(context, eventId);
+});
+
+/**
+ * 0/1/2/3 → Draft/Published/Cancelled/Ended. 모르는 코드는 **던지지 않는다** —
+ * 인덱서가 멈추면 공연 하나가 아니라 체인 전체가 멈춘다. 로그만 남기고 지나간다.
+ */
+Ticket.EventStatusChanged.handler(async ({ event, context }) => {
+  const current = await context.Event.get(event.params.eventId.toString());
+  if (!current) return;
+  const code = Number(event.params.status);
+  const status = EVENT_STATUS_BY_CODE[code];
+  if (status === undefined) {
+    context.log.warn('EventStatusChanged: unknown status code', {
+      eventId: event.params.eventId.toString(),
+      code,
+    });
+    return;
+  }
+  context.Event.set({ ...current, status });
+});
+
+/**
+ * `claim` 은 `_safeMint` → `emit Claimed` 순이라 민팅 `Transfer(0→to)` 가 **먼저** 온다.
+ * 티켓 행을 만드는 것은 여기다(그쪽은 행이 없어 그냥 지나간다).
+ *
+ * `identity` 는 소문자 주소로 `IdentityAccount` 를 가리킨다 — `listAttendees`·`snapshot`
+ * 이 이 연결로 닉네임과 kycLevel 을 읽는다.
+ */
+Ticket.Claimed.handler(async ({ event, context }) => {
+  const tier = Number(event.params.tier);
+  const owner = addr(event.params.to);
+  context.Ticket.set({
+    id: event.params.tokenId.toString(),
+    eventId: event.params.eventId,
+    tier,
+    owner,
+    transfers: 0,
+    revoked: false,
+    checkIn_id: undefined,
+    identity_id: owner,
+  });
+  // 체인의 `t.minted` 도 claim 마다 +1 이다(Ticket.sol:246). 생성 때 읽은 값에서 이어 센다.
+  const row = await context.Tier.get(`${event.params.eventId}-${tier}`);
+  if (row) context.Tier.set({ ...row, minted: row.minted + 1n });
+});
+
+/**
+ * 민팅(from == 0)은 세지 않는다 — 체인의 `_transfers` 도 `from != 0 && to != 0` 일 때만
+ * 오른다(Ticket.sol:537). 소각(to == 0)은 이 컨트랙트에 경로가 없다.
+ *
+ * 새 주인의 `IdentityAccount` 로 다시 잇는다. 연결이 옛 주인에 남아 있으면 주최자
+ * 목록이 앞사람의 닉네임을 계속 보여 준다(Task 27 리뷰).
+ */
+Ticket.Transfer.handler(async ({ event, context }) => {
+  const current = await context.Ticket.get(event.params.tokenId.toString());
+  if (!current) return;
+  const isMint = addr(event.params.from) === `0x${'00'.repeat(20)}`;
+  const owner = addr(event.params.to);
+  context.Ticket.set({
+    ...current,
+    owner,
+    identity_id: owner,
+    transfers: isMint ? current.transfers : current.transfers + 1,
+  });
+});
+
+/**
+ * 같은 트랜잭션이 이미 써 둔 체크인 행의 `manual`·`late` 는 지킨다.
+ *
+ * 두 경로가 `CheckedIn` **앞에** 자기 행을 남긴다:
+ * - `manualOverride` → `ManualOverride` 뒤에 `CheckedIn`(Ticket.sol:426-427)
+ * - 01b `checkInLate` → `CheckedInLate` 뒤에 `CheckedIn`(01b Ticket.sol:468-469)
+ * 그래서 여기서 무조건 false 로 덮으면 수동 입장과 지각 입장이 둘 다 지워진다.
+ * 다른 트랜잭션의 옛 행이면 새 입장이므로 false 로 시작한다.
+ */
+Ticket.CheckedIn.handler(async ({ event, context }) => {
+  const id = event.params.tokenId.toString();
+  const prior = await context.CheckIn.get(id);
+  const sameTx = prior?.txHash === event.transaction.hash;
+  context.CheckIn.set({
+    id,
+    gateId: event.params.gateId,
+    ts: event.params.ts,
+    nonceHash: event.params.nonceHash,
+    manual: sameTx ? prior.manual : false,
+    late: sameTx ? prior.late : false,
+    txHash: event.transaction.hash,
+    block: BigInt(event.block.number),
+  });
+  const ticket = await context.Ticket.get(id);
+  if (ticket) context.Ticket.set({ ...ticket, checkIn_id: id });
+});
+
+/**
+ * 01b 의 `CheckedInLate(tokenId, gateId, issuedAt, ts)` — 오프라인 큐가 복구 뒤에 밀어 넣은
+ * 입장이다(`contracts/docs/abi-delta-01b.md` §2). 이 브랜치의 ABI 에는 아직 없어
+ * `gen-config.mjs` 의 `reserved` 에 들어 있고, config 에 없으므로 생성물에도 없다.
+ * 재배포로 ABI 가 갱신되면 이 등록이 **저절로** 살아난다 — 그때 고칠 것은 없다.
+ *
+ * `CheckedIn` 보다 **먼저** 오므로(01b Ticket.sol:468-469) 여기서 행을 세우고,
+ * 바로 뒤의 `CheckedIn` 이 진짜 nonceHash 로 덮으면서 `late` 를 지킨다.
+ */
+interface CheckedInLateEvent {
+  readonly params: {
+    readonly tokenId: bigint;
+    readonly gateId: bigint;
+    readonly issuedAt: bigint;
+    readonly ts: bigint;
+  };
+  readonly transaction: { readonly hash: string };
+  readonly block: { readonly number: number };
+}
+type ReservedHandler<eventType> = {
+  handler: (h: (args: { event: eventType; context: handlerContext }) => Promise<void>) => void;
+};
+
+const checkedInLate = (Ticket as unknown as { CheckedInLate?: ReservedHandler<CheckedInLateEvent> })
+  .CheckedInLate;
+
+checkedInLate?.handler(async ({ event, context }) => {
+  const id = event.params.tokenId.toString();
+  const prior = await context.CheckIn.get(id);
+  context.CheckIn.set({
+    id,
+    gateId: event.params.gateId,
+    ts: event.params.ts,
+    nonceHash: ZERO32,
+    manual: prior?.txHash === event.transaction.hash ? prior.manual : false,
+    late: true,
+    txHash: event.transaction.hash,
+    block: BigInt(event.block.number),
+  });
+  const ticket = await context.Ticket.get(id);
+  if (ticket) context.Ticket.set({ ...ticket, checkIn_id: id });
+});
+
+/**
+ * 수동 입장. `ManualOverride` 는 eventId 를 싣지 않으므로 공연은 짝이 되는 `CheckedIn`
+ * (또는 `Ticket`)을 타고 찾는다. 행 둘을 쓴다 — 감사용 `Override` 와, 뒤따라오는
+ * `CheckedIn` 이 이어받을 체크인 행이다.
+ */
+Ticket.ManualOverride.handler(async ({ event, context }) => {
+  const id = event.params.tokenId.toString();
+  context.Override.set({
+    id: `${event.transaction.hash}-${event.logIndex}`,
+    tokenId: event.params.tokenId,
+    gateId: event.params.gateId,
+    approver: addr(event.params.approver),
+    role: Number(event.params.role),
+    reason: Number(event.params.reason),
+    requested: false,
+  });
+  context.CheckIn.set({
+    id,
+    gateId: event.params.gateId,
+    ts: BigInt(event.block.timestamp),
+    nonceHash: ZERO32,
+    manual: true,
+    late: false,
+    txHash: event.transaction.hash,
+    block: BigInt(event.block.number),
+  });
+  const ticket = await context.Ticket.get(id);
+  if (ticket) context.Ticket.set({ ...ticket, checkIn_id: id });
+});
+
+/** 요청은 입장이 아니다 — 체크인 행을 만들지 않는다. role 은 `ROLE_NONE`(0). */
+Ticket.OverrideRequested.handler(async ({ event, context }) => {
+  context.Override.set({
+    id: `${event.transaction.hash}-${event.logIndex}`,
+    tokenId: event.params.tokenId,
+    gateId: event.params.gateId,
+    approver: addr(event.params.requester),
+    role: 0,
+    reason: Number(event.params.reason),
+    requested: true,
+  });
+});
+
+Ticket.Revoked.handler(async ({ event, context }) => {
+  const current = await context.Ticket.get(event.params.tokenId.toString());
+  if (!current) return;
+  context.Ticket.set({ ...current, revoked: true });
+});
+
+/**
+ * 회전한 계정이 제 티켓을 되찾는다. `migrate` 는 `_internalMove` 라 체인의 `_transfers`
+ * 를 올리지 않는데(Ticket.sol:544), 인덱서에는 같은 트랜잭션의 `Transfer` 가 **먼저**
+ * 와서 이미 +1 해 놓았다. 그 한 번을 여기서 되돌린다 — 남겨 두면 양도 한도가
+ * 체인보다 빨리 닫힌 것처럼 보인다.
+ */
+Ticket.Migrated.handler(async ({ event, context }) => {
+  const current = await context.Ticket.get(event.params.tokenId.toString());
+  if (!current) return;
+  const owner = addr(event.params.to);
+  context.Ticket.set({
+    ...current,
+    owner,
+    identity_id: owner,
+    transfers: current.transfers > 0 ? current.transfers - 1 : 0,
+  });
+});
+
+/** 티켓 하나에 오퍼는 하나다(`_offers[tokenId]`) — 그래서 id 가 tokenId 다. */
+Ticket.OfferCreated.handler(async ({ event, context }) => {
+  context.Offer.set({
+    id: event.params.tokenId.toString(),
+    from: addr(event.params.from),
+    commitment: event.params.recipientCommitment,
+    expiresAt: event.params.expiresAt,
+    status: 'open',
+  });
+});
+
+/** 체크인·양도·직접 취소가 모두 낸다(Ticket.sol:309, 365, 423, 539). */
+Ticket.OfferCancelled.handler(async ({ event, context }) => {
+  const current = await context.Offer.get(event.params.tokenId.toString());
+  if (!current) return;
+  context.Offer.set({ ...current, status: 'cancelled' });
+});
+
+/**
+ * `acceptOffer` 는 `delete _offers` 를 `_update` **앞에** 해서(Ticket.sol:321) 취소
+ * 이벤트를 내지 않는다. 그래서 여기 한 번만 닫힌다. 01b 의 EIP-712 전환은
+ * 서명 다이제스트만 바꾸므로 이 핸들러는 그대로다.
+ */
+Ticket.OfferAccepted.handler(async ({ event, context }) => {
+  const current = await context.Offer.get(event.params.tokenId.toString());
+  if (!current) return;
+  context.Offer.set({ ...current, status: 'accepted' });
 });

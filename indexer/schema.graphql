@@ -35,11 +35,15 @@ type Manager {
 
 # Organizers.GateRegistered(gateId, eventId, gateAccount, kx, ky)
 # + GateOpened / GateClosed / GateRevoked
-# `open` 은 Envio 예약어다(codegen EE210). 컨트랙트 뷰 `isOpenGate(gateId)` 를 줄인
-# `isOpen` 을 쓴다.
+# `open` 은 Envio 예약어다(codegen EE210). 컨트랙트 뷰
+# `isOpenGate(eventId, gateAccount)` 를 줄인 `isOpen` 을 쓴다 — 그 뷰는 gateId 가
+# 아니라 (공연, 게이트 계정) 쌍으로 묻는다(contracts/src/Organizers.sol:170).
 type Gate {
   id: ID!            # gateId
   eventId: BigInt! @index
+  # 01b 의 `revokeGate` 는 `gateOf(account)` 를 비워서 같은 계정을 새 gateId 로 다시
+  # 등록할 수 있게 한다(abi-delta-01b.md §6). 그래서 한 주소에 행이 둘 이상 남는다 —
+  # 주소로 게이트를 찾는 질의는 반드시 `revoked: false` 로 거른다.
   account: String! @index
   kx: String!
   ky: String!
