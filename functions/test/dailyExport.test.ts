@@ -151,6 +151,12 @@ describe('EXPORT_ENTITIES', () => {
   it('selects the schema.graphql scalars and no relation fields', () => {
     const byName = new Map(EXPORT_ENTITIES.map((e) => [e.entity, e.fields.split(' ')]));
     expect(byName.get('Manager')).toEqual(['id', 'orgId', 'account', 'exists', 'canApprove']);
+    // Gate.isOpen 과 CheckIn.late 는 Task 33 이 스키마에서 바꾼/더한 열이다. 정확히
+    // 단언해 두지 않으면 다음 rename 도 테스트가 못 잡고 BigQuery 백업이 조용히 빈다.
+    expect(byName.get('Gate')).toEqual(['id', 'eventId', 'account', 'kx', 'ky', 'isOpen', 'revoked']);
+    expect(byName.get('CheckIn')).toEqual([
+      'id', 'gateId', 'ts', 'nonceHash', 'manual', 'late', 'txHash', 'block',
+    ]);
     expect(byName.get('Offer')).toEqual(['id', 'from', 'commitment', 'expiresAt', 'status']);
     expect(byName.get('Event')).toContain('creator');
     expect(byName.get('IdentityAccount')).toContain('deviceUpdatedAt');

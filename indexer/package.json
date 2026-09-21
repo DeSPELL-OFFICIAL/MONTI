@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "gen:config": "node scripts/gen-config.mjs",
-    "codegen": "pnpm gen:config && envio codegen",
+    "codegen": "pnpm gen:config && node scripts/isolate-generated.mjs && envio codegen",
     "dev": "pnpm codegen && envio dev",
     "start": "envio start",
     "typecheck": "tsc --noEmit",

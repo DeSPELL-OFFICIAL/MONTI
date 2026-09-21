@@ -35,7 +35,8 @@ type Manager {
 
 # Organizers.GateRegistered(gateId, eventId, gateAccount, kx, ky)
 # + GateOpened / GateClosed / GateRevoked
-# `open` 은 Envio 예약어다(codegen EE210). 컨트랙트 뷰 이름과 같은 `isOpen` 을 쓴다.
+# `open` 은 Envio 예약어다(codegen EE210). 컨트랙트 뷰 `isOpenGate(gateId)` 를 줄인
+# `isOpen` 을 쓴다.
 type Gate {
   id: ID!            # gateId
   eventId: BigInt! @index
