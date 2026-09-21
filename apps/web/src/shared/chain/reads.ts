@@ -79,6 +79,13 @@ export function readIdentity() {
     isMember: (account: Hex) => call<boolean>('isMember', [account]),
     isLocked: (account: Hex) => call<boolean>('isLocked', [account]),
     kycLevelOf: (account: Hex) => call<number>('kycLevelOf', [account]),
+    /**
+     * When this account's device key was last replaced, unix **seconds** (`0` for an account
+     * that has never rotated). Spec §13: the gate puts an amber note on the admit card when a
+     * phone changed inside the last day, because a stolen-ticket handover looks exactly like a
+     * legitimate new phone and the only person who can tell them apart is standing at the door.
+     */
+    deviceUpdatedAt: (account: Hex) => call<bigint>('deviceUpdatedAt', [account]),
   };
 }
 

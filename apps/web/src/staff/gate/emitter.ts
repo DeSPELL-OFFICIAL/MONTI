@@ -73,6 +73,17 @@ export interface GateEmitter {
   stop(): Promise<void>;
   /** The code on the wire, or `undefined` before the first rotation and after `stop()`. */
   lastCode(): GateCodeWire | undefined;
+  /**
+   * Every code this gate has served and not yet forgotten, newest first — what a response's
+   * nonce is matched against.
+   *
+   * A tap over NFC never needs this: `onTap` has already run `matchIssuedCode` against the ring
+   * and hands the pair over. The QR fallback (Task 31) does, because a camera produces a
+   * `GateResponseWire` and nothing else, and matching it against `lastCode()` alone would refuse
+   * every scan that answers the code before the last rotation — which, at three seconds a
+   * rotation and a person holding up a phone, is most of them.
+   */
+  liveCodes(): readonly GateCodeWire[];
 }
 
 /**
@@ -176,5 +187,6 @@ export async function startGateEmitter(params: StartGateEmitterParams): Promise<
       await Hce.stop();
     },
     lastCode: () => ring[0],
+    liveCodes: () => ring,
   };
 }
