@@ -148,6 +148,39 @@ contract DeployCoinbaseFactoryTest is Test {
         assertEq(script.factoryAddress(), script.MAINNET_FACTORY(), "v1 is preferred");
     }
 
+    /// @notice The canonical addresses are only Coinbase's on the chains Coinbase deployed to. On any
+    ///         other chain they are anybody's to take, and a squatter that answers `implementation()`
+    ///         with its own contract would pass a liveness check that asked for nothing more. Adopting
+    ///         it would point every MONTI account at a factory the rest of the ecosystem has never
+    ///         heard of, so the script deploys its own instead.
+    function test_ignoresASquatterAtTheCanonicalAddresses() public {
+        address impostor = _etchImpostorFactoryAt(script.MAINNET_FACTORY());
+        _etchImpostorFactoryAt(script.MAINNET_FACTORY_V1_1());
+
+        script.resolve();
+
+        assertFalse(script.adoptedCanonical(), "a live contract at the address is not Coinbase's factory");
+        assertEq(script.factoryAddress(), script.predictedFactory(), "MONTI deployed its own instead");
+        assertTrue(script.factoryAddress().code.length > 0, "and it is really on chain");
+        assertTrue(impostor != script.MAINNET_IMPLEMENTATION(), "the squatter's implementation is its own");
+    }
+
+    /// @notice The two constants are a pair. A factory at the v1 address that proxies to the v1.1
+    ///         implementation is not the v1 deployment -- account addresses follow from factory and
+    ///         implementation together -- so recognising the implementation alone is not enough.
+    function test_doesNotAdoptACanonicalAddressCrossedWithTheOtherVersionsImplementation() public {
+        CoinbaseSmartWallet realImplementation = new CoinbaseSmartWallet();
+        vm.etch(script.MAINNET_IMPLEMENTATION_V1_1(), address(realImplementation).code);
+
+        CoinbaseSmartWalletFactory crossed = new CoinbaseSmartWalletFactory(script.MAINNET_IMPLEMENTATION_V1_1());
+        vm.etch(script.MAINNET_FACTORY(), address(crossed).code);
+
+        script.resolve();
+
+        assertFalse(script.adoptedCanonical(), "the v1 factory has to report the v1 implementation");
+        assertEq(script.factoryAddress(), script.predictedFactory(), "MONTI deployed its own instead");
+    }
+
     /// @notice `Deploy.s.sol` and this script write the same file from opposite ends. Whichever runs
     ///         second must leave the other's addresses alone, or sub-plan 02 loses its contracts or
     ///         sub-plan 03 loses its account factory.
@@ -202,6 +235,17 @@ contract DeployCoinbaseFactoryTest is Test {
         assertEq(script.MAINNET_FACTORY_V1_1(), 0xBA5ED110eFDBa3D005bfC882d75358ACBbB85842, "v1.1 factory");
         assertEq(script.MAINNET_IMPLEMENTATION_V1_1(), 0x00000110dCdEdC9581cb5eCB8467282f2926534d, "v1.1 impl");
         assertEq(script.SALT(), bytes32(0), "salt");
+    }
+
+    /// @dev Puts a working factory at a canonical address that proxies to an implementation of its
+    ///      own rather than Coinbase's -- what a chain where someone got to the address first looks
+    ///      like. Returns that implementation.
+    function _etchImpostorFactoryAt(address factorySlot) private returns (address implementation) {
+        CoinbaseSmartWallet impostorImplementation = new CoinbaseSmartWallet();
+        implementation = address(impostorImplementation);
+
+        CoinbaseSmartWalletFactory impostorFactory = new CoinbaseSmartWalletFactory(implementation);
+        vm.etch(factorySlot, address(impostorFactory).code);
     }
 
     /// @dev Puts a real factory and implementation at one of the two canonical address pairs, which

@@ -139,22 +139,28 @@ contract DeployCoinbaseFactory is Script {
     /// @dev v1 before v1.1: both are real Coinbase deployments, but permissionless.js defaults to v1,
     ///      so preferring it keeps sub-plan 03 on stock configuration.
     function _liveCanonicalFactory() private view returns (address) {
-        if (_isLiveFactory(MAINNET_FACTORY)) return MAINNET_FACTORY;
-        if (_isLiveFactory(MAINNET_FACTORY_V1_1)) return MAINNET_FACTORY_V1_1;
+        if (_isLiveFactory(MAINNET_FACTORY, MAINNET_IMPLEMENTATION)) return MAINNET_FACTORY;
+        if (_isLiveFactory(MAINNET_FACTORY_V1_1, MAINNET_IMPLEMENTATION_V1_1)) return MAINNET_FACTORY_V1_1;
         return address(0);
     }
 
-    /// @dev A factory worth adopting is one that answers `implementation()` with a contract. Comparing
-    ///      runtime code against our own build would prove nothing -- ours is compiled differently and
-    ///      would never match Coinbase's byte for byte -- whereas this is the property sub-plan 03
-    ///      actually depends on.
-    function _isLiveFactory(address candidate) private view returns (bool) {
+    /// @dev A factory worth adopting is one that answers `implementation()` with the implementation
+    ///      Coinbase shipped alongside it, and that implementation has to be a contract. The two
+    ///      constants are checked as a pair: an account address is a function of the factory and the
+    ///      implementation together, so a contract sitting at a canonical address and proxying to
+    ///      something else would hand every attendee a different address than the ecosystem's. On a
+    ///      chain Coinbase has not deployed to, that address is anybody's to take.
+    ///
+    ///      Comparing runtime code against our own build would prove nothing instead -- ours is
+    ///      compiled differently and would never match Coinbase's byte for byte.
+    function _isLiveFactory(address candidate, address expectedImplementation) private view returns (bool) {
         if (candidate.code.length == 0) return false;
 
         (bool ok, bytes memory ret) = candidate.staticcall(abi.encodeWithSignature("implementation()"));
         if (!ok || ret.length != 32) return false;
 
-        return abi.decode(ret, (address)).code.length > 0;
+        address implementation = abi.decode(ret, (address));
+        return implementation == expectedImplementation && implementation.code.length > 0;
     }
 
     function _log() private view {
