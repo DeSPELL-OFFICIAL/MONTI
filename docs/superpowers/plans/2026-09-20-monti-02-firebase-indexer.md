@@ -63,13 +63,13 @@
 | `packages/shared/src/copy-lint.ts` | 금지어 스캐너 CLI(적중 시 exit 1) | 9 |
 | `firebase.json` / `.firebaserc` | 프로젝트·에뮬레이터·호스팅·리전 | 10 |
 | `firestore.rules` / `storage.rules` | 클라이언트 전면 차단. 예외는 `devices/{account}.pushToken`, `users/{uid}`의 세 필드, 이벤트 채팅 메시지뿐 | 11 |
-| `functions/src/lib/kms.ts` | KMS 봉투 암호화 `encryptField`/`decryptField`, `signKeccak` | 12, 13 |
-| `functions/src/lib/attester.ts` | Secret Manager `ATTESTER_PK` → viem 계정 | 13 |
-| `functions/src/config.ts` | 리전, 파라미터, 시크릿 선언 | 14 |
+| `functions/src/lib/kms.ts` | KMS 봉투 암호화 `encryptField`/`decryptField`, `signKeccak` | 12, 14 |
+| `functions/src/config.ts` | 리전, 파라미터, 시크릿 선언 | 13 |
+| `functions/src/lib/attester.ts` | Secret Manager `ATTESTER_PK` → viem 계정 | 14 |
 | `functions/src/lib/chain.ts` | viem public/wallet 클라이언트, `withGasMargin` 쓰기, `awaitFinalized` | 14 |
 | `functions/src/lib/db.ts` | Admin SDK 싱글턴, 컬렉션 상수, `assertStatusTransition` | 15 |
 | `functions/src/lib/auth.ts` | `resolveCallerAccount`, `requireStaffForGate` | 15 |
-| `functions/src/lib/phoneIndex.ts` | `hmacPhone`, `recipientCommitment`, `phoneIndex` 읽기·쓰기 | 24 |
+| `functions/src/lib/phoneIndex.ts` | `hmacPhone`, `upsertPhoneIndex`(16), `personIdByPhone`(24) | 16, 24 |
 | `functions/src/lib/envio.ts` | Envio GraphQL 페이지네이션 클라이언트 | 27 |
 | `functions/src/functions/*.ts` | 마스터 계획 표 + 델타의 함수 하나당 파일 하나 | 16–30 |
 | `functions/src/index.ts` | 모든 함수 재수출(배포 진입점) | 14, 30 |
@@ -85,8 +85,8 @@
 ```
 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9            packages/shared (순차)
 10 → 11                                       Firebase 프로젝트 파일 · 보안 규칙
-12 → 13                                       KMS · 어테스터
-14 → 15                                       functions 공통 계층
+12 → 13                                       KMS · Functions 패키지·설정
+14 → 15                                       어테스터·체인 클라이언트 · 공통 계층
 16 … 30                                       함수 (15 이후 서로 병렬 가능)
 31 → 32                                       정합성 가드 · 에뮬레이터 통합 테스트
 33 → 34 → 35 → 36 → 37 → 38                   Envio 인덱서 · Tenderly 알림
@@ -125,7 +125,7 @@
 
 | 컬렉션 | 주요 필드 | 쓰는 주체 | 클라이언트 접근 | Task |
 |---|---|---|---|---|
-| `persons/{personId}` | `status: 'pending'\|'active'\|'rotated'`(`kyc_ok`·`rejected`는 레거시), **`kycLevel: 0\|1`**, `account: Hex`, `kyc?: { provider:'didit', sessionId, url, status:'open'\|'approved'\|'rejected', verifiedAt?, faceSearchOk?, rejectedReason?, levelTx? }`, `enc?: { name, docNumber }`, `photoEnc?`, `chain: { registerTx?, registerPending?, block? }`, `createdAt`, `updatedAt` | Functions | 없음 | 16, 44 |
+| `persons/{personId}` | `status: 'pending'\|'kyc_ok'\|'rejected'\|'active'\|'rotated'`(`active`=체인 등록 완료, `kyc_ok`=승인됐으나 `setKycLevel` 미확정, `rejected`=거절·중복 얼굴), **`kycLevel: 0\|1`**, `account: Hex`, `kyc?: { provider:'didit', sessionId, url, status:'open'\|'approved'\|'rejected', verifiedAt?, faceSearchOk?, rejectedReason?, levelTx? }`, `enc?: { name, docNumber }`, `photoEnc?`, `chain: { registerTx?, registerPending?, block? }`, `createdAt`, `updatedAt` | Functions | 없음 | 16, 44 |
 | `users/{firebaseUid}` | `personId`, `phoneE164`, `nickname?`, `locale: 'en'\|'ko'`, `chatOrder: string[]`, `createdAt` | Functions + 소유자(3필드) | `nickname`·`locale`·`chatOrder`만 쓰기 | 16, 11 |
 | `passkeys/{credentialId}` | `personId`, `publicKeyCose: b64`, `counter: number`, `transports: string[]`, `createdAt`, `lastUsedAt?` | Functions | 없음 | 18 |
 | `devices/{account}` | `deviceX`, `deviceY`, `platform`, `pushToken?`, `updatedAt` | Functions + 소유자(`pushToken`) | `pushToken`만 쓰기 | 11, 28 |
@@ -528,24 +528,27 @@ git commit -m "feat(shared): add off-chain wire types and runtime guards"
 
 **Interfaces:**
 - Consumes: Task 1의 `Hex`. sub-plan 01이 커밋한 `contracts/deployments/10143.json`.
-- Produces: `MONAD_TESTNET_CHAIN_ID`, `MONAD_MAINNET_CHAIN_ID`, `DEFAULT_CHAIN_ID`, `MONAD_TESTNET_RPC_URL`, `MONAD_MAINNET_RPC_URL`, `ENTRY_POINT_V06_ADDRESS`, `P256_PRECOMPILE_ADDRESS`, `CREATE2_DEPLOYER_ADDRESS`, `GAS_LIMIT_MULTIPLIER_BPS`, `withGasMargin(estimate: bigint): bigint`, `HCE_AID`, `NDEF_GATE_TYPE`, `NDEF_RESPONSE_TYPE`, `QR_PREFIX`, `GATE_CODE_ROTATE_MS`, `CODE_WINDOW_SECONDS`, `ARM_WINDOW_SECONDS`, `ROTATION_COOLDOWN_SECONDS`, `DEVICE_COOLDOWN_SECONDS`, `DIDIT_WEBHOOK_TOLERANCE_SECONDS`, `SNAPSHOT_TTL_SECONDS`, `FIREBASE_REGION`, `BANNED_ATTENDEE_WORDS`, `interface Deployment`, `parseDeployment(raw: unknown): Deployment`, `getDeployment(chainId?: number): Deployment`.
+- Produces: `MONAD_TESTNET_CHAIN_ID`, `MONAD_MAINNET_CHAIN_ID`, `DEFAULT_CHAIN_ID`, `MONAD_TESTNET_RPC_URL`, `MONAD_MAINNET_RPC_URL`, `ENTRY_POINT_V06_ADDRESS`, `P256_PRECOMPILE_ADDRESS`, `CREATE2_DEPLOYER_ADDRESS`, `GAS_LIMIT_MULTIPLIER_BPS`, `withGasMargin(estimate: bigint): bigint`, `HCE_AID`, `NDEF_GATE_TYPE`, `NDEF_RESPONSE_TYPE`, `QR_PREFIX`, `GATE_CODE_ROTATE_MS`, `CODE_WINDOW_SECONDS`, `ARM_WINDOW_SECONDS`, `ROTATION_COOLDOWN_SECONDS`, `DEVICE_COOLDOWN_SECONDS`, `DIDIT_WEBHOOK_TOLERANCE_SECONDS`, `SNAPSHOT_TTL_SECONDS`, `FIREBASE_REGION`, `BANNED_ATTENDEE_WORDS`, `interface Deployment`, `parseDeployment(raw: unknown): Deployment`, `loadDeployment(chainId?: number): Deployment`, 그리고 얇은 접근자 `identityAddress()`, `organizersAddress()`, `ticketAddress()`, `paymasterAddress()`, `attesterAddress()`, `coinbaseFactoryAddress()`, `entryPointAddress()`.
+
+**모듈 스코프에서 배포 파일을 파싱하지 않는다.** `import '@monti/shared'` 만으로는 절대 예외가 나지 않아야 한다(01이 아직 배포하지 않았거나 테스트가 체인을 안 쓰는 경우가 많다). `loadDeployment` 는 **처음 호출될 때** 파싱하고 결과를 메모한다.
 
 **전제:** sub-plan 01 Task 13이 `contracts/deployments/10143.json`을 다음 모양으로 커밋해 두었다.
 
 ```json
 {
   "chainId": 10143,
-  "startBlock": 12345678,
   "identity": "0x0000000000000000000000000000000000000000",
   "organizers": "0x0000000000000000000000000000000000000000",
   "ticket": "0x0000000000000000000000000000000000000000",
   "paymaster": "0x0000000000000000000000000000000000000000",
-  "factory": "0x0000000000000000000000000000000000000000",
-  "attester": "0x0000000000000000000000000000000000000000"
+  "attester": "0x0000000000000000000000000000000000000000",
+  "coinbaseFactory": "0x0000000000000000000000000000000000000000",
+  "entryPoint": "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789",
+  "block": 12345678
 }
 ```
 
-(주소는 01이 실제 배포로 채운다. 이 계획은 값이 아니라 **모양**만 의존한다.)
+**키 이름은 01의 `Deploy.s.sol` 이 쓰는 것과 글자 단위로 같아야 한다.** 특히 시작 블록은 `startBlock` 이 아니라 **`block`**, 계정 팩토리는 `factory` 가 아니라 **`coinbaseFactory`** 이고 `entryPoint` 도 파일에 들어 있다. 주소 값은 01이 실제 배포로 채운다 — 이 계획은 값이 아니라 **모양**만 의존한다.
 
 - [ ] **Step 1: 배포 파일 동기화 스크립트를 쓴다**
 
@@ -591,7 +594,7 @@ Expected: `[sync-deployments] 10143.json`
 ```ts
 import { describe, expect, it } from 'vitest';
 import {
-  ATTESTER_ADDRESS,
+  attesterAddress,
   BANNED_ATTENDEE_WORDS,
   CODE_WINDOW_SECONDS,
   CREATE2_DEPLOYER_ADDRESS,
@@ -601,15 +604,15 @@ import {
   FIREBASE_REGION,
   GATE_CODE_ROTATE_MS,
   HCE_AID,
-  IDENTITY_ADDRESS,
+  identityAddress,
   MONAD_TESTNET_CHAIN_ID,
-  ORGANIZERS_ADDRESS,
+  organizersAddress,
   P256_PRECOMPILE_ADDRESS,
   QR_PREFIX,
-  TICKET_ADDRESS,
+  ticketAddress,
   TRANSFER_INVITE_TTL_SECONDS,
   USER_WRITABLE_FIELDS,
-  getDeployment,
+  loadDeployment,
   parseDeployment,
   withGasMargin,
 } from './constants.js';
@@ -679,48 +682,52 @@ describe('deployments', () => {
   it('parses a well-formed deployment', () => {
     const parsed = parseDeployment({
       chainId: 10143,
-      startBlock: 42,
       identity: '0x1111111111111111111111111111111111111111',
       organizers: '0x2222222222222222222222222222222222222222',
       ticket: '0x3333333333333333333333333333333333333333',
       paymaster: '0x4444444444444444444444444444444444444444',
-      factory: '0x5555555555555555555555555555555555555555',
       attester: '0x6666666666666666666666666666666666666666',
+      coinbaseFactory: '0x5555555555555555555555555555555555555555',
+      entryPoint: '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789',
+      block: 42,
     });
     expect(parsed.chainId).toBe(10143);
-    expect(parsed.startBlock).toBe(42);
+    expect(parsed.block).toBe(42);
     expect(parsed.ticket).toBe('0x3333333333333333333333333333333333333333');
+    expect(parsed.coinbaseFactory).toBe('0x5555555555555555555555555555555555555555');
   });
 
-  it('rejects a malformed address', () => {
-    expect(() =>
-      parseDeployment({
-        chainId: 10143,
-        startBlock: 1,
-        identity: '0xnope',
-        organizers: '0x2222222222222222222222222222222222222222',
-        ticket: '0x3333333333333333333333333333333333333333',
-        paymaster: '0x4444444444444444444444444444444444444444',
-        factory: '0x5555555555555555555555555555555555555555',
-        attester: '0x6666666666666666666666666666666666666666',
-      }),
-    ).toThrow('BAD_DEPLOYMENT_FIELD:identity');
+  it('rejects a malformed address and a missing block', () => {
+    const good = {
+      chainId: 10143,
+      identity: '0x1111111111111111111111111111111111111111',
+      organizers: '0x2222222222222222222222222222222222222222',
+      ticket: '0x3333333333333333333333333333333333333333',
+      paymaster: '0x4444444444444444444444444444444444444444',
+      attester: '0x6666666666666666666666666666666666666666',
+      coinbaseFactory: '0x5555555555555555555555555555555555555555',
+      entryPoint: '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789',
+      block: 1,
+    };
+    expect(() => parseDeployment({ ...good, identity: '0xnope' })).toThrow('BAD_DEPLOYMENT_FIELD:identity');
+    expect(() => parseDeployment({ ...good, coinbaseFactory: undefined })).toThrow('BAD_DEPLOYMENT_FIELD:coinbaseFactory');
+    expect(() => parseDeployment({ ...good, block: undefined })).toThrow('BAD_DEPLOYMENT_FIELD:block');
   });
 
-  it('returns the synced testnet deployment and rejects an unknown chain', () => {
-    const deployment = getDeployment(10143);
+  it('loads the synced testnet deployment lazily and rejects an unknown chain', () => {
+    const deployment = loadDeployment(10143);
     expect(deployment.chainId).toBe(10143);
-    expect(deployment.startBlock).toBeGreaterThanOrEqual(0);
-    expect(() => getDeployment(1)).toThrow('NO_DEPLOYMENT:1');
+    expect(deployment.block).toBeGreaterThanOrEqual(0);
+    expect(() => loadDeployment(1)).toThrow('NO_DEPLOYMENT:1');
   });
 
-  it('exports every contract address plus ATTESTER_ADDRESS at the top level', () => {
-    const deployment = getDeployment();
-    expect(ATTESTER_ADDRESS).toBe(deployment.attester);
-    expect(IDENTITY_ADDRESS).toBe(deployment.identity);
-    expect(ORGANIZERS_ADDRESS).toBe(deployment.organizers);
-    expect(TICKET_ADDRESS).toBe(deployment.ticket);
-    expect(ATTESTER_ADDRESS).toMatch(/^0x[0-9a-fA-F]{40}$/);
+  it('exposes address accessors that agree with the loaded deployment', () => {
+    const deployment = loadDeployment();
+    expect(attesterAddress()).toBe(deployment.attester);
+    expect(identityAddress()).toBe(deployment.identity);
+    expect(organizersAddress()).toBe(deployment.organizers);
+    expect(ticketAddress()).toBe(deployment.ticket);
+    expect(attesterAddress()).toMatch(/^0x[0-9a-fA-F]{40}$/);
   });
 });
 ```
@@ -810,13 +817,15 @@ export const USER_WRITABLE_FIELDS = ['nickname', 'locale', 'chatOrder'] as const
 
 export interface Deployment {
   chainId: number;
-  startBlock: number;
+  /** 01의 Deploy.s.sol 이 기록한 배포 블록. 인덱서의 start_block 이 된다. */
+  block: number;
   identity: Hex;
   organizers: Hex;
   ticket: Hex;
   paymaster: Hex;
-  factory: Hex;
   attester: Hex;
+  coinbaseFactory: Hex;
+  entryPoint: Hex;
 }
 
 const ADDRESS_FIELDS = [
@@ -824,18 +833,19 @@ const ADDRESS_FIELDS = [
   'organizers',
   'ticket',
   'paymaster',
-  'factory',
   'attester',
+  'coinbaseFactory',
+  'entryPoint',
 ] as const;
 
 export function parseDeployment(raw: unknown): Deployment {
   if (typeof raw !== 'object' || raw === null) throw new Error('BAD_DEPLOYMENT');
   const value = raw as Record<string, unknown>;
   if (typeof value.chainId !== 'number') throw new Error('BAD_DEPLOYMENT_FIELD:chainId');
-  if (typeof value.startBlock !== 'number' || value.startBlock < 0) {
-    throw new Error('BAD_DEPLOYMENT_FIELD:startBlock');
+  if (typeof value.block !== 'number' || value.block < 0) {
+    throw new Error('BAD_DEPLOYMENT_FIELD:block');
   }
-  const out: Record<string, unknown> = { chainId: value.chainId, startBlock: value.startBlock };
+  const out: Record<string, unknown> = { chainId: value.chainId, block: value.block };
   for (const field of ADDRESS_FIELDS) {
     const address = value[field];
     if (typeof address !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(address)) {
@@ -846,26 +856,33 @@ export function parseDeployment(raw: unknown): Deployment {
   return out as unknown as Deployment;
 }
 
-const DEPLOYMENTS: Record<number, Deployment> = {
-  [MONAD_TESTNET_CHAIN_ID]: parseDeployment(deployment10143),
+const RAW_DEPLOYMENTS: Record<number, unknown> = {
+  [MONAD_TESTNET_CHAIN_ID]: deployment10143,
 };
+const parsed = new Map<number, Deployment>();
 
-export function getDeployment(chainId: number = DEFAULT_CHAIN_ID): Deployment {
-  const deployment = DEPLOYMENTS[chainId];
-  if (!deployment) throw new Error(`NO_DEPLOYMENT:${chainId}`);
+/**
+ * 지연 로딩. `import '@monti/shared'` 만으로는 절대 던지지 않는다 —
+ * 배포 파일이 비어 있거나 모양이 틀렸다면 **이 함수를 부를 때** 알게 된다.
+ */
+export function loadDeployment(chainId: number = DEFAULT_CHAIN_ID): Deployment {
+  const cached = parsed.get(chainId);
+  if (cached) return cached;
+  const raw = RAW_DEPLOYMENTS[chainId];
+  if (!raw) throw new Error(`NO_DEPLOYMENT:${chainId}`);
+  const deployment = parseDeployment(raw);
+  parsed.set(chainId, deployment);
   return deployment;
 }
 
-/**
- * 어테스터 EOA 주소. contracts/deployments/{chainId}.json 의 `attester` 필드다.
- * 스태프 단말기(sub-plan 04)가 스냅샷 서명을 검증할 때 이 주소와 대조한다.
- */
-export const ATTESTER_ADDRESS: Hex = getDeployment().attester;
-export const IDENTITY_ADDRESS: Hex = getDeployment().identity;
-export const ORGANIZERS_ADDRESS: Hex = getDeployment().organizers;
-export const TICKET_ADDRESS: Hex = getDeployment().ticket;
-export const PAYMASTER_ADDRESS: Hex = getDeployment().paymaster;
-export const FACTORY_ADDRESS: Hex = getDeployment().factory;
+/** 얇은 접근자들. sub-plan 04는 `attesterAddress()` 로 스냅샷 서명을 검증한다. */
+export const identityAddress = (chainId?: number): Hex => loadDeployment(chainId).identity;
+export const organizersAddress = (chainId?: number): Hex => loadDeployment(chainId).organizers;
+export const ticketAddress = (chainId?: number): Hex => loadDeployment(chainId).ticket;
+export const paymasterAddress = (chainId?: number): Hex => loadDeployment(chainId).paymaster;
+export const attesterAddress = (chainId?: number): Hex => loadDeployment(chainId).attester;
+export const coinbaseFactoryAddress = (chainId?: number): Hex => loadDeployment(chainId).coinbaseFactory;
+export const entryPointAddress = (chainId?: number): Hex => loadDeployment(chainId).entryPoint;
 ```
 
 `packages/shared/src/index.ts`에 한 줄 추가:
@@ -891,7 +908,7 @@ git commit -m "feat(shared): add chain, protocol and copy constants with deploym
 
 ---
 
-## Task 3: 타입 있는 ABI 프래그먼트(`abi.ts`)
+## Task 3: 컨트랙트 전체 ABI 재수출(`abi.ts`)
 
 **Files:**
 - Create: `packages/shared/src/abi.ts`
@@ -899,40 +916,53 @@ git commit -m "feat(shared): add chain, protocol and copy constants with deploym
 - Test: `packages/shared/src/abi.test.ts`
 
 **Interfaces:**
-- Consumes: sub-plan 01이 커밋한 `packages/shared/src/abi/{Identity,Organizers,Ticket,MontiPaymaster,CoinbaseSmartWalletFactory}.json`(각각 ABI 배열).
-- Produces: `identityAbi`, `organizersAbi`, `ticketAbi`, `factoryAbi` — viem 추론이 살아 있는 `as const` 배열. 그리고 원본 JSON 재수출 `identityAbiJson`, `organizersAbiJson`, `ticketAbiJson`(인덱서와 웹이 쓴다).
+- Consumes: sub-plan 01의 `script/export-abi.sh` 가 만든 `packages/shared/src/abi/{Identity,Organizers,Ticket,MontiPaymaster,CoinbaseSmartWalletFactory}.json` — 각 파일은 **컨트랙트의 전체 ABI 배열**이다.
+- Produces: `identityAbi`, `organizersAbi`, `ticketAbi`, `montiPaymasterAbi`, `coinbaseFactoryAbi` — 전부 `viem`의 `Abi` 타입으로 좁힌 **전체 ABI**. 웹·Functions·인덱서가 모두 같은 배열을 쓴다.
 
-**왜 두 벌인가:** JSON import는 `as const` 리터럴 타입을 잃어 viem의 `readContract` 반환 타입이 `unknown`이 된다. Functions는 타입이 필요하므로 **백엔드가 실제로 호출하는 함수와 구독하는 이벤트만** 손으로 옮긴 좁은 `as const` ABI를 쓴다. 전체 ABI는 인덱서·웹용으로 JSON 그대로 둔다. Task 30의 정합성 테스트가 두 벌이 어긋나지 않는지 검사한다.
+**손으로 고른 프래그먼트를 쓰지 않는다.** 01이 컴파일 산출물에서 뽑아 주는 전체 ABI를 그대로 재수출한다. 그래야 `tiers`, `balanceOf`, `eventStatus`, `offerOf`, `kycLevelOf` 처럼 나중에 필요해지는 함수가 **이미 들어 있고**, 뒤 Task들이 ABI에 항목을 덧붙이는 일이 사라진다. 대신 JSON import는 리터럴 타입을 잃으므로 **`readContract` 결과는 항상 캐스팅한다**(`as bigint`, `as Hex`, `as readonly [boolean, boolean]` …). 이 계획의 모든 호출부가 그렇게 쓰여 있다.
 
-- [ ] **Step 1: 실패하는 테스트를 쓴다**
+- [ ] **Step 1: 01의 산출물이 있는지 확인한다**
+
+Run:
+```bash
+ls packages/shared/src/abi/
+node -e "const a=require('./packages/shared/src/abi/Ticket.json'); console.log(Array.isArray(a), a.length)"
+```
+Expected: `CoinbaseSmartWalletFactory.json  Identity.json  MontiPaymaster.json  Organizers.json  Ticket.json` 그리고 `true <두 자리 수>`. 파일이 없으면 sub-plan 01의 `script/export-abi.sh` 를 먼저 돌린다. 배열이 아니라 `{ "abi": [...] }` 로 나온다면 01에게 배열로 바꿔 달라고 요청한다(양쪽이 같은 모양을 전제한다).
+
+- [ ] **Step 2: 실패하는 테스트를 쓴다**
 
 `packages/shared/src/abi.test.ts`:
 
 ```ts
 import { describe, expect, it } from 'vitest';
 import {
-  factoryAbi,
+  coinbaseFactoryAbi,
   identityAbi,
-  identityAbiJson,
+  montiPaymasterAbi,
   organizersAbi,
-  organizersAbiJson,
   ticketAbi,
-  ticketAbiJson,
 } from './abi.js';
 
-type AbiItem = { type: string; name?: string; inputs?: unknown[] };
+type AbiItem = { type: string; name?: string; inputs?: Array<{ name?: string; indexed?: boolean }> };
 
 function names(abi: readonly unknown[], type: string): string[] {
   return (abi as AbiItem[]).filter((i) => i.type === type && i.name).map((i) => i.name as string);
 }
 
-describe('typed ABI fragments', () => {
-  it('exposes every Identity call the backend makes', () => {
+function event(abi: readonly unknown[], name: string): AbiItem {
+  const found = (abi as AbiItem[]).find((i) => i.type === 'event' && i.name === name);
+  if (!found) throw new Error(`event ${name} missing`);
+  return found;
+}
+
+describe('Identity ABI', () => {
+  it('carries every call and event the backend and indexer use', () => {
     expect(names(identityAbi, 'function')).toEqual(
       expect.arrayContaining([
-        'register', 'rotateAccount', 'lockDevice', 'accountOf', 'personOf', 'isMember',
-        'activeDevice', 'isLocked', 'deviceUpdatedAt', 'setNickname', 'nicknameOwner',
-        'nicknameOf', 'attester', 'setKycLevel', 'kycLevelOf',
+        'register', 'rotateAccount', 'setActiveDevice', 'lockDevice', 'setKycLevel', 'setNickname',
+        'accountOf', 'personOf', 'isMember', 'activeDevice', 'isLocked', 'deviceUpdatedAt',
+        'kycLevelOf', 'nicknameOwner', 'nicknameOf', 'attester',
       ]),
     );
     expect(names(identityAbi, 'event')).toEqual(
@@ -940,591 +970,91 @@ describe('typed ABI fragments', () => {
     );
   });
 
-  it('exposes every Organizers call the backend makes', () => {
+  it('declares register with the kycLevel argument', () => {
+    const register = (identityAbi as AbiItem[]).find((i) => i.type === 'function' && i.name === 'register');
+    expect(register?.inputs?.map((i) => i.name)).toEqual(['personId', 'account', 'deviceX', 'deviceY', 'kycLevel']);
+  });
+});
+
+describe('Organizers ABI', () => {
+  it('carries every call and event the backend and indexer use', () => {
     expect(names(organizersAbi, 'function')).toEqual(
-      expect.arrayContaining(['hasPermission', 'managerOf', 'isOpenGate', 'gateOf', 'gateInfo', 'ownerOf', 'setAdmin', 'setManager']),
+      expect.arrayContaining(['createOrganizer', 'setAdmin', 'setManager', 'registerGate', 'openGate', 'closeGate',
+        'ownerOf', 'hasPermission', 'managerOf', 'gateOf', 'gateInfo', 'isOpenGate']),
+    );
+    expect(names(organizersAbi, 'event')).toEqual(
+      expect.arrayContaining(['OrganizerCreated', 'AdminSet', 'ManagerSet', 'OwnerTransferred',
+        'GateRegistered', 'GateRevoked', 'GateOpened', 'GateClosed']),
     );
   });
+});
 
-  it('exposes every Ticket call the backend makes', () => {
+describe('Ticket ABI', () => {
+  it('carries every call the backend uses, including the ones added late', () => {
     expect(names(ticketAbi, 'function')).toEqual(
-      expect.arrayContaining([
-        'eventOf', 'eventOrg', 'ownerOf', 'checkInOf', 'tierOf', 'balanceOfEvent',
-        'eventMeta', 'eventStatus', 'createOffer', 'cancelOffer', 'acceptOffer', 'offerOf',
-      ]),
+      expect.arrayContaining(['ownerOf', 'balanceOf', 'eventOf', 'tierOf', 'eventOrg', 'checkInOf',
+        'balanceOfEvent', 'eventMeta', 'eventStatus', 'tiers', 'createOffer', 'cancelOffer', 'acceptOffer', 'offerOf']),
     );
     expect(names(ticketAbi, 'event')).toEqual(
-      expect.arrayContaining([
-        'CheckedIn', 'Claimed', 'Transfer', 'ManualOverride', 'EventStatusChanged',
-        'OfferCreated', 'OfferCancelled', 'OfferAccepted',
-      ]),
+      expect.arrayContaining(['EventCreated', 'EventStatusChanged', 'Claimed', 'Transfer', 'CheckedIn',
+        'OverrideRequested', 'ManualOverride', 'Revoked', 'Migrated',
+        'OfferCreated', 'OfferCancelled', 'OfferAccepted']),
     );
   });
 
-  it('exposes the Coinbase factory getAddress used for the counterfactual account', () => {
-    expect(names(factoryAbi, 'function')).toContain('getAddress');
-  });
+  it('matches sub-plan 01 offer event signatures exactly', () => {
+    // OfferCreated(uint256 indexed tokenId, address indexed from, bytes32 recipientCommitment, uint64 expiresAt)
+    const created = event(ticketAbi, 'OfferCreated');
+    expect(created.inputs?.map((i) => [i.name, i.indexed])).toEqual([
+      ['tokenId', true],
+      ['from', true],
+      ['recipientCommitment', false],
+      ['expiresAt', false],
+    ]);
 
-  it('keeps every typed fragment present in the generated JSON ABI', () => {
-    const pairs: Array<[readonly unknown[], readonly unknown[], string]> = [
-      [identityAbi, identityAbiJson, 'Identity'],
-      [organizersAbi, organizersAbiJson, 'Organizers'],
-      [ticketAbi, ticketAbiJson, 'Ticket'],
-    ];
-    for (const [typed, json, label] of pairs) {
-      for (const kind of ['function', 'event']) {
-        for (const name of names(typed, kind)) {
-          expect(names(json, kind), `${label}.${kind} ${name}`).toContain(name);
-        }
-      }
-    }
+    // OfferAccepted(uint256 indexed tokenId, address indexed from, address indexed to)
+    const accepted = event(ticketAbi, 'OfferAccepted');
+    expect(accepted.inputs?.map((i) => [i.name, i.indexed])).toEqual([
+      ['tokenId', true],
+      ['from', true],
+      ['to', true],
+    ]);
+  });
+});
+
+describe('other ABIs', () => {
+  it('exposes the paymaster budget calls and the Coinbase factory getAddress', () => {
+    expect(names(montiPaymasterAbi, 'function')).toEqual(expect.arrayContaining(['depositPlatform', 'budgetOf']));
+    expect(names(coinbaseFactoryAbi, 'function')).toEqual(expect.arrayContaining(['getAddress', 'createAccount']));
   });
 });
 ```
 
-- [ ] **Step 2: 실패를 확인한다**
+- [ ] **Step 3: 실패를 확인한다**
 
 Run: `pnpm --filter @monti/shared exec vitest run src/abi.test.ts`
 Expected: FAIL — `Failed to resolve import "./abi.js"`
 
-- [ ] **Step 3: `abi.ts`를 쓴다**
+- [ ] **Step 4: `abi.ts`를 쓴다**
 
 ```ts
-import identityAbiJsonRaw from './abi/Identity.json';
-import organizersAbiJsonRaw from './abi/Organizers.json';
-import ticketAbiJsonRaw from './abi/Ticket.json';
-import montiPaymasterAbiJsonRaw from './abi/MontiPaymaster.json';
+import type { Abi } from 'viem';
+import coinbaseFactoryAbiJson from './abi/CoinbaseSmartWalletFactory.json';
+import identityAbiJson from './abi/Identity.json';
+import montiPaymasterAbiJson from './abi/MontiPaymaster.json';
+import organizersAbiJson from './abi/Organizers.json';
+import ticketAbiJson from './abi/Ticket.json';
 
-export const identityAbiJson = identityAbiJsonRaw as readonly unknown[];
-export const organizersAbiJson = organizersAbiJsonRaw as readonly unknown[];
-export const ticketAbiJson = ticketAbiJsonRaw as readonly unknown[];
-export const montiPaymasterAbiJson = montiPaymasterAbiJsonRaw as readonly unknown[];
-
-export const identityAbi = [
-  {
-    type: 'function',
-    name: 'register',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'personId', type: 'bytes32' },
-      { name: 'account', type: 'address' },
-      { name: 'deviceX', type: 'bytes32' },
-      { name: 'deviceY', type: 'bytes32' },
-      { name: 'kycLevel', type: 'uint8' },
-    ],
-    outputs: [],
-  },
-  {
-    type: 'function',
-    name: 'setKycLevel',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'personId', type: 'bytes32' },
-      { name: 'level', type: 'uint8' },
-    ],
-    outputs: [],
-  },
-  {
-    type: 'function',
-    name: 'kycLevelOf',
-    stateMutability: 'view',
-    inputs: [{ name: 'account', type: 'address' }],
-    outputs: [{ name: '', type: 'uint8' }],
-  },
-  {
-    type: 'function',
-    name: 'rotateAccount',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'personId', type: 'bytes32' },
-      { name: 'newAccount', type: 'address' },
-    ],
-    outputs: [],
-  },
-  {
-    type: 'function',
-    name: 'lockDevice',
-    stateMutability: 'nonpayable',
-    inputs: [{ name: 'account', type: 'address' }],
-    outputs: [],
-  },
-  {
-    type: 'function',
-    name: 'accountOf',
-    stateMutability: 'view',
-    inputs: [{ name: 'personId', type: 'bytes32' }],
-    outputs: [{ name: '', type: 'address' }],
-  },
-  {
-    type: 'function',
-    name: 'personOf',
-    stateMutability: 'view',
-    inputs: [{ name: 'account', type: 'address' }],
-    outputs: [{ name: '', type: 'bytes32' }],
-  },
-  {
-    type: 'function',
-    name: 'isMember',
-    stateMutability: 'view',
-    inputs: [{ name: 'account', type: 'address' }],
-    outputs: [{ name: '', type: 'bool' }],
-  },
-  {
-    type: 'function',
-    name: 'activeDevice',
-    stateMutability: 'view',
-    inputs: [{ name: 'account', type: 'address' }],
-    outputs: [
-      { name: 'x', type: 'bytes32' },
-      { name: 'y', type: 'bytes32' },
-    ],
-  },
-  {
-    type: 'function',
-    name: 'isLocked',
-    stateMutability: 'view',
-    inputs: [{ name: 'account', type: 'address' }],
-    outputs: [{ name: '', type: 'bool' }],
-  },
-  {
-    type: 'function',
-    name: 'deviceUpdatedAt',
-    stateMutability: 'view',
-    inputs: [{ name: 'account', type: 'address' }],
-    outputs: [{ name: '', type: 'uint64' }],
-  },
-  {
-    type: 'function',
-    name: 'setNickname',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'nicknameHash', type: 'bytes32' },
-      { name: 'nickname', type: 'string' },
-    ],
-    outputs: [],
-  },
-  {
-    type: 'function',
-    name: 'nicknameOwner',
-    stateMutability: 'view',
-    inputs: [{ name: 'nicknameHash', type: 'bytes32' }],
-    outputs: [{ name: '', type: 'address' }],
-  },
-  {
-    type: 'function',
-    name: 'nicknameOf',
-    stateMutability: 'view',
-    inputs: [{ name: 'account', type: 'address' }],
-    outputs: [{ name: '', type: 'string' }],
-  },
-  {
-    type: 'function',
-    name: 'attester',
-    stateMutability: 'view',
-    inputs: [],
-    outputs: [{ name: '', type: 'address' }],
-  },
-  {
-    type: 'event',
-    name: 'Registered',
-    inputs: [
-      { name: 'personId', type: 'bytes32', indexed: true },
-      { name: 'account', type: 'address', indexed: true },
-    ],
-  },
-  {
-    type: 'event',
-    name: 'AccountRotated',
-    inputs: [
-      { name: 'personId', type: 'bytes32', indexed: true },
-      { name: 'oldAccount', type: 'address', indexed: true },
-      { name: 'newAccount', type: 'address', indexed: true },
-    ],
-  },
-  {
-    type: 'event',
-    name: 'DeviceChanged',
-    inputs: [
-      { name: 'account', type: 'address', indexed: true },
-      { name: 'x', type: 'bytes32', indexed: false },
-      { name: 'y', type: 'bytes32', indexed: false },
-    ],
-  },
-  {
-    type: 'event',
-    name: 'DeviceLocked',
-    inputs: [
-      { name: 'account', type: 'address', indexed: true },
-      { name: 'locked', type: 'bool', indexed: false },
-    ],
-  },
-  {
-    type: 'event',
-    name: 'NicknameSet',
-    inputs: [
-      { name: 'account', type: 'address', indexed: true },
-      { name: 'nicknameHash', type: 'bytes32', indexed: true },
-      { name: 'nickname', type: 'string', indexed: false },
-    ],
-  },
-  {
-    type: 'event',
-    name: 'KycLevelSet',
-    inputs: [
-      { name: 'account', type: 'address', indexed: true },
-      { name: 'level', type: 'uint8', indexed: false },
-    ],
-  },
-] as const;
-
-export const organizersAbi = [
-  {
-    type: 'function',
-    name: 'ownerOf',
-    stateMutability: 'view',
-    inputs: [{ name: 'orgId', type: 'uint256' }],
-    outputs: [{ name: '', type: 'address' }],
-  },
-  {
-    type: 'function',
-    name: 'hasPermission',
-    stateMutability: 'view',
-    inputs: [
-      { name: 'orgId', type: 'uint256' },
-      { name: 'account', type: 'address' },
-      { name: 'bit', type: 'uint32' },
-    ],
-    outputs: [{ name: '', type: 'bool' }],
-  },
-  {
-    type: 'function',
-    name: 'managerOf',
-    stateMutability: 'view',
-    inputs: [
-      { name: 'orgId', type: 'uint256' },
-      { name: 'account', type: 'address' },
-    ],
-    outputs: [
-      { name: 'exists', type: 'bool' },
-      { name: 'canApprove', type: 'bool' },
-    ],
-  },
-  {
-    type: 'function',
-    name: 'isOpenGate',
-    stateMutability: 'view',
-    inputs: [
-      { name: 'eventId', type: 'uint256' },
-      { name: 'gateAccount', type: 'address' },
-    ],
-    outputs: [{ name: '', type: 'bool' }],
-  },
-  {
-    type: 'function',
-    name: 'gateOf',
-    stateMutability: 'view',
-    inputs: [{ name: 'gateAccount', type: 'address' }],
-    outputs: [{ name: '', type: 'uint256' }],
-  },
-  {
-    type: 'function',
-    name: 'gateInfo',
-    stateMutability: 'view',
-    inputs: [{ name: 'gateId', type: 'uint256' }],
-    outputs: [
-      { name: 'eventId', type: 'uint256' },
-      { name: 'account', type: 'address' },
-      { name: 'kx', type: 'bytes32' },
-      { name: 'ky', type: 'bytes32' },
-      { name: 'open', type: 'bool' },
-      { name: 'revoked', type: 'bool' },
-    ],
-  },
-  {
-    type: 'function',
-    name: 'setAdmin',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'orgId', type: 'uint256' },
-      { name: 'admin', type: 'address' },
-      { name: 'permissionBits', type: 'uint32' },
-    ],
-    outputs: [],
-  },
-  {
-    type: 'function',
-    name: 'setManager',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'orgId', type: 'uint256' },
-      { name: 'manager', type: 'address' },
-      { name: 'exists', type: 'bool' },
-      { name: 'canApprove', type: 'bool' },
-    ],
-    outputs: [],
-  },
-  {
-    type: 'event',
-    name: 'AdminSet',
-    inputs: [
-      { name: 'orgId', type: 'uint256', indexed: true },
-      { name: 'admin', type: 'address', indexed: true },
-      { name: 'bits', type: 'uint32', indexed: false },
-    ],
-  },
-  {
-    type: 'event',
-    name: 'ManagerSet',
-    inputs: [
-      { name: 'orgId', type: 'uint256', indexed: true },
-      { name: 'manager', type: 'address', indexed: true },
-      { name: 'exists', type: 'bool', indexed: false },
-      { name: 'canApprove', type: 'bool', indexed: false },
-    ],
-  },
-  {
-    type: 'event',
-    name: 'GateRegistered',
-    inputs: [
-      { name: 'gateId', type: 'uint256', indexed: true },
-      { name: 'eventId', type: 'uint256', indexed: true },
-      { name: 'gateAccount', type: 'address', indexed: true },
-      { name: 'kx', type: 'bytes32', indexed: false },
-      { name: 'ky', type: 'bytes32', indexed: false },
-    ],
-  },
-] as const;
-
-export const ticketAbi = [
-  {
-    type: 'function',
-    name: 'ownerOf',
-    stateMutability: 'view',
-    inputs: [{ name: 'tokenId', type: 'uint256' }],
-    outputs: [{ name: '', type: 'address' }],
-  },
-  {
-    type: 'function',
-    name: 'eventOf',
-    stateMutability: 'view',
-    inputs: [{ name: 'tokenId', type: 'uint256' }],
-    outputs: [{ name: '', type: 'uint256' }],
-  },
-  {
-    type: 'function',
-    name: 'tierOf',
-    stateMutability: 'view',
-    inputs: [{ name: 'tokenId', type: 'uint256' }],
-    outputs: [{ name: '', type: 'uint8' }],
-  },
-  {
-    type: 'function',
-    name: 'eventOrg',
-    stateMutability: 'view',
-    inputs: [{ name: 'eventId', type: 'uint256' }],
-    outputs: [{ name: '', type: 'uint256' }],
-  },
-  {
-    type: 'function',
-    name: 'checkInOf',
-    stateMutability: 'view',
-    inputs: [{ name: 'tokenId', type: 'uint256' }],
-    outputs: [
-      {
-        name: '',
-        type: 'tuple',
-        components: [
-          { name: 'gateId', type: 'uint256' },
-          { name: 'ts', type: 'uint64' },
-          { name: 'nonceHash', type: 'bytes32' },
-          { name: 'manual', type: 'bool' },
-        ],
-      },
-    ],
-  },
-  {
-    type: 'function',
-    name: 'balanceOfEvent',
-    stateMutability: 'view',
-    inputs: [
-      { name: 'account', type: 'address' },
-      { name: 'eventId', type: 'uint256' },
-    ],
-    outputs: [{ name: '', type: 'uint256' }],
-  },
-  {
-    type: 'function',
-    name: 'eventMeta',
-    stateMutability: 'view',
-    inputs: [{ name: 'eventId', type: 'uint256' }],
-    outputs: [
-      {
-        name: '',
-        type: 'tuple',
-        components: [
-          { name: 'orgId', type: 'uint256' },
-          { name: 'titleHash', type: 'bytes32' },
-          { name: 'descHash', type: 'bytes32' },
-          { name: 'imageCid', type: 'string' },
-          { name: 'startsAt', type: 'uint64' },
-          { name: 'endsAt', type: 'uint64' },
-          { name: 'venueHash', type: 'bytes32' },
-          { name: 'saleStart', type: 'uint64' },
-          { name: 'saleEnd', type: 'uint64' },
-          { name: 'transferable', type: 'bool' },
-          { name: 'transferCutoffSeconds', type: 'uint32' },
-          { name: 'maxTransfers', type: 'uint8' },
-          { name: 'approvalRequired', type: 'bool' },
-          { name: 'category', type: 'uint8' },
-          { name: 'regionCode', type: 'bytes32' },
-          { name: 'requireKyc', type: 'bool' },
-        ],
-      },
-    ],
-  },
-  {
-    type: 'function',
-    name: 'eventStatus',
-    stateMutability: 'view',
-    inputs: [{ name: 'eventId', type: 'uint256' }],
-    outputs: [{ name: '', type: 'uint8' }],
-  },
-  {
-    type: 'function',
-    name: 'createOffer',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'tokenId', type: 'uint256' },
-      { name: 'recipientCommitment', type: 'bytes32' },
-      { name: 'expiresAt', type: 'uint64' },
-    ],
-    outputs: [],
-  },
-  {
-    type: 'function',
-    name: 'cancelOffer',
-    stateMutability: 'nonpayable',
-    inputs: [{ name: 'tokenId', type: 'uint256' }],
-    outputs: [],
-  },
-  {
-    type: 'function',
-    name: 'acceptOffer',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'tokenId', type: 'uint256' },
-      { name: 'attesterSig', type: 'bytes' },
-    ],
-    outputs: [],
-  },
-  {
-    type: 'function',
-    name: 'offerOf',
-    stateMutability: 'view',
-    inputs: [{ name: 'tokenId', type: 'uint256' }],
-    outputs: [
-      { name: 'from', type: 'address' },
-      { name: 'recipientCommitment', type: 'bytes32' },
-      { name: 'expiresAt', type: 'uint64' },
-    ],
-  },
-  {
-    type: 'event',
-    name: 'Claimed',
-    inputs: [
-      { name: 'tokenId', type: 'uint256', indexed: true },
-      { name: 'eventId', type: 'uint256', indexed: true },
-      { name: 'to', type: 'address', indexed: true },
-      { name: 'tier', type: 'uint8', indexed: false },
-    ],
-  },
-  {
-    type: 'event',
-    name: 'EventStatusChanged',
-    inputs: [
-      { name: 'eventId', type: 'uint256', indexed: true },
-      { name: 'status', type: 'uint8', indexed: false },
-    ],
-  },
-  {
-    type: 'event',
-    name: 'OfferCreated',
-    inputs: [
-      { name: 'tokenId', type: 'uint256', indexed: true },
-      { name: 'from', type: 'address', indexed: true },
-      { name: 'recipientCommitment', type: 'bytes32', indexed: true },
-      { name: 'expiresAt', type: 'uint64', indexed: false },
-    ],
-  },
-  {
-    type: 'event',
-    name: 'OfferCancelled',
-    inputs: [{ name: 'tokenId', type: 'uint256', indexed: true }],
-  },
-  {
-    type: 'event',
-    name: 'OfferAccepted',
-    inputs: [
-      { name: 'tokenId', type: 'uint256', indexed: true },
-      { name: 'to', type: 'address', indexed: true },
-      { name: 'recipientCommitment', type: 'bytes32', indexed: true },
-    ],
-  },
-  {
-    type: 'event',
-    name: 'Transfer',
-    inputs: [
-      { name: 'from', type: 'address', indexed: true },
-      { name: 'to', type: 'address', indexed: true },
-      { name: 'tokenId', type: 'uint256', indexed: true },
-    ],
-  },
-  {
-    type: 'event',
-    name: 'CheckedIn',
-    inputs: [
-      { name: 'tokenId', type: 'uint256', indexed: true },
-      { name: 'eventId', type: 'uint256', indexed: true },
-      { name: 'gateId', type: 'uint256', indexed: true },
-      { name: 'nonceHash', type: 'bytes32', indexed: false },
-      { name: 'ts', type: 'uint64', indexed: false },
-    ],
-  },
-  {
-    type: 'event',
-    name: 'ManualOverride',
-    inputs: [
-      { name: 'tokenId', type: 'uint256', indexed: true },
-      { name: 'gateId', type: 'uint256', indexed: true },
-      { name: 'approver', type: 'address', indexed: true },
-      { name: 'role', type: 'uint8', indexed: false },
-      { name: 'reason', type: 'uint8', indexed: false },
-    ],
-  },
-] as const;
-
-export const factoryAbi = [
-  {
-    type: 'function',
-    name: 'getAddress',
-    stateMutability: 'view',
-    inputs: [
-      { name: 'owners', type: 'bytes[]' },
-      { name: 'nonce', type: 'uint256' },
-    ],
-    outputs: [{ name: '', type: 'address' }],
-  },
-  {
-    type: 'function',
-    name: 'createAccount',
-    stateMutability: 'payable',
-    inputs: [
-      { name: 'owners', type: 'bytes[]' },
-      { name: 'nonce', type: 'uint256' },
-    ],
-    outputs: [{ name: 'account', type: 'address' }],
-  },
-] as const;
+/**
+ * sub-plan 01의 script/export-abi.sh 가 컴파일 산출물에서 뽑은 **전체 ABI** 다.
+ * 손으로 항목을 추가하지 않는다 — 컨트랙트가 바뀌면 01이 다시 뽑아 준다.
+ * JSON import 라 리터럴 타입이 없으므로 readContract 결과는 호출부에서 캐스팅한다.
+ */
+export const identityAbi = identityAbiJson as Abi;
+export const organizersAbi = organizersAbiJson as Abi;
+export const ticketAbi = ticketAbiJson as Abi;
+export const montiPaymasterAbi = montiPaymasterAbiJson as Abi;
+export const coinbaseFactoryAbi = coinbaseFactoryAbiJson as Abi;
 ```
 
 `packages/shared/src/index.ts`:
@@ -1535,16 +1065,16 @@ export * from './constants.js';
 export * from './abi.js';
 ```
 
-- [ ] **Step 4: 테스트를 통과시킨다**
+- [ ] **Step 5: 테스트를 통과시킨다**
 
 Run: `pnpm --filter @monti/shared exec vitest run src/abi.test.ts`
-Expected: PASS — `Tests  5 passed (5)`
+Expected: PASS — `Tests  6 passed (6)`
 
-- [ ] **Step 5: 커밋**
+- [ ] **Step 6: 커밋**
 
 ```bash
-git add packages/shared/src/abi.ts packages/shared/src/abi.test.ts packages/shared/src/index.ts
-git commit -m "feat(shared): add typed viem ABI fragments for backend calls"
+git add packages/shared/src/abi.ts packages/shared/src/abi.test.ts packages/shared/src/abi/ packages/shared/src/index.ts
+git commit -m "feat(shared): re-export the full contract ABIs generated by sub-plan 01"
 ```
 
 ---
@@ -1783,7 +1313,7 @@ export * from './encoding.js';
 - [ ] **Step 4: 테스트를 통과시킨다**
 
 Run: `pnpm --filter @monti/shared exec vitest run src/encoding.hash.test.ts`
-Expected: PASS — `Tests  11 passed (11)`
+Expected: PASS — `Tests  13 passed (13)`
 
 - [ ] **Step 5: 고정 벡터를 체인 쪽과 맞춘다**
 
@@ -2087,7 +1617,7 @@ export function fromQrPayload(text: string): GateResponseWire {
 - [ ] **Step 4: 테스트를 통과시킨다**
 
 Run: `pnpm --filter @monti/shared exec vitest run src/encoding.response.test.ts`
-Expected: PASS — `Tests  8 passed (8)`
+Expected: PASS — `Tests  9 passed (9)`
 
 - [ ] **Step 5: NDEF 페이로드 크기를 기록한다**
 
@@ -2274,7 +1804,7 @@ export function derToRs(der: Hex): Hex {
 - [ ] **Step 4: 테스트를 통과시킨다**
 
 Run: `pnpm --filter @monti/shared exec vitest run src/encoding.der.test.ts`
-Expected: PASS — `Tests  7 passed (7)`
+Expected: PASS — `Tests  8 passed (8)`
 
 - [ ] **Step 5: 커밋**
 
@@ -2716,9 +2246,19 @@ git commit -m "feat(shared): add attendee copy linter CLI"
 - Modify: `.gitignore`
 
 **Interfaces:**
-- Produces: 에뮬레이터 포트(Auth 9099, Firestore 8080, Functions 5001, Storage 9199, Hosting 5000, Pub/Sub 8085, UI 4000)와 `firebase deploy` 타깃. 이후 모든 Task의 `firebase emulators:exec` 명령이 이 설정에 의존한다.
+- Produces: 에뮬레이터 포트(Auth 9099, **Firestore 8089**, Functions 5001, Storage 9199, Hosting 5000, Pub/Sub 8085, UI 4000)와 `firebase deploy` 타깃. 이후 모든 Task의 `firebase emulators:exec` 명령이 이 설정에 의존한다.
 
-**사전 작업(콘솔, 1회):** 스펙 §16 S5에서 만든 Firebase 프로젝트 `monti-dev`(Blaze, 리전 **asia-northeast3**), 전화 로그인 켜짐, SMS 허용 국가 KR·US·JP·GB·DE·SG.
+**Firestore 에뮬레이터는 8080이 아니라 8089를 쓴다.** Envio의 Hasura가 8080을 점유하기 때문에(Task 33~38), 기본 포트를 그대로 두면 인덱서를 켠 채 Functions 테스트를 돌릴 수 없다.
+
+**Node 22 준비(사전 스캔 10번).** 이 머신의 기본 node는 22가 아닐 수 있다. Functions 런타임은 `nodejs22`로 고정돼 있으므로 로컬도 맞춘다:
+```bash
+fnm install 22 && fnm use 22 || (nvm install 22 && nvm use 22)
+node -v            # v22.x — 루트 .nvmrc 가 이미 22 다
+pnpm add -g firebase-tools
+firebase --version
+```
+
+**사전 작업(콘솔, 1회):** 스펙 §16 S5에서 만든 Firebase 프로젝트 `monti-dev`(Blaze, 리전 **asia-northeast3**), 전화 로그인 켜짐, SMS 허용 국가 KR·US·JP·GB·DE·SG. 로컬에는 `firebase-tools`가 필요하다(`pnpm add -g firebase-tools`).
 
 - [ ] **Step 1: 프로젝트 별칭을 만든다**
 
@@ -2779,7 +2319,7 @@ git commit -m "feat(shared): add attendee copy linter CLI"
   },
   "emulators": {
     "auth": { "port": 9099 },
-    "firestore": { "port": 8080 },
+    "firestore": { "port": 8089 },
     "functions": { "port": 5001 },
     "storage": { "port": 9199 },
     "hosting": { "port": 5000 },
@@ -2839,7 +2379,7 @@ ANDROID_APK_KEY_HASH=
 GCP_PROJECT_ID=monti-dev
 KMS_LOCATION=asia-northeast3
 KMS_KEY_RING=monti
-ENVIO_GRAPHQL_URL=http://localhost:8080/v1/graphql
+ENVIO_GRAPHQL_URL=http://127.0.0.1:8080/v1/graphql
 EXPORT_BUCKET=monti-exports
 BIGQUERY_DATASET=monti
 IPFS_GATEWAY=https://gateway.pinata.cloud/ipfs
@@ -2859,14 +2399,18 @@ indexer/generated
 
 Run:
 ```bash
-firebase emulators:exec --only firestore,auth,storage,pubsub "echo EMULATORS_OK"
+node -v
+firebase emulators:exec --only firestore,auth,storage,pubsub "echo EMULATORS_OK; echo \$FIRESTORE_EMULATOR_HOST"
 ```
-Expected: 마지막 줄들에
+Expected:
 ```
+v22.x.x
 ✔  All emulators ready!
 EMULATORS_OK
+127.0.0.1:8089
 ✔  Script exited successfully
 ```
+`FIRESTORE_EMULATOR_HOST` 가 `:8080` 으로 나오면 `firebase.json` 의 포트를 고치지 않은 것이다.
 
 - [ ] **Step 5: 커밋**
 
@@ -2909,7 +2453,7 @@ service cloud.firestore {
       allow read, create, delete: if false;
       allow update: if signedIn()
         && request.auth.token.account == account
-        && changedOnly(['pushToken', 'updatedAt']);
+        && changedOnly(['pushToken']);
     }
 
     // 사용자가 직접 쓸 수 있는 유일한 세 필드.
@@ -2949,6 +2493,7 @@ service cloud.firestore {
         // keys().hasOnly 가 `pinned` 를 막는다. 고정은 서버(pinMessage)만 쓴다.
         allow create: if isChatMember()
           && chatOpen()
+          && request.resource.data.keys().hasAll(['uid', 'text', 'createdAt', 'reported'])
           && request.resource.data.keys().hasOnly(['uid', 'text', 'createdAt', 'reported'])
           && request.resource.data.uid == request.auth.uid
           && request.resource.data.text is string
@@ -3039,7 +2584,7 @@ beforeAll(async () => {
     firestore: {
       rules: readFileSync(join(process.cwd(), '..', 'firestore.rules'), 'utf8'),
       host: '127.0.0.1',
-      port: 8080,
+      port: 8089,
     },
   });
 });
@@ -3087,6 +2632,11 @@ describe('devices/{account}.pushToken', () => {
     await assertFails(owner().doc(`devices/${ACCOUNT}`).update({ deviceX: '0xff' }));
   });
 
+  it('blocks smuggling a second field alongside pushToken', async () => {
+    await assertFails(owner().doc(`devices/${ACCOUNT}`).update({ pushToken: 'x', platform: 'web' }));
+    await assertFails(owner().doc(`devices/${ACCOUNT}`).update({ pushToken: 'x', updatedAt: 1 }));
+  });
+
   it('blocks another account', async () => {
     const other = env.authenticatedContext('uid-2', { account: '0x02' }).firestore();
     await assertFails(other.doc(`devices/${ACCOUNT}`).update({ pushToken: 'x' }));
@@ -3115,6 +2665,11 @@ describe('eventChats messages', () => {
     await assertSucceeds(
       owner().collection('eventChats/11/messages').add({ uid: 'uid-1', text: '안녕하세요', createdAt: 1, reported: 0 }),
     );
+  });
+
+  it('blocks a message missing a required field', async () => {
+    await assertFails(owner().collection('eventChats/11/messages').add({ uid: 'uid-1', text: 'hi', createdAt: 1 }));
+    await assertFails(owner().collection('eventChats/11/messages').add({ uid: 'uid-1', text: 'hi', reported: 0 }));
   });
 
   it('blocks a message longer than 500 characters', async () => {
@@ -3167,7 +2722,7 @@ Run:
 ```bash
 firebase emulators:exec --only firestore "pnpm --filter monti-functions exec vitest run test/rules.test.ts"
 ```
-Expected: PASS — `Tests  13 passed (13)`, 마지막에 `✔  Script exited successfully`
+Expected: PASS — `Tests  15 passed (15)`, 마지막에 `✔  Script exited successfully`
 
 - [ ] **Step 5: 규칙을 에뮬레이터 밖으로 배포한다**
 
@@ -3409,22 +2964,195 @@ git commit -m "feat(functions): add Cloud KMS envelope encryption for PII fields
 
 ---
 
-## Task 13: 어테스터 키 — Secret Manager(MVP)와 KMS 서명(프로덕션)
+## Task 13: Functions 패키지 뼈대 — `package.json`, `tsconfig`, `config.ts`
 
 **Files:**
-- Create: `functions/src/lib/attester.ts`
-- Create: `functions/test/attester.test.ts`
-- Modify: `functions/src/lib/kms.ts` (`signKeccak` 추가)
+- Modify: `functions/package.json`(Task 11의 최소 구성을 완성), Create `functions/tsconfig.json`
+- Create: `functions/src/config.ts`, `functions/src/index.ts`
+- Test: `functions/test/config.test.ts`
 
 **Interfaces:**
-- Consumes: Task 12 `attesterKeyName`.
-- Produces:
-  - `getAttesterAccount(): PrivateKeyAccount` — Secret Manager `ATTESTER_PK`(0x 접두사 32바이트 hex)에서 만든 viem 계정. **MVP 기본 경로.**
-  - `derSigToEthSignature(der: Hex, digest: Hex, expectedAddress: Hex): Promise<Hex>` — DER ECDSA → 65바이트 `r‖s‖v`. low-s 정규화 후 v를 27/28 중 복구되는 쪽으로 고른다.
-  - `signKeccak(digest: Hex, expectedAddress: Hex, client?: KmsSignClient): Promise<Hex>` — KMS 비대칭 서명 경로. **프로덕션 전환용.**
-  Task 19·21·22·25가 `getAttesterAccount()`를, Task 22가 `attesterAccount.sign({ hash })`를 쓴다.
+- Consumes: Task 2 `FIREBASE_REGION`, `MONAD_TESTNET_CHAIN_ID`, `MONAD_TESTNET_RPC_URL`.
+- Produces: `REGION`, `RP_ID`, `RP_NAME`, `ANDROID_APK_KEY_HASH`, `CHAIN_ID`, `RPC_URL`, `ENVIO_GRAPHQL_URL`, `EXPORT_BUCKET`, `BIGQUERY_DATASET`, `IPFS_GATEWAY`(모두 `defineString`), 시크릿 `ATTESTER_PK`, `PHONE_INDEX_KEY`, `DIDIT_API_KEY`, `DIDIT_WORKFLOW_ID`, `DIDIT_WEBHOOK_SECRET`, `TENDERLY_WEBHOOK_SECRET`, 그리고 `expectedOrigins(): string[]`.
 
-**결정 근거:** Cloud KMS `EC_SIGN_SECP256K1_SHA256`은 다이제스트를 그대로 받으므로 keccak256 다이제스트를 `digest.sha256` 필드에 넣으면 이더리움 호환 서명이 나온다. 다만 서명마다 왕복 1회(약 40 ms)가 더 들고 nonce 관리를 위해 `walletClient`에 커스텀 account를 끼워야 한다. **해커톤 MVP는 Secret Manager 경로로 간다**(단순함 우선, 스펙 §18 "확인 서명 키 침해"는 7일 쿨타임으로 완화). `signKeccak`은 지금 구현해 두고, 프로덕션 전환 시 `Identity.setAttester(kmsAddress)` 한 번으로 바꾼다.
+**왜 이 순서인가(사전 스캔 4번):** 의존성이 `package.json` 에 들어가기 전에 그 패키지를 import 하는 코드를 쓰면 설치가 깨진다. 그래서 **패키지·설정이 먼저**(이 Task), 그 위에 어테스터와 체인 클라이언트(Task 14)가 온다.
+
+- [ ] **Step 1: 실패하는 테스트를 쓴다**
+
+`functions/test/config.test.ts`:
+
+```ts
+import { describe, expect, it } from 'vitest';
+import { REGION, expectedOrigins } from '../src/config.js';
+
+describe('config', () => {
+  it('pins the Seoul region for every function', () => {
+    expect(REGION).toBe('asia-northeast3');
+  });
+
+  it('accepts both the web origin and the Android apk-key-hash origin', () => {
+    process.env.RP_ID = 'monti.app';
+    process.env.ANDROID_APK_KEY_HASH = 'AbCdEf-123_xyz';
+    expect(expectedOrigins()).toEqual(['https://monti.app', 'android:apk-key-hash:AbCdEf-123_xyz']);
+  });
+
+  it('omits the Android origin when no fingerprint is configured', () => {
+    process.env.RP_ID = 'monti.app';
+    process.env.ANDROID_APK_KEY_HASH = '';
+    expect(expectedOrigins()).toEqual(['https://monti.app']);
+  });
+});
+```
+
+- [ ] **Step 2: 실패를 확인한다**
+
+Run: `pnpm --filter monti-functions exec vitest run test/config.test.ts`
+Expected: FAIL — `Failed to resolve import "../src/config.js"`
+
+- [ ] **Step 3: 패키지와 tsconfig를 완성한다**
+
+`functions/package.json` (Task 11의 최소 구성을 이것으로 덮는다. Task 12가 넣은 `@google-cloud/kms` 도 포함돼 있다):
+
+```json
+{
+  "name": "monti-functions",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js",
+  "engines": { "node": "22" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "deploy": "pnpm build && firebase deploy --only functions --project dev"
+  },
+  "dependencies": {
+    "@google-cloud/bigquery": "^7.9.0",
+    "@google-cloud/kms": "^4.5.0",
+    "@google-cloud/storage": "^7.14.0",
+    "@monti/shared": "workspace:*",
+    "@simplewebauthn/server": "^13.0.0",
+    "cbor-x": "^1.6.0",
+    "firebase-admin": "^13.0.0",
+    "firebase-functions": "^6.1.0",
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^4.0.1",
+    "@types/node": "^22.7.0",
+    "firebase-functions-test": "^3.4.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}
+```
+
+`functions/tsconfig.json`:
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2023"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "outDir": "lib",
+    "types": ["node"]
+  },
+  "include": ["src"]
+}
+```
+
+- [ ] **Step 4: `config.ts`와 빈 `index.ts`를 쓴다**
+
+```ts
+import { setGlobalOptions } from 'firebase-functions/v2';
+import { defineSecret, defineString } from 'firebase-functions/params';
+import { FIREBASE_REGION, MONAD_TESTNET_CHAIN_ID, MONAD_TESTNET_RPC_URL } from '@monti/shared';
+
+export const REGION = FIREBASE_REGION;
+
+setGlobalOptions({ region: REGION, maxInstances: 20, memory: '512MiB', timeoutSeconds: 60 });
+
+export const RP_ID = defineString('RP_ID', { default: 'monti.app' });
+export const RP_NAME = defineString('RP_NAME', { default: 'MONTI' });
+export const ANDROID_APK_KEY_HASH = defineString('ANDROID_APK_KEY_HASH', { default: '' });
+export const CHAIN_ID = defineString('CHAIN_ID', { default: String(MONAD_TESTNET_CHAIN_ID) });
+export const RPC_URL = defineString('RPC_URL', { default: MONAD_TESTNET_RPC_URL });
+export const ENVIO_GRAPHQL_URL = defineString('ENVIO_GRAPHQL_URL', {
+  default: 'http://127.0.0.1:8080/v1/graphql',
+});
+export const EXPORT_BUCKET = defineString('EXPORT_BUCKET', { default: 'monti-exports' });
+export const IPFS_GATEWAY = defineString('IPFS_GATEWAY', { default: 'https://gateway.pinata.cloud/ipfs' });
+export const BIGQUERY_DATASET = defineString('BIGQUERY_DATASET', { default: 'monti' });
+
+export const ATTESTER_PK = defineSecret('ATTESTER_PK');
+export const PHONE_INDEX_KEY = defineSecret('PHONE_INDEX_KEY');
+export const DIDIT_API_KEY = defineSecret('DIDIT_API_KEY');
+export const DIDIT_WORKFLOW_ID = defineSecret('DIDIT_WORKFLOW_ID');
+export const DIDIT_WEBHOOK_SECRET = defineSecret('DIDIT_WEBHOOK_SECRET');
+export const TENDERLY_WEBHOOK_SECRET = defineSecret('TENDERLY_WEBHOOK_SECRET');
+
+/**
+ * Android WebView는 origin을 `android:apk-key-hash:<base64url SHA-256>`로 보낸다.
+ * 두 origin을 모두 받지 않으면 안드로이드 껍데기의 패스키가 전부 거부된다(마스터 계획 Global Constraints).
+ */
+export function expectedOrigins(): string[] {
+  const origins = [`https://${RP_ID.value()}`];
+  const hash = ANDROID_APK_KEY_HASH.value();
+  if (hash) origins.push(`android:apk-key-hash:${hash}`);
+  return origins;
+}
+```
+
+`functions/src/index.ts` (Task 16부터 채운다):
+
+```ts
+export {};
+```
+
+- [ ] **Step 5: 설치하고 테스트를 통과시킨다**
+
+Run:
+```bash
+pnpm install
+pnpm --filter monti-functions exec vitest run test/config.test.ts
+pnpm --filter monti-functions build
+```
+Expected: `Tests  3 passed (3)` 그리고 tsc 무출력.
+
+- [ ] **Step 6: 커밋**
+
+```bash
+git add functions/package.json functions/tsconfig.json functions/src/config.ts \
+        functions/src/index.ts functions/test/config.test.ts pnpm-lock.yaml
+git commit -m "feat(functions): complete the package, region options and typed params"
+```
+
+---
+
+## Task 14: 어테스터 키와 체인 클라이언트
+
+**Files:**
+- Create: `functions/src/lib/attester.ts`, `functions/src/lib/chain.ts`
+- Modify: `functions/src/lib/kms.ts`(`signKeccak` 용 `attesterKeyName` 는 Task 12에서 이미 있다)
+- Test: `functions/test/attester.test.ts`, `functions/test/chain.test.ts`
+
+**Interfaces:**
+- Consumes: Task 12 `attesterKeyName`; Task 13 `CHAIN_ID`, `RPC_URL`; Task 2 `loadDeployment`, `withGasMargin`.
+- Produces:
+  - `getAttesterAccount(privateKey?: string): PrivateKeyAccount` — Secret Manager `ATTESTER_PK`. **MVP 기본 경로.**
+  - `derSigToEthSignature(der: Hex, digest: Hex, expectedAddress: Hex): Promise<Hex>`
+  - `signKeccak(digest: Hex, expectedAddress: Hex, client?: KmsSignClient): Promise<Hex>` — **프로덕션 전환용.**
+  - `monadChain()`, `publicClient()`, `walletClient()`, `deployment()`, `gasLimitFor(estimate)`, `sendAttesterTx(tx)`, `awaitFinalized(blockNumber)`.
+  Task 16~30 전부가 `chain.ts`를 쓴다.
+
+**결정 근거:** Cloud KMS `EC_SIGN_SECP256K1_SHA256`은 다이제스트를 그대로 받으므로 keccak256 다이제스트를 `digest.sha256` 필드에 넣으면 이더리움 호환 서명이 나온다. 다만 서명마다 왕복 1회(약 40 ms)가 더 든다. **해커톤 MVP는 Secret Manager 경로로 간다**(단순함 우선, 스펙 §18 "확인 서명 키 침해"는 7일 쿨타임으로 완화). `signKeccak`은 지금 구현해 두고, 프로덕션 전환 시 `Identity.setAttester(kmsAddress)` 한 번으로 바꾼다.
 
 - [ ] **Step 1: 시크릿을 만든다**
 
@@ -3575,169 +3303,20 @@ export async function signKeccak(
 
 - [ ] **Step 5: 테스트를 통과시킨다**
 
-Run: `pnpm --filter monti-functions exec vitest run test/attester.test.ts`
-Expected: PASS — `Tests  3 passed (3)`
-
-- [ ] **Step 6: 커밋**
-
+Run:
 ```bash
-git add functions/src/lib/attester.ts functions/test/attester.test.ts functions/package.json
-git commit -m "feat(functions): add attester key access via Secret Manager with KMS signing path"
+pnpm --filter monti-functions exec vitest run test/attester.test.ts
+pnpm --filter monti-functions exec vitest run test/chain.test.ts
 ```
+Expected: `Tests  3 passed (3)` 그리고 `Tests  3 passed (3)`
 
----
+- [ ] **Step 6: `chain.ts`를 쓴다**
 
-## Task 14: Functions 패키지 완성 — `config.ts`와 `chain.ts`
-
-**Files:**
-- Modify: `functions/package.json`, Create `functions/tsconfig.json`
-- Create: `functions/src/config.ts`, `functions/src/lib/chain.ts`, `functions/src/index.ts`
-- Test: `functions/test/chain.test.ts`
-
-**Interfaces:**
-- Consumes: Task 2 `getDeployment`, `withGasMargin`, `FIREBASE_REGION`; Task 3 ABI들; Task 13 `getAttesterAccount`.
-- Produces:
-  - `config.ts`: `REGION`, `RP_ID`, `RP_NAME`, `ANDROID_APK_KEY_HASH`, `CHAIN_ID`, `RPC_URL`, `ENVIO_GRAPHQL_URL`, `EXPORT_BUCKET`, `BIGQUERY_DATASET` (모두 `defineString`), 시크릿 `ATTESTER_PK`, `PHONE_INDEX_KEY`, `DIDIT_API_KEY`, `DIDIT_WEBHOOK_SECRET`, `DIDIT_WORKFLOW_ID`, `TENDERLY_WEBHOOK_SECRET`, 그리고 `expectedOrigins(): string[]`.
-  - `chain.ts`: `monadChain`, `publicClient()`, `walletClient()`, `deployment()`, `sendAttesterTx(params): Promise<Hex>`, `awaitFinalized(blockNumber: bigint): Promise<void>`.
-  Task 16~30 전부가 이 두 파일을 쓴다.
-
-- [ ] **Step 1: 패키지와 tsconfig를 완성한다**
-
-`functions/package.json`:
-
-```json
-{
-  "name": "monti-functions",
-  "private": true,
-  "type": "module",
-  "main": "lib/index.js",
-  "engines": { "node": "22" },
-  "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "test": "vitest run",
-    "deploy": "pnpm build && firebase deploy --only functions --project dev"
-  },
-  "dependencies": {
-    "@google-cloud/bigquery": "^7.9.0",
-    "@google-cloud/kms": "^4.5.0",
-    "@google-cloud/storage": "^7.14.0",
-    "@monti/shared": "workspace:*",
-    "@simplewebauthn/server": "^13.0.0",
-    "cbor-x": "^1.6.0",
-    "firebase-admin": "^13.0.0",
-    "firebase-functions": "^6.1.0",
-    "viem": "^2.21.0"
-  },
-  "devDependencies": {
-    "@firebase/rules-unit-testing": "^4.0.1",
-    "@types/node": "^22.7.0",
-    "firebase-functions-test": "^3.4.0",
-    "tsx": "^4.19.0",
-    "typescript": "^5.6.0",
-    "vitest": "^2.1.0"
-  }
-}
-```
-
-`functions/tsconfig.json`:
-
-```json
-{
-  "compilerOptions": {
-    "target": "ES2023",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "lib": ["ES2023"],
-    "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "resolveJsonModule": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "outDir": "lib",
-    "types": ["node"]
-  },
-  "include": ["src"]
-}
-```
-
-- [ ] **Step 2: `config.ts`를 쓴다**
-
-```ts
-import { setGlobalOptions } from 'firebase-functions/v2';
-import { defineSecret, defineString } from 'firebase-functions/params';
-import { FIREBASE_REGION, MONAD_TESTNET_CHAIN_ID, MONAD_TESTNET_RPC_URL } from '@monti/shared';
-
-export const REGION = FIREBASE_REGION;
-
-setGlobalOptions({ region: REGION, maxInstances: 20, memory: '512MiB', timeoutSeconds: 60 });
-
-export const RP_ID = defineString('RP_ID', { default: 'monti.app' });
-export const RP_NAME = defineString('RP_NAME', { default: 'MONTI' });
-export const ANDROID_APK_KEY_HASH = defineString('ANDROID_APK_KEY_HASH', { default: '' });
-export const CHAIN_ID = defineString('CHAIN_ID', { default: String(MONAD_TESTNET_CHAIN_ID) });
-export const RPC_URL = defineString('RPC_URL', { default: MONAD_TESTNET_RPC_URL });
-export const ENVIO_GRAPHQL_URL = defineString('ENVIO_GRAPHQL_URL', {
-  default: 'http://127.0.0.1:8080/v1/graphql',
-});
-export const EXPORT_BUCKET = defineString('EXPORT_BUCKET', { default: 'monti-exports' });
-export const IPFS_GATEWAY = defineString('IPFS_GATEWAY', { default: 'https://gateway.pinata.cloud/ipfs' });
-export const BIGQUERY_DATASET = defineString('BIGQUERY_DATASET', { default: 'monti' });
-
-export const ATTESTER_PK = defineSecret('ATTESTER_PK');
-export const PHONE_INDEX_KEY = defineSecret('PHONE_INDEX_KEY');
-export const DIDIT_API_KEY = defineSecret('DIDIT_API_KEY');
-export const DIDIT_WORKFLOW_ID = defineSecret('DIDIT_WORKFLOW_ID');
-export const DIDIT_WEBHOOK_SECRET = defineSecret('DIDIT_WEBHOOK_SECRET');
-export const TENDERLY_WEBHOOK_SECRET = defineSecret('TENDERLY_WEBHOOK_SECRET');
-
-/**
- * Android WebView는 origin을 `android:apk-key-hash:<base64url SHA-256>`로 보낸다.
- * 두 origin을 모두 받지 않으면 안드로이드 껍데기의 패스키가 전부 거부된다(마스터 계획 Global Constraints).
- */
-export function expectedOrigins(): string[] {
-  const origins = [`https://${RP_ID.value()}`];
-  const hash = ANDROID_APK_KEY_HASH.value();
-  if (hash) origins.push(`android:apk-key-hash:${hash}`);
-  return origins;
-}
-```
-
-- [ ] **Step 3: 실패하는 테스트를 쓴다**
-
-`functions/test/chain.test.ts`:
-
-```ts
-import { describe, expect, it } from 'vitest';
-import { withGasMargin } from '@monti/shared';
-import { monadChain, gasLimitFor } from '../src/lib/chain.js';
-
-describe('monadChain', () => {
-  it('is built from CHAIN_ID and never hardcoded in logic', () => {
-    expect(monadChain().id).toBe(10143);
-    expect(monadChain().nativeCurrency.symbol).toBe('MON');
-  });
-});
-
-describe('gasLimitFor', () => {
-  it('applies the Monad 7.5% margin', () => {
-    expect(gasLimitFor(275_000n)).toBe(withGasMargin(275_000n));
-    expect(gasLimitFor(275_000n)).toBe(295_625n);
-  });
-
-  it('never returns a limit below the estimate', () => {
-    expect(gasLimitFor(1n)).toBeGreaterThanOrEqual(1n);
-  });
-});
-```
-
-Run: `pnpm --filter monti-functions exec vitest run test/chain.test.ts`
-Expected: FAIL — `Failed to resolve import "../src/lib/chain.js"`
-
-- [ ] **Step 4: `chain.ts`를 쓴다**
+Task 13의 원래 코드를 그대로 쓴다.
 
 ```ts
 import { createPublicClient, createWalletClient, defineChain, http, type Abi, type Hex } from 'viem';
-import { getDeployment, withGasMargin, type Deployment } from '@monti/shared';
+import { loadDeployment, withGasMargin, type Deployment } from '@monti/shared';
 import { getAttesterAccount } from './attester.js';
 import { CHAIN_ID, RPC_URL } from '../config.js';
 
@@ -3752,7 +3331,7 @@ export function monadChain() {
 }
 
 export function deployment(): Deployment {
-  return getDeployment(Number(CHAIN_ID.value()));
+  return loadDeployment(Number(CHAIN_ID.value()));
 }
 
 export function publicClient() {
@@ -3815,27 +3394,40 @@ export async function awaitFinalized(blockNumber: bigint, timeoutMs = 20_000): P
 }
 ```
 
-`functions/src/index.ts` (지금은 비어 있고 Task 16부터 채운다):
+`functions/test/chain.test.ts`:
 
 ```ts
-export {};
+import { describe, expect, it } from 'vitest';
+import { withGasMargin } from '@monti/shared';
+import { monadChain, gasLimitFor } from '../src/lib/chain.js';
+
+describe('monadChain', () => {
+  it('is built from CHAIN_ID and never hardcoded in logic', () => {
+    expect(monadChain().id).toBe(10143);
+    expect(monadChain().nativeCurrency.symbol).toBe('MON');
+  });
+});
+
+describe('gasLimitFor', () => {
+  it('applies the Monad 7.5% margin', () => {
+    expect(gasLimitFor(275_000n)).toBe(withGasMargin(275_000n));
+    expect(gasLimitFor(275_000n)).toBe(295_625n);
+  });
+
+  it('never returns a limit below the estimate', () => {
+    expect(gasLimitFor(1n)).toBeGreaterThanOrEqual(1n);
+  });
+});
 ```
 
-- [ ] **Step 5: 테스트를 통과시키고 커밋한다**
+- [ ] **Step 7: 커밋**
 
-Run:
 ```bash
-pnpm install
-pnpm --filter monti-functions exec vitest run test/chain.test.ts
-pnpm --filter monti-functions build
+git add functions/src/lib/attester.ts functions/src/lib/chain.ts \
+        functions/test/attester.test.ts functions/test/chain.test.ts
+git commit -m "feat(functions): add the attester account and a gas-margined chain client"
 ```
-Expected: `Tests  3 passed (3)` 그리고 tsc 무출력.
 
-```bash
-git add functions/package.json functions/tsconfig.json functions/src/config.ts \
-        functions/src/lib/chain.ts functions/src/index.ts functions/test/chain.test.ts pnpm-lock.yaml
-git commit -m "feat(functions): add region config, params and gas-margined chain client"
-```
 
 ---
 
@@ -3849,7 +3441,7 @@ git commit -m "feat(functions): add region config, params and gas-margined chain
 - Consumes: Task 14 `publicClient`, `deployment`; Task 3 `organizersAbi`, `ticketAbi`.
 - Produces:
   - `db`, `authAdmin`, `storage` (Admin SDK 싱글턴)
-  - 컬렉션 상수 `PERSONS`, `USERS`, `PASSKEYS`, `DEVICES`, `INVITES`, `KYC_SESSIONS`, `AUTH_CHALLENGES`, `PHONE_INDEX`, `TRANSFER_INVITES`, `EVENT_CHATS`, 그리고 `ALLOWED_COLLECTIONS`(Task 31의 정적 스캔이 쓴다)
+  - 컬렉션 상수 `PERSONS`, `USERS`, `PASSKEYS`, `DEVICES`, `INVITES`, `KYC_SESSIONS`, `AUTH_CHALLENGES`, `PHONE_INDEX`, `TRANSFER_INVITES`, `EVENT_CHATS`, `DELETION_REQUESTS`, `PENDING_GATES`, 그리고 `ALLOWED_COLLECTIONS`(Task 31의 정적 스캔이 쓴다). **뒤 Task들이 상수를 덧붙이지 않도록 여기서 전부 선언한다**(사전 스캔 8번)
   - `assertStatusTransition(from: PersonStatus, to: PersonStatus): void`
   - `resolveCallerAccount(request: CallableRequest): Promise<Hex>`
   - `PERM_MANAGE_GATES = 2`, `PERM_APPROVE_OVERRIDE = 4`
@@ -3868,18 +3460,27 @@ describe('assertStatusTransition', () => {
     expect(() => assertStatusTransition('pending', 'active')).not.toThrow();
   });
 
-  it('still allows the legacy pending → kyc_ok → active path', () => {
-    expect(() => assertStatusTransition('pending', 'kyc_ok')).not.toThrow();
+  it('allows the per-event KYC round trip active → kyc_ok → active', () => {
+    expect(() => assertStatusTransition('active', 'kyc_ok')).not.toThrow();
     expect(() => assertStatusTransition('kyc_ok', 'active')).not.toThrow();
+  });
+
+  it('lets a rejected person retry KYC', () => {
+    expect(() => assertStatusTransition('active', 'rejected')).not.toThrow();
+    expect(() => assertStatusTransition('rejected', 'kyc_ok')).not.toThrow();
+  });
+
+  it('blocks jumping from pending straight to kyc_ok', () => {
+    expect(() => assertStatusTransition('pending', 'kyc_ok')).toThrow('BAD_STATUS_TRANSITION:pending->kyc_ok');
   });
 
   it('allows rotation from active', () => {
     expect(() => assertStatusTransition('active', 'rotated')).not.toThrow();
   });
 
-  it('blocks going backwards and resurrecting a rejected person', () => {
+  it('blocks going backwards and resurrecting a rotated person', () => {
     expect(() => assertStatusTransition('active', 'pending')).toThrow('BAD_STATUS_TRANSITION');
-    expect(() => assertStatusTransition('rejected', 'active')).toThrow('BAD_STATUS_TRANSITION');
+    expect(() => assertStatusTransition('rotated', 'active')).toThrow('BAD_STATUS_TRANSITION');
   });
 
   it('is a no-op for an identical status (idempotent replays)', () => {
@@ -3924,6 +3525,8 @@ export const AUTH_CHALLENGES = 'authChallenges';
 export const PHONE_INDEX = 'phoneIndex';
 export const TRANSFER_INVITES = 'transferInvites';
 export const EVENT_CHATS = 'eventChats';
+export const DELETION_REQUESTS = 'deletionRequests';
+export const PENDING_GATES = 'pendingGates';
 
 /**
  * Functions가 쓸 수 있는 컬렉션의 전부. 스펙 §10.4 규칙 1에 따라
@@ -3940,23 +3543,27 @@ export const ALLOWED_COLLECTIONS = [
   PHONE_INDEX,
   TRANSFER_INVITES,
   EVENT_CHATS,
+  DELETION_REQUESTS,
+  PENDING_GATES,
   'members',
   'messages',
 ] as const;
 
 /**
- * KYC가 공연별·선택적으로 바뀐 뒤의 상태 기계다.
- * 가입은 본인인증 없이 끝나므로 `pending → active` 가 정상 경로이고,
- * 본인인증 통과 여부는 status가 아니라 **`kycLevel`(0 또는 1)** 이 따로 들고 있다.
- * `kyc_ok` 와 `rejected` 는 마스터 계획의 유니온을 유지하려고 남겨 둔 값이며
- * 이 계획의 어떤 함수도 더 이상 쓰지 않는다.
+ * 마스터 계획의 유니온을 그대로 쓰되, 각 값의 뜻을 사전 스캔 7번 판정대로 고정한다.
+ *  - `pending`  가입 시작. 아직 체인에 계정이 등록되지 않았다.
+ *  - `active`   `Identity.register` 가 finalized 됐다. **`kycLevel` 과 무관하다.**
+ *  - `kyc_ok`   Didit 이 승인했지만 `setKycLevel(1)` 이 아직 finalized 되지 않은 중간 상태.
+ *  - `rejected` Didit 이 거절했거나 같은 얼굴이 이미 있다.
+ *  - `rotated`  계정이 새 계정으로 교체됐다.
+ * 본인인증 통과 여부의 **원본은 `kycLevel`(0/1)** 이고 status 는 진행 단계 표시다.
  */
 const ALLOWED_TRANSITIONS: Record<PersonStatus, PersonStatus[]> = {
-  pending: ['pending', 'active', 'kyc_ok', 'rejected'],
+  pending: ['pending', 'active', 'rejected'],
+  active: ['active', 'kyc_ok', 'rejected', 'rotated'],
   kyc_ok: ['kyc_ok', 'active', 'rejected'],
-  active: ['active', 'rotated'],
+  rejected: ['rejected', 'kyc_ok', 'active'],
   rotated: ['rotated'],
-  rejected: ['rejected'],
 };
 
 /** 뒤로 가거나 죽은 상태를 되살리는 전이만 막는다. */
@@ -4177,7 +3784,7 @@ Run:
 pnpm --filter monti-functions exec vitest run test/db.test.ts
 pnpm --filter monti-functions exec vitest run test/auth.test.ts
 ```
-Expected: `Tests  6 passed (6)` 그리고 `Tests  8 passed (8)`
+Expected: `Tests  8 passed (8)` 그리고 `Tests  8 passed (8)`
 
 - [ ] **Step 6: 커밋**
 
@@ -4191,13 +3798,13 @@ git commit -m "feat(functions): add Firestore singletons, status guard and staff
 ## Task 16: `startSignup`
 
 **Files:**
-- Create: `functions/src/functions/startSignup.ts`
+- Create: `functions/src/lib/phoneIndex.ts`, `functions/src/functions/startSignup.ts`
 - Modify: `functions/src/index.ts`
 - Test: `functions/test/startSignup.test.ts`
 
 **Interfaces:**
-- Consumes: Task 15 `db`, `PERSONS`, `USERS`; Task 14 `PHONE_INDEX_KEY`.
-- Produces: callable `startSignup`: `{}` → `{ personId: Hex }`. `persons/{personId}` 를 `status: 'pending'`, **`kycLevel: 0`** 으로, `users/{uid}` 를 만들고 `phoneIndex`에 색인한다. `personId`는 `randomBytes(32)`이고 **어떤 것의 해시도 아니다**(마스터 계획 Global Constraints).
+- Consumes: Task 15 `db`, `PERSONS`, `USERS`, `PHONE_INDEX`; Task 13 `PHONE_INDEX_KEY`.
+- Produces: `hmacPhone(phoneE164, key): string`, `upsertPhoneIndex(phoneE164, personId, key): Promise<string>` (첫 소비자가 여기라 **이 Task가 `phoneIndex.ts`를 만든다** — 사전 스캔 4번), 그리고 callable `startSignup`: `{}` → `{ personId: Hex }`. `persons/{personId}` 를 `status: 'pending'`, **`kycLevel: 0`** 으로, `users/{uid}` 를 만들고 `phoneIndex`에 색인한다. `personId`는 `randomBytes(32)`이고 **어떤 것의 해시도 아니다**(마스터 계획 Global Constraints).
 
 **본인인증은 가입에 없다(창업자 델타).** KYC는 **공연별·요청 시**로 옮겨졌다. 가입은 전화번호 인증 하나로 끝나고, 본인인증이 필요한 공연을 만나면 그때 `startKyc`(Task 44)를 부른다. 따라서 이 함수는 Didit을 호출하지 않는다. **레벨 0 계정의 유일한 중복 방지 수단은 전화번호**이고, `phoneIndex/{hmacPhone}`가 한 번호당 한 계정을 강제한다.
 
@@ -4260,7 +3867,30 @@ describe('startSignup', () => {
 Run: `firebase emulators:exec --only firestore,auth "pnpm --filter monti-functions exec vitest run test/startSignup.test.ts"`
 Expected: FAIL — `Failed to resolve import "../src/functions/startSignup.js"`
 
-- [ ] **Step 2: `didit.ts`의 세션 생성 부분을 쓴다** (Task 44가 쓴다)
+- [ ] **Step 2: `phoneIndex.ts`를 만든다**
+
+`functions/src/lib/phoneIndex.ts` — 조회 쪽(`personIdByPhone`)은 Task 24가 덧붙인다:
+
+```ts
+import { createHmac } from 'node:crypto';
+import type { Hex } from '@monti/shared';
+import { PHONE_INDEX, db } from './db.js';
+
+/** 평문 번호를 Firestore 문서 id로 만들지 않는다. 키 없이는 역산이 불가능하다. */
+export function hmacPhone(phoneE164: string, key: string): string {
+  if (!/^\+[0-9]{7,15}$/.test(phoneE164)) throw new Error('BAD_PHONE');
+  if (!key) throw new Error('MISSING_PHONE_INDEX_KEY');
+  return createHmac('sha256', key).update(phoneE164, 'utf8').digest('hex');
+}
+
+export async function upsertPhoneIndex(phoneE164: string, personId: Hex, key: string): Promise<string> {
+  const id = hmacPhone(phoneE164, key);
+  await db.collection(PHONE_INDEX).doc(id).set({ personId }, { merge: true });
+  return id;
+}
+```
+
+- [ ] **Step 3: `didit.ts`의 세션 생성 부분을 쓴다** (Task 44가 쓴다)
 
 ```ts
 import type { Hex } from '@monti/shared';
@@ -4286,7 +3916,7 @@ export async function createDiditSession(
 }
 ```
 
-- [ ] **Step 3: `startSignup.ts`를 쓴다**
+- [ ] **Step 4: `startSignup.ts`를 쓴다**
 
 ```ts
 import { randomBytes } from 'node:crypto';
@@ -4342,15 +3972,16 @@ export const startSignup = onCall(
 export { startSignup } from './functions/startSignup.js';
 ```
 
-- [ ] **Step 4: 테스트를 통과시킨다**
+- [ ] **Step 5: 테스트를 통과시킨다**
 
 Run: `firebase emulators:exec --only firestore,auth "pnpm --filter monti-functions exec vitest run test/startSignup.test.ts"`
 Expected: PASS — `Tests  3 passed (3)`, `✔  Script exited successfully`
 
-- [ ] **Step 5: 커밋**
+- [ ] **Step 6: 커밋**
 
 ```bash
-git add functions/src/lib/didit.ts functions/src/functions/startSignup.ts functions/src/index.ts functions/test/startSignup.test.ts
+git add functions/src/lib/phoneIndex.ts functions/src/lib/didit.ts \
+        functions/src/functions/startSignup.ts functions/src/index.ts functions/test/startSignup.test.ts
 git commit -m "feat(functions): add KYC-free signup with a random personId and phone index"
 ```
 
@@ -4368,7 +3999,7 @@ git commit -m "feat(functions): add KYC-free signup with a random personId and p
 - Produces:
   - `verifyDiditSignature(input: { raw: string; signature: string; timestamp: number; secret: string; now: number; toleranceSeconds?: number }): boolean`
   - `redactDiditPayload(input: unknown): unknown`
-  - HTTPS `diditWebhook`. **`persons.status`는 건드리지 않는다.** `Approved` + Face Search `clear` → 어테스터가 `Identity.setKycLevel(personId, 1)`(가스 한도 ×1.075, `finalized` 대기)을 보내고 `persons.kycLevel = 1`, `persons.kyc = {...}` 를 쓴다. 같은 얼굴이 이미 있으면 **`kycLevel`은 0 그대로**이고 `kyc.rejectedReason = 'duplicate_face'` 만 남는다. `kycSessions/{session_id}` 기준 **멱등**.
+  - HTTPS `diditWebhook`. `Approved` + Face Search `clear` → `status='kyc_ok'` 로 두고 어테스터가 `Identity.setKycLevel(personId, 1)`(가스 한도 ×1.075)을 보낸 뒤 **`finalized` 가 되면** `status='active'`, `kycLevel=1`, `chain.kycLevelTx` 를 쓴다. 거절·중복 얼굴이면 `status='rejected'`, **`kycLevel`은 0 그대로**, `kyc.rejectedReason='duplicate_face'`. `kycSessions/{session_id}` 기준 **멱등**이고 중간에 죽어도 `reconcilePending` 이 `kyc_ok` 를 복구한다.
 
 - [ ] **Step 1: 실패하는 테스트를 쓴다**
 
@@ -4477,10 +4108,10 @@ export function redactDiditPayload(input: unknown): unknown {
 ```ts
 import { FieldValue } from 'firebase-admin/firestore';
 import { onRequest } from 'firebase-functions/v2/https';
-import { identityAbi, type Hex } from '@monti/shared';
+import { identityAbi, type Hex, type PersonStatus } from '@monti/shared';
 import { ATTESTER_PK, DIDIT_WEBHOOK_SECRET } from '../config.js';
 import { awaitFinalized, deployment, publicClient, sendAttesterTx } from '../lib/chain.js';
-import { KYC_SESSIONS, PERSONS, db } from '../lib/db.js';
+import { KYC_SESSIONS, PERSONS, assertStatusTransition, db } from '../lib/db.js';
 import { redactDiditPayload, verifyDiditSignature } from '../lib/didit.js';
 import { encryptField } from '../lib/kms.js';
 
@@ -4562,10 +4193,13 @@ export const diditWebhook = onRequest(
     const approved = body.status === 'Approved' && faceSearchOk;
     const personRef = db.collection(PERSONS).doc(personId);
 
-    // 얼굴이 이미 등록돼 있으면 레벨을 올리지 않는다. persons.status 는 건드리지 않는다.
+    // 거절·중복 얼굴이면 레벨을 올리지 않고 status 만 'rejected' 로 둔다(kycLevel 은 0 그대로).
     if (!approved) {
+      const current = (await personRef.get()).get('status') as PersonStatus | undefined;
+      if (current) assertStatusTransition(current, 'rejected');
       await personRef.set(
         {
+          status: 'rejected',
           kyc: {
             provider: 'didit',
             sessionId,
@@ -4602,12 +4236,19 @@ export const diditWebhook = onRequest(
       return;
     }
 
+    // 승인됐지만 setKycLevel 이 아직 확정되지 않은 중간 상태가 'kyc_ok' 다.
+    const before = (person.get('status') ?? 'pending') as PersonStatus;
+    assertStatusTransition(before, 'kyc_ok');
+    await personRef.set({ status: 'kyc_ok', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+
     const txHash = await sendAttesterTx({
       address: deployment().identity,
       abi: identityAbi,
       functionName: 'setKycLevel',
       args: [personId, 1],
     });
+    // 해시를 먼저 남긴다. 여기서 죽어도 reconcilePending 이 kyc_ok 를 복구한다.
+    await personRef.set({ chain: { kycLevelTx: txHash } }, { merge: true });
     const receipt = await publicClient().waitForTransactionReceipt({ hash: txHash, timeout: 30_000 });
     if (receipt.status !== 'success') {
       res.status(500).send('setKycLevel reverted');
@@ -4616,8 +4257,10 @@ export const diditWebhook = onRequest(
     // 스펙 §10.4 규칙 3: finalized 뒤에만 DB를 완료 처리한다.
     await awaitFinalized(receipt.blockNumber);
 
+    assertStatusTransition('kyc_ok', 'active');
     await personRef.set(
       {
+        status: 'active',
         kycLevel: 1,
         kyc: {
           provider: 'didit',
@@ -4625,9 +4268,8 @@ export const diditWebhook = onRequest(
           status: 'approved',
           verifiedAt: FieldValue.serverTimestamp(),
           faceSearchOk,
-          levelTx: txHash,
         },
-        chain: { block: Number(receipt.blockNumber) },
+        chain: { kycLevelTx: txHash, block: Number(receipt.blockNumber) },
         updatedAt: FieldValue.serverTimestamp(),
       },
       { merge: true },
@@ -4778,7 +4420,7 @@ import { verifyRegistrationResponse } from '@simplewebauthn/server';
 import type { RegistrationResponseJSON } from '@simplewebauthn/server';
 import { FieldValue } from 'firebase-admin/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
-import { factoryAbi, type Hex } from '@monti/shared';
+import { coinbaseFactoryAbi, type Hex } from '@monti/shared';
 import { RP_ID, expectedOrigins } from '../config.js';
 import { deployment, publicClient } from '../lib/chain.js';
 import { AUTH_CHALLENGES, PASSKEYS, PERSONS, db } from '../lib/db.js';
@@ -4828,8 +4470,8 @@ export const registerPasskey = onCall(
     const { x, y } = coseToP256(credential.publicKey);
     const contracts = deployment();
     const account = await publicClient().readContract({
-      address: contracts.factory,
-      abi: factoryAbi,
+      address: contracts.coinbaseFactory,
+      abi: coinbaseFactoryAbi,
       functionName: 'getAddress',
       args: [[ownerBytes(x, y)], 0n],
     });
@@ -4892,13 +4534,14 @@ vi.mock('../src/lib/chain.js', () => ({
   awaitFinalized: vi.fn(async () => undefined),
   publicClient: () => ({ readContract, waitForTransactionReceipt }),
   deployment: () => ({
-    chainId: 10143, startBlock: 0,
+    chainId: 10143, block: 0,
     identity: '0x1111111111111111111111111111111111111111',
     organizers: '0x2222222222222222222222222222222222222222',
     ticket: '0x3333333333333333333333333333333333333333',
     paymaster: '0x4444444444444444444444444444444444444444',
-    factory: '0x5555555555555555555555555555555555555555',
     attester: '0x6666666666666666666666666666666666666666',
+    coinbaseFactory: '0x5555555555555555555555555555555555555555',
+    entryPoint: '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789',
   }),
   monadChain: () => ({ id: 10143 }),
   gasLimitFor: (n: bigint) => n,
@@ -5101,7 +4744,7 @@ git commit -m "feat(functions): register identity on chain idempotently and wait
 - Consumes: Task 18 `challengeFromClientData`; Task 15 `AUTH_CHALLENGES`, `PASSKEYS`, `PERSONS`, `USERS`, `authAdmin`.
 - Produces:
   - callable `loginChallenge`: `{ purpose?: 'login' | 'register' }` → `{ challenge: string; expiresAt: number }` (챌린지는 base64url 32바이트).
-  - callable `loginVerify`: `{ assertion }` → `{ token: string; personId: Hex; account: Hex }`. 카운터가 줄거나 같으면 거부하고, Firebase 커스텀 토큰에 `personId`·`account` 클레임을 넣는다. **로그인은 패스키 전용**(스펙 §5.1).
+  - callable `loginVerify`: `{ assertion }` → `{ token: string; personId: Hex; account: Hex }`. 카운터가 줄거나 같으면 거부하고, Firebase 커스텀 토큰에 **`personId`·`account`·`phone_number` 세 클레임**을 넣는다. `phone_number` 는 `users/{uid}.phoneE164` 에서 읽는다 — Task 21(`startDeviceChange`), 25(`pendingOffers`), 42 가 패스키 세션에서도 이 값을 읽기 때문에 반드시 실어야 한다. **로그인은 패스키 전용**(스펙 §5.1).
 
 - [ ] **Step 1: 실패하는 테스트를 쓴다**
 
@@ -5172,6 +4815,17 @@ describe('loginVerify', () => {
     expect(result.account).toBe(ACCOUNT);
     expect(typeof result.token).toBe('string');
     expect((await db.collection(PASSKEYS).doc('cred-1').get()).get('counter')).toBe(5);
+  });
+
+  it('puts personId, account and phone_number into the custom token claims', async () => {
+    const { authAdmin } = await import('../src/lib/db.js');
+    const spy = vi.spyOn(authAdmin, 'createCustomToken');
+    const { challenge } = (await challengeFn({ data: {} } as never)) as { challenge: string };
+    await verifyFn({ data: { assertion: assertion(challenge) } } as never);
+    expect(spy).toHaveBeenCalledWith('uid-1', {
+      personId: PERSON_ID, account: ACCOUNT, phone_number: '+821011112222',
+    });
+    spy.mockRestore();
   });
 
   it('rejects a replayed counter', async () => {
@@ -5263,11 +4917,14 @@ export const loginVerify = onCall(
     if (!account) throw new HttpsError('failed-precondition', 'NO_ACCOUNT');
 
     const users = await db.collection(USERS).where('personId', '==', personId).limit(1).get();
-    const uid = users.docs[0]?.id;
-    if (!uid) throw new HttpsError('not-found', 'USER_NOT_FOUND');
+    const userDoc = users.docs[0];
+    if (!userDoc) throw new HttpsError('not-found', 'USER_NOT_FOUND');
+    const uid = userDoc.id;
+    const phoneE164 = userDoc.get('phoneE164') as string | undefined;
 
     await credentialRef.update({ counter: newCounter, lastUsedAt: FieldValue.serverTimestamp() });
-    const token = await authAdmin.createCustomToken(uid, { personId, account });
+    // phone_number 까지 실어야 startDeviceChange / pendingOffers / getSignupStatus 가 패스키 세션에서도 동작한다.
+    const token = await authAdmin.createCustomToken(uid, { personId, account, phone_number: phoneE164 ?? '' });
     return { token, personId, account };
   },
 );
@@ -5278,7 +4935,7 @@ export const loginVerify = onCall(
 - [ ] **Step 3: 테스트를 통과시킨다**
 
 Run: `firebase emulators:exec --only firestore,auth "pnpm --filter monti-functions exec vitest run test/login.test.ts"`
-Expected: PASS — `Tests  4 passed (4)`
+Expected: PASS — `Tests  5 passed (5)`
 
 - [ ] **Step 4: `signalAllAcceptedCredentials`를 어디에서도 부르지 않는지 확인한다**
 
@@ -5469,7 +5126,7 @@ git commit -m "feat(functions): add device lock and 7-day device change cooldown
 - Test: `functions/test/snapshot.test.ts`
 
 **Interfaces:**
-- Consumes: Task 8 `snapshotDigest`, `canonicalJson`, `UnsignedSnapshot`; Task 12 `decryptField`; Task 13 `getAttesterAccount`; Task 15 `requireStaffForGate`, `resolveCallerAccount`.
+- Consumes: Task 8 `snapshotDigest`, `canonicalJson`, `UnsignedSnapshot`; Task 12 `decryptField`; Task 14 `getAttesterAccount`; Task 15 `requireStaffForGate`, `resolveCallerAccount`.
 - Produces:
   - `envioQuery<T>(query: string, variables?: Record<string, unknown>): Promise<T>` — Envio GraphQL 1회 호출.
   - `envioPage<T>(entity: string, fields: string, pageSize?: number): Promise<T[]>` — id 커서 페이지네이션.
@@ -6041,14 +5698,14 @@ git commit -m "feat(functions): add organizer invites that return calldata inste
 ## Task 24: 전화번호 색인과 `resolveRecipient`
 
 **Files:**
-- Create: `functions/src/lib/phoneIndex.ts`, `functions/src/functions/resolveRecipient.ts`
+- Modify: `functions/src/lib/phoneIndex.ts`(Task 16이 만든 파일에 조회 함수 추가)
+- Create: `functions/src/functions/resolveRecipient.ts`
 - Test: `functions/test/phoneIndex.test.ts`
 
 **Interfaces:**
 - Consumes: Task 4 `nicknameHash`, `recipientCommitment`; Task 14 `PHONE_INDEX_KEY`; Task 3 `identityAbi`.
 - Produces:
-  - `hmacPhone(phoneE164: string, key: string): string` — 64자 소문자 hex. Firestore 문서 id.
-  - `upsertPhoneIndex(phoneE164: string, personId: Hex, key: string): Promise<string>`
+  - `personIdByPhone(phoneE164: string, key: string): Promise<Hex | undefined>` (`hmacPhone`·`upsertPhoneIndex` 는 Task 16이 이미 만들었다)
   - callable `resolveRecipient`: `{ type: 'phone'|'nickname'|'address', value: string }` → `ResolveRecipientResult`.
 
 **개인정보 원칙:** 평문 전화번호는 `users/{uid}.phoneE164` 하나에만 있고, 검색용 색인은 HMAC이다. 키가 없으면 색인만 보고는 어떤 번호인지 알 수 없다. 응답에는 **전화번호도 이름도 절대 담지 않는다**.
@@ -6141,33 +5798,16 @@ describe('resolveRecipient', () => {
 Run: `firebase emulators:exec --only firestore,auth "pnpm --filter monti-functions exec vitest run test/phoneIndex.test.ts"`
 Expected: FAIL — `Failed to resolve import "../src/lib/phoneIndex.js"`
 
-- [ ] **Step 2: `phoneIndex.ts`를 쓴다**
+- [ ] **Step 2: `phoneIndex.ts`에 조회 함수를 덧붙인다**
+
+Task 16이 만든 파일 끝에 한 함수만 추가한다. `hmacPhone` 과 `upsertPhoneIndex` 는 손대지 않는다.
 
 ```ts
-import { createHmac } from 'node:crypto';
-import type { Hex } from '@monti/shared';
-import { PHONE_INDEX, db } from './db.js';
-
-/** 평문 번호를 Firestore 문서 id로 만들지 않는다. 키 없이는 역산이 불가능하다. */
-export function hmacPhone(phoneE164: string, key: string): string {
-  if (!/^\+[0-9]{7,15}$/.test(phoneE164)) throw new Error('BAD_PHONE');
-  if (!key) throw new Error('MISSING_PHONE_INDEX_KEY');
-  return createHmac('sha256', key).update(phoneE164, 'utf8').digest('hex');
-}
-
-export async function upsertPhoneIndex(phoneE164: string, personId: Hex, key: string): Promise<string> {
-  const id = hmacPhone(phoneE164, key);
-  await db.collection(PHONE_INDEX).doc(id).set({ personId }, { merge: true });
-  return id;
-}
-
 export async function personIdByPhone(phoneE164: string, key: string): Promise<Hex | undefined> {
   const doc = await db.collection(PHONE_INDEX).doc(hmacPhone(phoneE164, key)).get();
   return doc.exists ? (doc.get('personId') as Hex) : undefined;
 }
 ```
-
-`startSignup`(Task 16)은 이미 `upsertPhoneIndex` 를 부른다. 이 Task는 그 함수의 정의와 조회 경로를 채울 뿐이므로 `startSignup.ts` 는 건드리지 않는다.
 
 - [ ] **Step 3: `resolveRecipient.ts`를 쓴다**
 
@@ -6184,7 +5824,7 @@ import {
 import { PHONE_INDEX_KEY } from '../config.js';
 import { deployment, publicClient } from '../lib/chain.js';
 import { PERSONS, db } from '../lib/db.js';
-import { hmacPhone } from '../lib/phoneIndex.js';
+import { hmacPhone, personIdByPhone } from '../lib/phoneIndex.js';
 
 const ZERO = '0x0000000000000000000000000000000000000000';
 
@@ -6206,8 +5846,7 @@ export const resolveRecipient = onCall(
         throw new HttpsError('invalid-argument', 'BAD_PHONE');
       }
       const commitment = recipientCommitment(id);
-      const indexDoc = await db.collection('phoneIndex').doc(id).get();
-      const personId = indexDoc.exists ? (indexDoc.get('personId') as Hex) : undefined;
+      const personId = await personIdByPhone(value, PHONE_INDEX_KEY.value());
       if (!personId) return { member: false, commitment };
       const account = (await db.collection(PERSONS).doc(personId).get()).get('account') as Hex | undefined;
       if (!account) return { member: false, commitment };
@@ -6268,7 +5907,7 @@ git commit -m "feat(functions): add HMAC phone index and recipient resolution by
 - Test: `functions/test/transferInvites.test.ts`
 
 **Interfaces:**
-- Consumes: Task 24 `hmacPhone`; Task 4 `recipientCommitment`, `offerDigest`; Task 13 `getAttesterAccount`.
+- Consumes: Task 24 `hmacPhone`; Task 4 `recipientCommitment`, `offerDigest`; Task 14 `getAttesterAccount`.
 - Produces:
   - callable `createTransferInvite`: `{ tokenId, phoneE164 }` → `{ inviteId, commitment, expiresAt, smsText, smsUri }`. **서버는 문자를 보내지 않는다.** 보내는 사람의 폰이 `smsUri`(`sms:+8210…?body=…`)로 자기 문자 앱을 연다.
   - callable `pendingOffers`: `{}` → `{ offers: Array<{ tokenId: string; attesterSig: Hex; inviteId: string }> }`. 호출자 전화번호의 `hmacPhone`과 맞는 `transferInvites`를 찾아 `Ticket.acceptOffer`용 어테스터 서명을 만들어 준다.
@@ -6672,7 +6311,7 @@ export const closeEndedChats = onSchedule(
 - [ ] **Step 4: 테스트를 통과시킨다**
 
 Run: `firebase emulators:exec --only firestore,auth "pnpm --filter monti-functions exec vitest run test/eventChat.test.ts"`
-Expected: PASS — `Tests  6 passed (6)`
+Expected: PASS — `Tests  5 passed (5)`
 
 - [ ] **Step 5: 커밋**
 
@@ -6691,7 +6330,7 @@ git commit -m "feat(functions): gate event chat on chain-verified ticket ownersh
 
 **Interfaces:**
 - Consumes: Task 22 `envioQuery`; Task 15 `resolveCallerAccount`; Task 3 `organizersAbi`, `ticketAbi`.
-- Produces: callable `listAttendees`: `{ eventId }` → `{ attendees: AttendeeRow[] }`. 행은 `{ tokenId, nickname, checkedIn, tier, kycLevel }` 다. 관리자(`PERM_CREATE_EVENT`) 혹은 매니저만. **전화번호와 실명은 절대 포함하지 않는다.**
+- Produces: callable `listAttendees`: `{ eventId }` → **`AttendeeRow[]`(맨 배열)**. 각 행은 `{ tokenId, nickname, checkedIn, tier, kycLevel }` 다. 관리자(`PERM_CREATE_EVENT`) 혹은 매니저만. **전화번호와 실명은 절대 포함하지 않는다.**
 
 - [ ] **Step 1: 실패하는 테스트를 쓴다**
 
@@ -6733,10 +6372,9 @@ const auth = { uid: 'uid-1', token: { account: '0x999999999999999999999999999999
 
 describe('listAttendees', () => {
   it('returns tokenId, nickname, checkedIn, tier and kycLevel and nothing else', async () => {
-    const result = (await list({ data: { eventId: '11' }, auth } as never)) as {
-      attendees: Array<Record<string, unknown>>;
-    };
-    expect(result.attendees).toEqual([
+    const result = (await list({ data: { eventId: '11' }, auth } as never)) as Array<Record<string, unknown>>;
+    expect(Array.isArray(result)).toBe(true);
+    expect(result).toEqual([
       { tokenId: '7', nickname: 'alex', checkedIn: true, tier: 0, kycLevel: 1 },
       { tokenId: '8', nickname: '', checkedIn: false, tier: 1, kycLevel: 0 },
     ]);
@@ -6775,7 +6413,7 @@ interface Row {
   identity: { nickname: string | null; kycLevel: number } | null;
 }
 
-export const listAttendees = onCall(async (request): Promise<{ attendees: AttendeeRow[] }> => {
+export const listAttendees = onCall(async (request): Promise<AttendeeRow[]> => {
   const { eventId } = (request.data ?? {}) as { eventId?: string };
   if (!eventId || !/^[0-9]+$/.test(eventId)) throw new HttpsError('invalid-argument', 'BAD_EVENT_ID');
 
@@ -6810,15 +6448,13 @@ export const listAttendees = onCall(async (request): Promise<{ attendees: Attend
     { eventId },
   );
 
-  return {
-    attendees: data.rows.map((row) => ({
-      tokenId: row.id,
-      nickname: row.identity?.nickname ?? '',
-      checkedIn: row.checkIn !== null,
-      tier: row.tier,
-      kycLevel: (row.identity?.kycLevel ?? 0) as 0 | 1,
-    })),
-  };
+  return data.rows.map((row) => ({
+    tokenId: row.id,
+    nickname: row.identity?.nickname ?? '',
+    checkedIn: row.checkIn !== null,
+    tier: row.tier,
+    kycLevel: (row.identity?.kycLevel ?? 0) as 0 | 1,
+  }));
 });
 ```
 
@@ -6849,7 +6485,7 @@ git commit -m "feat(functions): list attendees by nickname for organizers only"
 - Produces:
   - `verifyTenderlySignature(input: { raw: string; signature: string; date: string; secret: string }): boolean` — HMAC-SHA256(secret, raw + date).
   - `decodeMontiLogs(logs: Array<{ raw: { topics: string[]; data: string } }>): Array<{ name: string; args: Record<string, unknown> }>`
-  - HTTPS `tenderlyWebhook`. 처리 이벤트: `CheckedIn`(푸시 "입장 완료"), `Registered`(persons active), `AdminSet`/`ManagerSet`/`GateRegistered`(캐시 무효화 Pub/Sub), `Transfer`(보낸 사람의 채팅 멤버 제거), `OfferAccepted`(초대 accepted), `EventStatusChanged`(채팅 문서 생성·폐쇄).
+  - HTTPS `tenderlyWebhook`. 처리 이벤트: `CheckedIn`(푸시 "입장 완료"), `Registered`(persons active), `NicknameSet`(`users.nickname` 미러링), `AdminSet`/`ManagerSet`(캐시 무효화 로그), `GateRegistered`(`pendingGates` 닫기 — Task 43), `Transfer`(보낸 사람의 채팅 멤버 제거), `OfferAccepted`(초대 accepted, **tokenId 로 매칭**), `EventStatusChanged`(채팅 문서 생성·폐쇄).
 
 - [ ] **Step 1: 실패하는 테스트를 쓴다**
 
@@ -6960,7 +6596,7 @@ import { onRequest } from 'firebase-functions/v2/https';
 import { EVENT_STATUS_BY_CODE, identityAbi, ticketAbi, type Hex } from '@monti/shared';
 import { TENDERLY_WEBHOOK_SECRET } from '../config.js';
 import { deployment, publicClient } from '../lib/chain.js';
-import { DEVICES, EVENT_CHATS, PERSONS, TRANSFER_INVITES, db } from '../lib/db.js';
+import { DEVICES, EVENT_CHATS, PERSONS, TRANSFER_INVITES, USERS, db } from '../lib/db.js';
 import { decodeMontiLogs, verifyTenderlySignature, type TenderlyLog } from '../lib/tenderly.js';
 
 async function pushCheckedIn(tokenId: bigint): Promise<void> {
@@ -6982,6 +6618,17 @@ async function markRegistered(personId: Hex): Promise<void> {
   const person = await ref.get();
   if (!person.exists || person.get('status') === 'active') return;
   await ref.set({ status: 'active' }, { merge: true });
+}
+
+/** 체인이 원본이다. users.nickname 은 채팅 표시용 캐시일 뿐이라 이벤트로만 갱신한다. */
+async function mirrorNickname(account: Hex, nickname: string): Promise<void> {
+  const personId = await publicClient().readContract({
+    address: deployment().identity, abi: identityAbi, functionName: 'personOf', args: [account],
+  });
+  const users = await db.collection(USERS).where('personId', '==', personId as string).limit(1).get();
+  const doc = users.docs[0];
+  if (!doc) return;
+  await doc.ref.set({ nickname }, { merge: true });
 }
 
 async function dropChatMemberIfTicketless(from: Hex, tokenId: bigint): Promise<void> {
@@ -7027,13 +6674,17 @@ export const tenderlyWebhook = onRequest(
         case 'Registered':
           await markRegistered(event.args.personId as Hex);
           break;
+        case 'NicknameSet':
+          await mirrorNickname(event.args.account as Hex, event.args.nickname as string);
+          break;
         case 'Transfer':
           await dropChatMemberIfTicketless(event.args.from as Hex, event.args.tokenId as bigint);
           break;
         case 'OfferAccepted': {
+          // OfferAccepted(tokenId, from, to) 에는 커밋먼트가 없다. tokenId 로 초대를 찾는다.
           const invites = await db
             .collection(TRANSFER_INVITES)
-            .where('commitment', '==', event.args.recipientCommitment as Hex)
+            .where('tokenId', '==', String(event.args.tokenId as bigint))
             .where('status', '==', 'sent')
             .get();
           await Promise.all(invites.docs.map((doc) => doc.ref.update({ status: 'accepted' })));
@@ -7095,7 +6746,7 @@ Tenderly 대시보드 → 프로젝트 → Alerts → New Alert. 다섯 번 반�
 | monti-manager-set | Event Emitted · `ManagerSet` | `Organizers` 주소 | 같은 URL |
 | monti-gate-registered | Event Emitted · `GateRegistered` | `Organizers` 주소 | 같은 URL |
 
-추가로 델타 이벤트 두 개: `OfferAccepted`(Ticket), `EventStatusChanged`(Ticket), 그리고 `Transfer`(Ticket).
+추가로 `OfferAccepted`(Ticket), `EventStatusChanged`(Ticket), `Transfer`(Ticket), `NicknameSet`(Identity) 네 개를 더 만든다. 총 **9개**.
 
 Run:
 ```bash
@@ -7121,7 +6772,7 @@ git commit -m "feat(functions): dispatch Tenderly alerts to push, status and cha
 
 **Interfaces:**
 - Consumes: Task 14 `publicClient`, `deployment`; Task 15 `assertStatusTransition`.
-- Produces: scheduled `reconcilePending` — `pending`/`kyc_ok`이면서 `chain.registerTx`가 2분 넘게 미해결인 문서를 체인과 대조해 고친다(스펙 §10.4 규칙 3의 "주기적 대사 함수").
+- Produces: scheduled `reconcilePending` — 2분 넘게 멈춘 문서를 체인과 대조해 고친다(스펙 §10.4 규칙 3의 "주기적 대사 함수"). **두 경로를 모두 복구한다**: `pending` + `chain.registerTx`(계정 등록), `kyc_ok` + `chain.kycLevelTx`(본인인증 레벨).
 
 - [ ] **Step 1: 실패하는 테스트를 쓴다**
 
@@ -7156,28 +6807,45 @@ beforeEach(async () => {
 });
 
 describe('reconcilePending', () => {
-  it('promotes a kyc_ok person whose register tx is finalized', async () => {
-    await db.collection(PERSONS).doc(P1).set({ status: 'kyc_ok', chain: { registerTx: '0xaa' }, updatedAt: OLD });
+  it('promotes a pending person whose register tx is finalized', async () => {
+    await db.collection(PERSONS).doc(P1).set({ status: 'pending', chain: { registerTx: '0xaa' }, updatedAt: OLD });
     await run({} as never);
     const person = await db.collection(PERSONS).doc(P1).get();
     expect(person.get('status')).toBe('active');
     expect(person.get('chain.block')).toBe(100);
   });
 
-  it('clears a dropped transaction so the client can retry', async () => {
+  it('clears a dropped register transaction so the client can retry', async () => {
     getTransactionReceipt.mockRejectedValue(new Error('not found'));
-    await db.collection(PERSONS).doc(P2).set({ status: 'kyc_ok', chain: { registerTx: '0xbb' }, updatedAt: OLD });
+    await db.collection(PERSONS).doc(P2).set({ status: 'pending', chain: { registerTx: '0xbb' }, updatedAt: OLD });
     await run({} as never);
     const person = await db.collection(PERSONS).doc(P2).get();
-    expect(person.get('status')).toBe('kyc_ok');
+    expect(person.get('status')).toBe('pending');
     expect(person.get('chain.registerTx')).toBeUndefined();
   });
 
   it('repairs a person the chain already knows even with no stored tx', async () => {
     readContract.mockResolvedValue('0x9999999999999999999999999999999999999999');
-    await db.collection(PERSONS).doc(P3).set({ status: 'kyc_ok', updatedAt: OLD });
+    await db.collection(PERSONS).doc(P3).set({ status: 'pending', updatedAt: OLD });
     await run({} as never);
     expect((await db.collection(PERSONS).doc(P3).get()).get('status')).toBe('active');
+  });
+
+  it('finishes a stuck kyc_ok person once setKycLevel is finalized', async () => {
+    await db.collection(PERSONS).doc(P1).set({ status: 'kyc_ok', kycLevel: 0, chain: { kycLevelTx: '0xcc' }, updatedAt: OLD });
+    await run({} as never);
+    const person = await db.collection(PERSONS).doc(P1).get();
+    expect(person.get('status')).toBe('active');
+    expect(person.get('kycLevel')).toBe(1);
+  });
+
+  it('falls back to active when the setKycLevel transaction reverted', async () => {
+    getTransactionReceipt.mockResolvedValue({ status: 'reverted', blockNumber: 100n });
+    await db.collection(PERSONS).doc(P2).set({ status: 'kyc_ok', kycLevel: 0, chain: { kycLevelTx: '0xdd' }, updatedAt: OLD });
+    await run({} as never);
+    const person = await db.collection(PERSONS).doc(P2).get();
+    expect(person.get('status')).toBe('active');
+    expect(person.get('kycLevel')).toBe(0);
   });
 });
 ```
@@ -7215,6 +6883,39 @@ export const reconcilePending = onSchedule(
 
     for (const doc of snapshot.docs) {
       const status = doc.get('status') as 'pending' | 'kyc_ok';
+
+      // kyc_ok = setKycLevel 이 아직 확정되지 않은 중간 상태. 그 트랜잭션을 따라간다.
+      if (status === 'kyc_ok') {
+        const levelTx = doc.get('chain.kycLevelTx') as Hex | undefined;
+        if (!levelTx) continue;
+        const levelReceipt = await pc.getTransactionReceipt({ hash: levelTx }).catch(() => null);
+        if (!levelReceipt) {
+          await doc.ref.set({ chain: { kycLevelTx: FieldValue.delete() } }, { merge: true });
+          continue;
+        }
+        if (levelReceipt.status !== 'success') {
+          assertStatusTransition('kyc_ok', 'active');
+          await doc.ref.set(
+            { status: 'active', chain: { kycLevelTx: FieldValue.delete() }, updatedAt: FieldValue.serverTimestamp() },
+            { merge: true },
+          );
+          continue;
+        }
+        const levelFinalized = await pc.getBlock({ blockTag: 'finalized' });
+        if ((levelFinalized.number ?? 0n) < levelReceipt.blockNumber) continue;
+        assertStatusTransition('kyc_ok', 'active');
+        await doc.ref.set(
+          {
+            status: 'active',
+            kycLevel: 1,
+            chain: { block: Number(levelReceipt.blockNumber) },
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        );
+        continue;
+      }
+
       const txHash = doc.get('chain.registerTx') as Hex | undefined;
 
       if (txHash) {
@@ -7236,7 +6937,6 @@ export const reconcilePending = onSchedule(
         }
         const finalized = await pc.getBlock({ blockTag: 'finalized' });
         if ((finalized.number ?? 0n) < receipt.blockNumber) continue;
-        if (status !== 'kyc_ok') continue;
         assertStatusTransition(status, 'active');
         await doc.ref.set(
           { status: 'active', chain: { block: Number(receipt.blockNumber) }, updatedAt: FieldValue.serverTimestamp() },
@@ -7246,7 +6946,6 @@ export const reconcilePending = onSchedule(
       }
 
       // 트랜잭션 기록이 없어도 체인이 이미 알고 있으면 DB를 맞춘다.
-      if (status !== 'kyc_ok') continue;
       const onChain = await pc.readContract({
         address: identity, abi: identityAbi, functionName: 'accountOf', args: [doc.id as Hex],
       });
@@ -7263,7 +6962,7 @@ export const reconcilePending = onSchedule(
 - [ ] **Step 4: 테스트를 통과시킨다**
 
 Run: `firebase emulators:exec --only firestore "pnpm --filter monti-functions exec vitest run test/reconcilePending.test.ts"`
-Expected: PASS — `Tests  3 passed (3)`
+Expected: PASS — `Tests  5 passed (5)`
 
 - [ ] **Step 5: 커밋**
 
@@ -7598,7 +7297,7 @@ vi.mock('../../src/lib/chain.js', () => ({
     ),
     waitForTransactionReceipt: vi.fn(async () => ({ status: 'success', blockNumber: 42n })),
   }),
-  deployment: () => ({ identity: '0x11', ticket: '0x33', organizers: '0x22', factory: '0x55' }),
+  deployment: () => ({ identity: '0x11', ticket: '0x33', organizers: '0x22', coinbaseFactory: '0x55' }),
   gasLimitFor: (n: bigint) => n,
 }));
 
@@ -7695,7 +7394,7 @@ git commit -m "test(functions): add emulator integration test for the signup cha
 - Modify: `.gitignore`
 
 **Interfaces:**
-- Consumes: `contracts/deployments/10143.json`(주소와 `startBlock`).
+- Consumes: `contracts/deployments/10143.json`(주소와 `block`).
 - Produces: Envio HyperIndex 프로젝트. `pnpm --filter monti-indexer envio codegen` 이 `indexer/generated`를 만들고, Task 35·36의 핸들러가 거기서 `Identity`, `Organizers`, `Ticket`, `TestHelpers`를 import 한다.
 
 - [ ] **Step 1: 패키지를 만든다**
@@ -7805,12 +7504,12 @@ contracts:
       - event: ManualOverride(uint256 indexed tokenId, uint256 indexed gateId, address indexed approver, uint8 role, uint8 reason)
       - event: Revoked(uint256 indexed tokenId, uint8 reason)
       - event: Migrated(uint256 indexed tokenId, address indexed from, address indexed to)
-      - event: OfferCreated(uint256 indexed tokenId, address indexed from, bytes32 indexed recipientCommitment, uint64 expiresAt)
+      - event: OfferCreated(uint256 indexed tokenId, address indexed from, bytes32 recipientCommitment, uint64 expiresAt)
       - event: OfferCancelled(uint256 indexed tokenId)
-      - event: OfferAccepted(uint256 indexed tokenId, address indexed to, bytes32 indexed recipientCommitment)
+      - event: OfferAccepted(uint256 indexed tokenId, address indexed from, address indexed to)
 networks:
   - id: ${deployment.chainId}
-    start_block: ${deployment.startBlock}
+    start_block: ${deployment.block}
     contracts:
       - name: Identity
         address:
@@ -7824,7 +7523,7 @@ networks:
 `;
 
 await writeFile(join(here, '..', 'config.yaml'), config, 'utf8');
-console.log(`[gen-config] chain ${deployment.chainId}, start_block ${deployment.startBlock}`);
+console.log(`[gen-config] chain ${deployment.chainId}, start_block ${deployment.block}`);
 ```
 
 - [ ] **Step 3: 생성하고 codegen을 돌린다**
@@ -7902,9 +7601,10 @@ describe('schema.graphql', () => {
   });
 
   it('contains no personal data field', async () => {
+    // 주석까지 포함해 통째로 검사한다. 주석에도 phone/email 같은 낱말을 쓰지 않는다.
     const schema = await readFile(schemaPath, 'utf8');
-    for (const banned of ['phone', 'email', 'photo', 'firstName', 'lastName', 'documentNumber', 'personName']) {
-      expect(schema.toLowerCase()).not.toContain(banned.toLowerCase());
+    for (const banned of ['phone', 'email', 'photo', 'firstname', 'lastname', 'documentnumber', 'personname']) {
+      expect(schema.toLowerCase(), `schema mentions "${banned}"`).not.toContain(banned);
     }
   });
 });
@@ -8017,7 +7717,7 @@ type IdentityAccount {
   id: ID!            # account address
   personId: String!
   nickname: String
-  kycLevel: Int!     # 0 = phone only, 1 = ID + face verified
+  kycLevel: Int!     # 0 = number verified only, 1 = ID + face verified
   deviceX: String!
   deviceY: String!
   locked: Boolean!
@@ -8322,7 +8022,7 @@ git commit -m "feat(indexer): index identity, nickname, organizer and gate event
 - Test: `indexer/test/ticket.test.ts`
 
 **Interfaces:**
-- Consumes: Task 35의 같은 파일; `@monti/shared`의 `ticketAbi`, `EVENT_STATUS_BY_CODE`, `getDeployment`.
+- Consumes: Task 35의 같은 파일; `@monti/shared`의 `ticketAbi`, `EVENT_STATUS_BY_CODE`, `loadDeployment`.
 - Produces: `Ticket.EventCreated`, `EventStatusChanged`, `Claimed`, `Transfer`, `CheckedIn`, `OverrideRequested`, `ManualOverride`, `Revoked`, `Migrated`, `OfferCreated`, `OfferCancelled`, `OfferAccepted` 핸들러.
 
 **메타데이터 조회:** `EventCreated`는 `(eventId, orgId, creator)`만 싣는다. 나머지 필드는 핸들러 안에서 viem `readContract(ticket.eventMeta)`·`ticket.tiers`로 한 번 읽는다. 이벤트 생성은 드물어 동기화 속도에 영향이 없다.
@@ -8392,10 +8092,11 @@ describe('Ticket handlers', () => {
       }),
       mockDb,
     });
-    expect(mockDb.entities.Offer.get('7')?.status).toBe('open');
+    expect(mockDb.entities.Offer.get('7')).toMatchObject({ status: 'open', commitment: `0x${'cc'.repeat(32)}` });
 
+    // OfferAccepted(tokenId, from, to) — 커밋먼트를 싣지 않는다. tokenId 로만 잇는다.
     const after = await Ticket.OfferAccepted.processEvent({
-      event: Ticket.OfferAccepted.createMockEvent({ tokenId: 7n, to: B, recipientCommitment: `0x${'cc'.repeat(32)}` }),
+      event: Ticket.OfferAccepted.createMockEvent({ tokenId: 7n, from: A, to: B }),
       mockDb,
     });
     expect(after.entities.Offer.get('7')?.status).toBe('accepted');
@@ -8430,13 +8131,13 @@ Expected: FAIL — 엔티티가 `undefined`.
 ```ts
 import { Identity, Organizers, Ticket } from 'generated';
 import { createPublicClient, http } from 'viem';
-import { EVENT_STATUS_BY_CODE, getDeployment, ticketAbi } from '@monti/shared';
+import { EVENT_STATUS_BY_CODE, loadDeployment, ticketAbi } from '@monti/shared';
 ```
 
 파일 끝에 추가:
 
 ```ts
-const deployment = getDeployment(Number(process.env.CHAIN_ID ?? 10143));
+const deployment = loadDeployment(Number(process.env.CHAIN_ID ?? 10143));
 const rpc = createPublicClient({
   transport: http(process.env.RPC_URL ?? 'https://testnet-rpc.monad.xyz'),
 });
@@ -8609,32 +8310,12 @@ git commit -m "feat(indexer): index events, tickets, check-ins, overrides and of
 - Consumes: Task 36의 `EventCreated` 핸들러.
 - Produces: `Tier` 엔티티 백필(`ticket.tiers(eventId)` 한 번 읽어 `eventId-idx`로 저장). 그리고 테스트넷 대상 로컬 실행이 실제로 동기화되는지 확인.
 
-- [ ] **Step 1: `ticketAbi`에 `tiers`를 추가한다**
+- [ ] **Step 1: `tiers` 가 이미 ABI에 있는지 확인한다**
 
-`packages/shared/src/abi.ts`의 `ticketAbi` 배열에서 `eventStatus` 항목 바로 뒤에 넣는다:
+Task 3이 01의 **전체 ABI**를 재수출하므로 `tiers` 는 이미 들어 있다. 손으로 항목을 덧붙이지 않는다(사전 스캔 3번).
 
-```ts
-  {
-    type: 'function',
-    name: 'tiers',
-    stateMutability: 'view',
-    inputs: [{ name: 'eventId', type: 'uint256' }],
-    outputs: [
-      {
-        name: '',
-        type: 'tuple[]',
-        components: [
-          { name: 'name', type: 'string' },
-          { name: 'priceUsdCents', type: 'uint256' },
-          { name: 'supply', type: 'uint32' },
-          { name: 'minted', type: 'uint32' },
-          { name: 'maxPerWallet', type: 'uint16' },
-          { name: 'seated', type: 'bool' },
-        ],
-      },
-    ],
-  },
-```
+Run: `node -e "const a=require('./packages/shared/src/abi/Ticket.json'); console.log(a.filter(i=>i.name==='tiers').length)"`
+Expected: `1`. `0` 이면 01에게 `tiers` 를 `public` 으로 노출해 달라고 요청한다.
 
 - [ ] **Step 2: 실패하는 테스트를 쓴다**
 
@@ -8748,7 +8429,7 @@ Expected: `tickets = ` 숫자 한 줄.
 - [ ] **Step 7: 커밋**
 
 ```bash
-git add packages/shared/src/abi.ts indexer/src/EventHandlers.ts indexer/test/tier.test.ts
+git add indexer/src/EventHandlers.ts indexer/test/tier.test.ts
 git commit -m "feat(indexer): backfill tier entities from the ticket contract"
 ```
 
@@ -9169,7 +8850,7 @@ Run:
 ```bash
 firebase emulators:exec --only firestore,auth "pnpm --filter monti-functions exec vitest run test/pinMessage.test.ts test/rules.test.ts"
 ```
-Expected: PASS — `Tests  19 passed (19)` (pinMessage 4 + rules 15)
+Expected: PASS — `Tests  21 passed (21)` (pinMessage 4 + rules 17)
 
 - [ ] **Step 5: 정합성 가드를 다시 돌린다**
 
@@ -9324,30 +9005,9 @@ describe('processDeletions', () => {
 Run: `firebase emulators:exec --only firestore,auth "pnpm --filter monti-functions exec vitest run test/accountDeletion.test.ts"`
 Expected: FAIL — `Failed to resolve import "../src/functions/accountDeletion.js"`
 
-- [ ] **Step 3: `db.ts`와 `didit.ts`를 늘린다**
+- [ ] **Step 3: `didit.ts`에 파기 호출을 더한다**
 
-`functions/src/lib/db.ts`에 상수를 더하고 허용목록에 넣는다:
-
-```ts
-export const DELETION_REQUESTS = 'deletionRequests';
-```
-```ts
-export const ALLOWED_COLLECTIONS = [
-  PERSONS,
-  USERS,
-  PASSKEYS,
-  DEVICES,
-  INVITES,
-  KYC_SESSIONS,
-  AUTH_CHALLENGES,
-  PHONE_INDEX,
-  TRANSFER_INVITES,
-  EVENT_CHATS,
-  DELETION_REQUESTS,
-  'members',
-  'messages',
-] as const;
-```
+`DELETION_REQUESTS` 상수와 허용목록 등록은 **Task 15에서 이미 끝났다**(사전 스캔 8번). `functions/src/lib/db.ts` 는 건드리지 않는다.
 
 `functions/src/lib/didit.ts` 끝에 추가한다:
 
@@ -9507,7 +9167,7 @@ Expected: `25`
 - [ ] **Step 8: 커밋**
 
 ```bash
-git add functions/src/functions/accountDeletion.ts functions/src/lib/db.ts functions/src/lib/didit.ts \
+git add functions/src/functions/accountDeletion.ts functions/src/lib/didit.ts \
         functions/src/index.ts functions/test/accountDeletion.test.ts
 git commit -m "feat(functions): add 7-day account deletion request and daily erasure job"
 ```
@@ -9793,34 +9453,12 @@ describe('listPendingGates', () => {
 Run: `firebase emulators:exec --only firestore,auth "pnpm --filter monti-functions exec vitest run test/pendingGates.test.ts"`
 Expected: FAIL — `Failed to resolve import "../src/functions/pendingGates.js"`
 
-- [ ] **Step 3: `db.ts`에 컬렉션을 더한다**
+- [ ] **Step 3: 컬렉션 상수가 이미 있는지 확인한다**
 
-```ts
-export const PENDING_GATES = 'pendingGates';
-```
+`PENDING_GATES` 상수와 `ALLOWED_COLLECTIONS` 등록은 **Task 15에서 이미 끝났다**(사전 스캔 8번). 보안 규칙도 손대지 않는다 — 머리말 규칙의 마지막 `match /{document=**} { allow read, write: if false; }` 가 이미 클라이언트를 전면 차단한다.
 
-`ALLOWED_COLLECTIONS` 배열에 `PENDING_GATES`를 `DELETION_REQUESTS` 뒤에 넣는다:
-
-```ts
-export const ALLOWED_COLLECTIONS = [
-  PERSONS,
-  USERS,
-  PASSKEYS,
-  DEVICES,
-  INVITES,
-  KYC_SESSIONS,
-  AUTH_CHALLENGES,
-  PHONE_INDEX,
-  TRANSFER_INVITES,
-  EVENT_CHATS,
-  DELETION_REQUESTS,
-  PENDING_GATES,
-  'members',
-  'messages',
-] as const;
-```
-
-보안 규칙은 손대지 않는다 — 머리말 규칙의 마지막 `match /{document=**} { allow read, write: if false; }` 가 이미 클라이언트를 전면 차단한다.
+Run: `grep -n "PENDING_GATES" functions/src/lib/db.ts`
+Expected: 상수 선언 한 줄과 `ALLOWED_COLLECTIONS` 안의 한 줄, 두 줄.
 
 - [ ] **Step 4: `pendingGates.ts`를 쓴다**
 
@@ -9938,7 +9576,7 @@ export const listPendingGates = onCall(
 `functions/src/functions/tenderlyWebhook.ts`의 import 에 `PENDING_GATES`를 더하고:
 
 ```ts
-import { DEVICES, EVENT_CHATS, PENDING_GATES, PERSONS, TRANSFER_INVITES, db } from '../lib/db.js';
+import { DEVICES, EVENT_CHATS, PENDING_GATES, PERSONS, TRANSFER_INVITES, USERS, db } from '../lib/db.js';
 ```
 
 `case 'AdminSet': case 'ManagerSet': case 'GateRegistered':` 묶음에서 `GateRegistered`를 분리한다:
@@ -10009,7 +9647,7 @@ Expected: `29`(Task 44까지 끝낸 뒤) 또는 `28`(43까지)
 - [ ] **Step 9: 커밋**
 
 ```bash
-git add functions/src/functions/pendingGates.ts functions/src/lib/db.ts \
+git add functions/src/functions/pendingGates.ts \
         functions/src/functions/tenderlyWebhook.ts functions/src/index.ts \
         functions/test/pendingGates.test.ts functions/test/tenderly.test.ts
 git commit -m "feat(functions): queue staff-created gate accounts for organizer approval"
@@ -10235,7 +9873,7 @@ git commit -m "feat(functions): start per-event KYC on demand and reuse open Did
 | sub-plan 03 · 개인정보 보호법: 계정 삭제 요청 | 41 | 7일 유예, 티켓 보유 시 차단, Didit 세션 삭제까지 |
 | 교차 리뷰: 가입 진행 상태 폴링 | 42 | `getSignupStatus`, `pending`이면 Didit 링크 재발급 없이 재사용 |
 | 교차 리뷰 · §5.7: 게이트 등록 대기열 | 43 | `pendingGates` + `submitPendingGate` / `listPendingGates`, `GateRegistered`가 닫는다 |
-| 04 합의: `attesterSig` 규약, `ATTESTER_ADDRESS`, 닉네임 `displayName` | 2, 8, 22 | |
+| 04 합의: `attesterSig` 규약, `attesterAddress()`, 닉네임 `displayName` | 2, 8, 22 | 배포 파일은 지연 로딩이라 import만으로 던지지 않는다 |
 | 04 합의: 스냅샷 `eventTitle`·`requireKyc`·`tierName`·`seat` | 1, 8, 22 | `eventTitle`은 IPFS 메타데이터에서 읽어 CID 단위로 캐시 |
 | Global Constraints: 가스 한도 = estimate × 1.075 | 2, 14, 31 | `withGasMargin` + 정적 강제 |
 | Global Constraints: 크립토 단어 금지 린트 | 9 | exit 1 |
@@ -10286,7 +9924,7 @@ grep -oE "^export (const|\{) [a-zA-Z]+" functions/src/index.ts | sort
 실행자는 아래를 고치지 말고 그대로 두어야 한다. 바꾸려면 마스터 계획을 먼저 고친다.
 
 1. **금지어 매칭이 식별자를 잡는다.** `token`, `gas`, `chain`을 부분 문자열로 검사하면 `tokenId`, `gasLimit`, `chainId`가 전부 걸려 린터가 무력화된다. Task 9는 **영어만 단어 경계**(`\bgas\b`)로 검사하고 한글은 부분 문자열로 둔다. 목록 자체는 손대지 않았다. 또한 Global Constraints 문장은 `NFT`를 두 번 적고 `Monad`를 대문자로 적었는데, 코드가 쓰는 배열은 `NFT` 하나와 소문자 `monad`다(비교는 대소문자 무시라 결과는 같다).
-2. **`persons.status`의 `kyc_ok`·`rejected`는 창업자 델타 뒤로 죽은 값이 됐다.** 본인인증이 가입에서 빠지면서 정상 경로가 `pending → active` 하나가 되었고, 본인인증 통과 여부는 status가 아니라 **`kycLevel`(0/1)** 이 따로 들고 있다. 마스터 계획의 유니온을 깨지 않으려고 두 값과 그 전이는 `assertStatusTransition`에 남겨 두었지만 **이 계획의 어떤 함수도 더 이상 쓰지 않는다**. 03·04는 `status === 'active' && kycLevel === 1` 로 판단해야 하며 `'kyc_ok'` 를 기대하면 안 된다.
+2. **`persons.status` 다섯 값의 뜻을 사전 스캔 7번 판정대로 고정했다.** `active` = `Identity.register` 가 finalized 된 계정(**`kycLevel` 과 무관**), `kyc_ok` = Didit 승인 후 `setKycLevel(1)` 이 아직 finalized 되지 않은 **중간 상태**, `rejected` = 거절·중복 얼굴, `pending` = 계정 미등록, `rotated` = 계정 교체됨. **본인인증 통과 여부의 원본은 `kycLevel`(0/1)** 이므로 03·04는 `kycLevel === 1` 로 판단하고 `status` 는 진행 표시로만 읽는다. `reconcilePending` 이 `pending`(register tx)과 `kyc_ok`(setKycLevel tx) 양쪽을 복구한다.
 3. **`seat`은 지금 항상 빈 문자열이다.** 좌석 지정은 스펙 §15의 Could 항목이라 MVP에 배정 로직이 없다. 필드는 04와 합의한 대로 자리를 잡아 두었고, 좌석 기능이 들어오면 `Ticket` 쪽에 좌석 저장소가 생긴 뒤 여기서 읽어 채우면 된다. **`seat` 을 옵셔널로 바꾸면 `canonicalJson` 결과가 달라져 04의 서명 검증이 깨지므로 항상 존재해야 한다.**
 4. **`GateResponseWire`의 CBOR이 스펙 §7.3의 "≈130 B"보다 크다.** `deviceSig`가 바이트가 아니라 130자 16진수 **문자열**이라 CBOR 페이로드가 약 160 B가 된다. Type 4 CC 한도 안이라 동작에는 문제가 없고, 타입을 바꾸면 03·04가 함께 바뀌므로 그대로 두었다. 바이트로 바꾸면 약 100 B로 줄어든다.
 5. **`Identity.Registered`가 기기 키도 KYC 레벨도 싣지 않는다.** `register(personId, account, deviceX, deviceY, kycLevel)`는 다섯 인자를 받는데 이벤트는 `(personId, account)`뿐이다. 그래서 Envio `IdentityAccount`의 `deviceX/deviceY`는 0으로, `kycLevel`은 0으로 시작한다. **sub-plan 01이 `register()` 안에서 `DeviceChanged`와 `KycLevelSet`을 함께 emit 하기로 했고**(창업자 델타 6번), 인덱서는 그 두 이벤트만 구독하면 된다 — 트랜잭션 입력을 디코드하지 않는다. 01이 emit을 빠뜨리면 두 값은 다음 변경 때까지 0으로 남는다.
@@ -10295,14 +9933,34 @@ grep -oE "^export (const|\{) [a-zA-Z]+" functions/src/index.ts | sort
 8. **`phoneIndex`, `transferInvites`, `eventChats`, `authChallenges`는 마스터 계획의 Firestore 표에 없다.** 인터페이스 델타와 WebAuthn 요구사항 때문에 추가했고, 머리말의 "Firestore 컬렉션 전체 목록" 표가 필드까지 포함한 최신본이다. 특히 `authChallenges/{challenge}` 는 문서 id 가 챌린지 문자열 자체이고 `{ purpose, expiresAt, createdAt, usedAt? }` 를 담으며 `loginChallenge` 가 발급하고 `registerPasskey`/`loginVerify` 가 1회 소비한다(TTL 300초). Task 31의 허용목록이 네 개를 모두 포함한다.
 9. **Firestore 규칙은 `EVENT_CHAT_MESSAGE_MAX_CHARS`를 import 할 수 없다.** 규칙 파일에 `500`이 리터럴로 박힌다. Task 2의 상수 테스트가 500을 고정하고 Task 11의 규칙 테스트가 501자를 거부하는지 확인하므로, 한쪽만 바뀌면 테스트가 깨진다.
 
+### 4-b. 사전 스캔(preflight) 판정 반영 내역
+
+`.superpowers/sdd/2026-09-20-monti-02-firebase-indexer/preflight.md` 의 11개 판정을 전부 반영했다.
+
+| # | 판정 | 반영한 Task |
+|---|---|---|
+| 1 | 배포 JSON 키 `{chainId, identity, organizers, ticket, paymaster, attester, coinbaseFactory, entryPoint, block}`, 모듈 스코프 파싱 금지 → `loadDeployment` 지연 로딩 | 2 (+ 14, 33, 36 호출부) |
+| 2 | `OfferCreated(tokenId indexed, from indexed, recipientCommitment, expiresAt)` / `OfferAccepted(tokenId indexed, from indexed, to indexed)` | 3, 28, 33, 36 |
+| 3 | 01이 만든 **전체 ABI JSON** 재수출, 손으로 프래그먼트 추가 금지 | 3 (37 Step 1 제거) |
+| 4 | 패키지·설정(13) → 어테스터·체인(14) 순서, `phoneIndex.ts` 는 첫 소비자인 16에서 생성 | 13, 14, 16, 24 |
+| 5 | 스키마 주석에 `phone` 같은 낱말을 쓰지 않아 `not.toContain` 이 의미를 갖게 | 34 |
+| 6 | 커스텀 토큰 클레임 `{ personId, account, phone_number }` | 20 (21·25·42가 소비) |
+| 7 | `status` 다섯 값의 뜻 고정, `reconcilePending` 이 `pending`·`kyc_ok` 둘 다 복구 | 15, 17, 29 |
+| 8 | `NicknameSet` 미러링, `listAttendees` 맨 배열, 컬렉션 상수 15에 집중 | 28, 27, 15 |
+| 9 | `devices` 는 `pushToken` 한 키만, 채팅 메시지는 `hasAll` + `hasOnly` | 11 (+ 40) |
+| 10 | Firestore 에뮬레이터 **8089**(8080은 Hasura), Node 22 / firebase-tools 설치 절차 | 10 |
+| 11 | 기대 테스트 수 정정 | 4, 6, 7, 15, 20, 26, 29, 40 |
+
 ### 5. 실행자 체크리스트 (이 계획을 끝낸 뒤 참이어야 하는 것)
 
 ```bash
+node -v                                            # v22.x (fnm/nvm, 루트 .nvmrc = 22)
 pnpm test:shared                                   # 9 files, 전부 통과
 pnpm test:functions                                # 에뮬레이터 위에서 전부 통과
 pnpm --filter monti-indexer exec vitest run        # 4 files 통과
 pnpm lint:copy                                     # copy-lint: clean
 firebase functions:list --project dev | grep -c asia-northeast3   # 29
+grep -c '"port": 8089' firebase.json                              # 1 (Firestore, Hasura 와 충돌 방지)
 curl -sI https://monti.app/.well-known/apple-app-site-association | grep -c "application/json"  # 1
 ```
 
