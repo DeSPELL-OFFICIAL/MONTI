@@ -13,15 +13,12 @@
 // Whichever lands first turns the screen green; the other is then ignored. Neither is treated
 // as authority: spec §3 principle 4 makes the attendee's green informational — the staff screen
 // and the chain are the record — which is also why the waiting state has a deadline instead of
-// a spinner that can run all night.
+// a spinner that can run all night. There is no refusal path here on purpose: a check-in the
+// contract reverts emits no event and triggers no webhook, so a door that says no is silence,
+// and silence is what the deadline reports.
 import { useCallback, useEffect, useState } from 'react';
 import { numberToHex, type Hex } from 'viem';
-import {
-  CLOCK_SKEW_SECONDS,
-  CODE_WINDOW_SECONDS,
-  isGateDenyCode,
-  type GateDenyCode,
-} from '@monti/shared';
+import { CLOCK_SKEW_SECONDS, CODE_WINDOW_SECONDS } from '@monti/shared';
 import { Alert, Spinner } from '../../shared/ui';
 import { useCopy } from '../../shared/i18n';
 import { USED_EVENTS, eventTopic } from '../../shared/chain/abis';
@@ -47,23 +44,35 @@ export const WAITING_DEADLINE_MS = (CODE_WINDOW_SECONDS + CLOCK_SKEW_SECONDS) * 
  * so today the array holds one signature and the day the ABI lands it holds two, with no change
  * here. `tokenId` is `CheckedIn`'s first indexed parameter, so it is `topic1`.
  */
-export function checkedInTopics(tokenId: string): (Hex | Hex[] | null)[] {
+export function checkedInTopics(tokenId: string): (Hex | Hex[] | null)[] | null {
   const signatures = Object.keys(USED_EVENTS.Ticket)
     .map((eventName) => eventTopic('Ticket', eventName))
     .filter((topic): topic is Hex => topic !== null);
+  // `null`, never `[]`: a node reads an empty `topic0` as "match any topic0", which would turn
+  // this screen green on the next `Transfer` the contract emits for this ticket.
+  if (signatures.length === 0) return null;
   return [signatures, numberToHex(BigInt(tokenId), { size: 32 })];
 }
 
-type PushData = Record<string, string>;
+/**
+ * The FCM data payload `pushCheckedIn` sends from the backend's Tenderly webhook. It is emitted
+ * only from the `CheckedIn` case, so its arrival IS the confirmation — there is no refusal to
+ * carry, and no field here says one. `late` joins it after the 01b redeploy; it changes nothing
+ * on this screen, because 01b emits `CheckedIn` alongside `CheckedInLate` on the late path and
+ * the green lands either way.
+ */
+// shared: CheckInPush — belongs in `@monti/shared` next to the other wire shapes the day the
+// backend and this app are in one branch. It is not there on this branch.
+type CheckInPush = { tokenId: string; late?: '1' };
 
 // Ruling 4: `registerPush` runs once per app run, the first time someone reaches this screen
 // with an account. It raises the OS permission prompt, and a person who said no must not be
 // asked again by a re-render, a second ticket, or a second tap. So the registration is a
 // module-level fact and every mounted result screen listens to the one handler it installed.
-const pushListeners = new Set<(data: PushData) => void>();
+const pushListeners = new Set<(data: Record<string, string>) => void>();
 let pushStarted = false;
 
-function joinEntryPush(account: Hex | undefined, listener: (data: PushData) => void): () => void {
+function joinEntryPush(account: Hex | undefined, listener: (data: Record<string, string>) => void): () => void {
   pushListeners.add(listener);
   if (account && !pushStarted) {
     pushStarted = true;
@@ -85,10 +94,7 @@ export function resetEntryPush(): void {
   pushListeners.clear();
 }
 
-type Outcome =
-  | { kind: 'waiting' }
-  | { kind: 'done'; stage: LogStage }
-  | { kind: 'failed'; deny: GateDenyCode | null };
+type Outcome = { kind: 'waiting' } | { kind: 'done'; stage: LogStage } | { kind: 'failed' };
 
 export function Result({ tokenId }: { tokenId: string }) {
   const copy = useCopy();
@@ -104,53 +110,54 @@ export function Result({ tokenId }: { tokenId: string }) {
     setOutcome((prev) => (prev.kind === 'done' && prev.stage === 'finalized' ? prev : { kind: 'done', stage }));
   }, []);
 
-  // Only from `waiting`: a refusal never talks over a confirmation, and the deadline never
-  // talks over the gate's own reason for refusing.
-  const refuse = useCallback((deny: GateDenyCode | null): void => {
-    setOutcome((prev) => (prev.kind === 'waiting' ? { kind: 'failed', deny } : prev));
+  // Only from `waiting`: the deadline never talks over a confirmation that already landed.
+  const giveUp = useCallback((): void => {
+    setOutcome((prev) => (prev.kind === 'waiting' ? { kind: 'failed' } : prev));
   }, []);
 
   useEffect(() => {
     let live = true;
-    const stopLogs = subscribeLogs({
-      address: getConfig().addresses.ticket,
-      topics: checkedInTopics(tokenId),
-      onLog: (entry) => admit(entry.stage),
-    });
+    const topics = checkedInTopics(tokenId);
+    const stopLogs = topics
+      ? subscribeLogs({
+          address: getConfig().addresses.ticket,
+          topics,
+          onLog: (entry) => admit(entry.stage),
+        })
+      : () => undefined;
 
-    // The one-shot read. `readContract` resolves against the latest block, which on Monad is a
-    // speculative one, so it lights the green in the same state a speculative log would — a
-    // finalized log still hardens it. An unreachable chain is not an answer: the subscription
-    // and the push are still running.
+    // The one-shot read, for the tap that landed before the subscription opened. A check-in
+    // already sitting in storage when this screen mounts is a recorded fact, not something on
+    // its way, so it lights the green settled: "기록하고 있어요" under an entry finalized an hour
+    // ago would never stop being wrong. The live speculative → finalized transition belongs to
+    // the log subscription, which is the only source that can actually observe it.
     void Promise.resolve()
       .then(() => readTicket().checkInOf(BigInt(tokenId)))
       .then((checkIn) => {
-        if (live && checkIn.ts > 0n) admit('speculative');
+        if (live && checkIn.ts > 0n) admit('finalized');
       })
       .catch(() => undefined);
 
+    // The webhook fires only on `CheckedIn`, so the payload's arrival is the confirmation.
     const stopPush = joinEntryPush(account, (data) => {
-      if (!live || data.tokenId !== tokenId) return;
-      const deny = data.deny;
-      if (!deny) {
-        admit('finalized');
-        return;
-      }
-      // Ruling 2: a `'TIMEOUT'` from the staff's write is "no answer yet", not a refusal —
-      // `isGateDenyCode` does not accept it, so the screen keeps waiting for one of the two
-      // sources or for the deadline.
-      if (isGateDenyCode(deny)) refuse(deny);
+      const push = data as Partial<CheckInPush>;
+      if (!live || push.tokenId !== tokenId) return;
+      admit('finalized');
     });
-
-    const deadline = setTimeout(() => refuse(null), WAITING_DEADLINE_MS);
 
     return () => {
       live = false;
       stopLogs();
       stopPush();
-      clearTimeout(deadline);
     };
-  }, [tokenId, account, admit, refuse]);
+  }, [tokenId, account, admit]);
+
+  // Its own effect, keyed on the ticket alone: signing in during `waiting` changes `account` and
+  // would otherwise restart the 65 s from zero, which is the one thing a deadline may not do.
+  useEffect(() => {
+    const deadline = setTimeout(giveUp, WAITING_DEADLINE_MS);
+    return () => clearTimeout(deadline);
+  }, [tokenId, giveUp]);
 
   if (outcome.kind === 'waiting') {
     return (
@@ -162,9 +169,12 @@ export function Result({ tokenId }: { tokenId: string }) {
   }
 
   if (outcome.kind === 'failed') {
+    // The only failure this screen can know about. A refused check-in emits no event and sends
+    // no push, so "the door did not confirm" is the whole of what is known — and it is the
+    // sentence that gets the person to the one place that does know, the staff desk.
     return (
       <div data-testid="entry-result" data-stage="failed">
-        <Alert tone="error">{outcome.deny ? copy.enter.deny[outcome.deny] : copy.enter.notConfirmed}</Alert>
+        <Alert tone="error">{copy.enter.notConfirmed}</Alert>
       </div>
     );
   }

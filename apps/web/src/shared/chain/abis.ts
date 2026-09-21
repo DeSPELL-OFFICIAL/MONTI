@@ -54,8 +54,14 @@ export const USED_EVENTS = {
   Ticket: {
     /** `CheckedIn(uint256 tokenId, uint256 eventId, uint256 gateId, bytes32 nonceHash, uint64 ts)` */
     CheckedIn: 5,
-    /** 01b: `CheckedInLate(...)`, same five parameters. Pending until the redeploy. */
-    CheckedInLate: 5,
+    /**
+     * 01b: `CheckedInLate(uint256 indexed tokenId, uint256 indexed gateId, uint64 issuedAt,
+     * uint64 ts)` — **four** parameters, no `eventId` and no `nonceHash`
+     * (`MONTI-01b/contracts/docs/abi-delta-01b.md:54`). It is emitted *in addition to*
+     * `CheckedIn` on the late path, so it is subscribed for the green and never for counting.
+     * Pending until the redeploy.
+     */
+    CheckedInLate: 4,
   },
 } as const satisfies Record<UsedContract, Readonly<Record<string, number>>>;
 

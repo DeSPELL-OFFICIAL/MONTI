@@ -136,8 +136,9 @@ export function Enter() {
         </>
       ) : null}
 
-      {/* The tap is over; <Result /> owns everything after it, deadline included. */}
-      {state.phase === 'waiting' ? <Result tokenId={tokenId} /> : null}
+      {/* The tap is over; <Result /> owns everything after it, deadline included. A missing
+          route param would otherwise reach `BigInt('')` as `0n` and watch token 0. */}
+      {state.phase === 'waiting' && tokenId ? <Result tokenId={tokenId} /> : null}
 
       {state.phase === 'failed' ? (
         <>
