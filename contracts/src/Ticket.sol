@@ -346,6 +346,39 @@ contract Ticket is ERC721, ITicket {
         emit CheckedIn(tokenId, eventId, g.gateId, nonceHash, uint64(block.timestamp));
     }
 
+    /// @notice Spec 13: a manager without approval rights files a request; someone with rights admits.
+    function requestOverride(uint256 tokenId, uint256 gateId, uint8 reason) external {
+        uint256 orgId = _events[_eventOf[tokenId]].orgId;
+        if (orgId == 0) revert NoSuchTicket();
+        (bool exists,) = organizers.managerOf(orgId, msg.sender);
+        if (!exists && !organizers.hasPermission(orgId, msg.sender, PERM_APPROVE_OVERRIDE)) revert Unauthorized();
+        emit OverrideRequested(tokenId, gateId, msg.sender, reason);
+    }
+
+    /// @notice role 1 = admin (or owner) holding PERM_APPROVE_OVERRIDE, role 2 = manager with canApprove.
+    ///         Emits CheckedIn as well so the staff screen and the indexer watch one event only.
+    function manualOverride(uint256 tokenId, uint256 gateId, uint8 reason) external {
+        if (_ownerOf(tokenId) == address(0)) revert NoSuchTicket();
+        uint256 eventId = _eventOf[tokenId];
+        uint256 orgId = _events[eventId].orgId;
+
+        uint8 role;
+        if (organizers.hasPermission(orgId, msg.sender, PERM_APPROVE_OVERRIDE)) {
+            role = 1;
+        } else {
+            (bool exists, bool canApprove) = organizers.managerOf(orgId, msg.sender);
+            if (exists && canApprove) role = 2;
+        }
+        if (role == 0) revert Unauthorized();
+        if (_revoked[tokenId]) revert TicketRevoked();
+        if (_checkIns[tokenId].ts != 0) revert AlreadyCheckedIn();
+
+        _checkIns[tokenId] = CheckIn({gateId: gateId, ts: uint64(block.timestamp), nonceHash: bytes32(0), manual: true});
+
+        emit ManualOverride(tokenId, gateId, msg.sender, role, reason);
+        emit CheckedIn(tokenId, eventId, gateId, bytes32(0), uint64(block.timestamp));
+    }
+
     function _requireEventPermission(uint256 eventId, uint32 bit) private view {
         uint256 orgId = _events[eventId].orgId;
         if (orgId == 0) revert UnknownEvent();
