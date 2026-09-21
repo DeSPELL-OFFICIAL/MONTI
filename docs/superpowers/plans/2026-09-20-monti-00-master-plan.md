@@ -465,7 +465,7 @@ function offerOf(uint256 tokenId) external view returns (Offer memory);
 **창업자 입력 (이게 없으면 Task 15가 시작되지 않는다)**
 
 - 실제 스태프 단말기의 **게이트 계정 주소와 진짜 P-256 공개키**(`SEED_GATE_KX`/`SEED_GATE_KY`). 계정은 채택된 팩토리 `0xBA5ED110eFDBa3D005bfC882d75358ACBbB85842`로 `factoryAddress`를 명시해 유도한 것이어야 한다. `registerGate`는 한 주소를 한 번만 받는다.
-- 배포자 계정 가스 **3~4 MON 이상**(브로드캐스트 7건, Monad는 한도 × 100 gwei로 문다). 페이마스터 스테이크·예치 1 + 1 MON은 옛 배포에서 회수한다(Step 9).
+- **가스 예산 (이 줄이 정본이다. 다른 곳은 여기를 참조하고 숫자를 다시 적지 않는다)** — 배포자 계정 **4 MON 이상**: 컨트랙트 네 건 배포 + 페이마스터 스테이크 1 MON + EntryPoint 예치금 1 MON + 데모 멤버 자금 3 × 0.1 MON, 여유 포함(Monad는 한도 × 100 gwei로 문다). 어테스터 계정 **1 MON 이상**(Step 8의 재등록 트랜잭션). 옛 배포의 스테이크·예치 1 + 1 MON은 Step 9에서 회수하지만 **24시간 지연이 있어 이번 재배포의 재원으로 쓸 수 없다.**
 - **Tenderly 알림을 새 주소로 다시 겨눈다**(기획서 §8.6). 옛 네 주소를 보는 알림·시뮬레이션·웹훅은 재배포 즉시 조용해진다 — 02의 `tenderlyWebhook`이 새 `Ticket`/`Identity` 주소를 받아야 입장 푸시가 다시 산다.
 - 인덱서 재시작 블록 = 새 `.block`. 옛 데이터는 비운다.
 
