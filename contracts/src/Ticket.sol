@@ -2,7 +2,10 @@
 pragma solidity 0.8.31;
 
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import {Base64} from "@openzeppelin/contracts/utils/Base64.sol";
+import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {LibString} from "solady/utils/LibString.sol";
 import {P256} from "solady/utils/P256.sol";
 import {IIdentity} from "./interfaces/IIdentity.sol";
 import {IOrganizers} from "./interfaces/IOrganizers.sol";
@@ -12,6 +15,8 @@ import {ITicket} from "./interfaces/ITicket.sol";
 /// @notice ERC-721 where every transfer rule lives in one _update override and every admission is an
 ///         append-only CheckIn record. The chain is the authority for the ADMIT decision (spec 7.4).
 contract Ticket is ERC721, ITicket {
+    using Strings for uint256;
+
     struct EventMeta {
         uint256 orgId;
         bytes32 titleHash;
@@ -268,6 +273,10 @@ contract Ticket is ERC721, ITicket {
         return _checkIns[tokenId];
     }
 
+    function isRevoked(uint256 tokenId) external view returns (bool) {
+        return _revoked[tokenId];
+    }
+
     function offerOf(uint256 tokenId) external view returns (Offer memory) {
         return _offers[tokenId];
     }
@@ -446,6 +455,56 @@ contract Ticket is ERC721, ITicket {
         _internalMove = false;
 
         emit Migrated(tokenId, holder, msg.sender);
+    }
+
+    /// @notice Everything the ticket shows comes from the chain (spec 10.2) — no server, no IPFS
+    ///         metadata file, nothing to go stale. The status attribute is the one visible thing
+    ///         admission changes: 입장 전 -> 입장 완료. A voided ticket reads 취소됨 whether or not it
+    ///         ever walked in, which is the order the attendee app derives its state in too.
+    ///         Tier names and image CIDs are typed by organizers, so both are JSON-escaped: a bare
+    ///         quote would close the string early and let an organizer forge the attributes after it.
+    function tokenURI(uint256 tokenId) public view override returns (string memory) {
+        if (_ownerOf(tokenId) == address(0)) revert NoSuchTicket();
+
+        uint256 eventId = _eventOf[tokenId];
+        EventMeta storage m = _events[eventId];
+        Tier storage t = _tiers[eventId][_tierOf[tokenId]];
+
+        string memory status = unicode"입장 전";
+        if (_revoked[tokenId]) {
+            status = unicode"취소됨";
+        } else if (_checkIns[tokenId].ts != 0) {
+            status = unicode"입장 완료";
+        }
+
+        string memory attributes = string.concat(
+            '[{"trait_type":"Event","value":"',
+            eventId.toString(),
+            '"},{"trait_type":"Tier","value":"',
+            LibString.escapeJSON(t.name),
+            '"},{"trait_type":"Starts","display_type":"date","value":',
+            uint256(m.startsAt).toString(),
+            '},{"trait_type":"Seated","value":"',
+            t.seated ? "true" : "false",
+            '"},{"trait_type":"Transferable","value":"',
+            m.transferable ? "true" : "false",
+            unicode'"},{"trait_type":"상태","value":"',
+            status,
+            '"}]'
+        );
+
+        string memory json = string.concat(
+            '{"name":"MONTI Ticket #',
+            tokenId.toString(),
+            '","description":"MONTI on-chain admission. The chain decides, not our server.',
+            '","image":"ipfs://',
+            LibString.escapeJSON(m.imageCid),
+            '","attributes":',
+            attributes,
+            "}"
+        );
+
+        return string.concat("data:application/json;base64,", Base64.encode(bytes(json)));
     }
 
     function _requireEventPermission(uint256 eventId, uint32 bit) private view {

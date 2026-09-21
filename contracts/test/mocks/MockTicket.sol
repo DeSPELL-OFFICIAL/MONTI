@@ -14,4 +14,8 @@ contract MockTicket is ITicket {
     function eventOrg(uint256 eventId) external view returns (uint256) {
         return orgOf[eventId];
     }
+
+    function isRevoked(uint256) external pure returns (bool) {
+        return false;
+    }
 }
