@@ -7,18 +7,11 @@ export class DeviceKeyUnavailable extends Error {
   }
 }
 
-/** The active native backend cannot honour the policy the caller asked for. */
-export class DeviceKeyPolicyUnsupported extends Error {
-  constructor(
-    readonly alias: string,
-    readonly reason: string,
-  ) {
-    super(`DeviceKeyPolicyUnsupported: ${reason} for ${alias}`);
-    this.name = 'DeviceKeyPolicyUnsupported';
-  }
-}
-
-/** Where the private key actually lives. Android may downgrade StrongBox to TEE silently. */
+/**
+ * Where the private key actually lives. @monti/device-key reports it rather than infers it:
+ * Android falls back to the TEE on a device with no StrongBox, and that downgrade has to be
+ * visible to whatever registers the key.
+ */
 export type DeviceKeyBacking = 'secureEnclave' | 'strongBox' | 'tee';
 
 export interface DeviceKeyPublic {

@@ -52,6 +52,9 @@ importers:
       '@dnd-kit/utilities':
         specifier: 3.2.2
         version: 3.2.2(react@19.2.0)
+      '@monti/device-key':
+        specifier: workspace:*
+        version: link:../../plugins/device-key
       '@monti/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -61,9 +64,6 @@ importers:
       '@noble/hashes':
         specifier: 1.8.0
         version: 1.8.0
-      '@perfood/capacitor-crypto-api':
-        specifier: 8.0.0
-        version: 8.0.0(@capacitor/core@8.5.2)
       '@tanstack/react-query':
         specifier: 5.62.11
         version: 5.62.11(react@19.2.0)
@@ -208,6 +208,18 @@ importers:
       vitest:
         specifier: ^2.1.0
         version: 2.1.9(@types/node@22.20.4)(jsdom@26.1.0)
+
+  plugins/device-key:
+    devDependencies:
+      '@capacitor/core':
+        specifier: 8.5.2
+        version: 8.5.2
+      typescript:
+        specifier: 5.9.2
+        version: 5.9.2
+      vitest:
+        specifier: 3.2.4
+        version: 3.2.4(@types/node@22.20.4)(jsdom@26.1.0)(tsx@4.23.15)
 
 packages:
 
@@ -1778,11 +1790,6 @@ packages:
   '@peculiar/x509@1.14.3':
     resolution: {integrity: sha512-C2Xj8FZ0uHWeCXXqX5B4/gVFQmtSkiuOolzAgutjTfseNOHT3pUjljDZsTSxXFGgio54bCzVFqmEOUrIVk8RDA==}
     engines: {node: '>=20.0.0'}
-
-  '@perfood/capacitor-crypto-api@8.0.0':
-    resolution: {integrity: sha512-HaDntLFzGNNyMkc9ayaN+dB9OiirgPsH8Cj422l/yHpjP/jcnIHk9K4I9jJDZZQY+TMsfWCWmPIvjWKVt0g3pg==}
-    peerDependencies:
-      '@capacitor/core': '>=8.0.0'
 
   '@pkgjs/parseargs@0.11.0':
     resolution: {integrity: sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==}
@@ -6376,10 +6383,6 @@ snapshots:
       reflect-metadata: 0.2.2
       tslib: 2.8.1
       tsyringe: 4.10.0
-
-  '@perfood/capacitor-crypto-api@8.0.0(@capacitor/core@8.5.2)':
-    dependencies:
-      '@capacitor/core': 8.5.2
 
   '@pkgjs/parseargs@0.11.0':
     optional: true

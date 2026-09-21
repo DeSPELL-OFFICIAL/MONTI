@@ -4,13 +4,7 @@ const generateKey = vi.fn();
 const sign = vi.fn();
 /** `null` is the plugin adapter's typed "no key under this alias yet". */
 const loadKey = vi.fn<() => Promise<{ publicKey: string; backing?: string } | null>>(async () => null);
-vi.mock('./plugin', () => ({
-  generateKey,
-  sign,
-  loadKey,
-  PLUGIN_SUPPORTS_ACCESS_CONTROL: true,
-  PLUGIN_SIGNS_DIGEST_RAW: true,
-}));
+vi.mock('./plugin', () => ({ generateKey, sign, loadKey }));
 vi.mock('@capacitor/core', () => ({ Capacitor: { isNativePlatform: () => true } }));
 
 import { base64UrlEncode } from '@monti/shared';
@@ -97,43 +91,6 @@ describe('device key', () => {
       r: R_SEVEN,
       s: `0x${'11'.repeat(32)}`,
     });
-  });
-
-  it('refuses to mint a biometric key on a backend that cannot enforce it', async () => {
-    const { ensureDeviceKeyNative } = await import('./native');
-    vi.doMock('./plugin', () => ({
-      generateKey,
-      sign,
-      loadKey,
-      PLUGIN_SUPPORTS_ACCESS_CONTROL: false,
-      PLUGIN_SIGNS_DIGEST_RAW: true,
-    }));
-    vi.resetModules();
-    const { ensureDeviceKeyNative: guarded } = await import('./native');
-    await expect(guarded({ alias: ATTENDEE_KEY_ALIAS, requireAuth: true, strongBox: true })).rejects.toThrow(
-      'DeviceKeyPolicyUnsupported: backend cannot enforce biometric access control',
-    );
-    expect(ensureDeviceKeyNative).toBeTypeOf('function');
-    vi.doUnmock('./plugin');
-    vi.resetModules();
-  });
-
-  it('refuses to mint even the gate key on a backend that re-hashes the digest', async () => {
-    vi.doMock('./plugin', () => ({
-      generateKey,
-      sign,
-      loadKey,
-      PLUGIN_SUPPORTS_ACCESS_CONTROL: true,
-      PLUGIN_SIGNS_DIGEST_RAW: false,
-    }));
-    vi.resetModules();
-    const { ensureDeviceKey: guarded } = await import('./index');
-    await expect(guarded({ alias: GATE_KEY_ALIAS, requireAuth: false, strongBox: true })).rejects.toThrow(
-      'DeviceKeyPolicyUnsupported: backend re-hashes the digest',
-    );
-    expect(generateKey).not.toHaveBeenCalled();
-    vi.doUnmock('./plugin');
-    vi.resetModules();
   });
 
   it('arms by signing a throwaway digest so the biometric context is retained for 60s', async () => {

@@ -1,33 +1,20 @@
 // ONLY file that touches a native crypto plugin. Backend switch lives here.
 //
-// @perfood/capacitor-crypto-api@8.0.0 real surface (read from its own typings and native
-// sources in node_modules, not from the README):
-//   CryptoApi.generateKey({ tag, algorithm: 'ecdsa' | 'ecdh', type? }) -> { publicKey?: string }
-//   CryptoApi.loadKey({ tag, algorithm })                              -> { publicKey?: string }
-//   CryptoApi.sign({ tag, data, type? })                               -> { signature?: string }
-// `type` is a BiometryType ('BIOMETRY' | 'BIOMETRY_OR_PASSCODE' | 'PASSCODE'), and both
-// publicKey and signature are OPTIONAL in the response, so every wrapper below narrows.
+// The backend is @monti/device-key (plugins/device-key), MONTI's own plugin. Task 13 tried
+// @perfood/capacitor-crypto-api@8.0.0 and read three disqualifying defects off its native
+// sources: it signs SHA-256(utf8(data)) instead of the digest it is given, it hard-codes a
+// 5-second Android auth window where MONTI needs 60, and it has no StrongBox switch or
+// reportable backing. Each was silent at runtime, and a key registered on chain that can
+// never produce a verifiable signature is unrecoverable — so the vendor is gone entirely.
 //
-// Three defects make this backend unusable for MONTI, and each one is silent at runtime:
-//   1. No auth window. iOS pins `.biometryCurrentSet` with no validity period; Android
-//      hard-codes `setUserAuthenticationParameters(5, ...)`. ARM_WINDOW_SECONDS is 60.
-//   2. No StrongBox switch. Android always tries StrongBox and silently falls back to TEE;
-//      iOS always uses the Secure Enclave. `strongBox` cannot be honoured either way.
-//   3. It re-hashes. iOS signs with `.ecdsaSignatureMessageX962SHA256` over
-//      `data.data(using: .utf8)` and Android with `SHA256withECDSA` over `data.getBytes()`,
-//      so the plugin signs SHA-256(utf8(data)) — never the 32-byte gate digest we hand it.
-//      Ticket.checkIn verifies P256 over that digest, so every such signature is invalid.
-//      This blocks key CREATION too: a key registered on chain that can never produce a
-//      verifiable signature is worse than no key at all.
-// Task 14 re-points this file at @monti/device-key; both flags are then deleted, not
-// flipped — a constant-true guard is a dead path.
-import { CryptoApi } from '@perfood/capacitor-crypto-api';
+// @monti/device-key surface:
+//   DeviceKey.generateKey({ tag, accessControl, strongBox }) -> { publicKey, backing }
+//   DeviceKey.loadKey({ tag })                               -> { publicKey, backing }
+//   DeviceKey.sign({ tag, data })                            -> { signature }
+// `publicKey` is a base64url P-256 SubjectPublicKeyInfo, `data` the base64url 32-byte digest
+// signed as-is, `signature` a base64url DER signature. Failures reject with a typed code.
+import { DEVICE_KEY_ERROR, DeviceKey } from '@monti/device-key';
 import type { DeviceKeyBacking } from './types';
-
-/** Flip to true only with a backend that can enforce biometric access control (Task 14). */
-export const PLUGIN_SUPPORTS_ACCESS_CONTROL: boolean = false;
-/** Flip to true only with a backend that signs the given digest as-is (defect 3 above). */
-export const PLUGIN_SIGNS_DIGEST_RAW: boolean = false;
 
 export interface KeyOptions {
   alias: string;
@@ -36,49 +23,56 @@ export interface KeyOptions {
 }
 
 /**
- * `backing` is how a backend reports which secure hardware it actually landed in — Android
- * downgrades StrongBox to TEE silently, so `strongBox: true` is only enforceable if the
- * backend says where the key went. This vendor cannot report it; Task 14's plugin can.
+ * `backing` is which secure hardware the key actually landed in. Android may create the key in
+ * the TEE when the device has no StrongBox — the one downgrade the plugin allows — and saying
+ * so is the whole point of the field: `strongBox: true` is only meaningful if the answer comes
+ * back. The plugin's own union is assigned to this one, so a divergence is a compile error.
  */
 export interface PluginKey {
   publicKey: string;
   backing?: DeviceKeyBacking;
 }
 
-/** The plugin types every response field as optional; a missing key is a backend failure. */
-function requirePublicKey(response: { publicKey?: string }): PluginKey {
+/**
+ * The bridge is untyped at runtime, so a malformed native response is narrowed here rather
+ * than trusted. `backing` travels with the key; dropping it would hide a TEE downgrade.
+ */
+function requirePublicKey(response: { publicKey?: string; backing?: DeviceKeyBacking }): PluginKey {
   if (!response.publicKey) throw new Error('Secure element returned no public key');
-  return { publicKey: response.publicKey };
+  return { publicKey: response.publicKey, backing: response.backing };
+}
+
+function hasCode(error: unknown, code: string): boolean {
+  return typeof error === 'object' && error !== null && (error as { code?: unknown }).code === code;
 }
 
 export async function generateKey(options: KeyOptions): Promise<PluginKey> {
   return requirePublicKey(
-    await CryptoApi.generateKey({
+    await DeviceKey.generateKey({
       tag: options.alias,
-      algorithm: 'ecdsa',
-      // The only access control this backend can express. It is not enough on its own —
-      // see defect 1 — which is why PLUGIN_SUPPORTS_ACCESS_CONTROL stays false.
-      type: options.requireAuth ? 'BIOMETRY' : undefined,
+      accessControl: options.requireAuth,
+      strongBox: options.strongBox,
     }),
   );
 }
 
 /**
- * `null` is the typed "no key under this alias yet" result, and the ONLY result that may
- * lead to minting a new key. This vendor signals it by resolving without a `publicKey`
- * (iOS `call.resolve([:])`, Android omits the field, web returns `{}`); everything else —
- * a cancelled biometric prompt, a locked keychain — rejects, and that rejection propagates
- * untouched. Rotating a key that is already registered on chain is unrecoverable.
+ * `null` is the typed "no key under this alias yet" result, and the ONLY result that may lead
+ * to minting a new key. The plugin signals it by rejecting with `KEY_NOT_FOUND`; everything
+ * else — a cancelled biometric prompt, a locked keystore, a dead bridge — propagates untouched.
+ * Rotating a key that is already registered on chain cannot be undone.
  */
 export async function loadKey(options: { alias: string }): Promise<PluginKey | null> {
-  const response = await CryptoApi.loadKey({ tag: options.alias, algorithm: 'ecdsa' });
-  return response.publicKey ? { publicKey: response.publicKey } : null;
+  try {
+    return requirePublicKey(await DeviceKey.loadKey({ tag: options.alias }));
+  } catch (error) {
+    if (hasCode(error, DEVICE_KEY_ERROR.keyNotFound)) return null;
+    throw error;
+  }
 }
 
 export async function sign(options: { alias: string; data: string }): Promise<{ signature: string }> {
-  // Refuse rather than hand the gate a signature over the wrong message (defect 3).
-  if (!PLUGIN_SIGNS_DIGEST_RAW) throw new Error('DeviceKeyPolicyUnsupported: backend re-hashes the digest');
-  const { signature } = await CryptoApi.sign({ tag: options.alias, data: options.data });
+  const { signature } = await DeviceKey.sign({ tag: options.alias, data: options.data });
   if (!signature) throw new Error('Secure element returned no signature');
   return { signature };
 }

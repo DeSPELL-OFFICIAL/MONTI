@@ -1,8 +1,8 @@
 import { bytesToHex, hexToBytes } from 'viem';
 import { base64UrlDecode, base64UrlEncode, derToRs, splitRs, type Hex } from '@monti/shared';
-import { PLUGIN_SIGNS_DIGEST_RAW, PLUGIN_SUPPORTS_ACCESS_CONTROL, generateKey, loadKey, sign } from './plugin';
+import { generateKey, loadKey, sign } from './plugin';
 import { spkiToXy } from './spki';
-import { DeviceKeyPolicyUnsupported, type DeviceKeyOptions, type DeviceKeyPublic } from './types';
+import type { DeviceKeyOptions, DeviceKeyPublic } from './types';
 
 /** Constant throwaway message, never a real digest and never leaves the device. */
 const ARM_DIGEST = base64UrlEncode(new Uint8Array(32).fill(0x6d));
@@ -25,14 +25,6 @@ function toLowS(s: Hex): Hex {
 }
 
 export async function ensureDeviceKeyNative(options: DeviceKeyOptions): Promise<DeviceKeyPublic> {
-  // Never register a key on chain that this backend could never sign with.
-  if (!PLUGIN_SIGNS_DIGEST_RAW) {
-    throw new DeviceKeyPolicyUnsupported(options.alias, 'backend re-hashes the digest instead of signing it');
-  }
-  // Never create a key that claims biometric protection the backend cannot enforce.
-  if (options.requireAuth && !PLUGIN_SUPPORTS_ACCESS_CONTROL) {
-    throw new DeviceKeyPolicyUnsupported(options.alias, 'backend cannot enforce biometric access control');
-  }
   // `null` is the only result that may mint a key. A cancelled prompt or a locked keychain
   // rejects instead, and rotating a key already registered on chain is unrecoverable.
   const key = (await loadKey({ alias: options.alias })) ?? (await generateKey(options));
