@@ -29,3 +29,15 @@ export function passkeyProblem(error: unknown): PasskeyProblem {
   }
   return 'failed';
 }
+
+/**
+ * Nothing is stored on this device, so there is no ceremony to start. A class rather than a
+ * sentence: the sign-in screen has to tell "sign up first" apart from a real failure, and a
+ * reworded message must not silently downgrade one into the other.
+ */
+export class NoPasskeyOnDevice extends Error {
+  constructor() {
+    super('NoPasskeyOnDevice');
+    this.name = 'NoPasskeyOnDevice';
+  }
+}

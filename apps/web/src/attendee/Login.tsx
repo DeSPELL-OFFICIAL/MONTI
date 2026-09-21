@@ -6,7 +6,7 @@ import { useCopy } from '../shared/i18n';
 import type { Copy } from '../shared/copy/index';
 import { api, callableFailure } from '../shared/api/functions';
 import { getFirebaseAuth } from '../shared/api/firebase';
-import { passkeyProblem, signPasskeyAssertion } from '../shared/passkey';
+import { NoPasskeyOnDevice, passkeyProblem, signPasskeyAssertion } from '../shared/passkey';
 
 /** The person is gone as far as signing in goes — a retry cannot change any of these. */
 const UNAVAILABLE_REASONS = new Set(['BAD_SIGNUP_STATE', 'NO_ACCOUNT', 'USER_NOT_FOUND']);
@@ -14,12 +14,20 @@ const UNAVAILABLE_REASONS = new Set(['BAD_SIGNUP_STATE', 'NO_ACCOUNT', 'USER_NOT
 /** The server has never seen this credential: this phone has a passkey for another account. */
 const NO_CREDENTIAL_REASONS = new Set(['CREDENTIAL_NOT_FOUND']);
 
+/**
+ * `getPasskeyAccount` throws this before any ceremony starts when nothing is stored here.
+ * `instanceof` alone is not enough: a test that mocks the passkey module supplies its own
+ * class, and the name is what both the real error and any stand-in agree on.
+ */
+function isNoPasskeyOnDevice(failure: unknown): boolean {
+  if (failure instanceof NoPasskeyOnDevice) return true;
+  return typeof failure === 'object' && failure !== null &&
+    (failure as { name?: unknown }).name === 'NoPasskeyOnDevice';
+}
+
 function message(copy: Copy, failure: unknown): string {
   if (passkeyProblem(failure) === 'cancelled') return copy.login.cancelled;
-  // getPasskeyAccount throws this before any ceremony starts when nothing is stored here.
-  if (failure instanceof Error && failure.message === 'No passkey on this device') {
-    return copy.login.noPasskey;
-  }
+  if (isNoPasskeyOnDevice(failure)) return copy.login.noPasskey;
   const { reason } = callableFailure(failure);
   if (NO_CREDENTIAL_REASONS.has(reason)) return copy.login.noPasskey;
   if (UNAVAILABLE_REASONS.has(reason)) return copy.login.unavailable;
