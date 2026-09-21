@@ -17,8 +17,12 @@
 //      `data.data(using: .utf8)` and Android with `SHA256withECDSA` over `data.getBytes()`,
 //      so the plugin signs SHA-256(utf8(data)) — never the 32-byte gate digest we hand it.
 //      Ticket.checkIn verifies P256 over that digest, so every such signature is invalid.
-// Task 14 replaces this file's backend; both flags below flip together when it lands.
+//      This blocks key CREATION too: a key registered on chain that can never produce a
+//      verifiable signature is worse than no key at all.
+// Task 14 re-points this file at @monti/device-key; both flags are then deleted, not
+// flipped — a constant-true guard is a dead path.
 import { CryptoApi } from '@perfood/capacitor-crypto-api';
+import type { DeviceKeyBacking } from './types';
 
 /** Flip to true only with a backend that can enforce biometric access control (Task 14). */
 export const PLUGIN_SUPPORTS_ACCESS_CONTROL: boolean = false;
@@ -31,13 +35,23 @@ export interface KeyOptions {
   strongBox: boolean;
 }
 
+/**
+ * `backing` is how a backend reports which secure hardware it actually landed in — Android
+ * downgrades StrongBox to TEE silently, so `strongBox: true` is only enforceable if the
+ * backend says where the key went. This vendor cannot report it; Task 14's plugin can.
+ */
+export interface PluginKey {
+  publicKey: string;
+  backing?: DeviceKeyBacking;
+}
+
 /** The plugin types every response field as optional; a missing key is a backend failure. */
-function requirePublicKey(response: { publicKey?: string }): { publicKey: string } {
+function requirePublicKey(response: { publicKey?: string }): PluginKey {
   if (!response.publicKey) throw new Error('Secure element returned no public key');
   return { publicKey: response.publicKey };
 }
 
-export async function generateKey(options: KeyOptions): Promise<{ publicKey: string }> {
+export async function generateKey(options: KeyOptions): Promise<PluginKey> {
   return requirePublicKey(
     await CryptoApi.generateKey({
       tag: options.alias,
@@ -49,8 +63,16 @@ export async function generateKey(options: KeyOptions): Promise<{ publicKey: str
   );
 }
 
-export async function loadKey(options: { alias: string }): Promise<{ publicKey: string }> {
-  return requirePublicKey(await CryptoApi.loadKey({ tag: options.alias, algorithm: 'ecdsa' }));
+/**
+ * `null` is the typed "no key under this alias yet" result, and the ONLY result that may
+ * lead to minting a new key. This vendor signals it by resolving without a `publicKey`
+ * (iOS `call.resolve([:])`, Android omits the field, web returns `{}`); everything else —
+ * a cancelled biometric prompt, a locked keychain — rejects, and that rejection propagates
+ * untouched. Rotating a key that is already registered on chain is unrecoverable.
+ */
+export async function loadKey(options: { alias: string }): Promise<PluginKey | null> {
+  const response = await CryptoApi.loadKey({ tag: options.alias, algorithm: 'ecdsa' });
+  return response.publicKey ? { publicKey: response.publicKey } : null;
 }
 
 export async function sign(options: { alias: string; data: string }): Promise<{ signature: string }> {

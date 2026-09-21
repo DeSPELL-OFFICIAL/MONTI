@@ -7,17 +7,25 @@ export class DeviceKeyUnavailable extends Error {
   }
 }
 
-/** The active native backend cannot enforce `requireAuth`, so the key would be unprotected. */
+/** The active native backend cannot honour the policy the caller asked for. */
 export class DeviceKeyPolicyUnsupported extends Error {
-  constructor(readonly alias: string) {
-    super(`DeviceKeyPolicyUnsupported: backend cannot enforce biometric access control for ${alias}`);
+  constructor(
+    readonly alias: string,
+    readonly reason: string,
+  ) {
+    super(`DeviceKeyPolicyUnsupported: ${reason} for ${alias}`);
     this.name = 'DeviceKeyPolicyUnsupported';
   }
 }
 
+/** Where the private key actually lives. Android may downgrade StrongBox to TEE silently. */
+export type DeviceKeyBacking = 'secureEnclave' | 'strongBox' | 'tee';
+
 export interface DeviceKeyPublic {
   x: Hex;
   y: Hex;
+  /** Absent when the backend cannot report it; never assume StrongBox from silence. */
+  backing?: DeviceKeyBacking;
 }
 
 export interface DeviceKeyOptions {
