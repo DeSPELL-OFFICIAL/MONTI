@@ -7,17 +7,17 @@ import {IPaymaster} from "account-abstraction/interfaces/IPaymaster.sol";
 /// @notice Just enough EntryPoint v0.6 for the paymaster tests: it holds deposits, tracks stake and
 ///         can call validatePaymasterUserOp as the real EntryPoint would (msg.sender == entryPoint).
 contract MockEntryPoint {
-    mapping(address => uint256) public balanceOf;
+    mapping(address => uint256) public deposits;
     mapping(address => uint256) public stakeOf;
     mapping(address => uint32) public unstakeDelayOf;
     mapping(address => bool) public unlocked;
 
     function depositTo(address account) external payable {
-        balanceOf[account] += msg.value;
+        deposits[account] += msg.value;
     }
 
     function withdrawTo(address payable to, uint256 amount) external {
-        balanceOf[msg.sender] -= amount;
+        deposits[msg.sender] -= amount;
         (bool ok,) = to.call{value: amount}("");
         require(ok, "withdraw failed");
     }
@@ -40,6 +40,19 @@ contract MockEntryPoint {
         require(ok, "withdraw failed");
     }
 
+    /// @dev ERC-7562 OP-054 forbids a validation frame from calling the EntryPoint at all. Arm this and
+    ///      any such call fails the way a compliant bundler's tracer would reject the operation.
+    bool public refuseValidationReads;
+
+    function setRefuseValidationReads(bool on) external {
+        refuseValidationReads = on;
+    }
+
+    function balanceOf(address account) external view returns (uint256) {
+        require(!refuseValidationReads, "OP-054: EntryPoint called from validation");
+        return deposits[account];
+    }
+
     function callValidate(address paymaster, UserOperation calldata op, bytes32 opHash, uint256 maxCost)
         external
         returns (bytes memory context, uint256 validationData)
@@ -51,7 +64,7 @@ contract MockEntryPoint {
     function callPostOp(address paymaster, IPaymaster.PostOpMode mode, bytes calldata context, uint256 actualGasCost)
         external
     {
-        balanceOf[paymaster] -= actualGasCost;
+        deposits[paymaster] -= actualGasCost;
         IPaymaster(paymaster).postOp(mode, context, actualGasCost);
     }
 

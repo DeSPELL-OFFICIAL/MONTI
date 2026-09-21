@@ -18,9 +18,11 @@ import {ITicket} from "./interfaces/ITicket.sol";
 ///         project's budget or push its own costs onto MONTI.
 ///
 /// @dev    The paymaster must be staked on the EntryPoint (ERC-7562): validation reads storage owned by
-///         Identity, Organizers and Ticket, and `postOp` writes this contract's storage. Task 28 adds
-///         `addStake`. Validation itself is `view` — nothing is debited until the EntryPoint reports the
-///         real cost in `postOp`, which is what keeps a user-chosen `maxCost` from draining a slot.
+///         Identity, Organizers and Ticket, and it writes this contract's own. Task 28 adds `addStake`.
+///         Validation must never call the EntryPoint (OP-054 — bundlers drop such operations), so the
+///         platform slot is not checked here at all: it *is* this paymaster's deposit, and the EntryPoint
+///         already refuses an operation the deposit cannot cover (AA31). A project slot is reserved at
+///         validation and settled in `postOp`, so the ops of one bundle cannot over-commit it.
 contract MontiPaymaster is IPaymaster {
     /// @notice How an allowlisted selector names the project that should pay.
     enum ArgKind {
@@ -51,9 +53,11 @@ contract MontiPaymaster is IPaymaster {
     IIdentity public immutable identity;
     address public immutable deployer;
 
-    /// @dev Project slots only. The platform slot is not stored: see `budgetOf`.
+    /// @dev Project slots only, spendable wei: a reservation leaves the slot at validation and either
+    ///      comes back or is spent in `postOp`. The platform slot is not stored: see `budgetOf`.
     mapping(uint256 => uint256) private _orgBudget;
-    /// @dev Sum of every project slot, so the platform slot can be derived from the EntryPoint deposit.
+    /// @dev Project wei still sitting in the EntryPoint deposit, reservations included. Read only by
+    ///      `withdrawPlatform`, never during validation, so MONTI cannot withdraw a project's money.
     uint256 private _orgBudgetTotal;
 
     mapping(uint256 => bool) public selfSponsored;
@@ -75,7 +79,7 @@ contract MontiPaymaster is IPaymaster {
     error BadCallData();
     error ValueNotAllowed();
     error BatchTooLong();
-    error MixedBatchOrg();
+    error MixedBatch();
     error UnknownSponsorTarget();
     error BudgetExhausted();
     error NoSuchOrganizer();
@@ -95,13 +99,13 @@ contract MontiPaymaster is IPaymaster {
 
     // --- Budgets -------------------------------------------------------------------------------------
 
-    /// @notice The platform slot is whatever the EntryPoint holds beyond the projects' reserved wei, so
-    ///         EntryPoint accounting drift lands here instead of stranding funds nobody can withdraw.
+    /// @notice The platform slot has no accounting of its own: it is this paymaster's EntryPoint deposit,
+    ///         which is also what the EntryPoint spends from. The figure therefore includes wei the
+    ///         projects own — `withdrawPlatform` is what keeps MONTI out of it. Never call this from
+    ///         validation: it reaches into the EntryPoint (OP-054).
     function budgetOf(uint256 orgId) public view returns (uint256) {
         if (orgId != PLATFORM) return _orgBudget[orgId];
-        uint256 deposited = entryPoint.balanceOf(address(this));
-        uint256 reserved = _orgBudgetTotal;
-        return deposited > reserved ? deposited - reserved : 0;
+        return entryPoint.balanceOf(address(this));
     }
 
     function depositPlatform() external payable {
@@ -126,10 +130,12 @@ contract MontiPaymaster is IPaymaster {
         entryPoint.withdrawTo(payable(msg.sender), amount);
     }
 
+    /// @dev Capped so that what stays on deposit still backs every project slot.
     function withdrawPlatform(address to, uint256 amount) external {
         if (msg.sender != deployer) revert Unauthorized();
         if (to == address(0)) revert ZeroAddress();
-        if (amount > budgetOf(PLATFORM)) revert BudgetExhausted();
+        uint256 held = entryPoint.balanceOf(address(this));
+        if (amount > held || held - amount < _orgBudgetTotal) revert BudgetExhausted();
         entryPoint.withdrawTo(payable(to), amount);
     }
 
@@ -143,9 +149,12 @@ contract MontiPaymaster is IPaymaster {
 
     /// @notice `paymasterAndData` carries nothing but this contract's 20-byte address; anything appended
     ///         is ignored, because the paying slot comes from the verified call and not from the sender.
+    /// @dev    Reserves `maxCost` out of a project slot so that every operation of one bundle is checked
+    ///         against what the ones before it already committed. The platform slot is deliberately not
+    ///         checked: the EntryPoint has already refused the operation if the deposit cannot cover it,
+    ///         and reading that deposit here would be a forbidden EntryPoint call (OP-054).
     function validatePaymasterUserOp(UserOperation calldata userOp, bytes32, uint256 maxCost)
         external
-        view
         returns (bytes memory context, uint256 validationData)
     {
         if (msg.sender != address(entryPoint)) revert NotEntryPoint();
@@ -155,30 +164,36 @@ contract MontiPaymaster is IPaymaster {
             revert UnknownSender();
         }
 
-        uint256 orgId = _requireAllowedCall(userOp.callData);
-        uint256 slot = selfSponsored[orgId] ? orgId : PLATFORM;
-        if (budgetOf(slot) < maxCost) revert BudgetExhausted();
+        uint256 slot = _requireAllowedCall(userOp.callData);
+        if (slot != PLATFORM) {
+            uint256 available = _orgBudget[slot];
+            if (available < maxCost) revert BudgetExhausted();
+            unchecked {
+                _orgBudget[slot] = available - maxCost;
+            }
+        }
 
         return (abi.encode(slot, maxCost), 0);
     }
 
-    /// @notice Debits the real cost the EntryPoint reports, never the sender's `maxCost`.
+    /// @notice Settles the reservation made at validation against the real cost the EntryPoint reports.
     /// @dev    Must not revert whatever the mode: the gas is already spent, and a reverting `postOp` only
-    ///         burns more of it. The platform slot needs no store — the EntryPoint has already taken
+    ///         burns more of it. The platform slot keeps no books — the EntryPoint has already taken
     ///         `actualGasCost` out of this paymaster's deposit, which is what `budgetOf(PLATFORM)` reads.
     function postOp(PostOpMode, bytes calldata context, uint256 actualGasCost) external {
         if (msg.sender != address(entryPoint)) revert NotEntryPoint();
-        (uint256 slot,) = abi.decode(context, (uint256, uint256));
+        (uint256 slot, uint256 maxCost) = abi.decode(context, (uint256, uint256));
+        uint256 spent = actualGasCost < maxCost ? actualGasCost : maxCost;
 
         if (slot != PLATFORM) {
-            uint256 balance = _orgBudget[slot];
-            uint256 debit = actualGasCost < balance ? actualGasCost : balance;
             unchecked {
-                _orgBudget[slot] = balance - debit;
-                _orgBudgetTotal -= debit;
+                // What the operation did not use goes back to the project it was reserved from.
+                _orgBudget[slot] += maxCost - spent;
+                uint256 held = _orgBudgetTotal;
+                _orgBudgetTotal = held > spent ? held - spent : 0;
             }
         }
-        emit BudgetDebited(slot, actualGasCost);
+        emit BudgetDebited(slot, spent);
     }
 
     function allowedSelector(bytes4 selector) public view returns (bool) {
@@ -187,9 +202,10 @@ contract MontiPaymaster is IPaymaster {
 
     // --- Call inspection -----------------------------------------------------------------------------
 
-    /// @dev Reads the wallet's `execute`/`executeBatch` payload and returns the project every inner call
-    ///      agrees on (`PLATFORM` when none of them names one).
-    function _requireAllowedCall(bytes calldata callData) private view returns (uint256 orgId) {
+    /// @dev Reads the wallet's `execute`/`executeBatch` payload and returns the one slot that pays for it.
+    ///      Every element of a batch must land on that same slot — a project call is never mixed with a
+    ///      platform one, so no project can be billed for work it did not ask for.
+    function _requireAllowedCall(bytes calldata callData) private view returns (uint256 slot) {
         if (callData.length < 4) revert UnsupportedWalletCall();
         bytes4 sel = bytes4(callData[0:4]);
 
@@ -198,36 +214,44 @@ contract MontiPaymaster is IPaymaster {
             if (callData.length < 4 + 128) revert BadCallData();
             (address target, uint256 value, bytes memory inner) = abi.decode(callData[4:], (address, uint256, bytes));
             if (value != 0) revert ValueNotAllowed();
-            return _checkInner(target, inner);
+            return _slotOfInnerCall(target, inner);
         }
 
         if (sel == EXECUTE_BATCH) {
             // offset + length
             if (callData.length < 4 + 64) revert BadCallData();
+            _requireBatchFits(callData);
             Call[] memory calls = abi.decode(callData[4:], (Call[]));
             uint256 n = calls.length;
             if (n == 0) revert UnsupportedWalletCall();
-            if (n > MAX_BATCH) revert BatchTooLong();
 
-            bool named;
             for (uint256 i; i < n; ++i) {
                 if (calls[i].value != 0) revert ValueNotAllowed();
-                uint256 called = _checkInner(calls[i].target, calls[i].data);
-                if (called == PLATFORM) continue;
-                if (!named) {
-                    orgId = called;
-                    named = true;
-                } else if (called != orgId) {
-                    revert MixedBatchOrg();
+                uint256 called = _slotOfInnerCall(calls[i].target, calls[i].data);
+                if (i == 0) {
+                    slot = called;
+                } else if (called != slot) {
+                    revert MixedBatch();
                 }
             }
-            return orgId;
+            return slot;
         }
 
         revert UnsupportedWalletCall();
     }
 
-    function _checkInner(address target, bytes memory inner) private view returns (uint256 orgId) {
+    /// @dev Reads the array length straight out of the calldata, so an oversized batch is refused before
+    ///      the decoder walks every element of it.
+    function _requireBatchFits(bytes calldata callData) private pure {
+        uint256 offset = uint256(bytes32(callData[4:36]));
+        uint256 tail = callData.length - 4;
+        if (offset > tail || tail - offset < 32) revert BadCallData();
+        if (uint256(bytes32(callData[4 + offset:36 + offset])) > MAX_BATCH) revert BatchTooLong();
+    }
+
+    /// @dev The slot an inner call is billed to: its project when that project sponsors itself, else the
+    ///      platform. A call that names no project is a platform call.
+    function _slotOfInnerCall(address target, bytes memory inner) private view returns (uint256) {
         if (target != address(ticket) && target != address(identity) && target != address(organizers)) {
             revert TargetNotAllowed();
         }
@@ -241,6 +265,7 @@ contract MontiPaymaster is IPaymaster {
         if (kind == ArgKind.Platform) return PLATFORM;
 
         uint256 arg = _argAt(inner, _argWord[sel]);
+        uint256 orgId;
         if (kind == ArgKind.TokenId) {
             uint256 eventId = ticket.eventOf(arg);
             if (eventId == 0) revert UnknownSponsorTarget();
@@ -252,6 +277,8 @@ contract MontiPaymaster is IPaymaster {
             if (organizers.ownerOf(orgId) == address(0)) revert UnknownSponsorTarget();
         }
         if (orgId == PLATFORM) revert UnknownSponsorTarget();
+
+        return selfSponsored[orgId] ? orgId : PLATFORM;
     }
 
     /// @dev The `word`-th 32-byte argument of an ABI-encoded call, bounds-checked.

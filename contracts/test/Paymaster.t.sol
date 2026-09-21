@@ -84,9 +84,9 @@ contract PaymasterTest is MontiTest {
     function test_orgDepositIsSeparate() public {
         paymaster.depositPlatform{value: 1 ether}();
         paymaster.deposit{value: 2 ether}(orgId);
-        assertEq(paymaster.budgetOf(0), 1 ether, "project wei is not platform wei");
         assertEq(paymaster.budgetOf(orgId), 2 ether);
         assertEq(ep.balanceOf(address(paymaster)), 3 ether);
+        assertEq(paymaster.budgetOf(0), 3 ether, "the platform slot is the EntryPoint deposit itself");
     }
 
     function test_depositToAnOrganizerThatDoesNotExistIsRefused() public {
@@ -234,7 +234,7 @@ contract PaymasterTest is MontiTest {
 
         ep.callPostOp(address(paymaster), IPaymaster.PostOpMode.opSucceeded, context, 0.004 ether);
         assertEq(paymaster.budgetOf(orgId), 1 ether, "project slot untouched");
-        assertEq(paymaster.budgetOf(0), 1 ether - 0.004 ether);
+        assertEq(ep.balanceOf(address(paymaster)), 2 ether - 0.004 ether, "the EntryPoint took the cost");
     }
 
     function test_selfSponsoredOrgPaysFromItsOwnSlot() public {
@@ -245,13 +245,13 @@ contract PaymasterTest is MontiTest {
         (bytes memory context,) = ep.callValidate(address(paymaster), _op(_claimCall(), 0), bytes32(0), 0.01 ether);
         (uint256 slot,) = abi.decode(context, (uint256, uint256));
         assertEq(slot, orgId, "the event's own project pays");
+        assertEq(paymaster.budgetOf(orgId), 1 ether - 0.01 ether, "maxCost is reserved until postOp settles");
 
         vm.expectEmit(true, false, false, true);
         emit BudgetDebited(orgId, 0.004 ether);
         ep.callPostOp(address(paymaster), IPaymaster.PostOpMode.opSucceeded, context, 0.004 ether);
 
-        assertEq(paymaster.budgetOf(orgId), 1 ether - 0.004 ether, "debited the real cost, not maxCost");
-        assertEq(paymaster.budgetOf(0), 1 ether, "platform untouched");
+        assertEq(paymaster.budgetOf(orgId), 1 ether - 0.004 ether, "settled at the real cost, not maxCost");
     }
 
     function test_senderCannotSpoofTheProjectThroughPaymasterAndData() public {
@@ -313,7 +313,11 @@ contract PaymasterTest is MontiTest {
 
     function test_batchNamingTwoProjectsIsRefused() public {
         paymaster.depositPlatform{value: 1 ether}();
+        _selfSponsor();
         uint256 other = organizers.createOrganizer(ORG_OWNER);
+        paymaster.deposit{value: 1 ether}(other);
+        vm.prank(ORG_OWNER);
+        paymaster.setSelfSponsored(other, true);
 
         Call[] memory calls = new Call[](2);
         calls[0] = Call(address(ticket), 0, abi.encodeCall(Ticket.claim, (eventId, 0, "")));
@@ -322,16 +326,59 @@ contract PaymasterTest is MontiTest {
         );
         bytes memory batch = abi.encodeWithSignature("executeBatch((address,uint256,bytes)[])", calls);
 
-        vm.expectRevert(MontiPaymaster.MixedBatchOrg.selector);
+        vm.expectRevert(MontiPaymaster.MixedBatch.selector);
+        ep.callValidate(address(paymaster), _op(batch, 0), bytes32(0), 0.01 ether);
+    }
+
+    /// @dev Otherwise one cheap call naming a self-sponsored org would bill it for seven platform calls.
+    function test_batchMixingAProjectCallWithPlatformCallsIsRefused() public {
+        paymaster.depositPlatform{value: 1 ether}();
+        paymaster.deposit{value: 1 ether}(orgId);
+        _selfSponsor();
+
+        Call[] memory calls = new Call[](2);
+        calls[0] = Call(address(ticket), 0, abi.encodeCall(Ticket.claim, (eventId, 0, "")));
+        calls[1] = Call(address(identity), 0, abi.encodeWithSignature("lockDevice(address)", ALICE));
+        bytes memory batch = abi.encodeWithSignature("executeBatch((address,uint256,bytes)[])", calls);
+
+        vm.expectRevert(MontiPaymaster.MixedBatch.selector);
         ep.callValidate(address(paymaster), _op(batch, 0), bytes32(0), 0.01 ether);
     }
 
     // --- refusals ------------------------------------------------------------------------------------
 
-    function test_budgetBelowMaxCostIsRefused() public {
-        paymaster.depositPlatform{value: 0.01 ether}();
+    function test_projectBudgetBelowMaxCostIsRefused() public {
+        paymaster.deposit{value: 0.01 ether}(orgId);
+        _selfSponsor();
         vm.expectRevert(MontiPaymaster.BudgetExhausted.selector);
         ep.callValidate(address(paymaster), _op(_claimCall(), 0), bytes32(0), 0.01 ether + 1);
+    }
+
+    /// @dev v0.6 validates every operation of a bundle before executing any of them, so a reservation is
+    ///      the only thing that stops one project's slot being promised twice over.
+    function test_oneBundleCannotOverCommitAProjectSlot() public {
+        paymaster.depositPlatform{value: 10 ether}();
+        paymaster.deposit{value: 0.015 ether}(orgId);
+        _selfSponsor();
+
+        ep.callValidate(address(paymaster), _op(_claimCall(), 0), bytes32(0), 0.01 ether);
+        assertEq(paymaster.budgetOf(orgId), 0.005 ether);
+
+        vm.expectRevert(MontiPaymaster.BudgetExhausted.selector);
+        ep.callValidate(address(paymaster), _op(_claimCall(), 0), bytes32(0), 0.01 ether);
+    }
+
+    function test_validationNeverCallsTheEntryPoint() public {
+        paymaster.depositPlatform{value: 1 ether}();
+        paymaster.deposit{value: 1 ether}(orgId);
+
+        // Any EntryPoint call from a validation frame is what a compliant bundler drops (OP-054).
+        ep.setRefuseValidationReads(true);
+        ep.callValidate(address(paymaster), _op(_claimCall(), 0), bytes32(0), 0.01 ether);
+
+        _selfSponsor();
+        ep.callValidate(address(paymaster), _op(_claimCall(), 0), bytes32(0), 0.01 ether);
+        ep.setRefuseValidationReads(false);
     }
 
     function test_senderThatIsNeitherMemberNorGateIsRefused() public {
@@ -429,24 +476,28 @@ contract PaymasterTest is MontiTest {
 
     // --- postOp --------------------------------------------------------------------------------------
 
-    function test_postOpDebitsAtMostTheRemainingBudget() public {
-        paymaster.deposit{value: 0.001 ether}(orgId);
-        _selfSponsor();
-
-        vm.prank(address(ep));
-        paymaster.postOp(IPaymaster.PostOpMode.opSucceeded, abi.encode(orgId, uint256(1 ether)), 0.5 ether);
-        assertEq(paymaster.budgetOf(orgId), 0, "a slot can go to zero but never underflow");
-    }
-
-    function test_postOpDebitsInEveryMode() public {
+    function test_postOpNeverSettlesMoreThanWasReserved() public {
         paymaster.deposit{value: 1 ether}(orgId);
         _selfSponsor();
 
+        (bytes memory context,) = ep.callValidate(address(paymaster), _op(_claimCall(), 0), bytes32(0), 0.01 ether);
+        // The EntryPoint cannot report more than the prefund it took, but the cap is what enforces it.
         vm.prank(address(ep));
-        paymaster.postOp(IPaymaster.PostOpMode.opReverted, abi.encode(orgId, uint256(1 ether)), 0.01 ether);
-        vm.prank(address(ep));
-        paymaster.postOp(IPaymaster.PostOpMode.postOpReverted, abi.encode(orgId, uint256(1 ether)), 0.01 ether);
-        assertEq(paymaster.budgetOf(orgId), 1 ether - 0.02 ether, "a reverted op still burned gas");
+        paymaster.postOp(IPaymaster.PostOpMode.opSucceeded, context, 0.5 ether);
+        assertEq(paymaster.budgetOf(orgId), 1 ether - 0.01 ether, "the reservation is the ceiling");
+    }
+
+    function test_postOpSettlesInEveryMode() public {
+        paymaster.deposit{value: 1 ether}(orgId);
+        _selfSponsor();
+
+        (bytes memory first,) = ep.callValidate(address(paymaster), _op(_claimCall(), 0), bytes32(0), 0.01 ether);
+        ep.callPostOp(address(paymaster), IPaymaster.PostOpMode.opReverted, first, 0.004 ether);
+
+        (bytes memory second,) = ep.callValidate(address(paymaster), _op(_claimCall(), 0), bytes32(0), 0.01 ether);
+        ep.callPostOp(address(paymaster), IPaymaster.PostOpMode.postOpReverted, second, 0.004 ether);
+
+        assertEq(paymaster.budgetOf(orgId), 1 ether - 0.008 ether, "a reverted op still burned gas");
     }
 
     function testFuzz_postOpNeverReverts(uint8 rawMode, uint256 slot, uint256 maxCost, uint256 actualGasCost) public {
