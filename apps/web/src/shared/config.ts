@@ -1,5 +1,5 @@
-import type { Hex } from '@monti/shared';
-import { DEFAULT_CHAIN_ID, ENTRY_POINT_V06, explorerUrlFor } from './config/chainDefaults';
+import { DEFAULT_CHAIN_ID, ENTRY_POINT_V06_ADDRESS, type Hex } from '@monti/shared';
+import { explorerUrlFor } from './config/chainDefaults';
 
 /**
  * Every module that needs a chain id, contract address, RPC/WS endpoint, or key
@@ -17,7 +17,7 @@ export interface AppConfig {
   rpId: string;
   ipfsGateway: string;
   pinataJwt: string;
-  /** Derived from chainId via chainDefaults, so no view hardcodes an explorer host. */
+  /** Derived from chainId, so no view hardcodes an explorer host. */
   explorerUrl: string;
 }
 
@@ -52,7 +52,7 @@ export function getConfig(): AppConfig {
       .filter(Boolean),
     wsUrl: required('VITE_WS_URL'),
     bundlerUrl: required('VITE_BUNDLER_URL'),
-    entryPoint: ENTRY_POINT_V06,
+    entryPoint: ENTRY_POINT_V06_ADDRESS,
     addresses: {
       identity: required('VITE_ADDR_IDENTITY') as Hex,
       organizers: required('VITE_ADDR_ORGANIZERS') as Hex,
