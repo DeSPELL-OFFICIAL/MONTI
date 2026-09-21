@@ -39,6 +39,10 @@ contract DeployTest is Test {
     bytes4 internal constant CHECK_IN = bytes4(keccak256("checkIn(uint256,(uint256,uint256,uint64,bytes32),bytes)"));
 
     function setUp() public {
+        // Pin the chain id: on a forked run `block.chainid` would be Monad's, and `run()` would write
+        // the tracked deployments/10143.json instead of the gitignored local one.
+        vm.chainId(31337);
+
         entryPoint = new EntryPoint();
         deployScript = new Deploy();
         deployer = vm.addr(PK);
