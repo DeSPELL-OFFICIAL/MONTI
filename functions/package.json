@@ -9,6 +9,7 @@
     "build:deploy": "tsc --noEmit -p tsconfig.json && node esbuild.config.mjs",
     "test": "vitest run",
     "test:rules": "RULES=1 vitest run",
+    "test:int": "firebase emulators:exec --only firestore,auth --project mon-ti \"vitest run --config vitest.int.config.ts\"",
     "deploy": "pnpm build:deploy && firebase deploy --only functions --project dev"
   },
   "dependencies": {
