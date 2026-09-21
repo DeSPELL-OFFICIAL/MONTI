@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@monti/shared": "workspace:*",
-    "envio": "^2.22.0",
+    "envio": "^2.32.0",
     "generated": "link:./generated",
     "viem": "^2.21.0"
   },
