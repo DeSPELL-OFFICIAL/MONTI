@@ -59,6 +59,9 @@ export function TransferRecipient() {
     setRoute(next);
     setError('');
     setInvite(null);
+    // A number typed under 전화번호 is not a nickname: switching route starts the field over
+    // rather than sending what was there under the new route's rules.
+    setValue('');
   }
 
   async function find(): Promise<void> {
@@ -114,7 +117,16 @@ export function TransferRecipient() {
         </Field>
       ) : null}
       <Field label={labels[route]}>
-        <input value={value} onChange={(event) => setValue(event.target.value)} />
+        {/* A phone gets the numeric keypad and the browser's number autofill; a nickname and
+            an account address get neither autocorrect nor spellcheck. */}
+        <input
+          type={route === 'phone' ? 'tel' : 'text'}
+          inputMode={route === 'phone' ? 'tel' : 'text'}
+          autoComplete={route === 'phone' ? 'tel-national' : 'off'}
+          spellCheck={false}
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+        />
       </Field>
       {error ? <Alert tone="error">{error}</Alert> : null}
       {invite ? (

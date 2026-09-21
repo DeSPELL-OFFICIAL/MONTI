@@ -21,7 +21,7 @@ export function TransferConfirm() {
   if (!account) {
     return (
       <Screen title={copy.transfer.confirmTitle}>
-        <Alert tone="error">{copy.transfer.notFound}</Alert>
+        <Alert tone="error">{copy.transfer.recipientMissing}</Alert>
         <Button variant="ghost" onClick={() => navigate(`/tickets/${tokenId}/transfer`)}>
           {copy.common.back}
         </Button>

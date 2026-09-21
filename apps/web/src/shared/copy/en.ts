@@ -84,6 +84,7 @@ export const en: typeof ko = {
   transfer: {
     title: 'Hand over', byNickname: 'Nickname', byAddress: 'Address', byPhone: 'Phone',
     countryCode: 'Country code', findCta: 'Find', notFound: 'Not found.',
+    recipientMissing: 'Choose who gets the ticket first.',
     confirmTitle: 'Hand the ticket to this person?', confirmCta: 'Hand over', sent: 'Handed over',
     inviteTitle: 'This number has not signed up yet',
     inviteBody: 'Send an invite and the ticket moves automatically once they sign up.',

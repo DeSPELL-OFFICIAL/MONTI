@@ -1,14 +1,45 @@
 import { useState } from 'react';
+import { encodeErrorResult } from 'viem';
 import type { Hex } from '@monti/shared';
+import { ticketAbi } from '../../shared/chain/abis';
 import { OpReverted, ticketOp } from '../../shared/chain/ops';
 import { getAttendeeAccount } from '../../shared/chain/accounts';
 import { readTicket } from '../../shared/chain/reads';
 import { useCopy } from '../../shared/i18n';
 import { useSession } from '../../shared/session';
-import { precheckMessage, runPrecheck } from './precheck';
+import { precheckMessage, runPrecheck, type PrecheckFailure } from './precheck';
 
 /** `wait` gave up before the operation landed. Not a failure — it is still on its way. */
 const STILL_CONFIRMING = 'TIMEOUT';
+
+/**
+ * The eight reverts `Ticket._update` can raise on a handover, each pointing at the pre-check
+ * rule that already owns a sentence in both locales. The pre-check reads a moment before the
+ * operation runs, so a rule can still flip underneath it — a race, or a stale read — and when
+ * it does the chain names the rule in the first four bytes of the revert data. Saying which
+ * rule it was beats one sentence for all eight.
+ */
+const REVERT_RULES: ReadonlyArray<readonly [string, PrecheckFailure]> = [
+  ['TicketRevoked', 'revoked'],
+  ['TransfersDisabled', 'notTransferable'],
+  ['AlreadyCheckedIn', 'alreadyEntered'],
+  ['TransferCutoffPassed', 'afterCutoff'],
+  ['NotMember', 'notMember'],
+  ['KycRequired', 'recipientNotVerified'],
+  ['TransferLimitReached', 'noTransfersLeft'],
+  ['MaxPerWalletExceeded', 'maxPerWallet'],
+];
+
+/** Built once, from the generated ABI rather than from hand-copied selectors. */
+let bySelector: Map<string, PrecheckFailure> | undefined;
+
+export function revertRule(revertReason: Hex): PrecheckFailure | undefined {
+  bySelector ??= new Map(
+    REVERT_RULES.map(([errorName, failure]) => [encodeErrorResult({ abi: ticketAbi, errorName }), failure]),
+  );
+  // Every one of these errors is argument-less, but slicing keeps a padded reason working.
+  return bySelector.get(revertReason.slice(0, 10).toLowerCase());
+}
 
 /**
  * Member → member handover: one `safeTransferFrom` sponsored by the event's organisation.
@@ -69,12 +100,17 @@ export function useTransfer(tokenId: string): TransferState {
       await sendTransfer(from, to, id, meta.orgId);
       setPhase('sent');
     } catch (cause) {
-      if (cause instanceof OpReverted && cause.revertReason === STILL_CONFIRMING) {
-        setPhase('confirming');
-        return;
+      if (cause instanceof OpReverted) {
+        if (cause.revertReason === STILL_CONFIRMING) {
+          setPhase('confirming');
+          return;
+        }
+        const rule = cause.revertReason ? revertRule(cause.revertReason) : undefined;
+        // A revert nobody here recognises is not something the person can act on.
+        setError(rule ? precheckMessage(copy, rule) : copy.transfer.failed);
+      } else {
+        setError(copy.common.error);
       }
-      // A revert here is a rule the pre-check could not see (a race, or a stale read).
-      setError(cause instanceof OpReverted ? copy.transfer.failed : copy.common.error);
       setPhase('idle');
     }
   }

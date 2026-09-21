@@ -1,6 +1,7 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { toFunctionSelector } from 'viem';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearSession, setSession } from '../../shared/session';
 
@@ -29,7 +30,12 @@ const ticket = {
   eventOf: vi.fn(), tierOf: vi.fn(), tiers: vi.fn(), eventMeta: vi.fn(), eventStatus: vi.fn(),
   isRevoked: vi.fn(), checkInOf: vi.fn(), transfersOf: vi.fn(), balanceOfEvent: vi.fn(),
 };
-vi.mock('../../shared/chain/reads', () => ({ readIdentity: () => identity, readTicket: () => ticket }));
+// Partial mock: the reads are stubs, but `EventStatus` stays the real module's.
+vi.mock('../../shared/chain/reads', async (orig) => ({
+  ...(await orig<typeof import('../../shared/chain/reads')>()),
+  readIdentity: () => identity,
+  readTicket: () => ticket,
+}));
 
 const { TransferRecipient } = await import('./Recipient');
 const { TransferConfirm } = await import('./Confirm');
@@ -200,7 +206,62 @@ describe('TransferConfirm', () => {
 
   it('offers the way back when the screen is opened without a recipient', async () => {
     renderFlow('/tickets/1/transfer/confirm');
-    expect(await screen.findByText('찾을 수 없어요.')).toBeInTheDocument();
+    // Its own sentence: nothing was searched for here, so "not found" would not be true.
+    expect(await screen.findByText('받는 분을 먼저 골라 주세요.')).toBeInTheDocument();
     expect(ticketOp).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The pre-check reads a moment before the operation runs, so a rule can flip underneath it.
+ * The chain then names the rule it refused on in the first four bytes of the revert data, and
+ * every one of those rules already owns a sentence — signatures written out here rather than
+ * read back from the ABI, so this pins the selectors independently.
+ */
+const REVERT_SENTENCES: ReadonlyArray<readonly [string, string]> = [
+  ['TicketRevoked()', '취소된 티켓이라 양도할 수 없어요.'],
+  ['TransfersDisabled()', '이 행사는 양도할 수 없어요.'],
+  ['AlreadyCheckedIn()', '이미 입장한 티켓이에요.'],
+  ['TransferCutoffPassed()', '양도 마감 시간이 지났어요.'],
+  ['NotMember()', '받는 분이 아직 가입하지 않았어요.'],
+  ['KycRequired()', '받는 사람이 본인인증을 하지 않았어요.'],
+  ['TransferLimitReached()', '이 티켓은 더 이상 양도할 수 없어요.'],
+  ['MaxPerWalletExceeded()', '받는 분이 이 행사 티켓을 이미 최대 수만큼 갖고 있어요.'],
+];
+
+const GENERIC = '양도하지 못했어요. 잠시 뒤 다시 시도해 주세요.';
+
+describe('a handover the contract refuses', () => {
+  for (const [signature, sentence] of REVERT_SENTENCES) {
+    it(`says which rule ${signature} is`, async () => {
+      ticketOp.mockRejectedValueOnce(new OpReverted('safeTransferFrom', toFunctionSelector(signature)));
+      renderFlow(CONFIRM);
+      await userEvent.click(screen.getByRole('button', { name: '양도하기' }));
+      expect(await screen.findByText(sentence)).toBeInTheDocument();
+      expect(screen.queryByText(GENERIC)).not.toBeInTheDocument();
+    });
+  }
+
+  it('reads the rule out of a reason that carries data after the selector', async () => {
+    const padded = `${toFunctionSelector('TicketRevoked()')}${'00'.repeat(32)}` as const;
+    ticketOp.mockRejectedValueOnce(new OpReverted('safeTransferFrom', padded));
+    renderFlow(CONFIRM);
+    await userEvent.click(screen.getByRole('button', { name: '양도하기' }));
+    expect(await screen.findByText('취소된 티켓이라 양도할 수 없어요.')).toBeInTheDocument();
+  });
+
+  it('keeps the generic sentence for a selector nothing here knows', async () => {
+    ticketOp.mockRejectedValueOnce(new OpReverted('safeTransferFrom', '0xdeadbeef'));
+    renderFlow(CONFIRM);
+    await userEvent.click(screen.getByRole('button', { name: '양도하기' }));
+    expect(await screen.findByText(GENERIC)).toBeInTheDocument();
+  });
+
+  it('still reads a timeout as confirming, never as a refusal', async () => {
+    ticketOp.mockRejectedValueOnce(new OpReverted('safeTransferFrom', 'TIMEOUT'));
+    renderFlow(CONFIRM);
+    await userEvent.click(screen.getByRole('button', { name: '양도하기' }));
+    expect(await screen.findByText('아직 확인 중이에요. 잠시 뒤 내 티켓에서 확인해 주세요.')).toBeInTheDocument();
+    expect(screen.queryByText(GENERIC)).not.toBeInTheDocument();
   });
 });

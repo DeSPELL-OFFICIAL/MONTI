@@ -3,6 +3,13 @@ import { getConfig } from '../config';
 import { getPublicClient } from './client';
 import { identityAbi, ticketAbi } from './abis';
 
+/**
+ * `Ticket.EventStatus` by its solidity ordinal (contracts/src/Ticket.sol:68-73). Named once
+ * here so no screen compares an event against a bare number.
+ */
+export const EventStatus = { Draft: 0, Published: 1, Cancelled: 2, Ended: 3 } as const;
+export type EventStatusValue = (typeof EventStatus)[keyof typeof EventStatus];
+
 export interface CheckInStruct {
   gateId: bigint;
   ts: bigint;

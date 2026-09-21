@@ -5,7 +5,13 @@ const ticket = {
   eventMeta: vi.fn(), balanceOfEvent: vi.fn(), transfersOf: vi.fn(),
   checkInOf: vi.fn(), isRevoked: vi.fn(), eventStatus: vi.fn(),
 };
-vi.mock('../../shared/chain/reads', () => ({ readIdentity: () => identity, readTicket: () => ticket }));
+// Partial mock: the two factories are stubs, but `EventStatus` stays the real module's, so a
+// renamed or renumbered ordinal breaks here instead of passing quietly.
+vi.mock('../../shared/chain/reads', async (orig) => ({
+  ...(await orig<typeof import('../../shared/chain/reads')>()),
+  readIdentity: () => identity,
+  readTicket: () => ticket,
+}));
 
 const { runPrecheck, precheckMessage } = await import('./precheck');
 
@@ -104,6 +110,64 @@ describe('runPrecheck', () => {
     setup();
     await expect(runPrecheck({ tokenId: 1n, eventId: 5n, from: ME, to: YOU, now: BEFORE_CUTOFF, maxPerWallet: 0 }))
       .resolves.toBe('maxPerWallet');
+  });
+
+  // Ticket._update refuses in one fixed order (contracts/src/Ticket.sol): revoked →
+  // transferable → checked in → cutoff → member → kyc → transfer limit → maxPerWallet.
+  // When two rules fail at once the person must read the one the chain would have named.
+  it('answers with the rule the chain would revert on when two fail at once', async () => {
+    // A voided ticket sent to someone who never signed up: TicketRevoked comes first.
+    setup();
+    ticket.isRevoked.mockResolvedValue(true);
+    identity.isMember.mockResolvedValue(false);
+    await expect(runPrecheck({ tokenId: 1n, eventId: 5n, from: ME, to: YOU, now: BEFORE_CUTOFF, maxPerWallet: 2 }))
+      .resolves.toBe('revoked');
+
+    // Past the deadline and out of handovers: TransferCutoffPassed comes before TransferLimitReached.
+    setup();
+    ticket.transfersOf.mockResolvedValue(3);
+    await expect(runPrecheck({ tokenId: 1n, eventId: 5n, from: ME, to: YOU, now: AT_CUTOFF, maxPerWallet: 2 }))
+      .resolves.toBe('afterCutoff');
+
+    // Not a member, and unverified on an event that demands it: NotMember comes before KycRequired.
+    setup({ requireKyc: true });
+    identity.isMember.mockResolvedValue(false);
+    identity.kycLevelOf.mockResolvedValue(0);
+    await expect(runPrecheck({ tokenId: 1n, eventId: 5n, from: ME, to: YOU, now: BEFORE_CUTOFF, maxPerWallet: 2 }))
+      .resolves.toBe('notMember');
+
+    // An event that is over and a ticket already used: eventCancelled is ours and outranks the mirror.
+    setup();
+    ticket.eventStatus.mockResolvedValue(3);
+    ticket.checkInOf.mockResolvedValue({ gateId: 1n, ts: 5n, nonceHash: `0x${'00'.repeat(32)}`, manual: false });
+    await expect(runPrecheck({ tokenId: 1n, eventId: 5n, from: ME, to: YOU, now: BEFORE_CUTOFF, maxPerWallet: 2 }))
+      .resolves.toBe('eventCancelled');
+  });
+
+  // Nine sequential awaits on a phone is nine round trips before the sentence appears. Issued
+  // together they coalesce into one multicall (client.ts sets batch.multicall), and the rule
+  // order above stops depending on which read resolves first.
+  it('issues every read up front instead of walking them one at a time', async () => {
+    vi.clearAllMocks();
+    setup();
+    ticket.isRevoked.mockResolvedValue(true);
+    await expect(runPrecheck({ tokenId: 1n, eventId: 5n, from: ME, to: YOU, now: BEFORE_CUTOFF, maxPerWallet: 2 }))
+      .resolves.toBe('revoked');
+    // The reads behind the rules `revoked` short-circuits were already in flight.
+    for (const read of [identity.isMember, identity.isLocked, identity.kycLevelOf, ticket.isRevoked,
+      ticket.checkInOf, ticket.eventStatus, ticket.eventMeta, ticket.transfersOf, ticket.balanceOfEvent]) {
+      expect(read).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  // No read leaves at all when the recipient is the sender: it is settled from the arguments.
+  it('refuses a handover to yourself without reading anything', async () => {
+    vi.clearAllMocks();
+    setup();
+    await expect(runPrecheck({ tokenId: 1n, eventId: 5n, from: ME, to: ME, now: BEFORE_CUTOFF, maxPerWallet: 2 }))
+      .resolves.toBe('self');
+    expect(identity.isMember).not.toHaveBeenCalled();
+    expect(ticket.eventMeta).not.toHaveBeenCalled();
   });
 
   it('maps every failure to attendee copy', () => {

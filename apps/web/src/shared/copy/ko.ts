@@ -82,6 +82,7 @@ export const ko = {
   transfer: {
     title: '양도', byNickname: '별명', byAddress: '주소', byPhone: '전화번호',
     countryCode: '국가 번호', findCta: '찾기', notFound: '찾을 수 없어요.',
+    recipientMissing: '받는 분을 먼저 골라 주세요.',
     confirmTitle: '이 분에게 양도할까요?', confirmCta: '양도하기', sent: '양도했어요',
     inviteTitle: '아직 가입하지 않은 번호예요',
     inviteBody: '초대 문자를 보내면 상대가 가입할 때 티켓이 자동으로 전달돼요.',
