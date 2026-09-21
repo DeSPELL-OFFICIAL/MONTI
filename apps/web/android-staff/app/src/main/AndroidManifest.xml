@@ -12,6 +12,20 @@
         android:name="android.hardware.nfc.hce"
         android:required="true" />
 
+    <!--
+      The QR fallback (staff/qr/scan.ts) reads the attendee's MONTI1: code with the camera when
+      their phone cannot write a tag. Declaring CAMERA below makes Google Play assume both
+      features are *required* unless they are declared otherwise, and they are not: a gate phone
+      whose camera is broken can still take taps, which is the job. HCE above is the requirement;
+      this is the fallback.
+    -->
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.camera.autofocus"
+        android:required="false" />
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -60,4 +74,11 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!--
+      Without this line Capacitor reports the camera as never-granted and
+      @capacitor-mlkit/barcode-scanning's requestPermissions() skips the prompt entirely
+      (isPermissionDeclared(CAMERA) in BarcodeScannerPlugin.java) — the QR fallback would
+      refuse itself forever on a phone whose camera works. staff/qr/nativeWiring.test.ts pins it.
+    -->
+    <uses-permission android:name="android.permission.CAMERA" />
 </manifest>
