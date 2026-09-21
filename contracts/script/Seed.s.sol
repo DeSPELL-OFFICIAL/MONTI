@@ -221,11 +221,15 @@ contract Seed is Script {
 
     /// @dev The chain carries only `titleHash` and `descHash`, so this CID is where the attendee app
     ///      gets the event's name and picture from (sub-plan 03 reads it as the metadata JSON's CID).
-    ///      A base32 CIDv1 of a sha2-256 digest is 59 characters and starts with `bafy` — anything else
-    ///      is a placeholder that would leave the demo event nameless on the first screen.
+    ///      A base32 CIDv1 of a sha2-256 digest is 59 characters and starts with `bafy` (dag-pb) or
+    ///      `bafk` (raw leaf, what Pinata's v3 upload returns for small files) — anything else is a
+    ///      placeholder that would leave the demo event nameless on the first screen.
     function _requireCid(string memory cid) private pure {
         require(bytes(cid).length == CID_LENGTH, "SEED_IMAGE_CID must be a 59-character base32 CIDv1");
-        require(LibString.startsWith(cid, "bafy"), "SEED_IMAGE_CID must be a base32 CIDv1 starting with bafy");
+        require(
+            LibString.startsWith(cid, "bafy") || LibString.startsWith(cid, "bafk"),
+            "SEED_IMAGE_CID must be a base32 CIDv1 starting with bafy or bafk"
+        );
     }
 
     function _meta(string memory imageCid_) private view returns (Ticket.EventMeta memory) {

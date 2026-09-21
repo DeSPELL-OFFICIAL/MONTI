@@ -223,8 +223,14 @@ contract SeedTest is Test {
         _seedWithCid("bafybeigdyrztseedimageplaceholdercid");
 
         // 59 characters, but not a CID: the length alone would have let this through.
-        vm.expectRevert(bytes("SEED_IMAGE_CID must be a base32 CIDv1 starting with bafy"));
+        vm.expectRevert(bytes("SEED_IMAGE_CID must be a base32 CIDv1 starting with bafy or bafk"));
         _seedWithCid("Qmabbeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi");
+    }
+
+    function test_seedAcceptsARawLeafCidFromPinata() public {
+        // Pinata's v3 upload returns a raw-codec CIDv1 (`bafk...`) for files under the chunk size.
+        _seedWithCid("bafkreiepv7iydmisqmk2qrht7zwfeaxtf7sljdzfbfhtthjgpovrknn754");
+        assertEq(ticket.eventMeta(1).imageCid, "bafkreiepv7iydmisqmk2qrht7zwfeaxtf7sljdzfbfhtthjgpovrknn754");
     }
 
     /// @notice Identity.register answers to the attester and nobody else, so the wrong key does not fail
