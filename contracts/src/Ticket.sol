@@ -70,6 +70,12 @@ contract Ticket is ERC721, ITicket {
     uint256 public constant CODE_WINDOW = 60;
     uint256 public constant CLOCK_SKEW = 5;
 
+    /// @notice The role tag carried by ManualOverride. ROLE_APPROVER is the owner or an admin holding
+    ///         PERM_APPROVE_OVERRIDE; ROLE_MANAGER is a manager with canApprove. ROLE_NONE never admits.
+    uint8 public constant ROLE_NONE = 0;
+    uint8 public constant ROLE_APPROVER = 1;
+    uint8 public constant ROLE_MANAGER = 2;
+
     uint32 private constant PERM_CREATE_EVENT = 1;
     uint32 private constant PERM_MANAGE_GATES = 2;
     uint32 private constant PERM_APPROVE_OVERRIDE = 4;
@@ -347,33 +353,51 @@ contract Ticket is ERC721, ITicket {
     }
 
     /// @notice Spec 13: a manager without approval rights files a request; someone with rights admits.
+    ///         The gate must be one of this event's gates, open or closed, so the request names a real
+    ///         door; an unregistered gateId (0 included) reports eventId 0 and is rejected.
     function requestOverride(uint256 tokenId, uint256 gateId, uint8 reason) external {
-        uint256 orgId = _events[_eventOf[tokenId]].orgId;
-        if (orgId == 0) revert NoSuchTicket();
+        if (_ownerOf(tokenId) == address(0)) revert NoSuchTicket();
+        uint256 eventId = _eventOf[tokenId];
+        (uint256 gateEventId,,,,,) = organizers.gateInfo(gateId);
+        if (gateEventId != eventId) revert GateMismatch();
+
+        uint256 orgId = _events[eventId].orgId;
         (bool exists,) = organizers.managerOf(orgId, msg.sender);
         if (!exists && !organizers.hasPermission(orgId, msg.sender, PERM_APPROVE_OVERRIDE)) revert Unauthorized();
         emit OverrideRequested(tokenId, gateId, msg.sender, reason);
     }
 
-    /// @notice role 1 = admin (or owner) holding PERM_APPROVE_OVERRIDE, role 2 = manager with canApprove.
-    ///         Emits CheckedIn as well so the staff screen and the indexer watch one event only.
+    /// @notice ROLE_APPROVER = admin (or owner) holding PERM_APPROVE_OVERRIDE, ROLE_MANAGER = manager
+    ///         with canApprove. The event and ticket must be admissible for the same reasons checkIn
+    ///         demands; only the NFC tap itself is waived. Emits CheckedIn as well so the staff screen
+    ///         and the indexer watch one event only.
     function manualOverride(uint256 tokenId, uint256 gateId, uint8 reason) external {
         if (_ownerOf(tokenId) == address(0)) revert NoSuchTicket();
         uint256 eventId = _eventOf[tokenId];
         uint256 orgId = _events[eventId].orgId;
 
-        uint8 role;
+        (uint256 gateEventId,,,,,) = organizers.gateInfo(gateId);
+        if (gateEventId != eventId) revert GateMismatch();
+        EventStatus status = eventStatus(eventId);
+        if (status == EventStatus.Ended) revert EventEnded();
+        if (status == EventStatus.Cancelled) revert EventCancelled();
+
+        uint8 role = ROLE_NONE;
         if (organizers.hasPermission(orgId, msg.sender, PERM_APPROVE_OVERRIDE)) {
-            role = 1;
+            role = ROLE_APPROVER;
         } else {
             (bool exists, bool canApprove) = organizers.managerOf(orgId, msg.sender);
-            if (exists && canApprove) role = 2;
+            if (exists && canApprove) role = ROLE_MANAGER;
         }
-        if (role == 0) revert Unauthorized();
+        if (role == ROLE_NONE) revert Unauthorized();
         if (_revoked[tokenId]) revert TicketRevoked();
         if (_checkIns[tokenId].ts != 0) revert AlreadyCheckedIn();
 
         _checkIns[tokenId] = CheckIn({gateId: gateId, ts: uint64(block.timestamp), nonceHash: bytes32(0), manual: true});
+        if (_offers[tokenId].from != address(0)) {
+            delete _offers[tokenId];
+            emit OfferCancelled(tokenId);
+        }
 
         emit ManualOverride(tokenId, gateId, msg.sender, role, reason);
         emit CheckedIn(tokenId, eventId, gateId, bytes32(0), uint64(block.timestamp));
