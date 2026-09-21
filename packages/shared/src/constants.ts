@@ -37,6 +37,11 @@ export const QR_PREFIX = 'MONTI1:';
 
 export const GATE_CODE_ROTATE_MS = 3_000;
 export const CODE_WINDOW_SECONDS = 60;
+/**
+ * `Ticket.CLOCK_SKEW`. 게이트 폰 시계가 체인보다 이만큼 앞서 가는 것까지는 위조가 아니다.
+ * 관객 폰도 같은 값으로 판단해야 체인이 받아 줄 코드를 먼저 거절하지 않는다.
+ */
+export const CLOCK_SKEW_SECONDS = 5;
 export const ARM_WINDOW_SECONDS = 60;
 export const ROTATION_COOLDOWN_SECONDS = 7 * 24 * 60 * 60;
 export const DEVICE_COOLDOWN_SECONDS = 7 * 24 * 60 * 60;

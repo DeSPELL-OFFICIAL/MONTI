@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { keccak256 } from 'viem';
+import { keccak256, sha256 } from 'viem';
 import {
   deviceSigHash,
   gateCodeHash,
+  gateCodePreimage,
   nicknameHash,
   normalizeNickname,
   offerDigest,
@@ -17,6 +18,25 @@ describe('gateCodeHash', () => {
   it('matches the fixed vector for gateId=3 eventId=11 issuedAt=1789862400 nonce=0x11*32', () => {
     expect(gateCodeHash({ gateId: 3n, eventId: 11n, issuedAt: ISSUED_AT, nonce: NONCE })).toBe(
       '0xb284e28bf3727ec6a13b3fd1b195cadd348b187d2e904c4013961c068cbe121d',
+    );
+  });
+
+  it('is sha256 of gateCodePreimage, the bytes a verifier that hashes internally is handed', () => {
+    const preimage = gateCodePreimage({ gateId: 3n, eventId: 11n, issuedAt: ISSUED_AT, nonce: NONCE });
+    // abi.encode of (uint256, uint256, uint64, bytes32) is four 32-byte words, in that order.
+    expect(preimage).toBe(
+      '0x' +
+        '03'.padStart(64, '0') +
+        '0b'.padStart(64, '0') +
+        (1_789_862_400).toString(16).padStart(64, '0') +
+        '11'.repeat(32),
+    );
+    expect(sha256(preimage)).toBe(gateCodeHash({ gateId: 3n, eventId: 11n, issuedAt: ISSUED_AT, nonce: NONCE }));
+  });
+
+  it('rejects a nonce that is not 32 bytes', () => {
+    expect(() => gateCodePreimage({ gateId: 3n, eventId: 11n, issuedAt: ISSUED_AT, nonce: '0x11' as Hex })).toThrow(
+      'BAD_NONCE',
     );
   });
 
