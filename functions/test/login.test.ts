@@ -231,6 +231,9 @@ describe('loginChallenge', () => {
   });
 });
 
+/** 참석자 안드로이드 앱의 서명 인증서 해시 — base64url SHA-256, 패딩 없이 43글자. */
+const ANDROID_HASH = '0UBplgrJxGVdhlStTif_-sczxK2uPjwEiwb9-eotdAY';
+
 describe('loginVerify', () => {
   it('returns a custom token, consumes the challenge and bumps the stored counter', async () => {
     const challenge = await issue();
@@ -269,11 +272,11 @@ describe('loginVerify', () => {
 
   it('accepts the android apk-key-hash origin', async () => {
     const saved = process.env.ANDROID_APK_KEY_HASH;
-    process.env.ANDROID_APK_KEY_HASH = 'kV8uQhash';
+    process.env.ANDROID_APK_KEY_HASH = ANDROID_HASH;
     try {
       const challenge = await issue();
       const result = (await login(
-        makeAssertion({ challenge, counter: 5, origin: 'android:apk-key-hash:kV8uQhash' }),
+        makeAssertion({ challenge, counter: 5, origin: `android:apk-key-hash:${ANDROID_HASH}` }),
       )) as { token: string };
       expect(result.token).toBe('token:uid-1');
     } finally {

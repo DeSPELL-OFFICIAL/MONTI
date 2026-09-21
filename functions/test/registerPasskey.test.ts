@@ -200,6 +200,9 @@ beforeEach(() => {
   seedPerson(PERSON_ID, 'uid-1');
 });
 
+/** 참석자 안드로이드 앱의 서명 인증서 해시 — base64url SHA-256, 패딩 없이 43글자. */
+const ANDROID_HASH = '0UBplgrJxGVdhlStTif_-sczxK2uPjwEiwb9-eotdAY';
+
 describe('registerPasskey', () => {
   it('verifies the attestation, derives the counterfactual account and stores passkey + account together', async () => {
     seedChallenge('chal-happy-0123456789');
@@ -256,12 +259,12 @@ describe('registerPasskey', () => {
 
   it('accepts the android apk-key-hash origin', async () => {
     const saved = process.env.ANDROID_APK_KEY_HASH;
-    process.env.ANDROID_APK_KEY_HASH = 'kV8uQhash';
+    process.env.ANDROID_APK_KEY_HASH = ANDROID_HASH;
     try {
       seedChallenge('chal-android-0123456789');
       const { attestation } = makeAttestation({
         challenge: 'chal-android-0123456789',
-        origin: 'android:apk-key-hash:kV8uQhash',
+        origin: `android:apk-key-hash:${ANDROID_HASH}`,
       });
       const result = (await wrapped({ data: { personId: PERSON_ID, attestation }, auth } as never)) as {
         ok: true;
