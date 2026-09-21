@@ -6,7 +6,7 @@ export const REGION = FIREBASE_REGION;
 
 setGlobalOptions({ region: REGION, maxInstances: 20, memory: '512MiB', timeoutSeconds: 60 });
 
-export const RP_ID = defineString('RP_ID', { default: 'monti.app' });
+export const RP_ID = defineString('RP_ID', { default: 'monti.despell.io' });
 export const RP_NAME = defineString('RP_NAME', { default: 'MONTI' });
 export const ANDROID_APK_KEY_HASH = defineString('ANDROID_APK_KEY_HASH', { default: '' });
 export const CHAIN_ID = defineString('CHAIN_ID', { default: String(MONAD_TESTNET_CHAIN_ID) });

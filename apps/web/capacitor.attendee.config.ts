@@ -53,9 +53,18 @@ const config: CapacitorConfig = {
     /**
      * The relying party stays the web origin, so one passkey is the same credential on the site
      * and in the APK. Unlike the staff project, this one sits at `android/` — the exact path
-     * `@capgo/capacitor-passkey`'s sync hook hardcodes (`scripts/configure-native.js:123`) — so
-     * the hook writes `res/values/capacitor-passkey.xml` and the manifest `<meta-data>` itself
-     * on every `cap sync`, and androidProjects.test.ts pins what it wrote.
+     * `@capgo/capacitor-passkey`'s sync hook hardcodes (`scripts/configure-native.js:124-125`
+     * joins `rootDir` with the literal `'android'` and never reads `android.path`) — so the hook
+     * writes `res/values/capacitor-passkey.xml` and the manifest `<meta-data>` itself on every
+     * `cap sync`, and androidProjects.test.ts pins what it wrote.
+     *
+     * ⚠ The corollary belongs to this file, not the staff one: because the hook only ever knows
+     * `<root>/android`, `pnpm sync:staff` rewrites **these** two files, from the origin
+     * `capacitor.staff.config.ts` declares. It is harmless only while both flavors declare the
+     * same origin — and the moment they diverge, syncing the gate app silently repoints the
+     * attendee APK's Digital Asset Links. `androidProjects.test.ts` reads this XML against *this*
+     * file's origin and asserts the two configs' passkey blocks are equal, so the divergence
+     * fails a test before it reaches a device.
      *
      * Still outside this repository and still blocking sign-in on a real device: the signing
      * certificate SHA-256 in `https://monti.despell.io/.well-known/assetlinks.json`, and

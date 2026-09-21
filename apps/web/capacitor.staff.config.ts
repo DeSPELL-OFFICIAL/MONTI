@@ -23,8 +23,8 @@ const config: CapacitorConfig = {
      * `getDependencies()` is never consulted (`@capacitor/cli` 8.5.2, `dist/plugin.js:25`).
      *
      * The Capgo NFC reader package — the one `capacitor.attendee.config.ts` lists and this file
-     * does not — is deliberately absent, and `noReaderMode.test.ts` asserts on this file's text
-     * that it stays unnamed here. The gate phone emulates a tag; it never opens a reader
+     * does not — is deliberately absent, and `noReaderMode.test.ts` asserts on *this array* that
+     * no reader package is in it. The gate phone emulates a tag; it never opens a reader
      * session. Before this list existed the reader plugin was still linked into the APK: a
      * registered native plugin one `Capacitor.Plugins` lookup away from that text scan, plus an
      * `android.permission.NFC` the gate build never used. Dropping the module removes the
@@ -50,6 +50,17 @@ const config: CapacitorConfig = {
      * The relying party stays the web origin: a staff member's passkey is the same credential
      * whether they signed in on the site or in this APK. The plugin's sync hook turns this into
      * the app's Digital Asset Links declaration.
+     *
+     * ⚠ `@capgo/capacitor-passkey`'s sync hook cannot see `android.path`. Its
+     * `scripts/configure-native.js:124-125` joins `rootDir` with the literal `'android'`, so
+     * `pnpm sync:staff` never touches `android-staff/` — it rewrites the **attendee** project's
+     * `android/app/src/main/res/values/capacitor-passkey.xml` and its manifest `<meta-data>`,
+     * from the origin *this* file declares. That is harmless only while both flavors declare the
+     * same origin, which they do (`androidProjects.test.ts` asserts the two are equal). The day
+     * they diverge, a staff sync would silently repoint the attendee APK's Digital Asset Links at
+     * the staff origin; the pin tests are what catch it — `androidProjects.test.ts` reads the
+     * attendee XML against the attendee origin, and `src/staff/androidProject.test.ts` reads
+     * `android-staff/`'s hand-written copy, which no hook maintains.
      *
      * Two halves of this are not in this repository and block staff sign-in on a real device:
      * `https://monti.despell.io/.well-known/assetlinks.json` has to list the APK's signing

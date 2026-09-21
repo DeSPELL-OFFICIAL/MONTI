@@ -3,6 +3,8 @@ import { join, relative, resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import staffConfig from '../../capacitor.staff.config';
+
 /**
  * Spec §11 and §18, as a test.
  *
@@ -98,9 +100,26 @@ describe('the staff device never enables NFC reader mode', () => {
     expect(offenders, `imports the NFC barrel:\n${offenders.join('\n')}`).toEqual([]);
   });
 
-  it('the staff Capacitor config does not register the attendee NFC plugin', () => {
-    const config = readFileSync(resolve(WEB, 'capacitor.staff.config.ts'), 'utf8');
-    expect(config).not.toContain('capacitor-nfc');
-    expect(config).toContain('app.monti.staff');
+  /**
+   * The scan above cannot cover the Capacitor config — it is build configuration, not source that
+   * ships — and reading its *text* was the wrong guard anyway. `expect(text).not.toContain(…)`
+   * answers a different question than "is the plugin linked": it fires on a comment that merely
+   * names the package (the config's own prose has to say "the Capgo NFC reader package" to stay
+   * green), and it stays silent if the name ever arrives spread across a variable or a shared
+   * constant. `includePlugins` is the array `cap sync` actually reads, so assert that.
+   */
+  it('links no reader plugin into the staff APK, and does link the two the gate needs', () => {
+    const plugins = staffConfig.android?.includePlugins ?? [];
+    // An empty or absent allowlist is the failure that looks like success: `cap sync` then falls
+    // back to `getDependencies()` and links the reader along with everything else.
+    expect(plugins.length, 'no allowlist means cap sync links every dependency').toBeGreaterThan(0);
+    expect(
+      plugins.filter((name) => /nfc/i.test(name)),
+      'an NFC reader package is in the staff allowlist',
+    ).toEqual([]);
+    // Card emulation and the QR fallback are the gate's own two; losing either is a silent gate.
+    expect(plugins).toContain('@monti/hce-android');
+    expect(plugins).toContain('@capacitor-mlkit/barcode-scanning');
+    expect(staffConfig.appId).toBe('app.monti.staff');
   });
 });

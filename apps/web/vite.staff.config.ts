@@ -11,8 +11,13 @@ import { defineConfig } from 'vite';
  * Capacitor serves `index.html` from the asset directory and nothing else, but a Rollup input of
  * `staff.html` writes `staff.html`. Renaming after the bundle is written is cheaper than a second
  * HTML file that exists only to be copied.
+ *
+ * `sourcemap` follows `mode`, for the same reason `vite.config.ts` does: `pnpm sync:staff` runs
+ * `vite build` at mode `production` and `cap sync` then copies `dist-staff/` — map included —
+ * into `android-staff/app/src/main/assets/public/`. `vite build --config vite.staff.config.ts
+ * --mode development` is the build that keeps it.
  */
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [
     react(),
     {
@@ -26,8 +31,8 @@ export default defineConfig({
   build: {
     outDir: 'dist-staff',
     emptyOutDir: true,
-    sourcemap: true,
+    sourcemap: mode !== 'production',
     target: 'es2022',
     rollupOptions: { input: resolve(__dirname, 'staff.html') },
   },
-});
+}));
