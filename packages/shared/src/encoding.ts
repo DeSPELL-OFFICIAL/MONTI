@@ -1,0 +1,80 @@
+import { encodeAbiParameters, keccak256, parseAbiParameters, sha256, stringToBytes } from 'viem';
+import type { Hex } from './types.js';
+
+function assertBytes32(value: Hex, label: string): void {
+  if (typeof value !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(value)) throw new Error(label);
+}
+
+/** 게이트 단말기의 게이트 키가 서명하는 값. GateCodeWire.sig 가 이 해시에 대한 r||s 다. */
+export function gateCodeHash(input: {
+  gateId: bigint;
+  eventId: bigint;
+  issuedAt: bigint;
+  nonce: Hex;
+}): Hex {
+  assertBytes32(input.nonce, 'BAD_NONCE');
+  return sha256(
+    encodeAbiParameters(
+      parseAbiParameters('uint256 gateId, uint256 eventId, uint64 issuedAt, bytes32 nonce'),
+      [input.gateId, input.eventId, input.issuedAt, input.nonce],
+    ),
+  );
+}
+
+/**
+ * 관객 기기 키가 서명하는 값. Ticket.checkIn 이 체인 위에서
+ * sha256(abi.encode(tokenId, g.gateId, g.eventId, g.nonce, g.issuedAt)) 로 다시 계산한다.
+ * 인자 순서를 바꾸면 모든 체크인이 실패한다.
+ */
+export function deviceSigHash(input: {
+  tokenId: bigint;
+  gateId: bigint;
+  eventId: bigint;
+  nonce: Hex;
+  issuedAt: bigint;
+}): Hex {
+  assertBytes32(input.nonce, 'BAD_NONCE');
+  return sha256(
+    encodeAbiParameters(
+      parseAbiParameters('uint256 tokenId, uint256 gateId, uint256 eventId, bytes32 nonce, uint64 issuedAt'),
+      [input.tokenId, input.gateId, input.eventId, input.nonce, input.issuedAt],
+    ),
+  );
+}
+
+/** 닉네임 비교는 항상 이 정규형으로 한다. 웹·서버·인덱서가 같은 함수를 쓴다. */
+export function normalizeNickname(raw: string): string {
+  return raw.normalize('NFKC').trim().toLowerCase();
+}
+
+export function nicknameHash(raw: string): Hex {
+  const normalized = normalizeNickname(raw);
+  if (normalized.length === 0) throw new Error('EMPTY_NICKNAME');
+  return keccak256(stringToBytes(normalized));
+}
+
+/**
+ * hmacPhone = HMAC-SHA256(PHONE_INDEX_KEY, phoneE164) 의 32바이트를 그대로 keccak 한다.
+ * 0x 접두사 유무는 무시한다. 결과가 Ticket.createOffer 의 recipientCommitment 다.
+ */
+export function recipientCommitment(hmacPhoneHex: string): Hex {
+  const bare = hmacPhoneHex.startsWith('0x') ? hmacPhoneHex.slice(2) : hmacPhoneHex;
+  if (!/^[0-9a-fA-F]{64}$/.test(bare)) throw new Error('BAD_HMAC_PHONE');
+  return keccak256(`0x${bare.toLowerCase()}` as Hex);
+}
+
+/** 어테스터가 acceptOffer 용으로 서명하는 다이제스트. */
+export function offerDigest(input: {
+  tokenId: bigint;
+  recipientCommitment: Hex;
+  recipientAccount: Hex;
+}): Hex {
+  assertBytes32(input.recipientCommitment, 'BAD_COMMITMENT');
+  if (!/^0x[0-9a-fA-F]{40}$/.test(input.recipientAccount)) throw new Error('BAD_ACCOUNT');
+  return keccak256(
+    encodeAbiParameters(
+      parseAbiParameters('uint256 tokenId, bytes32 recipientCommitment, address recipientAccount'),
+      [input.tokenId, input.recipientCommitment, input.recipientAccount],
+    ),
+  );
+}
