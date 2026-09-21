@@ -1,0 +1,7 @@
+{
+  "projects": {
+    "default": "monti-dev",
+    "dev": "monti-dev",
+    "prod": "monti-prod"
+  }
+}
