@@ -31,7 +31,7 @@
     "@noble/hashes": "1.8.0",
     "@perfood/capacitor-crypto-api": "8.0.0",
     "@tanstack/react-query": "5.62.11",
-    "cbor-x": "^1.6.0",
+    "cbor-x": "1.6.6",
     "firebase": "12.6.0",
     "i18next": "25.5.2",
     "ox": "0.9.6",

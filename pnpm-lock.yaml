@@ -68,7 +68,7 @@ importers:
         specifier: 5.62.11
         version: 5.62.11(react@19.2.0)
       cbor-x:
-        specifier: ^1.6.0
+        specifier: 1.6.6
         version: 1.6.6
       firebase:
         specifier: 12.6.0

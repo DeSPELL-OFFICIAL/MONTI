@@ -28,7 +28,15 @@ export function storeCredential(credential: WebAuthnCredential): void {
 
 export function storedCredential(): WebAuthnCredential | null {
   const raw = localStorage.getItem(STORAGE_KEY);
-  return raw ? (JSON.parse(raw) as WebAuthnCredential) : null;
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as WebAuthnCredential;
+  } catch {
+    // A half-written or hand-edited entry is not a credential. Drop it so the caller
+    // sees "no passkey on this device" and registers again, instead of throwing on read.
+    localStorage.removeItem(STORAGE_KEY);
+    return null;
+  }
 }
 
 export function clearCredential(): void {

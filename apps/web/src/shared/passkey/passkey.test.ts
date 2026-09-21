@@ -120,6 +120,14 @@ describe('createPasskey (native)', () => {
   });
 });
 
+describe('storedCredential', () => {
+  it('drops a corrupt entry instead of throwing, so the caller can register again', () => {
+    localStorage.setItem('monti.passkey', '{"id":"Y3JlZC1pZA"');
+    expect(storedCredential()).toBeNull();
+    expect(localStorage.getItem('monti.passkey')).toBeNull();
+  });
+});
+
 describe('getFnNative', () => {
   it('hands viem the same binary credential a browser would', async () => {
     const assertion = await getFnNative({

@@ -41,11 +41,6 @@ export async function getSmartAccount(webAuthnAccount: WebAuthnAccount): Promise
   return smartAccount;
 }
 
-export function setSmartAccount(account: SmartAccount | null): void {
-  smartAccount = account;
-  smartAccountKey = account ? String(account.address) : null;
-}
-
 export function resetBundler(): void {
   bundlerClient = null;
   smartAccount = null;

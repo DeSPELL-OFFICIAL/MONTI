@@ -56,7 +56,7 @@ export const getFnNative: PasskeyGetFn = async (options?: PasskeyCredentialReque
   const assertion = await getCredentialNative({
     challenge: toBase64Url(toBytes(request.challenge)),
     rpId: request.rpId ?? getConfig().rpId,
-    userVerification: 'required',
+    userVerification: request.userVerification ?? 'required',
     allowCredentials: (request.allowCredentials ?? []).map((entry) => ({
       id: toBase64Url(toBytes(entry.id)),
       type: 'public-key',
