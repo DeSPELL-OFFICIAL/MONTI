@@ -8,7 +8,10 @@ echo "== fmt =="
 forge fmt --check
 
 echo "== build =="
-forge build --sizes
+# Not --sizes: forge 1.5.1 ignores code_size_limit there and exits 1 past EIP-170's 24,576 B,
+# which is not the limit this chain has. test/ContractSize.t.sol holds Monad's 128 KB instead,
+# and `forge test` below runs it.
+forge build
 
 echo "== test =="
 forge test -vv
