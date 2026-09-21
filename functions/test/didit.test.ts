@@ -452,6 +452,39 @@ describe('diditWebhook', () => {
     expect(after.get('kycLevel')).toBe(1);
   });
 
+  it('never creates a person document from an unknown vendor_data', async () => {
+    const stranger = `0x${'cd'.repeat(32)}` as Hex;
+
+    const approved = await deliver({ ...approvedBody(null, 's7'), vendor_data: stranger, decision: { face_search: { status: 'clear' } } });
+    expect(approved.statusCode).toBe(200); // Didit 이 영원히 재시도하지 않게 200 이다
+    expect(approved.body).toBe('unknown person');
+
+    // 거절 결정도 마찬가지다 — 예전에는 이 경로가 사람 문서를 새로 만들었다.
+    const declined = await deliver({ session_id: 's8', status: 'Declined', vendor_data: stranger });
+    expect(declined.statusCode).toBe(200);
+
+    // persons 에는 beforeEach 가 만든 문서 하나뿐이다.
+    expect([...docs.keys()].filter((path) => path.startsWith(`${PERSONS}/`))).toEqual([`${PERSONS}/${PERSON}`]);
+    expect(snapshot(`${PERSONS}/${stranger}`).exists).toBe(false);
+    expect(sendAttesterTx).not.toHaveBeenCalled();
+
+    // 세션에는 orphan 표시와 사유만 남는다 — 그 밖에는 아무것도 없다.
+    for (const id of ['s7', 's8']) {
+      expect(snapshot(`${KYC_SESSIONS}/${id}`).data()).toEqual({
+        sessionId: id,
+        status: 'orphan',
+        reason: 'unknown_person',
+      });
+    }
+
+    // 사람이 나중에 만들어지고 같은 세션이 다시 오면, orphan 기록이 그 배달을 삼키지 않는다.
+    write(`${PERSONS}/${stranger}`, { status: 'active', kycLevel: 0 });
+    const retry = await deliver({ ...approvedBody(null, 's7'), vendor_data: stranger, decision: { face_search: { status: 'clear' } } });
+    expect(retry.statusCode).toBe(200);
+    expect(snapshot(`${PERSONS}/${stranger}`).get('kycLevel')).toBe(1);
+    expect(snapshot(`${KYC_SESSIONS}/s7`).get('status')).toBe('Approved'); // 더 이상 orphan 이 아니다
+  });
+
   it('never persists a Didit PII field, and binds every envelope to personId:field', async () => {
     await deliver(approvedBody());
 

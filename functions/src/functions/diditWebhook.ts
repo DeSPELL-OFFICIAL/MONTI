@@ -112,9 +112,24 @@ export const diditWebhook = onRequest(
     const isStamped = (snap: { exists: boolean; get: (field: string) => unknown }): boolean =>
       snap.exists && snap.get('decision') === decision;
 
-    // 사전 읽기. KMS 왕복과 트랜잭션에 들어가기 전에 중복·전이를 먼저 걸러낸다.
+    // 우리가 만든 적 없는 `vendor_data` 로는 사람 문서를 만들지 않는다. 웹훅 입력이 곧
+    // 새 사람이 되는 길을 열면 아무나 `persons/{아무 32바이트}` 를 찍어낼 수 있다.
+    // 세션 id 와 사유만 남긴다 — 이 세 필드 말고는 아무것도 쓰지 않는다.
+    const orphanStamp = { sessionId, status: 'orphan', reason: 'unknown_person' };
+
+    // 사전 읽기. KMS 왕복과 트랜잭션에 들어가기 전에 중복·존재·전이를 먼저 걸러낸다.
     if (isStamped(await sessionRef.get())) {
       res.status(200).send('duplicate');
+      return;
+    }
+
+    const prePerson = await personRef.get();
+    if (!prePerson.exists) {
+      // Didit 이 영원히 재시도하지 않도록 200 으로 받되, 사람 문서는 손대지 않는다.
+      // `status:'orphan'` 이라 reconcile 스캔에 그대로 보인다. `decision` 을 쓰지 않으므로
+      // 사람이 나중에 만들어져 같은 세션이 다시 오면 중복으로 삼켜지지 않고 정상 처리된다.
+      await sessionRef.set(orphanStamp, { merge: true });
+      res.status(200).send('unknown person');
       return;
     }
 
@@ -130,7 +145,6 @@ export const diditWebhook = onRequest(
 
     const approved = decision === 'Approved' && faceSearch === 'clear';
     const target: PersonStatus = approved ? 'kyc_ok' : 'rejected';
-    const prePerson = await personRef.get();
 
     // 이미 레벨 1이면 다른 세션이 와도 체인에 다시 쓰지 않는다.
     if (approved && (prePerson.get('kycLevel') as number | undefined) === 1) {
@@ -187,19 +201,24 @@ export const diditWebhook = onRequest(
 
     // 사람 문서와 세션 도장은 한 트랜잭션에서 같이 커밋된다. 트랜잭션은 다시 읽고 다시 검사한다
     // — 사전 읽기 뒤에 다른 배달이 끼어들었어도 도장만 남고 복구 지점이 없는 상태는 생기지 않는다.
-    const committed = await db.runTransaction(async (tx) => {
+    const outcome = await db.runTransaction(async (tx) => {
       const session = await tx.get(sessionRef);
       const person = await tx.get(personRef);
-      if (isStamped(session)) return false;
+      if (isStamped(session)) return 'duplicate';
+      // 사전 읽기 뒤에 사람 문서가 사라졌어도 웹훅 입력으로 되살리지 않는다.
+      if (!person.exists) {
+        tx.set(sessionRef, orphanStamp, { merge: true });
+        return 'orphan';
+      }
       const current = person.get('status') as PersonStatus | undefined;
       if (current) assertStatusTransition(current, target);
       else if (approved) assertStatusTransition('pending', target);
       tx.set(personRef, personUpdate, { merge: true });
       tx.set(sessionRef, sessionStamp, { merge: true });
-      return true;
+      return 'committed';
     });
-    if (!committed) {
-      res.status(200).send('duplicate');
+    if (outcome !== 'committed') {
+      res.status(200).send(outcome === 'orphan' ? 'unknown person' : 'duplicate');
       return;
     }
     if (!approved) {
