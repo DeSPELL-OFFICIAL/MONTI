@@ -1,6 +1,6 @@
 import { Encoder } from 'cbor-x';
 import { encodeAbiParameters, keccak256, parseAbiParameters, sha256, stringToBytes } from 'viem';
-import { QR_PREFIX } from './constants.js';
+import { DEVICE_DIGEST_FORM, QR_PREFIX } from './constants.js';
 import {
   GATE_RESPONSE_VERSION,
   isGateCodeWire,
@@ -43,24 +43,80 @@ export function gateCodeHash(input: GateCodeDigestInput): Hex {
 }
 
 /**
- * 관객 기기 키가 서명하는 값. Ticket.checkIn 이 체인 위에서
- * sha256(abi.encode(tokenId, g.gateId, g.eventId, g.nonce, g.issuedAt)) 로 다시 계산한다.
- * 인자 순서를 바꾸면 모든 체크인이 실패한다.
+ * 관객 기기 키가 서명하는 값의 입력. 두 형식이 같은 입력을 받는다 — v1 은 앞의 두 워드를
+ * 그냥 쓰지 않는다. 호출부가 형식에 따라 인자를 바꿔 넣지 않아도 되도록 일부러 하나로 뒀다.
  */
-export function deviceSigHash(input: {
+export interface DeviceDigestInput {
+  /** `block.chainid`. v1 에서는 쓰이지 않는다. */
+  chainId: bigint;
+  /** 배포된 Ticket 주소(`address(this)`). v1 에서는 쓰이지 않는다. */
+  ticket: Hex;
   tokenId: bigint;
   gateId: bigint;
   eventId: bigint;
   nonce: Hex;
   issuedAt: bigint;
-}): Hex {
+}
+
+function assertTicket(value: Hex): void {
+  if (typeof value !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(value)) throw new Error('BAD_TICKET_ADDRESS');
+}
+
+/**
+ * v1 서명 원문. 5개 워드뿐이라 체인도 배포본도 가리키지 않는다.
+ * @deprecated 01b 재배포(그 계획의 Task 15) 이후에는 {@link deviceDigestPreimageV2} 가 맞다.
+ */
+export function deviceSigPreimage(input: Omit<DeviceDigestInput, 'chainId' | 'ticket'>): Hex {
   assertBytes32(input.nonce, 'BAD_NONCE');
-  return sha256(
-    encodeAbiParameters(
-      parseAbiParameters('uint256 tokenId, uint256 gateId, uint256 eventId, bytes32 nonce, uint64 issuedAt'),
-      [input.tokenId, input.gateId, input.eventId, input.nonce, input.issuedAt],
-    ),
+  return encodeAbiParameters(
+    parseAbiParameters('uint256 tokenId, uint256 gateId, uint256 eventId, bytes32 nonce, uint64 issuedAt'),
+    [input.tokenId, input.gateId, input.eventId, input.nonce, input.issuedAt],
   );
+}
+
+/**
+ * 관객 기기 키가 서명하는 값(v1). **지금 배포된** Ticket.checkIn 이 체인 위에서
+ * sha256(abi.encode(tokenId, g.gateId, g.eventId, g.nonce, g.issuedAt)) 로 다시 계산한다.
+ * 인자 순서를 바꾸면 모든 체크인이 실패한다.
+ * @deprecated 01b 재배포 이후에는 {@link deviceDigestV2} 가 맞다. 형식 선택은
+ *             {@link DEVICE_DIGEST_FORM} 한 줄이고, 화면은 {@link deviceDigest} 를 부른다.
+ */
+export function deviceSigHash(input: Omit<DeviceDigestInput, 'chainId' | 'ticket'>): Hex {
+  return sha256(deviceSigPreimage(input));
+}
+
+/**
+ * v2 서명 원문. 01b 의 `Ticket._deviceDigest` 가 그대로 이 7개 워드를 abi.encode 한다:
+ * `(uint256 chainId, address ticket, uint256 tokenId, uint256 gateId, uint256 eventId,
+ * bytes32 nonce, uint64 issuedAt)`. 앞의 두 워드가 있어야 한 체인·한 배포본에서 거둔 서명이
+ * 다른 곳에서 재생되지 않는다.
+ */
+export function deviceDigestPreimageV2(input: DeviceDigestInput): Hex {
+  assertBytes32(input.nonce, 'BAD_NONCE');
+  assertTicket(input.ticket);
+  return encodeAbiParameters(
+    parseAbiParameters(
+      'uint256 chainId, address ticket, uint256 tokenId, uint256 gateId, uint256 eventId, bytes32 nonce, uint64 issuedAt',
+    ),
+    [input.chainId, input.ticket, input.tokenId, input.gateId, input.eventId, input.nonce, input.issuedAt],
+  );
+}
+
+export function deviceDigestV2(input: DeviceDigestInput): Hex {
+  return sha256(deviceDigestPreimageV2(input));
+}
+
+/**
+ * 이 빌드가 실제로 서명하는 원문. WebCrypto 는 다이제스트가 아니라 원문을 받아 자기가
+ * 해싱하므로, 로컬 검증은 이걸 쓴다 — `gateCodePreimage` 가 있는 이유와 같다.
+ */
+export function deviceDigestPreimage(input: DeviceDigestInput): Hex {
+  return DEVICE_DIGEST_FORM === 'v2-domainSeparated' ? deviceDigestPreimageV2(input) : deviceSigPreimage(input);
+}
+
+/** 이 빌드가 실제로 서명하는 32바이트. 형식은 {@link DEVICE_DIGEST_FORM} 한 줄이 정한다. */
+export function deviceDigest(input: DeviceDigestInput): Hex {
+  return sha256(deviceDigestPreimage(input));
 }
 
 /** 닉네임 비교는 항상 이 정규형으로 한다. 웹·서버·인덱서가 같은 함수를 쓴다. */

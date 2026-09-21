@@ -35,6 +35,21 @@ export const NDEF_RESPONSE_TYPE = 'monti.app:s';
  */
 export const QR_PREFIX = 'MONTI1:';
 
+/**
+ * 관객 기기 키가 서명하는 다이제스트의 형식. 두 가지가 있고, 어느 쪽인지는 **배포된**
+ * Ticket 이 정한다.
+ *
+ * - `v1-fiveField` — `sha256(abi.encode(tokenId, gateId, eventId, nonce, issuedAt))`.
+ *   지금 Monad 테스트넷에 올라가 있는 `Ticket.checkIn` 이 검증하는 형식이다.
+ * - `v2-domainSeparated` — 앞에 `chainId` 와 Ticket 주소 두 워드를 붙인 형식.
+ *   01b 번들(Tasks 8-10 리뷰 Gap 2)이 `Ticket._deviceDigest` 로 들여온다.
+ *
+ * 01b 가 재배포되는 순간(그 계획의 Task 15) 이 한 줄을 `v2-domainSeparated` 로 바꾸면
+ * 서명·검증·QR 이 한꺼번에 따라온다. 형식을 고르는 곳은 여기 하나뿐이다.
+ */
+export type DeviceDigestForm = 'v1-fiveField' | 'v2-domainSeparated';
+export const DEVICE_DIGEST_FORM: DeviceDigestForm = 'v1-fiveField';
+
 export const GATE_CODE_ROTATE_MS = 3_000;
 export const CODE_WINDOW_SECONDS = 60;
 /**
