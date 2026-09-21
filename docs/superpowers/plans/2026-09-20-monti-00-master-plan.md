@@ -400,3 +400,9 @@ function offerOf(uint256 tokenId) external view returns (Offer memory);
 
 - Spec coverage: §5 journeys → sub-plans 02/03; §7 protocol → 03 (attendee side), 04 (gate side), 01 (`checkIn`); §8.1 shell → 03/04; §8.3–8.5 gas/paymaster/bundler → 01 (`MontiPaymaster`), 03/04 (bundler client); §9 identity/KYC/device/roles → 01/02/03; §10.4 storage rules → 02; §12 offline → 04; §13 staff screen → 03 UI + 04 logic; §15 Must list → all covered; §8.7 payments → out of MVP (voucher path in `claim` only).
 - Type consistency: all sub-plans must import names from this file; a reviewer task at the end of sub-plan 04 diffs every ABI/function/type name used in 02–04 against `packages/shared` generated from 01.
+
+## Delta after 03 Task 11 (sendSponsoredOp receipt)
+
+- `sendSponsoredOp` receipt stays `{ success, txHash, blockNumber, revertReason? }`, but `revertReason` is now `Hex | 'TIMEOUT'`. `wait(timeoutMs)` never throws: on deadline it resolves `{ success: false, txHash: '0x', blockNumber: 0n, revertReason: 'TIMEOUT' }`; transient RPC errors inside the poll are swallowed until the deadline. The `SponsoredOpTimeout` class in plan 03 §Task 11 "Produces" no longer exists.
+- Consumers in plan 04 (`mapRevertToDenyCode`, gate queue `lastError`): `'TIMEOUT'` is not a deny. Treat it as "confirmation pending" — keep the chain-event subscription as the source of truth and show the neutral "확인 중 / Confirming" state, never a red screen. Only a `Hex` revert reason maps to a DENY code.
+- viem's default `baseFeeMultiplier` is kept (fee cap only; effective price is base + priority on Monad), so it does not compound with the ×1.075 gas-limit headroom.
