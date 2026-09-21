@@ -5845,3 +5845,20 @@ git commit -m "test(staff): diff every name used by sub-plan 04 against packages
 - 게이트 계정의 첫 배포(`initCode`) 비용과 파우셋 충전은 01 Task 11·12(페이마스터·팩토리)와 마스터 플랜 Task 0.6(S6)의 몫이다. 이 계획은 `sendSponsoredOp` 가 미배포 계정도 처리한다고 가정한다.
 - 관객 폰 쪽 무장·읽기·쓰기(스펙 §7.2 1·3·4단계)는 03이다. 이 계획은 4단계가 만들어 낸 `monti.app:s` 를 받는 지점에서 시작한다.
 - 주최자 웹의 `registerGate`·`openGate` 호출은 03의 `organizer/` 다. Task 15는 그 결과를 폴링할 뿐이다.
+
+## 01b delta (2026-09-21)
+
+01b 재배포 번들이 컨트랙트를 바꿨다. **아직 배포 전이다**(01b Task 15에서 새 주소로 올린다). 인터페이스 원본은 **`contracts/docs/abi-delta-01b.md`** 한 곳이고, 아래는 "어느 Task가 무엇 때문에 바뀌고 델타 문서의 어디를 읽어야 하는가"만 가리킨다. **위 Task 본문은 고치지 않는다** — 같은 파일이 `mvp-staff`에도 있어 본문을 고치면 병합에서 충돌한다. 이 델타가 없으면 01b의 C1이 체인에 올라간 채 아무도 쓰지 않는다.
+
+| Task | 무엇이 바뀌나 | 새 인터페이스 | 읽을 곳 |
+|---|---|---|---|
+| **T12 (기기 키 서명)** | 바꿀 코드는 없다. 사실만 굳힌다 | `webauthn-sol`이 이미 요구하던 **low-`s`** 가 이제 `Ticket`의 입장 경로에서도 강제된다(solady `P256.verifySignature`). 게이트 계정의 서명 합성은 그대로 두고, `s > N/2`이면 `s = N − s`로 정규화된 채 나가는지 한 번 확인한다 | §7.2 |
+| **T21 (`checkIn` 유저옵)** | 같은 인자를 쓰는 **짝 하나**가 더 필요하다. 현장 탭은 계속 `checkIn`이다 | `encodeCheckInLateCall(code, response)` / `sendCheckInLate(p)` — `functionName`만 `'checkInLate'`이고 인자 세 개는 `checkIn`과 **완전히 같다**. `checkInLate(uint256,(uint256,uint256,uint64,bytes32),bytes)` `0x47a7fad1`. 테스트: `decodeFunctionData`가 `functionName === 'checkInLate'`를 내고 인자가 `checkIn`과 동일할 것 | §2 |
+| **T21 (UserOp 가스)** | 측정값이 새로 나왔다. 옛 숫자에서 출발하지 않는다 | `checkIn` **123,800** / `checkInLate` **132,607**, 둘 다 200,000 콜 예산 대비. 두 경로의 차이는 약 8.8 k(`gateInfo`가 `isOpenGate`를 대신하고 로그가 하나 더 붙는다). 01b Task 15 Step 4에서 실 UserOp 네 필드(`callGasLimit`·`verificationGasLimit`·`preVerificationGas`·`maxFeePerGas`)를 받아 적는다 | §8 · 04 |
+| **T22 (revert → DENY)** | 줄 두 개가 늘고, **한 코드의 문구가 경로마다 다르다** | `NotMember` → `TX_FAILED`, `RotationPending` → `TX_FAILED`(기획서 §13에 대응 코드가 없다. 밀려난 옛 계정은 `DeviceLocked`보다 `RotationPending`이 먼저 걸린다). `CodeExpired`는 **현장에서 "다시 대세요", 큐를 흘리다 나오면 "기록 창 만료, 미기록"**. **되돌리는 사유 12개 자체는 바뀌지 않았다** — `checkInLate`는 `checkIn`과 똑같은 집합으로 되돌아오고 DENY 표는 움직이지 않는다 | §6, §8 · 04 |
+| **T24 (`CheckedIn` 구독)** | **바꿀 것이 없다.** 늦은 경로도 같은 `CheckedIn(uint256,uint256,uint256,bytes32,uint64)`을 내므로 topic0(`0x31153c57…d438b`)과 인덱스 토픽이 동일하다. 구독은 그대로다 | 원한다면 `CheckedInLate(uint256,uint256,uint64,uint64)`(topic0 `0xad3c23d7…b782`) 구독을 **더해서** 큐 흘림 건수를 화면에 띄운다. 입장 수를 셀 때는 여전히 `CheckedIn`만 센다 | §2 |
+| **T28 (내구 큐 흘리기)** | **`sendCheckIn`이 아니라 `sendCheckInLate`로 나간다.** 체인의 현장 창은 60초라 큐는 절대 통과할 수 없다 — 그대로 구현하면 큐가 계속 `CodeExpired`로 되돌아온다 | 기록 창은 **개장 −12시간 ~ 폐장 +12시간**(`LATE_WINDOW() = 43200`). 게이트가 열려 있을 필요는 없지만 **폐기된 게이트는 큐도 못 흘린다**. 1회용 번호는 두 경로를 합쳐 한 번만 쓰인다. 그 창이 닫힌 항목은 재시도해도 `CodeExpired`이므로 **'미기록'으로 옮긴다** | §2, §8 · 04 · 기획서 v2.6 §12 |
+| **T29 (재전송 대사)** | 보고서에 칸이 둘 늘고, `checkInOf` 해체가 깨진다 | `ReconcileReport = { confirmed, late, conflicts, failed, unrecorded }`. `CodeExpired`·`EventEnded`로 실패한 항목은 `failed`가 아니라 **`unrecorded`** 로 세어 주최자 화면에 따로 보여준다(기획서 §12 사후 대사). `checkInOf` 반환이 **`{ gateId, nonceHash, ts, manual, late }`** 로 바뀌었다 — 셀렉터가 그대로라 컴파일러가 못 잡는다 | **§5** |
+| **T15 (게이트 등록)** | 자리표시자 키가 더는 통하지 않고, 폐기가 회복 가능해졌다 | `registerGate`가 **반쪽 0** P-256 키를 거부한다(둘 다 0일 때만 막던 것에서) — 진짜 `kx`/`ky`가 필요하다. `revokeGate`는 `gateOf(account)`를 비우므로 폐기한 주소를 **새 `gateId`로 다시 등록할 수 있다**(재배포 전이라면 그 주소는 영구히 타버렸다). 두 조작 모두 이제 페이마스터가 스폰서한다 | §3 · §6 |
+| **T34 (교차 대조)** | 이름 짝 하나가 늘었다 | `CODE_WINDOW` ↔ `CODE_WINDOW_SECONDS`와 똑같이 **`LATE_WINDOW`(Solidity, `12 hours` = 43,200) ↔ `LATE_WINDOW_SECONDS`(TS, `43_200`)** 도 이름이 다르다. `MIGRATE_DELAY` ↔ `MIGRATE_DELAY_SECONDS`(86,400)도 같은 관계다. 사람이 한 번 확인한다 | §1·§2 |
+| **P1 (`@monti/shared` 가정)** | 이 계획이 `ticketAbi`·`organizersAbi`·`identityAbi`·`CONTRACTS`를 02에서 받아 쓰는 전제가 그대로 유지되지만, **`MONTI-staff`는 `MONTI-web`의 부분집합이 아니라 동등한 피어**라 같은 ABI 복사·`abi.test.ts`·`constants.ts` 갱신을 자기 저장소에서 따로 해야 한다 | 02·03과 같은 목록(새 함수·이벤트 이름, `LATE_WINDOW_SECONDS`, `MIGRATE_DELAY_SECONDS`). Task 10의 로컬 임시 상수도 새 주소로 | §8 · 04 |
