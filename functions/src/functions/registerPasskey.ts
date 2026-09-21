@@ -27,6 +27,13 @@ const SUPPORTED_ALGORITHMS = [-7];
 const ALLOWED_FORMATS = new Set(['none', 'packed']);
 
 /**
+ * 챌린지는 그대로 Firestore 문서 id 가 된다. base64url 밖의 문자(`/`, `.`, 빈 문자열)는
+ * 문서 경로 자체를 깨뜨려 매핑되지 않은 500 이 되므로 id 로 쓰기 **전에** 막는다.
+ * Task 20 이 내주는 값은 32바이트 base64url(43자)다.
+ */
+const CHALLENGE_RE = /^[A-Za-z0-9_-]{16,128}$/;
+
+/**
  * 웹 클라이언트는 지원하지 않는 엔진에서 `{}` 를 그대로 올려 보낸다.
  * 그런 입력을 조용히 넘기면 뒤에서 "검증 실패"로 뭉개지므로 여기서 크게 튕긴다.
  */
@@ -77,13 +84,24 @@ export const registerPasskey = onCall(
     // 가입에 본인인증이 없으므로 pending 이 정상 상태다. KYC 레벨은 여기서 보지 않는다.
     if (person.get('status') !== 'pending') throw new HttpsError('failed-precondition', 'BAD_SIGNUP_STATE');
 
+    // clientDataJSON 은 클라이언트가 만든 바이트다. base64·JSON·필드가 깨진 입력은
+    // 라이브러리에 닿기 전에 여기서 `invalid-argument` 로 끝낸다(500 으로 새지 않는다).
+    let challenge: string;
+    try {
+      challenge = challengeFromClientData(registration.response.clientDataJSON);
+    } catch {
+      throw new HttpsError('invalid-argument', 'BAD_ATTESTATION');
+    }
+    if (!CHALLENGE_RE.test(challenge)) throw new HttpsError('invalid-argument', 'BAD_CHALLENGE');
+
     // 챌린지를 한 번만 쓰도록 트랜잭션으로 소비한다.
-    const challenge = challengeFromClientData(registration.response.clientDataJSON);
     const challengeRef = db.collection(AUTH_CHALLENGES).doc(challenge);
     await db.runTransaction(async (tx) => {
       const doc = await tx.get(challengeRef);
       if (!doc.exists) throw new HttpsError('failed-precondition', 'CHALLENGE_NOT_FOUND');
       if (doc.get('usedAt')) throw new HttpsError('failed-precondition', 'CHALLENGE_USED');
+      // 로그인용 챌린지를 등록에 돌려쓰지 못하게 한다(교차 프로토콜 재사용).
+      if (doc.get('purpose') !== 'register') throw new HttpsError('permission-denied', 'BAD_CHALLENGE');
       if ((doc.get('expiresAt') as number) < Math.floor(Date.now() / 1000)) {
         throw new HttpsError('failed-precondition', 'CHALLENGE_EXPIRED');
       }
@@ -106,14 +124,23 @@ export const registerPasskey = onCall(
       throw new HttpsError('permission-denied', 'ATTESTATION_REJECTED');
     }
 
+    // 라이브러리는 `alg` 만 대조하고 `crv`·좌표 길이는 보지 않는다. `fmt:'none'` 은 서명 검증도 없어
+    // 위조된 P-384 키가 여기까지 온다. P-256 이 아니면 거부지 서버 오류가 아니다.
     const credential = verification.registrationInfo.credential;
-    const { x, y } = coseToP256(credential.publicKey);
+    let owner: Hex;
+    try {
+      const { x, y } = coseToP256(credential.publicKey);
+      owner = ownerBytes(x, y);
+    } catch {
+      throw new HttpsError('permission-denied', 'ATTESTATION_REJECTED');
+    }
+
     const contracts = deployment();
     const predicted = await publicClient().readContract({
       address: contracts.coinbaseFactory,
       abi: coinbaseFactoryAbi,
       functionName: 'getAddress',
-      args: [[ownerBytes(x, y)], ACCOUNT_NONCE],
+      args: [[owner], ACCOUNT_NONCE],
     });
     const account = getAddress(predicted as string);
 

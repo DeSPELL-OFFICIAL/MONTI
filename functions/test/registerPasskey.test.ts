@@ -112,6 +112,8 @@ interface AttestationOptions {
   counter?: number;
   credentialId?: Buffer;
   type?: string;
+  /** x 좌표를 31바이트로 자른다 — 라이브러리가 좌표 길이를 보지 않는다는 사실의 회귀 테스트용. */
+  truncateX?: boolean;
 }
 
 /** 진짜 인증기가 만드는 것과 같은 구조의 `none` 어테스테이션을 만든다(자기 서명이 없어 서명 검증도 없다). */
@@ -124,7 +126,7 @@ function makeAttestation(options: AttestationOptions) {
         [1, 2],
         [3, options.alg ?? -7],
         [-1, options.crv ?? 1],
-        [-2, x],
+        [-2, options.truncateX ? x.subarray(0, 31) : x],
         [-3, y],
       ]),
     ),
@@ -200,8 +202,8 @@ beforeEach(() => {
 
 describe('registerPasskey', () => {
   it('verifies the attestation, derives the counterfactual account and stores passkey + account together', async () => {
-    seedChallenge('chal-happy');
-    const { attestation, credentialId, cose } = makeAttestation({ challenge: 'chal-happy', counter: 7 });
+    seedChallenge('chal-happy-0123456789');
+    const { attestation, credentialId, cose } = makeAttestation({ challenge: 'chal-happy-0123456789', counter: 7 });
 
     const result = (await wrapped({ data: { personId: PERSON_ID, attestation }, auth } as never)) as {
       ok: true;
@@ -243,8 +245,8 @@ describe('registerPasskey', () => {
   });
 
   it('never stores the raw attestation, only the COSE public key', async () => {
-    seedChallenge('chal-raw');
-    const { attestation } = makeAttestation({ challenge: 'chal-raw' });
+    seedChallenge('chal-raw-0123456789');
+    const { attestation } = makeAttestation({ challenge: 'chal-raw-0123456789' });
     await wrapped({ data: { personId: PERSON_ID, attestation }, auth } as never);
 
     const everythingWritten = JSON.stringify([...docs.entries()]);
@@ -256,9 +258,9 @@ describe('registerPasskey', () => {
     const saved = process.env.ANDROID_APK_KEY_HASH;
     process.env.ANDROID_APK_KEY_HASH = 'kV8uQhash';
     try {
-      seedChallenge('chal-android');
+      seedChallenge('chal-android-0123456789');
       const { attestation } = makeAttestation({
-        challenge: 'chal-android',
+        challenge: 'chal-android-0123456789',
         origin: 'android:apk-key-hash:kV8uQhash',
       });
       const result = (await wrapped({ data: { personId: PERSON_ID, attestation }, auth } as never)) as {
@@ -272,7 +274,7 @@ describe('registerPasskey', () => {
   });
 
   it('refuses a challenge that was never issued', async () => {
-    const { attestation } = makeAttestation({ challenge: 'never-issued' });
+    const { attestation } = makeAttestation({ challenge: 'never-issued-0123456' });
     await expect(
       wrapped({ data: { personId: PERSON_ID, attestation }, auth } as never),
     ).rejects.toThrow('CHALLENGE_NOT_FOUND');
@@ -281,10 +283,10 @@ describe('registerPasskey', () => {
   });
 
   it('consumes the challenge so the same attestation cannot be replayed', async () => {
-    seedChallenge('chal-once');
-    const { attestation } = makeAttestation({ challenge: 'chal-once' });
+    seedChallenge('chal-once-0123456789');
+    const { attestation } = makeAttestation({ challenge: 'chal-once-0123456789' });
     await wrapped({ data: { personId: PERSON_ID, attestation }, auth } as never);
-    expect(snapshot('authChallenges/chal-once').get('usedAt')).toBeDefined();
+    expect(snapshot('authChallenges/chal-once-0123456789').get('usedAt')).toBeDefined();
 
     await expect(
       wrapped({ data: { personId: PERSON_ID, attestation }, auth } as never),
@@ -292,8 +294,8 @@ describe('registerPasskey', () => {
   });
 
   it('refuses an expired challenge', async () => {
-    seedChallenge('chal-old', { expiresAt: Math.floor(Date.now() / 1000) - 1 });
-    const { attestation } = makeAttestation({ challenge: 'chal-old' });
+    seedChallenge('chal-old-0123456789', { expiresAt: Math.floor(Date.now() / 1000) - 1 });
+    const { attestation } = makeAttestation({ challenge: 'chal-old-0123456789' });
     await expect(
       wrapped({ data: { personId: PERSON_ID, attestation }, auth } as never),
     ).rejects.toThrow('CHALLENGE_EXPIRED');
@@ -301,11 +303,11 @@ describe('registerPasskey', () => {
 
   it('refuses a foreign origin, a foreign rpIdHash, an unverified user and a wrong COSE algorithm', async () => {
     const cases: Array<[string, AttestationOptions]> = [
-      ['chal-origin', { challenge: 'chal-origin', origin: 'https://evil.app' }],
-      ['chal-rpid', { challenge: 'chal-rpid', rpId: 'evil.app' }],
-      ['chal-uv', { challenge: 'chal-uv', flags: 0x41 }], // UP|AT, UV 없음
-      ['chal-alg', { challenge: 'chal-alg', alg: -35, crv: 2 }], // ES384
-      ['chal-type', { challenge: 'chal-type', type: 'webauthn.get' }],
+      ['chal-origin-0123456789', { challenge: 'chal-origin-0123456789', origin: 'https://evil.app' }],
+      ['chal-rpid-0123456789', { challenge: 'chal-rpid-0123456789', rpId: 'evil.app' }],
+      ['chal-uv-0123456789', { challenge: 'chal-uv-0123456789', flags: 0x41 }], // UP|AT, UV 없음
+      ['chal-alg-0123456789', { challenge: 'chal-alg-0123456789', alg: -35, crv: 2 }], // ES384
+      ['chal-type-0123456789', { challenge: 'chal-type-0123456789', type: 'webauthn.get' }],
     ];
     for (const [challenge, options] of cases) {
       seedChallenge(challenge);
@@ -319,7 +321,7 @@ describe('registerPasskey', () => {
   });
 
   it('refuses an empty attestation object, an attestation string and missing fields', async () => {
-    seedChallenge('chal-empty');
+    seedChallenge('chal-empty-0123456789');
     for (const attestation of [{}, '{}', null, { id: 'abc', type: 'public-key' }]) {
       await expect(
         wrapped({ data: { personId: PERSON_ID, attestation }, auth } as never),
@@ -329,15 +331,15 @@ describe('registerPasskey', () => {
   });
 
   it('refuses a credential id that is already registered', async () => {
-    seedChallenge('chal-first');
-    const first = makeAttestation({ challenge: 'chal-first' });
+    seedChallenge('chal-first-0123456789');
+    const first = makeAttestation({ challenge: 'chal-first-0123456789' });
     await wrapped({ data: { personId: PERSON_ID, attestation: first.attestation }, auth } as never);
 
     // 다른 사람이 같은 credential id 를 다시 들고 온다.
     seedPerson(OTHER_PERSON_ID, 'uid-2');
-    seedChallenge('chal-second');
+    seedChallenge('chal-second-0123456789');
     const stolen = makeAttestation({
-      challenge: 'chal-second',
+      challenge: 'chal-second-0123456789',
       credentialId: Buffer.from(first.credentialId, 'base64url'),
     });
     await expect(
@@ -352,16 +354,16 @@ describe('registerPasskey', () => {
   });
 
   it('refuses a second passkey for a person that already has an account', async () => {
-    seedChallenge('chal-a');
+    seedChallenge('chal-a-0123456789');
     await wrapped({
-      data: { personId: PERSON_ID, attestation: makeAttestation({ challenge: 'chal-a' }).attestation },
+      data: { personId: PERSON_ID, attestation: makeAttestation({ challenge: 'chal-a-0123456789' }).attestation },
       auth,
     } as never);
 
-    seedChallenge('chal-b');
+    seedChallenge('chal-b-0123456789');
     await expect(
       wrapped({
-        data: { personId: PERSON_ID, attestation: makeAttestation({ challenge: 'chal-b' }).attestation },
+        data: { personId: PERSON_ID, attestation: makeAttestation({ challenge: 'chal-b-0123456789' }).attestation },
         auth,
       } as never),
     ).rejects.toThrow('PASSKEY_ALREADY_REGISTERED');
@@ -369,8 +371,8 @@ describe('registerPasskey', () => {
 
   it('refuses a personId that is not the caller own', async () => {
     docs.set(`persons/${OTHER_PERSON_ID}`, { status: 'pending' });
-    seedChallenge('chal-foreign');
-    const { attestation } = makeAttestation({ challenge: 'chal-foreign' });
+    seedChallenge('chal-foreign-0123456789');
+    const { attestation } = makeAttestation({ challenge: 'chal-foreign-0123456789' });
     await expect(
       wrapped({ data: { personId: OTHER_PERSON_ID, attestation }, auth } as never),
     ).rejects.toThrow('PERSON_MISMATCH');
@@ -378,7 +380,7 @@ describe('registerPasskey', () => {
   });
 
   it('refuses an unauthenticated caller, a malformed personId and a person that is past signup', async () => {
-    const { attestation } = makeAttestation({ challenge: 'chal-x' });
+    const { attestation } = makeAttestation({ challenge: 'chal-x-0123456789' });
     await expect(wrapped({ data: { personId: PERSON_ID, attestation } } as never)).rejects.toThrow(
       'AUTH_REQUIRED',
     );
@@ -391,5 +393,64 @@ describe('registerPasskey', () => {
       'BAD_SIGNUP_STATE',
     );
     expect(transactions).toBe(0);
+  });
+  it('refuses a clientDataJSON that is not decodable JSON and one without a challenge', async () => {
+    const { attestation } = makeAttestation({ challenge: 'chal-broken-0123456789' });
+    const withClientData = (clientDataJSON: string) => ({
+      ...attestation,
+      response: { ...attestation.response, clientDataJSON },
+    });
+
+    // base64url 은 풀리지만 JSON 이 아니다.
+    await expect(
+      wrapped({ data: { personId: PERSON_ID, attestation: withClientData('zzzz') }, auth } as never),
+    ).rejects.toThrow('BAD_ATTESTATION');
+
+    const noChallenge = Buffer.from(
+      JSON.stringify({ type: 'webauthn.create', origin: ORIGIN }),
+      'utf8',
+    ).toString('base64url');
+    await expect(
+      wrapped({ data: { personId: PERSON_ID, attestation: withClientData(noChallenge) }, auth } as never),
+    ).rejects.toThrow('BAD_ATTESTATION');
+
+    expect(transactions).toBe(0);
+  });
+
+  it('refuses a challenge string that cannot be a document id', async () => {
+    for (const challenge of ['a/b/c/evil-0123456', 'short', '../../persons/xyz-0123', 'chal with spaces 0']) {
+      const { attestation } = makeAttestation({ challenge });
+      await expect(
+        wrapped({ data: { personId: PERSON_ID, attestation }, auth } as never),
+      ).rejects.toThrow('BAD_CHALLENGE');
+    }
+    expect(transactions).toBe(0); // 문서 id 로 쓰기 전에 끝난다
+  });
+
+  it('refuses a challenge that was issued for login, and leaves it unconsumed', async () => {
+    seedChallenge('chal-login-0123456789', { purpose: 'login' });
+    const { attestation } = makeAttestation({ challenge: 'chal-login-0123456789' });
+    await expect(
+      wrapped({ data: { personId: PERSON_ID, attestation }, auth } as never),
+    ).rejects.toThrow('BAD_CHALLENGE');
+    expect(snapshot('authChallenges/chal-login-0123456789').get('usedAt')).toBeUndefined();
+    expect(snapshot(`persons/${PERSON_ID}`).get('account')).toBeUndefined();
+  });
+
+  it('refuses a forged none attestation whose key passes the library but is not P-256', async () => {
+    // 라이브러리는 alg 만 본다. crv·좌표 길이는 우리가 봐야 한다(fmt:'none' 은 서명 검증도 없다).
+    const cases: Array<[string, AttestationOptions]> = [
+      ['chal-crv-0123456789', { challenge: 'chal-crv-0123456789', alg: -7, crv: 2 }],
+      ['chal-coord-0123456789', { challenge: 'chal-coord-0123456789', alg: -7, truncateX: true }],
+    ];
+    for (const [challenge, options] of cases) {
+      seedChallenge(challenge);
+      const { attestation } = makeAttestation(options);
+      await expect(
+        wrapped({ data: { personId: PERSON_ID, attestation }, auth } as never),
+      ).rejects.toThrow('ATTESTATION_REJECTED');
+    }
+    expect(readContract).not.toHaveBeenCalled();
+    expect(snapshot(`persons/${PERSON_ID}`).get('account')).toBeUndefined();
   });
 });
