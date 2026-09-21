@@ -45,6 +45,13 @@ contract MontiPaymaster is IPaymaster {
     uint256 public constant PLATFORM = 0;
     uint256 public constant MAX_BATCH = 8;
 
+    /// @dev The highest argument index `setAllowed` will index a call at. The widest row the
+    ///      constructor seeds is 2 (`safeTransferFrom`'s tokenId), so eight head words is already far
+    ///      past anything this paymaster sponsors -- past it the value is a typo, and a typo has to be
+    ///      refused at set time. Internal on purpose: it bounds an operator's input, and no consumer
+    ///      reads it, so it stays out of the exported ABI.
+    uint8 internal constant MAX_ARG_WORD = 7;
+
     uint32 private constant PERM_MANAGE_BUDGET = 16;
     bytes4 private constant EXECUTE = bytes4(keccak256("execute(address,uint256,bytes)"));
     bytes4 private constant EXECUTE_BATCH = bytes4(keccak256("executeBatch((address,uint256,bytes)[])"));
@@ -263,6 +270,22 @@ contract MontiPaymaster is IPaymaster {
     ///         Not reachable from validation, so it changes nothing about ERC-7562 compliance.
     function setAllowed(bytes4 selector, ArgKind kind, uint8 word) external {
         if (msg.sender != deployer) revert Unauthorized();
+
+        // Removing a selector removes its word with it. Left behind, a stale word would be inherited
+        // by a later re-allow that passed 0 and meant it.
+        if (kind == ArgKind.None) {
+            delete argKindOf[selector];
+            delete _argWord[selector];
+            emit SelectorAllowed(selector, uint8(ArgKind.None), 0);
+            return;
+        }
+
+        // A word past the end of the call is not a narrower sponsorship, it is no sponsorship at all:
+        // `_argAt` bounds-checks it and every operation on that selector dies in validation with
+        // BadCallData. This setter is used under operational pressure and `SelectorAllowed` is its only
+        // feedback, so a mistyped word fails here rather than at the next tap.
+        if (word > MAX_ARG_WORD) revert BadCallData();
+
         argKindOf[selector] = kind;
         _argWord[selector] = word;
         emit SelectorAllowed(selector, uint8(kind), word);

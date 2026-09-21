@@ -347,7 +347,9 @@ contract CheckInLateGasTest is CheckInLateBase {
     }
 
     /// @dev 늦은 경로. 같은 `_admit` 을 타지만 제출 기한을 재느라 `endsAt` 을 한 번 더 읽고
-    ///      `late` 를 세운다(`manual` 과 같은 슬롯이라 추가 SSTORE 는 없다).
+    ///      `late` 를 세운다(`Ticket.sol:66` — `ts` 와 같은 슬롯이고 `ts` 는 언제나 비0이므로
+    ///      추가 SSTORE 는 없다. `manual` 과 같은 슬롯이라는 것만으로는 아무것도 얻지 못했다 —
+    ///      그때 그 칸은 통째로 0이었고, Commit E 의 −21,800 가스가 그 값이다).
     function test_checkInLateGas() public {
         vm.warp(ISSUED + 1 hours);
         Ticket.GateCode memory g = _code();

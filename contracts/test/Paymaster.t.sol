@@ -426,6 +426,15 @@ contract PaymasterTest is MontiTest {
             bytes32(0),
             0.01 ether
         );
+        // The same TokenId path `checkIn` takes above, but the comment said six and only five ran.
+        Ticket.GateCode memory lateCode =
+            Ticket.GateCode({gateId: 1, eventId: eventId, issuedAt: T0, nonce: bytes32(0)});
+        ep.callValidate(
+            address(paymaster),
+            _op(_execute(address(ticket), abi.encodeCall(Ticket.checkInLate, (tokenId, lateCode, ""))), 0),
+            bytes32(0),
+            0.01 ether
+        );
         ep.callValidate(
             address(paymaster),
             _op(
@@ -782,6 +791,36 @@ contract PaymasterTest is MontiTest {
 
         paymaster.setAllowed(sel, MontiPaymaster.ArgKind.TokenId, 1);
         assertEq(paymaster.argWordOf(sel), 1);
+    }
+
+    /// @dev Minor 3. 잘못 친 word 는 "좁은 스폰서"가 아니라 스폰서 없음이다 -- `_argAt` 이 범위를
+    ///      확인하므로 그 셀렉터의 모든 UserOp 가 검증에서 BadCallData 로 죽는다. 세터를 누르는
+    ///      시점에 거절해야 운영자가 안다.
+    function test_setAllowedRefusesAnArgumentWordThatIsNotInTheCall() public {
+        bytes4 sel = bytes4(keccak256("transferFrom(address,address,uint256)"));
+
+        vm.expectRevert(MontiPaymaster.BadCallData.selector);
+        paymaster.setAllowed(sel, MontiPaymaster.ArgKind.TokenId, 8);
+        assertEq(paymaster.argWordOf(sel), 2, "the refused call changed nothing");
+
+        // 경계: 마지막으로 받아 주는 값은 그대로 들어간다.
+        paymaster.setAllowed(sel, MontiPaymaster.ArgKind.TokenId, 7);
+        assertEq(paymaster.argWordOf(sel), 7);
+    }
+
+    /// @dev Minor 3. 셀렉터를 끄면 word 도 함께 지워진다. 남겨 두면 나중에 word 0 을 뜻하고 넘긴
+    ///      재허용이 옛 word 를 물려받는다.
+    function test_removingASelectorClearsItsArgumentWord() public {
+        bytes4 sel = bytes4(keccak256("transferFrom(address,address,uint256)"));
+        assertEq(paymaster.argWordOf(sel), 2);
+
+        vm.expectEmit(true, false, false, true);
+        emit SelectorAllowed(sel, uint8(MontiPaymaster.ArgKind.None), 0);
+        paymaster.setAllowed(sel, MontiPaymaster.ArgKind.None, 2);
+        assertEq(paymaster.argWordOf(sel), 0, "the word went with it");
+
+        paymaster.setAllowed(sel, MontiPaymaster.ArgKind.TokenId, 0);
+        assertEq(paymaster.argWordOf(sel), 0, "and a re-allow that means word 0 gets word 0");
     }
 
     function test_onlyTheDeployerCanChangeTheAllowlist() public {
