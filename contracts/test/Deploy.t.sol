@@ -84,6 +84,11 @@ contract DeployTest is Test {
             uint8(MontiPaymaster.ArgKind.Platform),
             "openGate kind"
         );
+        assertTrue(
+            paymaster.allowedSelector(bytes4(keccak256("checkInLate(uint256,(uint256,uint256,uint64,bytes32),bytes)"))),
+            "checkInLate is sponsored"
+        );
+        assertTrue(paymaster.allowedSelector(bytes4(keccak256("cancelRotation()"))), "cancelRotation is sponsored");
     }
 
     /// @notice `Organizers.setTicket` may be called once and never again, so the script has to hand it a
