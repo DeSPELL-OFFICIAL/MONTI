@@ -187,6 +187,33 @@ export async function parkedCount(): Promise<number> {
   return (await allEntries()).filter((entry) => entry.status === 'failed').length;
 }
 
+/**
+ * Re-arms one parked entry for the next drain, because a staff member looked at it and asked
+ * for another try (Task 29's queue screen). `attempts` goes back to zero: the twenty are spent,
+ * and a person deciding the network is back is new information the counter should not hold
+ * against them. `nextAttemptAt` goes to now, so it leaves on the next pass rather than after a
+ * minute of backoff it already served.
+ *
+ * **Only a parked entry.** `conflict` is terminal — the chain let someone else in on that
+ * ticket and resending would only revert again — and `sent`/`confirmed` are ops that already
+ * exist, which this queue never sends twice. Anything else answers `undefined` and changes
+ * nothing, so a screen listing stale rows cannot re-send a settled check-in by accident.
+ */
+export async function retryEntry(id: string, now = Date.now()): Promise<StoredQueueEntry | undefined> {
+  const db = await staffDb();
+  const entry = (await db.get(QUEUE_STORE, id)) as StoredQueueEntry | undefined;
+  if (!entry || entry.status !== 'failed') return undefined;
+  const rearmed: StoredQueueEntry = {
+    ...entry,
+    status: 'pending',
+    attempts: 0,
+    nextAttemptAt: now,
+    lastError: undefined,
+  };
+  await db.put(QUEUE_STORE, rearmed);
+  return rearmed;
+}
+
 export interface DrainParams {
   orgId: bigint;
   now?: number;
