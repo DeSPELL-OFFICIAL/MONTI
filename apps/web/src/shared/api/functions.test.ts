@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { FirebaseError } from 'firebase/app';
 
 let nextError: unknown = null;
 
@@ -36,6 +37,21 @@ describe('callable wrappers', () => {
     await expect(api.pinMessage({ eventId: '3', msgId: 'm1', pinned: true })).resolves.toMatchObject({ name: 'pinMessage' });
   });
 
+  it('asks for a register-purpose challenge, which is the only way registerPasskey is reachable', async () => {
+    // loginVerify demands purpose 'login' and registerPasskey demands 'register'; the server
+    // refuses each ceremony the other's challenge, so the purpose has to leave the client.
+    await expect(api.loginChallenge({ purpose: 'register' })).resolves.toMatchObject({
+      name: 'loginChallenge', payload: { purpose: 'register' },
+    });
+  });
+
+  it('carries the person id the backend mints through the passkey ceremony', async () => {
+    const personId = `0x${'11'.repeat(32)}` as const;
+    await expect(api.registerPasskey({ personId, attestation: { id: 'cred' } })).resolves.toMatchObject({
+      name: 'registerPasskey', payload: { personId },
+    });
+  });
+
   it('passes the gate device account to the staff-only callables', async () => {
     const gateAccount = `0x${'dd'.repeat(20)}` as const;
     await expect(api.issueSnapshot({ eventId: '5', gateAccount })).resolves.toMatchObject({
@@ -53,15 +69,37 @@ describe('callable wrappers', () => {
 
 describe('error mapping', () => {
   it('turns an HttpsError into a typed { code, message } the caller can branch on', async () => {
-    nextError = Object.assign(new Error('PHONE_ALREADY_REGISTERED'), { code: 'functions/already-exists' });
+    nextError = new FirebaseError('functions/already-exists', 'PHONE_ALREADY_REGISTERED');
     const failure = await api.startSignup().catch((error: unknown) => error);
     expect(failure).toBeInstanceOf(CallableError);
     expect(failure).toMatchObject({ code: 'already-exists', message: 'PHONE_ALREADY_REGISTERED' });
   });
 
-  it('falls back to unknown/UNKNOWN when the rejection is not a Firebase error', async () => {
-    nextError = 'boom';
+  it('never lets a transport failure pose as a server reason code', async () => {
+    // A raw 'Failed to fetch' reaching a caller that branches on `message` is worse than opaque.
+    nextError = new Error('Failed to fetch');
     const failure = await api.loginVerify({ assertion: {} }).catch((error: unknown) => error);
-    expect(failure).toMatchObject({ name: 'CallableError', code: 'unknown', message: 'UNKNOWN' });
+    expect(failure).toMatchObject({ name: 'CallableError', code: 'internal', message: 'UNKNOWN' });
+  });
+
+  it('is opaque about anything that is not a Firebase error at all', async () => {
+    nextError = 'boom';
+    await expect(api.loginChallenge().catch((error: unknown) => error)).resolves.toMatchObject({
+      code: 'internal', message: 'UNKNOWN',
+    });
+  });
+
+  it('refuses to cast a code outside the HttpsError set into the union', async () => {
+    nextError = new FirebaseError('functions/teapot', 'SOMETHING');
+    await expect(api.startKyc().catch((error: unknown) => error)).resolves.toMatchObject({
+      code: 'internal', message: 'UNKNOWN',
+    });
+  });
+
+  it('leaves a non-callable Firebase error opaque too', async () => {
+    nextError = new FirebaseError('auth/network-request-failed', 'A network error occurred');
+    await expect(api.startKyc().catch((error: unknown) => error)).resolves.toMatchObject({
+      code: 'internal', message: 'UNKNOWN',
+    });
   });
 });
