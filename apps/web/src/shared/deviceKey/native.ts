@@ -1,15 +1,19 @@
 import { bytesToHex, hexToBytes } from 'viem';
-import { base64UrlDecode, base64UrlEncode, derToRs, splitRs, type Hex } from '@monti/shared';
+import {
+  P256_HALF_ORDER,
+  P256_ORDER,
+  base64UrlDecode,
+  base64UrlEncode,
+  derToRs,
+  splitRs,
+  type Hex,
+} from '@monti/shared';
 import { generateKey, loadKey, sign } from './plugin';
 import { spkiToXy } from './spki';
 import type { DeviceKeyOptions, DeviceKeyPublic } from './types';
 
 /** Constant throwaway message, never a real digest and never leaves the device. */
 const ARM_DIGEST = base64UrlEncode(new Uint8Array(32).fill(0x6d));
-
-/** Order of the P-256 group (SEC 2, secp256r1 `n`). */
-const P256_N = 0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551n;
-const P256_HALF_N = P256_N / 2n;
 
 /**
  * Ticket.checkIn verifies through Solady's `P256.verifySignature`, which includes the
@@ -20,8 +24,8 @@ const P256_HALF_N = P256_N / 2n;
  */
 function toLowS(s: Hex): Hex {
   const value = BigInt(s);
-  if (value <= P256_HALF_N) return s;
-  return `0x${(P256_N - value).toString(16).padStart(64, '0')}`;
+  if (value <= P256_HALF_ORDER) return s;
+  return `0x${(P256_ORDER - value).toString(16).padStart(64, '0')}`;
 }
 
 export async function ensureDeviceKeyNative(options: DeviceKeyOptions): Promise<DeviceKeyPublic> {

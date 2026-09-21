@@ -67,12 +67,23 @@ function reader<C extends UsedContract>(contract: C, address: Hex) {
     getPublicClient().readContract({ address, abi, functionName, args }) as Promise<T>;
 }
 
+/** `Identity.activeDevice` answers with two separate `bytes32` outputs, not a struct. */
+export interface DeviceKeyPoint {
+  x: Hex;
+  y: Hex;
+}
+
 export function readIdentity() {
   const call = reader('Identity', getConfig().addresses.identity);
   return {
     isMember: (account: Hex) => call<boolean>('isMember', [account]),
     isLocked: (account: Hex) => call<boolean>('isLocked', [account]),
     kycLevelOf: (account: Hex) => call<number>('kycLevelOf', [account]),
+    /** The P-256 point `Ticket.checkIn` verifies the device signature against. */
+    activeDevice: async (account: Hex): Promise<DeviceKeyPoint> => {
+      const [x, y] = await call<[Hex, Hex]>('activeDevice', [account]);
+      return { x, y };
+    },
   };
 }
 
@@ -150,10 +161,15 @@ const GATE_INFO_FIELDS = [
   'eventId', 'account', 'kx', 'ky', 'open', 'revoked',
 ] as const satisfies readonly (keyof GateInfoStruct)[];
 
+// Two `bytes32` of the same width: a swap here would hand WebCrypto and the P-256 precompile a
+// mirrored point and every check-in would read as a bad device signature.
+const ACTIVE_DEVICE_FIELDS = ['x', 'y'] as const satisfies readonly (keyof DeviceKeyPoint)[];
+
 export const STRUCT_SHAPES = {
   Ticket: {
     eventMeta: EVENT_META_FIELDS, tiers: TIER_FIELDS, checkInOf: CHECK_IN_FIELDS,
     offerOf: OFFER_FIELDS,
   },
   Organizers: { gateInfo: GATE_INFO_FIELDS },
+  Identity: { activeDevice: ACTIVE_DEVICE_FIELDS },
 } as const;

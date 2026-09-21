@@ -3,7 +3,7 @@
 // Everything past `verifying` — signing the digest, writing the answer back, the QR fallback and
 // the result — is Tasks 25 and 26. Those phases exist in `EnterPhase` and are rendered as
 // placeholders here so the state machine is whole; nothing in this file signs anything.
-import { useCallback, useRef } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import type { GateCodeWire } from '@monti/shared';
 import { Alert, Button, Countdown, Screen, Spinner } from '../../shared/ui';
@@ -11,6 +11,8 @@ import { fmt, useCopy } from '../../shared/i18n';
 import type { Copy } from '../../shared/copy/index';
 import { nfcCapability, readGateCode } from '../../shared/nfc';
 import { IDLE, tapEnding, useArm, type EnterPhase } from './useArm';
+import { handOverSignature } from './buildResponse';
+import { Qr } from './Qr';
 import { verifyGate, type GateVerdict } from './verifyGate';
 
 /** The phases that hold the armed window open, and so show the countdown. */
@@ -33,6 +35,10 @@ function failureText(copy: Copy, error: string): string {
     tapTimeout: copy.enter.tapTimeout,
     tapFailed: copy.enter.tapFailed,
     armFailed: copy.enter.armFailed,
+    signFailed: copy.enter.signFailed,
+    keyInvalidated: copy.enter.keyInvalidated,
+    deviceMismatch: copy.enter.deviceMismatch,
+    writeFailed: copy.enter.writeFailed,
   };
   return sentences[error] ?? copy.common.error;
 }
@@ -41,6 +47,9 @@ export function Enter() {
   const copy = useCopy();
   const { tokenId = '' } = useParams();
   const { state, setState, arm, isCurrent, windowSeconds } = useArm();
+  // Held from the read onwards: the QR fallback answers the same code the tap read, and there
+  // is no second chance to get it — the reader has already rotated by the time it is needed.
+  const [gateCode, setGateCode] = useState<GateCodeWire | null>(null);
   // The open reader session, so the countdown can take it back. iOS keeps its sheet up for its
   // own 60 s, which always outlasts the arm window because the read starts after the biometric.
   const tap = useRef<AbortController | null>(null);
@@ -62,6 +71,7 @@ export function Enter() {
       return;
     }
 
+    setGateCode(null);
     const controller = new AbortController();
     tap.current = controller;
     setState((prev) => ({ ...prev, phase: 'reading' }));
@@ -77,6 +87,7 @@ export function Enter() {
       if (tap.current === controller) tap.current = null;
     }
     if (!isCurrent(armedAt)) return;
+    setGateCode(wire);
 
     setState((prev) => ({ ...prev, phase: 'verifying' }));
     let verdict: GateVerdict;
@@ -94,8 +105,7 @@ export function Enter() {
       setState((prev) => ({ ...prev, phase: 'failed', error: verdict.reason }));
       return;
     }
-    // Task 25 takes it from here: sign the check-in digest and write the answer back.
-    setState((prev) => ({ ...prev, phase: 'signing', error: '' }));
+    await handOverSignature({ tokenId, gateCode: wire, setState, armedAt, isCurrent });
   }
 
   const secondsLeft = state.armedAt
@@ -127,11 +137,12 @@ export function Enter() {
         </>
       ) : null}
 
-      {/* Task 26 replaces this with the real code. */}
       {state.phase === 'qr' ? (
         <>
           <p>{copy.enter.qrTitle}</p>
           {state.error ? <Alert tone="info">{failureText(copy, state.error)}</Alert> : null}
+          {/* Without a code there is nothing to answer: a phone with no NFC never read one. */}
+          {gateCode ? <Qr tokenId={tokenId} gateCode={gateCode} onExpire={expire} /> : null}
         </>
       ) : null}
 

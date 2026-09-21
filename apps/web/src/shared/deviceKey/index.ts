@@ -5,6 +5,7 @@ import type { DeviceKeyOptions, DeviceKeyPublic } from './types';
 import { armDeviceKeyWeb, ensureDeviceKeyWeb, signWithDeviceKeyWeb } from './web';
 
 export * from './types';
+export { DEVICE_KEY_ERROR, deviceKeyErrorCode, type DeviceKeyErrorCode } from './plugin';
 
 export function deviceKeyCapability(): 'native' | 'none' {
   return Capacitor.isNativePlatform() ? 'native' : 'none';

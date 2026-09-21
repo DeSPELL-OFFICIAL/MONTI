@@ -1,7 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { keccak256, sha256 } from 'viem';
 import {
+  DEVICE_DIGEST_FORM,
+  P256_HALF_ORDER,
+  P256_ORDER,
+} from './constants.js';
+import {
+  deviceDigest,
+  deviceDigestPreimage,
+  deviceDigestV2,
+  deviceDigestPreimageV2,
   deviceSigHash,
+  deviceSigPreimage,
   gateCodeHash,
   gateCodePreimage,
   nicknameHash,
@@ -65,6 +75,81 @@ describe('deviceSigHash', () => {
     expect(() =>
       deviceSigHash({ tokenId: 7n, gateId: 3n, eventId: 11n, nonce: '0x11' as Hex, issuedAt: ISSUED_AT }),
     ).toThrow('BAD_NONCE');
+  });
+});
+
+/**
+ * The domain-separated form `Ticket._deviceDigest` lands with sub-plan 01b:
+ * `sha256(abi.encode(uint256 chainId, address ticket, uint256 tokenId, uint256 gateId,
+ * uint256 eventId, bytes32 nonce, uint64 issuedAt))`. The two extra words stop a signature
+ * collected on one chain, or by one Ticket deployment, from being replayed against another.
+ */
+const V2_INPUT = {
+  chainId: 31337n,
+  ticket: '0x7111111111111111111111111111111111111111' as Hex,
+  tokenId: 7n,
+  gateId: 3n,
+  eventId: 11n,
+  nonce: NONCE,
+  issuedAt: ISSUED_AT,
+};
+
+describe('deviceDigestV2', () => {
+  it('matches the fixed vector the contracts pin (P256Vectors.SHARED_DIGEST)', () => {
+    expect(deviceDigestV2(V2_INPUT)).toBe('0xca378ab2af0962bff66d23c4ebb20198fb1a80fe94957e6520368bacae1ffe66');
+  });
+
+  it('is sha256 of the seven-word preimage, spelled out by hand', () => {
+    expect(deviceDigestPreimageV2(V2_INPUT)).toBe(
+      '0x' +
+        (31337).toString(16).padStart(64, '0') +
+        '7111111111111111111111111111111111111111'.padStart(64, '0') +
+        '07'.padStart(64, '0') +
+        '03'.padStart(64, '0') +
+        '0b'.padStart(64, '0') +
+        '11'.repeat(32) +
+        (1_789_862_400).toString(16).padStart(64, '0'),
+    );
+    expect(sha256(deviceDigestPreimageV2(V2_INPUT))).toBe(deviceDigestV2(V2_INPUT));
+  });
+
+  it('is not the five-field digest — otherwise the domain words did nothing', () => {
+    expect(deviceDigestV2(V2_INPUT)).not.toBe(deviceSigHash(V2_INPUT));
+  });
+
+  it('changes with the chain and with the deployment', () => {
+    expect(deviceDigestV2({ ...V2_INPUT, chainId: 10143n })).not.toBe(deviceDigestV2(V2_INPUT));
+    expect(deviceDigestV2({ ...V2_INPUT, ticket: `0x${'22'.repeat(20)}` as Hex })).not.toBe(deviceDigestV2(V2_INPUT));
+  });
+
+  it('rejects a ticket that is not an address', () => {
+    expect(() => deviceDigestV2({ ...V2_INPUT, ticket: '0x7111' as Hex })).toThrow('BAD_TICKET_ADDRESS');
+  });
+});
+
+describe('deviceSigPreimage (v1)', () => {
+  it('is what the deprecated five-field hash is sha256 of', () => {
+    expect(sha256(deviceSigPreimage(V2_INPUT))).toBe(deviceSigHash(V2_INPUT));
+  });
+});
+
+describe('the form this build signs', () => {
+  it('follows DEVICE_DIGEST_FORM and nothing else', () => {
+    const expected = DEVICE_DIGEST_FORM === 'v2-domainSeparated' ? deviceDigestV2(V2_INPUT) : deviceSigHash(V2_INPUT);
+    expect(deviceDigest(V2_INPUT)).toBe(expected);
+    expect(sha256(deviceDigestPreimage(V2_INPUT))).toBe(deviceDigest(V2_INPUT));
+  });
+
+  it('is still the five-field form, because the deployed Ticket.checkIn verifies that one', () => {
+    // Flip this line together with DEVICE_DIGEST_FORM when 01b redeploys (its Task 15).
+    expect(DEVICE_DIGEST_FORM).toBe('v1-fiveField');
+  });
+});
+
+describe('the secp256r1 order', () => {
+  it('is SEC 2 n, and half of it is the low-s boundary Solady enforces', () => {
+    expect(P256_ORDER).toBe(0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551n);
+    expect(P256_HALF_ORDER).toBe(P256_ORDER / 2n);
   });
 });
 

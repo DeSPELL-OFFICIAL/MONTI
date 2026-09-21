@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GateCodeWire, Hex } from '@monti/shared';
+import type { ArmState } from './useArm';
 import { ko } from '../../shared/copy/index';
 import { fmt } from '../../shared/i18n';
 
@@ -25,6 +26,12 @@ const verifyGate = vi.fn();
 vi.mock('./verifyGate', async (orig) => ({
   ...(await orig<typeof import('./verifyGate')>()),
   verifyGate,
+}));
+
+const handOverSignature = vi.fn();
+vi.mock('./buildResponse', async (orig) => ({
+  ...(await orig<typeof import('./buildResponse')>()),
+  handOverSignature,
 }));
 
 vi.mock('react-router-dom', async (orig) => ({
@@ -52,6 +59,7 @@ beforeEach(() => {
   readGateCode.mockReset().mockResolvedValue(WIRE);
   verifyGate.mockReset().mockResolvedValue({ ok: true });
   nfcCapability.mockReset().mockReturnValue('native');
+  handOverSignature.mockReset().mockResolvedValue(undefined);
 });
 
 async function tapEnter() {
@@ -280,6 +288,41 @@ describe('<Enter /> gate verification', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.getByRole('timer')).toBeInTheDocument();
     expect(screen.getByText(ko.enter.verifying)).toBeInTheDocument();
+  });
+
+  it('hands the verified code to the signing step, inside this arm window', async () => {
+    await tapEnter();
+    expect(handOverSignature).toHaveBeenCalledTimes(1);
+    const handed = handOverSignature.mock.calls[0]?.[0] as {
+      tokenId: string;
+      gateCode: GateCodeWire;
+      armedAt: number;
+      isCurrent: (armedAt: number) => boolean;
+    };
+    expect(handed.tokenId).toBe('7');
+    expect(handed.gateCode).toEqual(WIRE);
+    expect(handed.isCurrent(handed.armedAt)).toBe(true);
+    expect(handed.isCurrent(handed.armedAt + 1)).toBe(false);
+  });
+
+  it('does not sign a gate it refused', async () => {
+    verifyGate.mockResolvedValue({ ok: false, reason: 'gateClosed' });
+    await tapEnter();
+    expect(handOverSignature).not.toHaveBeenCalled();
+  });
+
+  it('shows the code for the gate it read once the hand-over asks for it', async () => {
+    handOverSignature.mockImplementation(
+      async ({ setState }: { setState: (update: (prev: ArmState) => ArmState) => void }) => {
+        setState((prev) => ({ ...prev, phase: 'qr', error: 'writeFailed' }));
+      },
+    );
+    await tapEnter();
+    expect(screen.getByText(ko.enter.qrTitle)).toBeInTheDocument();
+    expect(screen.getByText(ko.enter.writeFailed)).toBeInTheDocument();
+    // <Qr /> is mounted for the code that was actually read. jsdom has no secure element, so
+    // what it settles on here is its own refusal — that it got that far is the wiring under test.
+    expect(await screen.findByText(ko.enter.signFailed)).toBeInTheDocument();
   });
 
   it('comes back to the start button after a refusal', async () => {
