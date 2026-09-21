@@ -29,7 +29,17 @@ import { signUserOpWithDeviceKey } from './gateSigner';
 let cached: Promise<SmartAccount> | null = null;
 
 export function getGateSmartAccount(): Promise<SmartAccount> {
-  if (!cached) cached = build();
+  // The memo holds the promise, so a rejected build has to evict itself. `ensureGateKey()` can
+  // lose a StrongBox race at boot (Task 11 §7.1), and a cached rejection would re-throw on
+  // every tap until someone restarts the app — at the door, mid-event. The sibling
+  // `getSmartAccount` (bundler.ts) memoises the resolved value and so retries for free; this
+  // does the same by hand, because a promise remembers its failure and a value does not.
+  if (!cached) {
+    cached = build().catch((error: unknown) => {
+      cached = null;
+      throw error;
+    });
+  }
   return cached;
 }
 
@@ -49,7 +59,19 @@ export async function getGateAddress(): Promise<Address> {
 
 /**
  * The gate key wearing viem's `WebAuthnAccount` shape. Only `publicKey` and `type` are read —
- * by the factory, to salt the address, and by `getStubSignature`, to price a P-256 verification.
+ * by the factory, to salt the address, and by `getStubSignature`, which `sendSponsoredOp` hands
+ * the bundler before a real signature exists.
+ *
+ * That stub does NOT price a P-256 verification. It carries viem's fixed challenge
+ * (`toCoinbaseSmartAccount.js:122-124`), which can never equal a real `userOpHash`, so
+ * `WebAuthn.verify` fails the challenge comparison and returns **before** the `0x100`
+ * precompile runs: the stub gets the `SignatureWrapper` shape and the calldata cost right and
+ * hides the verify itself — 5,012 gas estimated against 15,287 measured on Monad, ~10.3k short.
+ * `sendSponsoredOp` adds only `applyGasBuffer` (7.5%) and never calls viem's
+ * `userOperation.estimateGas` hook, so nothing puts that gas back. Once the account is
+ * deployed the estimate is small enough that 7.5% no longer covers the gap and the EntryPoint
+ * reverts `AA23 out of gas`. Task 21 clamps `verificationGasLimit` at a **150,000** floor in
+ * `sendSponsoredOp` — 150k, not viem's 800k, because Monad bills the limit, not the usage.
  *
  * The three signing hooks refuse. Each of them is the ERC-1271 path, which wraps the digest in
  * `CoinbaseSmartWallet.replaySafeHash` typed data; `validateUserOp` does not, and Task 12 is

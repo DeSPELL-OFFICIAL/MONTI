@@ -81,8 +81,9 @@ vi.mock('../config', () => ({
 vi.mock('@capacitor/core', () => ({ Capacitor: { isNativePlatform: () => false } }));
 
 /** Task 11. `backing` rides along the way the device-key module reports it. */
+const ensureGateKey = vi.fn(async () => ({ x: X, y: Y, backing: 'strongbox' }));
 vi.mock('../../staff/gate/gateKey', () => ({
-  ensureGateKey: async () => ({ x: X, y: Y, backing: 'strongbox' }),
+  ensureGateKey,
   gatePublicKeyUncompressed: (key: { x: Hex; y: Hex }) => `0x${key.x.slice(2)}${key.y.slice(2)}`,
   signWithGateKey: async () => ({ r: `0x${'33'.repeat(32)}`, s: `0x${'44'.repeat(32)}` }),
 }));
@@ -259,9 +260,24 @@ describe('gate smart account', () => {
     );
   });
 
-  it('keeps viem stub signature for gas estimation', async () => {
-    // sendSponsoredOp estimates with this before it signs; the WebAuthn stub is what makes the
-    // bundler price a P-256 verification rather than an ECDSA one.
+  it('retries a failed key setup instead of caching the rejection until restart', async () => {
+    // Task 11 §7.1: ensureGateKey can lose a StrongBox race at boot. The memo holds a promise,
+    // so without the eviction one such boot would re-throw on every tap for the rest of the
+    // event and only an app restart at the door would clear it.
+    ensureGateKey.mockRejectedValueOnce(new Error('strongbox busy'));
+    await expect(getGateSmartAccount()).rejects.toThrow('strongbox busy');
+
+    const account = await getGateSmartAccount();
+    expect(account.address).toBe(getAddress(GATE_ADDRESS));
+  });
+
+  it('estimates with viem WebAuthn stub: right shape, and a verify that is never priced', async () => {
+    // sendSponsoredOp hands this to the bundler before it signs. The stub keeps the
+    // SignatureWrapper shape and the calldata cost honest, but its fixed challenge
+    // short-circuits WebAuthn.verify before the P-256 precompile, so ~10.3k of verification gas
+    // (5,012 estimated vs 15,287 measured on Monad) is never priced. Task 21 clamps
+    // verificationGasLimit at 150,000 in sendSponsoredOp — not viem's 800,000, because Monad
+    // bills the limit rather than the usage.
     const account = await getGateSmartAccount();
     expect(size(await account.getStubSignature())).toBeGreaterThan(64);
   });
