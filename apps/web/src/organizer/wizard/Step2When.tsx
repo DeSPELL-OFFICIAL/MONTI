@@ -1,5 +1,6 @@
 import { Button, Field } from '../../shared/ui';
 import { useOrganizerCopy } from '../copy';
+import { MAX_VENUE_CHARS } from './buildEventMeta';
 import { fromLocalInput, toLocalInput } from './datetime';
 import type { StepProps } from './Step1Basic';
 
@@ -9,7 +10,13 @@ export function Step2When({ draft, patch, onNext, onBack }: StepProps & { onBack
     <section>
       <h2>{copy.step2}</h2>
       <Field label={copy.venue}>
-        <input value={draft.venue} onChange={(event) => patch({ venue: event.target.value })} />
+        {/* The cap belongs in the field: reaching it here costs a keystroke, reaching it at
+            the server costs an upload the organiser has already waited for. */}
+        <input
+          value={draft.venue}
+          maxLength={MAX_VENUE_CHARS}
+          onChange={(event) => patch({ venue: event.target.value })}
+        />
       </Field>
       <Field label={copy.startsAt}>
         <input

@@ -3,6 +3,7 @@ import { keccak256, toBytes } from 'viem';
 import {
   buildEventMeta,
   buildTiers,
+  MAX_VENUE_CHARS,
   validateDraft,
   type DraftProblem,
   type WizardDraft,
@@ -28,6 +29,19 @@ describe('buildEventMeta', () => {
     expect(meta.descHash).toBe(keccak256(toBytes('한남동 라이브')));
     expect(meta.venueHash).toBe(keccak256(toBytes('서울 용산구 한남동')));
     expect(meta.regionCode).toBe(keccak256(toBytes('KR-11')));
+  });
+
+  /**
+   * The backend trims every readable field before it pins it (`optionalMetaField` in
+   * `functions/src/functions/organizer.ts`), so the hash has to be of the trimmed string.
+   * Hashing the padded one would put a `venueHash` on chain that the pinned document does not
+   * match, for that event, for good.
+   */
+  it('hashes the trimmed venue, because the trimmed venue is what the server pins', () => {
+    const padded = buildEventMeta({ ...draft, venue: '  서울 용산구 한남동  ' }, 'bafyMetaJson');
+    expect(padded.venueHash).toBe(keccak256(toBytes('서울 용산구 한남동')));
+    expect(padded.venueHash).toBe(buildEventMeta(draft, 'bafyMetaJson').venueHash);
+    expect(padded.venueHash).not.toBe(keccak256(toBytes('  서울 용산구 한남동  ')));
   });
 
   it('puts the metadata JSON cid in imageCid and converts the cutoff to seconds', () => {
@@ -101,6 +115,24 @@ describe('validateDraft mirrors what Ticket.createEvent reverts on', () => {
     expect(problems({ description: '' })).toContain('description');
     expect(problems({ venue: '' })).toContain('venue');
     expect(problems({ image: null })).toContain('image');
+  });
+
+  /**
+   * `MAX_META_FIELD_CHARS` in the backend's `organizer.ts`. The server measures the trimmed
+   * string, so a venue padded out past the cap is still fine, and a venue past it is refused
+   * here rather than by a `BAD_META` that arrives after the picture has already been uploaded.
+   */
+  it('refuses a venue longer than the server will pin, measured after trimming', () => {
+    expect(problems({ venue: '가'.repeat(MAX_VENUE_CHARS) })).toEqual([]);
+    expect(problems({ venue: `  ${'가'.repeat(MAX_VENUE_CHARS)}  ` })).toEqual([]);
+    expect(problems({ venue: '가'.repeat(MAX_VENUE_CHARS + 1) })).toContain('venueTooLong');
+  });
+
+  // Two different rules, two different sentences: an organiser who wrote nothing is told to
+  // write something, not that what they wrote is too long.
+  it('calls a venue of nothing but spaces blank rather than too long', () => {
+    expect(problems({ venue: '   ' })).toContain('venue');
+    expect(problems({ venue: '   ' })).not.toContain('venueTooLong');
   });
 
   it('refuses a region the picker does not offer, because the chain stores its hash', () => {

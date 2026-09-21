@@ -63,6 +63,16 @@ const MAX_TIERS = 8;
 const SECONDS_PER_HOUR = 3600;
 
 /**
+ * The venue's own width, and not a struct width: the chain stores a hash, so any length fits
+ * there. This is the mirror of `MAX_META_FIELD_CHARS` in the backend's
+ * `functions/src/functions/organizer.ts`, which refuses a longer field with
+ * `invalid-argument` / `BAD_META` — and it refuses it at the pin step, after the cover picture
+ * has already gone up. The count is taken **after** trimming, because that is what the server
+ * counts.
+ */
+export const MAX_VENUE_CHARS = 200;
+
+/**
  * Everything the wizard refuses to send. The first four stand in for a revert
  * `Ticket.createEvent` would raise; the rest are the fields whose widths or hashes would make
  * the operation meaningless rather than reverting. `organizer/copy.ts` owns a sentence each.
@@ -73,7 +83,7 @@ export type DraftProblem =
   | 'sale'           // InvalidSchedule — saleStart >= saleEnd
   | 'tiersEmpty'     // InvalidTiers — tiers_.length == 0
   | 'tiersTooMany'   // InvalidTiers — tiers_.length > 8
-  | 'title' | 'description' | 'image' | 'venue' | 'region' | 'category'
+  | 'title' | 'description' | 'image' | 'venue' | 'venueTooLong' | 'region' | 'category'
   | 'cutoff' | 'maxTransfers'
   | 'tierName' | 'tierSupply' | 'tierMaxPerWallet';
 
@@ -103,7 +113,11 @@ export function validateDraft(draft: WizardDraft): DraftProblem[] {
   if (draft.title.trim() === '') problems.push('title');
   if (draft.description.trim() === '') problems.push('description');
   if (draft.image === null) problems.push('image');
-  if (draft.venue.trim() === '') problems.push('venue');
+  // Two rules, named apart: an organiser who wrote a venue that is merely too long should be
+  // told to shorten it, not told to write one.
+  const venue = draft.venue.trim();
+  if (venue === '') problems.push('venue');
+  else if (venue.length > MAX_VENUE_CHARS) problems.push('venueTooLong');
   if (!REGION_CODES.has(draft.regionCode)) problems.push('region');
   if (!(CATEGORY_CODES as readonly number[]).includes(draft.category)) problems.push('category');
 
@@ -143,7 +157,11 @@ export function buildEventMeta(draft: WizardDraft, metaCid: string): EventMetaSt
     imageCid: metaCid,
     startsAt: BigInt(draft.startsAt),
     endsAt: BigInt(draft.endsAt),
-    venueHash: keccak256(toBytes(draft.venue)),
+    // The backend trims the venue before it pins it (`optionalMetaField` in the backend's
+    // `organizer.ts`), so the trimmed string is the one the readable document will carry.
+    // Hashing the untrimmed one would put a `venueHash` on chain that the pinned document does
+    // not match, and nothing can repair that afterwards: `EventMeta` is written once.
+    venueHash: keccak256(toBytes(draft.venue.trim())),
     saleStart: BigInt(draft.saleStart),
     saleEnd: BigInt(draft.saleEnd),
     transferable: draft.transferable,

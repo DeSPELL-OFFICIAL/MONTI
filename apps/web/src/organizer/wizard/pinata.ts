@@ -117,8 +117,10 @@ export interface PinnedEvent {
  *
  * All five are required here: `validateDraft` refuses a blank venue, an unlisted region and a
  * theme outside the four before Publish can reach this, so there is no half-filled call to
- * describe. `category` is a number — the server refuses a plain string `BAD_META`, and the
- * reader only takes it when `typeof === 'number'` (`shared/envio/ipfs.ts`).
+ * describe. `category` goes as a number because of the *reader*, not the server: the server
+ * coerces a numeric string (`optionalCategory`, functions/src/functions/organizer.ts), but the
+ * pinned document is read back only when `typeof === 'number'` (`shared/envio/ipfs.ts`), so a
+ * `'2'` that survived the call would show as the default `0` on every discover screen.
  */
 export async function pinEventImage(args: {
   orgId: string;

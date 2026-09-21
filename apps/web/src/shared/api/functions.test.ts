@@ -93,8 +93,9 @@ describe('callable wrappers', () => {
 
   /**
    * The landed `pinEventMetadata` takes three optional readable fields beside the two required
-   * ones, and `category` is a **number** — the chain's `uint8`. A string there is refused with
-   * `BAD_META`, and the attendee reader only reads `category` when it is a number.
+   * ones, and `category` is a **number** — the chain's `uint8`. The server would coerce a numeric
+   * string, but the attendee reader reads the pinned `category` only when it is already a number,
+   * so this side always sends one.
    */
   it('carries the optional metadata fields, with the theme as a number', async () => {
     await expect(

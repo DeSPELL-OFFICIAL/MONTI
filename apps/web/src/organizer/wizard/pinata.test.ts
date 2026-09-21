@@ -87,9 +87,10 @@ describe('pinEventImage', () => {
   });
 
   /**
-   * `toHaveBeenCalledWith` would pass on the string `'2'` as readily as on the number, and both
-   * ends refuse it: the server answers `BAD_META` to a plain string, and the attendee reader
-   * only takes `category` when `typeof === 'number'` (`shared/envio/ipfs.ts`).
+   * `toHaveBeenCalledWith` would pass on the string `'2'` as readily as on the number, and the
+   * server would let it through — it coerces a numeric string. The reader is what refuses it:
+   * the pinned document's `category` is taken only when `typeof === 'number'`
+   * (`shared/envio/ipfs.ts`), so a string reaches every discover screen as the default `0`.
    */
   it('sends the theme as the number the chain and the reader both want', async () => {
     await pinEventImage({

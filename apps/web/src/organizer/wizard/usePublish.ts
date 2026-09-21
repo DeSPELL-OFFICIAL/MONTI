@@ -17,6 +17,7 @@ export type WizardProblem = keyof OrganizerCopy['wizard']['problems'];
 // The local mirror's answers are a subset, so a rule it finds always has a sentence.
 const _draftProblemsAreCovered: Record<DraftProblem, WizardProblem> = {
   orgId: 'orgId', title: 'title', description: 'description', image: 'image', venue: 'venue',
+  venueTooLong: 'venueTooLong',
   region: 'region', category: 'category', schedule: 'schedule', sale: 'sale', cutoff: 'cutoff',
   maxTransfers: 'maxTransfers', tiersEmpty: 'tiersEmpty', tiersTooMany: 'tiersTooMany',
   tierName: 'tierName', tierSupply: 'tierSupply', tierMaxPerWallet: 'tierMaxPerWallet',
@@ -113,7 +114,9 @@ export function usePublish(
         // reader takes `category` only when `typeof === 'number'` (`shared/envio/ipfs.ts`).
         name: draft.title,
         description: draft.description,
-        venue: draft.venue,
+        // Trimmed, because the server trims it before pinning it and `buildEventMeta` hashes
+        // the trimmed string — the hash on chain and the pinned words have to be the same venue.
+        venue: draft.venue.trim(),
         category: draft.category,
         region: draft.regionCode,
       });

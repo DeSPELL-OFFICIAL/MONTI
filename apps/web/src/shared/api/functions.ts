@@ -353,7 +353,9 @@ export const api = {
   // `meta.venue`, `meta.category` and `meta.region` are optional and are pinned into the same
   // document beside `name`/`description`; an empty one is dropped by the server rather than
   // pinned blank, because the attendee reader fills a missing field with its own default.
-  // `category` is a **number** — the chain's `uint8` — and a string is refused `BAD_META`.
+  // `category` is a **number** — the chain's `uint8`. The server would coerce a numeric string
+  // (`optionalCategory`), but the attendee reader takes the pinned value only when it is already
+  // a number, so this side never leans on that coercion. A non-numeric string is `BAD_META`.
   pinEventMetadata: call<
     {
       orgId: string;

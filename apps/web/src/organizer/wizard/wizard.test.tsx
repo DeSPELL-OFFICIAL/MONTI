@@ -195,9 +195,10 @@ describe('the review step', () => {
       },
     });
     // Two things `toHaveBeenCalledWith` alone would let through. The theme has to arrive as a
-    // number — the server answers `BAD_META` to a plain string, and the attendee reader only
-    // takes `category` when `typeof === 'number'` (`shared/envio/ipfs.ts`) — and the region has
-    // to be the ISO code, the same value hashed into `regionCode` just below, not its label.
+    // number: the server would coerce a numeric string, but the attendee reader takes the pinned
+    // `category` only when `typeof === 'number'` (`shared/envio/ipfs.ts`), so a string would read
+    // as the default `0` everywhere. And the region has to be the ISO code, the same value hashed
+    // into `regionCode` just below, not its label.
     const pinned = pinEventMetadata.mock.calls[0]?.[0];
     expect(typeof pinned?.meta.category).toBe('number');
     expect(pinned?.meta.region).toBe('KR-11');

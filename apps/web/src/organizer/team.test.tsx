@@ -88,6 +88,12 @@ function nth(found: HTMLElement[], index: number): HTMLElement {
   return one;
 }
 
+/** One listed invitation, by its place in the list. A grant panel is drawn inside its own row,
+ *  which is the only thing telling its checkboxes apart from the invite form's copies of them. */
+function row(index: number) {
+  return within(nth(screen.getAllByRole('listitem'), index));
+}
+
 beforeEach(() => {
   ownerOf.mockResolvedValue(OWNER);
   adminBitsOf.mockResolvedValue(0);
@@ -246,9 +252,10 @@ describe('putting the role on chain', () => {
     const user = userEvent.setup();
     await openGrant(user, 'manager');
     await user.type(screen.getByLabelText(copy.account), INVITED);
-    // The approval right is one choice the screen makes, shown both where an invitation is
-    // written and where the role is granted, so either checkbox moves the same value.
-    await user.click(nth(screen.getAllByLabelText(copy.requestOnly), 0));
+    // The approval right sent here is the panel's own. The invite form carries a checkbox that
+    // reads the same and decides something else entirely — what the *next* invitation stores —
+    // so the one inside the row is the one this test has to press.
+    await user.click(row(0).getByLabelText(copy.requestOnly));
     await user.click(screen.getByRole('button', { name: copy.grant }));
 
     await waitFor(() =>
@@ -363,5 +370,118 @@ describe('what comes back from the grant', () => {
     await user.click(screen.getByRole('button', { name: copy.grant }));
     expect(await screen.findByText(copy.problems.account)).toBeInTheDocument();
     expect(organizersOp).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The panel and the form ask the same two questions about two different people. `createInvite`
+ * stores `permissionBits` and `canApprove` on the invitation document and `acceptInvite` builds
+ * its calldata from them, so a value a panel changed and the form never showed is a wrong
+ * permission leaving the browser rather than a checkbox in the wrong place.
+ */
+describe('the grant panel against the invite form', () => {
+  it('keeps a permission ticked inside a panel out of the next invitation', async () => {
+    const user = userEvent.setup();
+    await openGrant(user, 'admin');
+    // While the form is still on its manager default the panel is the only thing on screen
+    // offering permission bits, so this reads unambiguously.
+    await user.click(screen.getByLabelText(copy.perms.approveOverride));
+
+    await user.selectOptions(screen.getByLabelText(copy.role), 'admin');
+    await user.type(screen.getByLabelText(copy.phone), '+821012345678');
+    await user.click(screen.getByRole('button', { name: copy.invite }));
+
+    await waitFor(() =>
+      // createEvent|manageGates: what the form showed, untouched by the panel beside it.
+      expect(createInvite).toHaveBeenCalledWith({
+        orgId: '9', role: 'admin', phoneE164: '+821012345678', permissionBits: 3,
+      }),
+    );
+  });
+
+  it('keeps an approval right ticked inside a panel out of the next invitation', async () => {
+    const user = userEvent.setup();
+    await openGrant(user, 'manager');
+    await user.click(row(0).getByLabelText(copy.requestOnly));
+
+    await user.type(screen.getByLabelText(copy.phone), '+821012345678');
+    await user.click(screen.getByRole('button', { name: copy.invite }));
+
+    await waitFor(() =>
+      expect(createInvite).toHaveBeenCalledWith({
+        orgId: '9', role: 'manager', phoneE164: '+821012345678', canApprove: false,
+      }),
+    );
+  });
+
+  /** Two accepted rows is where the one word `copy.grant` would name two actions at once. */
+  it('offers the last step on one row at a time', async () => {
+    const user = userEvent.setup();
+    listInvites.mockResolvedValue([accepted('manager'), { ...accepted('manager'), inviteId: 'a2' }]);
+    open();
+    await waitFor(() => expect(screen.getAllByRole('button', { name: copy.grant })).toHaveLength(2));
+
+    await user.click(row(0).getByRole('button', { name: copy.grant }));
+    expect(screen.getAllByRole('button', { name: copy.grant })).toHaveLength(1);
+    expect(row(1).queryByRole('button', { name: copy.grant })).not.toBeInTheDocument();
+  });
+
+  /** The guard above buys one `copy.grant` on screen and closing is what pays for it: with no
+   *  way out, the first panel opened would be the last one this owner could reach — a grant that
+   *  lands leaves its panel standing, so even finishing does not free them to start the next. */
+  it('gives a panel a way out that puts the other rows back within reach', async () => {
+    const user = userEvent.setup();
+    managerOf.mockResolvedValue({ exists: true, canApprove: false });
+    listInvites.mockResolvedValue([accepted('manager'), { ...accepted('manager'), inviteId: 'a2' }]);
+    open();
+    await waitFor(() => expect(screen.getAllByRole('button', { name: copy.grant })).toHaveLength(2));
+
+    await user.click(row(0).getByRole('button', { name: copy.grant }));
+    await user.type(row(0).getByLabelText(copy.account), INVITED);
+    await user.click(row(0).getByRole('button', { name: copy.grant }));
+    expect(await screen.findByText(copy.granted)).toBeInTheDocument();
+
+    await user.click(row(0).getByRole('button', { name: copy.grantClose }));
+    expect(screen.queryByText(copy.granted)).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: copy.grant })).toHaveLength(2);
+
+    await user.click(row(1).getByRole('button', { name: copy.grant }));
+    expect(row(1).getByLabelText(copy.account)).toHaveValue('');
+    expect(screen.queryByText(copy.granted)).not.toBeInTheDocument();
+  });
+
+  /** The chain write does not read the invitation document, so nothing incorrect could land —
+   *  the screen would simply be offering the last step of an invitation it has just withdrawn. */
+  it('takes the panel away with the invitation it belongs to', async () => {
+    const user = userEvent.setup();
+    await openGrant(user, 'manager');
+    await user.click(screen.getByRole('button', { name: copy.revoke }));
+
+    expect(await screen.findByText(copy.status.revoked)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: copy.grant })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(copy.account)).not.toBeInTheDocument();
+  });
+
+  it('opens a panel from nothing the last one left behind', async () => {
+    const user = userEvent.setup();
+    adminBitsOf.mockResolvedValue(7);
+    listInvites.mockResolvedValue([accepted('admin'), { ...accepted('admin'), inviteId: 'a2' }]);
+    open();
+    await waitFor(() => expect(screen.getAllByRole('button', { name: copy.grant })).toHaveLength(2));
+
+    await user.click(row(0).getByRole('button', { name: copy.grant }));
+    await user.click(row(0).getByLabelText(copy.perms.approveOverride));
+    await user.type(row(0).getByLabelText(copy.account), INVITED);
+    await user.click(row(0).getByRole('button', { name: copy.grant }));
+    expect(await screen.findByText(copy.granted)).toBeInTheDocument();
+
+    // Withdrawing the first invitation is what closes its panel, and a closed panel is what
+    // puts the second row's offer back on screen.
+    await user.click(row(0).getByRole('button', { name: copy.revoke }));
+    await user.click(await screen.findByRole('button', { name: copy.grant }));
+
+    expect(row(1).getByLabelText(copy.account)).toHaveValue('');
+    expect(row(1).getByLabelText(copy.perms.approveOverride)).not.toBeChecked();
+    expect(screen.queryByText(copy.granted)).not.toBeInTheDocument();
   });
 });

@@ -25,6 +25,12 @@ const ORG_ID_RE = /^[0-9]{1,78}$/;
  *  deadline rather than leaving the reader without one until the next load. */
 const INVITE_TTL_SECONDS = 7 * 24 * 60 * 60;
 
+/** What a set of admin permissions starts as wherever this screen asks for one: enough to run
+ *  an event and its entrances, and nothing that hands out permissions or spends money. Both the
+ *  invite form and every grant panel open on it, which is what makes "a panel opens back on the
+ *  form's own default" a fact rather than two numbers that happen to agree today. */
+const DEFAULT_ADMIN_BITS = PERM_CREATE_EVENT | PERM_MANAGE_GATES;
+
 /**
  * What `Organizers` reverts these two writes with, against the rule each one names.
  * `setAdmin` raises `NotOwner` (`Organizers.sol:96`) and `setManager` raises `Unauthorized`
@@ -83,7 +89,7 @@ export function Team({ orgId: fixedOrgId }: { orgId?: string } = {}) {
   const [phone, setPhone] = useState('');
   const [role, setRole] = useState<Role>('manager');
   const [canApprove, setCanApprove] = useState(false);
-  const [bits, setBits] = useState(PERM_CREATE_EVENT | PERM_MANAGE_GATES);
+  const [bits, setBits] = useState(DEFAULT_ADMIN_BITS);
 
   const [invites, setInvites] = useState<InviteRow[]>([]);
   // `createInvite` is the only thing that ever hands back a link, and it hands it back once:
@@ -94,6 +100,12 @@ export function Team({ orgId: fixedOrgId }: { orgId?: string } = {}) {
   const [mayList, setMayList] = useState(true);
 
   const [granting, setGranting] = useState<InviteRow | null>(null);
+  // The panel's own permission bits and approval right, kept apart from the invite form's above.
+  // They answer the same two questions about two different people: these decide what one
+  // accepted invitation is granted on chain now, `bits`/`canApprove` what the next invitation
+  // will store for somebody who has not accepted anything yet.
+  const [grantBits, setGrantBits] = useState(DEFAULT_ADMIN_BITS);
+  const [grantCanApprove, setGrantCanApprove] = useState(false);
   const [account, setAccount] = useState('');
   const [isOwner, setIsOwner] = useState<boolean | null>(null);
   const [granted, setGranted] = useState(false);
@@ -233,10 +245,51 @@ export function Team({ orgId: fixedOrgId }: { orgId?: string } = {}) {
       setInvites((current) =>
         current.map((entry) => (entry.inviteId === inviteId ? { ...entry, status: 'revoked' } : entry)),
       );
+      // A withdrawn invitation has no last step left to send, and an open panel is a snapshot
+      // taken while the row still said `accepted`. Nothing incorrect could land — the chain
+      // write reads the row's role and this screen's own fields, never the invitation document
+      // — but the screen would be offering to finish an invitation it has just told the reader
+      // was taken back.
+      if (granting?.inviteId === inviteId) endGrant();
     } catch (cause) {
       const { code } = callableFailure(cause);
       setProblem(code === 'not-found' ? 'notFound' : code === 'permission-denied' ? 'notAllowed' : 'failed');
     }
+  }
+
+  /**
+   * Opening one row's panel, and the single place everything inside it starts from.
+   *
+   * The bits and the approval right are reset because they are the panel's own: `createInvite`
+   * stores `permissionBits` and `canApprove` on the invitation document and `acceptInvite`
+   * builds its calldata from them, so a panel carrying the last one's answers would grant
+   * permissions this organiser last chose for a different person. The address and `granted` are
+   * reset because both belong to whoever the previous panel was about — left standing, they
+   * read as this person's account and as "the role is in place" for a role nobody has yet been
+   * given here.
+   */
+  function beginGrant(row: InviteRow): void {
+    setGranting(row);
+    setGrantBits(DEFAULT_ADMIN_BITS);
+    setGrantCanApprove(false);
+    setAccount('');
+    setGranted(false);
+  }
+
+  /**
+   * Closing a panel without sending anything, and the counterpart to `beginGrant`.
+   *
+   * It has to exist because only one row offers its last step while a panel is open: with no way
+   * out, the first panel opened would be the last one this owner could reach, and a grant that
+   * lands leaves its panel standing so even finishing would not free them. The two resets mirror
+   * `beginGrant` rather than answering anything the screen can show — neither the address nor
+   * `granted` is rendered outside an open panel — so that both ways a panel can end leave the
+   * same nothing behind, and neither has to be read to know what the other one cleared.
+   */
+  function endGrant(): void {
+    setGranting(null);
+    setAccount('');
+    setGranted(false);
   }
 
   async function grant(): Promise<void> {
@@ -248,7 +301,7 @@ export function Team({ orgId: fixedOrgId }: { orgId?: string } = {}) {
     setGranted(false);
     if (!ORG_ID_RE.test(orgId)) return setProblem('orgId');
     if (!isAddress(account, { strict: true })) return setProblem('account');
-    if (granting.role === 'admin' && bits === 0) return setProblem('bits');
+    if (granting.role === 'admin' && grantBits === 0) return setProblem('bits');
 
     setBusy(true);
     try {
@@ -256,8 +309,8 @@ export function Team({ orgId: fixedOrgId }: { orgId?: string } = {}) {
         account: await getStaffAccount(),
         orgId: BigInt(orgId),
         ...(granting.role === 'admin'
-          ? { functionName: 'setAdmin' as const, args: [BigInt(orgId), account as Hex, bits] }
-          : { functionName: 'setManager' as const, args: [BigInt(orgId), account as Hex, true, canApprove] }),
+          ? { functionName: 'setAdmin' as const, args: [BigInt(orgId), account as Hex, grantBits] }
+          : { functionName: 'setManager' as const, args: [BigInt(orgId), account as Hex, true, grantCanApprove] }),
       });
       await check();
     } catch (cause) {
@@ -396,19 +449,19 @@ export function Team({ orgId: fixedOrgId }: { orgId?: string } = {}) {
                       <label>
                         <input
                           type="checkbox"
-                          checked={canApprove}
-                          onChange={(event) => setCanApprove(event.target.checked)}
+                          checked={grantCanApprove}
+                          onChange={(event) => setGrantCanApprove(event.target.checked)}
                         />
-                        {canApprove ? copy.canApprove : copy.requestOnly}
+                        {grantCanApprove ? copy.canApprove : copy.requestOnly}
                       </label>
                     ) : (
                       PERMISSION_BITS.map((permission) => (
                         <label key={permission.name} style={{ display: 'block' }}>
                           <input
                             type="checkbox"
-                            checked={(bits & permission.bit) !== 0}
+                            checked={(grantBits & permission.bit) !== 0}
                             onChange={(event) =>
-                              setBits((current) =>
+                              setGrantBits((current) =>
                                 event.target.checked ? current | permission.bit : current & ~permission.bit,
                               )
                             }
@@ -424,9 +477,20 @@ export function Team({ orgId: fixedOrgId }: { orgId?: string } = {}) {
                     <Button variant="ghost" onClick={() => void check()}>
                       {copy.check}
                     </Button>
+                    {/* What pays for the guard on the row action below. That guard keeps exactly
+                        one `copy.grant` on screen by taking every other row's offer away while
+                        this panel is open, which leaves this the only door back to them. */}
+                    <Button variant="ghost" onClick={endGrant}>
+                      {copy.grantClose}
+                    </Button>
                   </>
-                ) : row.status === 'accepted' && isOwner ? (
-                  <Button onClick={() => setGranting(row)}>{copy.grant}</Button>
+                ) : row.status === 'accepted' && isOwner && granting === null ? (
+                  // `copy.grant` names two things: opening this panel, and sending the grant
+                  // from inside an open one. With two accepted invitations both would be on
+                  // screen at once — one row's open panel beside another row's offer — so the
+                  // offer is made only while no panel is open anywhere, leaving the send button
+                  // as the only thing wearing that word.
+                  <Button onClick={() => beginGrant(row)}>{copy.grant}</Button>
                 ) : null}
 
                 {/* The server takes a withdrawal for `sent` and `accepted` and answers
