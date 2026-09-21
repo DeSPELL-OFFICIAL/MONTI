@@ -122,6 +122,7 @@ describe('deploy bundle', () => {
 
     for (const name of [
       'startSignup',
+      'startKyc',
       'registerPasskey',
       'loginChallenge',
       'loginVerify',

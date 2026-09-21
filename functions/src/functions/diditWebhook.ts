@@ -4,8 +4,9 @@ import type { Hex, PersonStatus } from '@monti/shared';
 import { ATTESTER_PK, DIDIT_WEBHOOK_SECRET } from '../config.js';
 import { awaitFinalized, publicClient } from '../lib/chain.js';
 import { KYC_SESSIONS, PERSONS, assertStatusTransition, db } from '../lib/db.js';
-import { redactDiditPayload, verifyDiditSignature } from '../lib/didit.js';
+import { declineReason, redactDiditPayload, verifyDiditSignature } from '../lib/didit.js';
 import { encryptField, piiAad } from '../lib/kms.js';
+import { normalizePortrait } from '../lib/portrait.js';
 import { sendSetKycLevel } from '../lib/kycLevel.js';
 
 const PERSON_ID_RE = /^0x[0-9a-fA-F]{64}$/;
@@ -24,21 +25,6 @@ interface DiditBody {
       portrait_image?: string;
     };
   };
-}
-
-/**
- * 거절 사유는 우리가 정한 코드만 쓴다. Didit 이 준 자유 문장은 저장하지 않는다.
- *  - `declined`             Didit 이 문서·얼굴 검증에서 거절했다(Expired·Abandoned 포함).
- *  - `duplicate_face`       Face Search 1:N 이 같은 얼굴을 이미 찾았다.
- *  - `face_search_missing`  승인인데 Face Search 결과 자체가 없다. **중복 얼굴이 아니다.**
- *  - `face_search_not_clear` 승인인데 Face Search 가 `clear` 도 `duplicate` 도 아닌 값을 줬다.
- * 넷 다 `kycLevel` 을 올리지 않는다(fail-closed).
- */
-function rejectionReason(status: string, faceSearch: string | null): string {
-  if (status !== 'Approved') return 'declined';
-  if (faceSearch === null) return 'face_search_missing';
-  if (faceSearch === 'duplicate') return 'duplicate_face';
-  return 'face_search_not_clear';
 }
 
 /**
@@ -168,7 +154,11 @@ export const diditWebhook = onRequest(
       const identity = body.decision?.id_verification ?? {};
       const fullName = `${identity.last_name ?? ''}${identity.first_name ?? ''}`.trim();
       const documentNumber = identity.document_number ?? '';
-      const portrait = (identity.portrait_image ?? '').replace(/^data:image\/[a-z]+;base64,/, '');
+      // 원본 해상도 사진은 봉투에 **넣지 않는다.** 32 KB 스냅샷 한도 안으로 줄이고 EXIF 를
+      // 털어낸 우리 규격 JPEG 만 저장한다(`lib/portrait.ts`). 원본 바이트는 여기서 끝난다.
+      const portrait = normalizePortrait(
+        (identity.portrait_image ?? '').replace(/^data:image\/[a-z]+;base64,/, ''),
+      );
       const [encName, encDoc, encPhoto] = await Promise.all([
         fullName ? encryptField(fullName, piiAad(personId, 'name')) : Promise.resolve(''),
         documentNumber ? encryptField(documentNumber, piiAad(personId, 'docNumber')) : Promise.resolve(''),
@@ -185,7 +175,10 @@ export const diditWebhook = onRequest(
       ? {
           // 'kyc_ok' = 승인됐지만 setKycLevel 이 아직 확정되지 않은 중간 상태. reconcilePending 의 키다.
           status: 'kyc_ok',
-          kyc: { provider: 'didit', sessionId, status: 'approved', faceSearchOk: true },
+          // `lastReason` 은 지난 시도의 거절 사유다. 승인에서 **반드시 지워야** 한다 —
+          // Firestore 의 merge 는 맵을 깊이 합치므로, 그대로 두면 통과한 사람 문서에
+          // 'duplicate_face' 가 남아 웹이 거절 안내를 그린다.
+          kyc: { provider: 'didit', sessionId, status: 'approved', faceSearchOk: true, lastReason: null },
           ...pii,
           updatedAt: FieldValue.serverTimestamp(),
         }
@@ -196,7 +189,8 @@ export const diditWebhook = onRequest(
             provider: 'didit',
             sessionId,
             status: 'rejected',
-            rejectedReason: rejectionReason(decision, faceSearch),
+            // 닫힌 네 값 중 하나. 웹은 이 코드마다 다른 안내를 그린다(`KycDeclineReason`).
+            lastReason: declineReason(decision, faceSearch),
           },
           updatedAt: FieldValue.serverTimestamp(),
         };
@@ -255,6 +249,7 @@ export const diditWebhook = onRequest(
           status: 'approved',
           verifiedAt: FieldValue.serverTimestamp(),
           faceSearchOk: true,
+          lastReason: null,
         },
         chain: { kycLevelTx: txHash, block: Number(receipt.blockNumber), kycLevelError: null },
         updatedAt: FieldValue.serverTimestamp(),

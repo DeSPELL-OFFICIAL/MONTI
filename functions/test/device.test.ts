@@ -151,6 +151,16 @@ vi.mock('../src/lib/chain.js', () => ({
   deployment: () => ({ identity: IDENTITY }),
 }));
 
+/** Didit 세션 생성만 가짜로 바꾼다 — 재사용 판단(`ensureKycSession`)은 진짜 코드가 돈다. */
+const createDiditSession = vi.fn(async (..._args: unknown[]) => ({
+  sessionId: 'sess-dev',
+  url: 'https://verify.didit.me/s/sess-dev',
+}));
+vi.mock('../src/lib/didit.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/didit.js')>()),
+  createDiditSession: (...args: unknown[]) => createDiditSession(...args),
+}));
+
 const { hmacPhone } = await import('../src/lib/phoneIndex.js');
 const { lockDevice, startDeviceChange } = await import('../src/functions/device.js');
 const functionsTest = (await import('firebase-functions-test')).default();
@@ -188,6 +198,11 @@ beforeEach(() => {
   chain.isMember = true;
   chain.kycLevelOf = 0;
   process.env.PHONE_INDEX_KEY = KEY;
+  process.env.RP_ID = 'monti.despell.io';
+  process.env.DEV_ORIGINS = '';
+  process.env.DIDIT_API_KEY = 'didit-key';
+  process.env.DIDIT_WORKFLOW_ID = 'wf-1';
+  createDiditSession.mockClear();
   sendAttesterTx.mockClear();
   readContract.mockClear();
   waitForTransactionReceipt.mockClear();
@@ -329,9 +344,56 @@ describe('startDeviceChange', () => {
     chain.kycLevelOf = 1;
     const result = await callChange({ method: 'kyc' }, passkeyAuth);
     expect(result.cooldownSeconds).toBe(COOLDOWN);
+    expect(createDiditSession).not.toHaveBeenCalled(); // 이미 통과한 사람에게 세션을 열지 않는다
 
     chain.kycLevelOf = 0;
     await expect(callChange({ method: 'kyc' }, passkeyAuth)).rejects.toThrow('KYC_REQUIRED');
+  });
+
+  /**
+   * Task 21 의 `KYC_REQUIRED` 는 "여기서 막혔다" 만 말하고 끝이었다. 이제 같은 세션 생성기
+   * (`startKyc` 가 쓰는 `ensureKycSession`)로 연 링크를 함께 준다 — 웹이 곧바로 그 링크를 연다.
+   */
+  it('hands back a Didit link with KYC_REQUIRED, from the same session creator as startKyc', async () => {
+    chain.kycLevelOf = 0;
+    const error = (await callChange({ method: 'kyc' }, passkeyAuth).catch((cause: unknown) => cause)) as {
+      message: string;
+      details?: { kycUrl?: string; sessionId?: string };
+    };
+
+    expect(error.message).toBe('KYC_REQUIRED');
+    expect(error.details).toEqual({
+      kycUrl: 'https://verify.didit.me/s/sess-dev',
+      sessionId: 'sess-dev',
+    });
+    // vendor_data 는 난수 personId, 복귀 주소는 우리 도메인의 기본값이다.
+    expect(createDiditSession.mock.calls[0]).toEqual([
+      PERSON_ID,
+      'didit-key',
+      'wf-1',
+      'https://monti.despell.io/kyc/callback',
+    ]);
+    expect(snapshot(`persons/${PERSON_ID}`).get('kyc.status')).toBe('open');
+  });
+
+  it('reuses the open session instead of opening a second one on the next attempt', async () => {
+    chain.kycLevelOf = 0;
+    await expect(callChange({ method: 'kyc' }, passkeyAuth)).rejects.toThrow('KYC_REQUIRED');
+    await expect(callChange({ method: 'kyc' }, passkeyAuth)).rejects.toThrow('KYC_REQUIRED');
+    expect(createDiditSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses a callback that is not one of our own origins', async () => {
+    chain.kycLevelOf = 0;
+    await expect(
+      callChange({ method: 'kyc', callbackUrl: 'https://evil.example/kyc' }, passkeyAuth),
+    ).rejects.toThrow('BAD_CALLBACK_URL');
+    expect(createDiditSession).not.toHaveBeenCalled();
+
+    await expect(
+      callChange({ method: 'kyc', callbackUrl: 'https://monti.despell.io/devices/new' }, passkeyAuth),
+    ).rejects.toThrow('KYC_REQUIRED');
+    expect(createDiditSession.mock.calls[0]![3]).toBe('https://monti.despell.io/devices/new');
   });
 
   it('accepts a KYC level above 1 — the rule is "at least verified", not "exactly 1"', async () => {

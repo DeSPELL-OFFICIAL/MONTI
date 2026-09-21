@@ -1,6 +1,15 @@
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import type { Hex, PersonStatus } from '@monti/shared';
 import { ALLOWED_TRANSITIONS, PASSKEYS, PERSONS, USERS, db } from '../lib/db.js';
+import type { KycDeclineReason } from '../lib/didit.js';
+
+/** 닫힌 네 값. `lib/didit.ts` 의 `declineReason` 이 쓴 것만 여기로 나간다. */
+const DECLINE_REASONS: readonly string[] = [
+  'declined',
+  'duplicate_face',
+  'face_search_missing',
+  'face_search_not_clear',
+];
 
 /**
  * 가입을 아직 시작하지 않은 uid 의 답. `persons` 표에 없는 유일한 값이라 따로 둔다 —
@@ -14,6 +23,12 @@ export interface SignupStatusResult {
   hasPasskey: boolean;
   hasAccount: boolean;
   kycLevel?: 0 | 1;
+  /**
+   * 지난 본인인증 시도가 왜 막혔는지. 통과했거나(`kycLevel === 1`) 시도한 적이 없으면 없다.
+   * 관객 화면은 이 코드마다 다른 안내를 그린다 — 그래서 `persons` 를 직접 못 읽는 웹에게
+   * 이 창구로 내보낸다. 개인정보가 아니다(닫힌 네 값 중 하나).
+   */
+  kycReason?: KycDeclineReason;
   personId?: Hex;
 }
 
@@ -31,6 +46,13 @@ function narrowStatus(value: unknown): PersonStatus {
 /** 본인인증 통과 여부의 원본은 `kycLevel`(0/1)이다. 0 도 1 도 아닌 값은 통과로 읽지 않는다. */
 function narrowKycLevel(value: unknown): 0 | 1 {
   return value === 1 ? 1 : 0;
+}
+
+/** 표에 없는 값은 내보내지 않는다 — 웹이 모르는 코드를 받으면 그릴 화면이 없다. */
+function narrowKycReason(value: unknown): KycDeclineReason | undefined {
+  return typeof value === 'string' && DECLINE_REASONS.includes(value)
+    ? (value as KycDeclineReason)
+    : undefined;
 }
 
 /**
@@ -58,12 +80,15 @@ export const getSignupStatus = onCall(async (request): Promise<SignupStatusResul
   // 둘이 어긋난 상태(계정 주소만 남고 자격증명이 지워진 기기 교체 도중)가 실제로 있기 때문이다.
   const passkeys = await db.collection(PASSKEYS).where('personId', '==', personId).limit(1).get();
   const account = person.get('account') as string | undefined;
+  const kycLevel = narrowKycLevel(person.get('kycLevel'));
+  const kycReason = kycLevel === 1 ? undefined : narrowKycReason(person.get('kyc.lastReason'));
 
   return {
     status: narrowStatus(person.get('status')),
     hasPasskey: !passkeys.empty,
     hasAccount: typeof account === 'string' && account.length > 0,
-    kycLevel: narrowKycLevel(person.get('kycLevel')),
+    kycLevel,
+    ...(kycReason ? { kycReason } : {}),
     personId,
   };
 });

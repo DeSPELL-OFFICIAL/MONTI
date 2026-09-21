@@ -14,12 +14,19 @@ const docs = new Map<string, Record<string, unknown>>();
 /** 쓰기 횟수. 상태 조회는 아무것도 쓰지 않아야 한다. */
 let writeCount = 0;
 
+/** 진짜 `DocumentSnapshot.get` 처럼 점 경로를 따라 들어간다(`kyc.lastReason`). */
+function field(data: Record<string, unknown> | undefined, path: string): unknown {
+  return path
+    .split('.')
+    .reduce<unknown>((node, key) => (node as Record<string, unknown> | undefined)?.[key], data);
+}
+
 function snapshot(path: string) {
   const data = docs.get(path);
   return {
     exists: data !== undefined,
     id: path.slice(path.indexOf('/') + 1),
-    get: (field: string) => data?.[field],
+    get: (name: string) => field(data, name),
     data: () => data,
   };
 }
@@ -172,5 +179,24 @@ describe('getSignupStatus', () => {
     expect(json).not.toContain('didit');
     expect(json).not.toContain('+8210');
     expect(writeCount).toBe(0);
+  });
+
+  it('hands the web the decline reason it has no other way to read', async () => {
+    signedUp({
+      status: 'rejected',
+      kyc: { provider: 'didit', sessionId: 's1', status: 'rejected', lastReason: 'duplicate_face' },
+    });
+    expect((await call()).kycReason).toBe('duplicate_face');
+
+    // 통과한 사람에게는 지난 사유를 보내지 않는다.
+    signedUp({ status: 'active', kycLevel: 1, kyc: { lastReason: 'declined' } });
+    expect((await call()).kycReason).toBeUndefined();
+
+    // 우리가 정한 네 값이 아니면 내보내지 않는다 — 웹이 그릴 화면이 없다.
+    signedUp({ status: 'rejected', kyc: { lastReason: 'weird' } });
+    expect((await call()).kycReason).toBeUndefined();
+
+    signedUp({ status: 'active' });
+    expect((await call()).kycReason).toBeUndefined();
   });
 });

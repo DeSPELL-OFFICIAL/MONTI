@@ -1,6 +1,6 @@
 import { createHmac } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { redactDiditPayload, verifyDiditSignature } from '../src/lib/didit.js';
+import { declineReason, redactDiditPayload, verifyDiditSignature } from '../src/lib/didit.js';
 
 const SECRET = 'whsec-monti';
 const RAW = '{"session_id":"s1","status":"Approved","vendor_data":"0xaa"}';
@@ -45,12 +45,30 @@ describe('redactDiditPayload', () => {
   });
 });
 
+describe('declineReason', () => {
+  // 웹은 이 네 값마다 다른 안내를 그린다. 값이 하나라도 늘거나 바뀌면 그 화면이 빈다.
+  it('folds every Didit outcome into exactly four codes', () => {
+    expect(declineReason('Declined', null)).toBe('declined');
+    expect(declineReason('Expired', 'clear')).toBe('declined');
+    expect(declineReason('Abandoned', 'duplicate')).toBe('declined');
+    expect(declineReason('Approved', null)).toBe('face_search_missing');
+    expect(declineReason('Approved', 'duplicate')).toBe('duplicate_face');
+    expect(declineReason('Approved', 'in_review')).toBe('face_search_not_clear');
+    expect(declineReason('Approved', '')).toBe('face_search_not_clear');
+  });
+
+  it('never calls a missing face search a duplicate — that copy says "이미 계정이 있습니다"', () => {
+    expect(declineReason('Approved', null)).not.toBe('duplicate_face');
+  });
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // diditWebhook — 서명 검증 · 멱등 · 레닥션이 실제 핸들러에서 함께 도는지 본다.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { EventEmitter } from 'node:events';
 import { beforeEach, vi } from 'vitest';
+import { decode as decodeJpeg, encode as encodeJpeg } from 'jpeg-js';
 import type { Hex } from '@monti/shared';
 
 process.env.GCP_PROJECT_ID = 'monti-dev';
@@ -62,6 +80,25 @@ const NAME_FIRST = '길동';
 const NAME_LAST = '홍';
 const DOC_NUMBER = 'M12345678';
 const PORTRAIT = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ==';
+
+/**
+ * Didit 이 실제로 보내는 모양의 사진: 신분증 촬영 해상도 그대로인 JPEG.
+ * 노이즈로 채워야 압축이 안 먹어 32 KB 한도를 진짜로 넘긴다.
+ */
+function oversizedPortrait(): string {
+  const width = 1200;
+  const height = 1600;
+  const data = new Uint8Array(width * height * 4);
+  let seed = 7;
+  for (let i = 0; i < width * height; i += 1) {
+    seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+    data[i * 4] = seed % 256;
+    data[i * 4 + 1] = (seed >> 8) % 256;
+    data[i * 4 + 2] = (seed >> 16) % 256;
+    data[i * 4 + 3] = 255;
+  }
+  return encodeJpeg({ data, width, height }, 95).data.toString('base64');
+}
 
 /** `persons` / `kycSessions` 두 컬렉션과 트랜잭션만 흉내 내는 가짜 Firestore(startSignup.test.ts 와 같은 패턴). */
 const docs = new Map<string, Record<string, unknown>>();
@@ -323,7 +360,7 @@ describe('diditWebhook', () => {
     const person = snapshot(`${PERSONS}/${PERSON}`);
     expect(person.get('status')).toBe('rejected');
     expect(person.get('kycLevel')).toBe(0);
-    expect(person.get('kyc')).toMatchObject({ status: 'rejected', rejectedReason: 'declined', sessionId: 's2' });
+    expect(person.get('kyc')).toMatchObject({ status: 'rejected', lastReason: 'declined', sessionId: 's2' });
     expect(sendAttesterTx).not.toHaveBeenCalled();
   });
 
@@ -334,7 +371,7 @@ describe('diditWebhook', () => {
     const person = snapshot(`${PERSONS}/${PERSON}`);
     expect(person.get('status')).toBe('rejected');
     expect(person.get('kycLevel')).toBe(0);
-    expect((person.get('kyc') as Record<string, unknown>).rejectedReason).toBe('duplicate_face');
+    expect((person.get('kyc') as Record<string, unknown>).lastReason).toBe('duplicate_face');
     expect(sendAttesterTx).not.toHaveBeenCalled();
   });
 
@@ -417,12 +454,12 @@ describe('diditWebhook', () => {
     const missing = await deliver(approvedBody(null, 's3'));
     expect(missing.statusCode).toBe(200);
     const afterMissing = snapshot(`${PERSONS}/${PERSON}`);
-    expect((afterMissing.get('kyc') as Record<string, unknown>).rejectedReason).toBe('face_search_missing');
+    expect((afterMissing.get('kyc') as Record<string, unknown>).lastReason).toBe('face_search_missing');
     expect(afterMissing.get('kycLevel')).toBe(0); // 사유가 무엇이든 fail-closed 다
 
     const unknown = await deliver(approvedBody('in_review', 's4'));
     expect(unknown.statusCode).toBe(200);
-    expect((snapshot(`${PERSONS}/${PERSON}`).get('kyc') as Record<string, unknown>).rejectedReason).toBe(
+    expect((snapshot(`${PERSONS}/${PERSON}`).get('kyc') as Record<string, unknown>).lastReason).toBe(
       'face_search_not_clear',
     );
     expect(snapshot(`${PERSONS}/${PERSON}`).get('kycLevel')).toBe(0);
@@ -507,5 +544,44 @@ describe('diditWebhook', () => {
     const raw = session.raw as { decision: Record<string, unknown> };
     expect(Object.keys(raw.decision)).toEqual(['face_search']);
     expect(raw).not.toHaveProperty('decision.id_verification');
+  });
+
+  // ── 요청 시 본인인증(Task 44) ───────────────────────────────────────────────
+
+  it('downscales an oversized portrait before the envelope and never stores the original', async () => {
+    const original = oversizedPortrait();
+    expect(original.length).toBeGreaterThan(32 * 1024);
+
+    const body = approvedBody();
+    (body.decision.id_verification as Record<string, unknown>).portrait_image =
+      `data:image/jpeg;base64,${original}`;
+    const res = await deliver(body);
+    expect(res.statusCode).toBe(200);
+
+    // 원본 바이트는 어느 문서에도 없다.
+    expect(JSON.stringify([...docs.entries()])).not.toContain(original.slice(0, 64));
+
+    const stored = await decryptField(
+      snapshot(`${PERSONS}/${PERSON}`).get('photoEnc') as string,
+      piiAad(PERSON, 'photo'),
+    );
+    // 봉투 안의 것은 우리 규격 JPEG 다 — 32 KB 한도 안, 긴 변 256 px.
+    expect(stored.length).toBeLessThanOrEqual(32 * 1024);
+    expect(stored).not.toBe(original);
+    const decoded = decodeJpeg(Buffer.from(stored, 'base64'), { useTArray: true });
+    expect(Math.max(decoded.width, decoded.height)).toBe(256);
+  });
+
+  it('clears the previous decline reason when a later session is approved', async () => {
+    await deliver({ session_id: 'd1', status: 'Declined', vendor_data: PERSON });
+    expect((snapshot(`${PERSONS}/${PERSON}`).get('kyc') as Record<string, unknown>).lastReason).toBe('declined');
+
+    // 같은 사람이 다시 시도해 통과했다. merge 는 맵을 깊이 합치므로 사유를 지우지 않으면 남는다.
+    const res = await deliver(approvedBody('clear', 'd2'));
+    expect(res.statusCode).toBe(200);
+    const kyc = snapshot(`${PERSONS}/${PERSON}`).get('kyc') as Record<string, unknown>;
+    expect(kyc.status).toBe('approved');
+    expect(kyc.lastReason).toBeNull();
+    expect(snapshot(`${PERSONS}/${PERSON}`).get('kycLevel')).toBe(1);
   });
 });

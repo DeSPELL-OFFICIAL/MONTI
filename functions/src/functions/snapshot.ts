@@ -18,6 +18,7 @@ import { deployment, publicClient } from '../lib/chain.js';
 import { PERSONS, db } from '../lib/db.js';
 import { envioQuery } from '../lib/envio.js';
 import { decryptField, piiAad } from '../lib/kms.js';
+import { PORTRAIT_MAX_BASE64_BYTES } from '../lib/portrait.js';
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 const DIGITS_RE = /^[0-9]+$/;
@@ -36,8 +37,11 @@ export const SNAPSHOT_MAX_TICKETS = 500;
 /**
  * 사진 한 장의 base64 길이 상한(32 KB).
  * 넘는 사진은 그 티켓만 건너뛴다 — 한 장 때문에 스냅샷 전체가 응답 한계에 걸리면 아무도 못 들어간다.
+ *
+ * 값의 원본은 `lib/portrait.ts` 다. 저장할 때 줄이는 쪽(`normalizePortrait`)과 읽을 때 거르는
+ * 쪽(여기)이 같은 숫자를 봐야 "저장은 됐는데 게이트에서만 사라지는 사진" 이 생기지 않는다.
  */
-export const SNAPSHOT_MAX_PHOTO_BYTES = 32 * 1024;
+export const SNAPSHOT_MAX_PHOTO_BYTES = PORTRAIT_MAX_BASE64_BYTES;
 
 /** 직렬화된 스냅샷 전체 상한(8 MB). callable 응답 한계(10 MB) 아래에 여유를 두고 잡았다. */
 export const SNAPSHOT_MAX_BYTES = 8 * 1024 * 1024;

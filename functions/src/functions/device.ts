@@ -1,10 +1,11 @@
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { DEVICE_COOLDOWN_SECONDS, identityAbi, type Hex } from '@monti/shared';
-import { ATTESTER_PK, PHONE_INDEX_KEY } from '../config.js';
+import { ATTESTER_PK, DIDIT_API_KEY, DIDIT_WORKFLOW_ID, PHONE_INDEX_KEY } from '../config.js';
 import { sendSerialized } from '../lib/attesterLock.js';
 import { deployment, publicClient, sendAttesterTx } from '../lib/chain.js';
 import { resolveCallerAccount } from '../lib/auth.js';
 import { DEVICES, USERS, db } from '../lib/db.js';
+import { assertCallbackUrl, defaultCallbackUrl, ensureKycSession } from '../lib/kycSession.js';
 import { hmacPhone } from '../lib/phoneIndex.js';
 
 const B32_RE = /^0x[0-9a-fA-F]{64}$/;
@@ -42,7 +43,7 @@ export interface DeviceChangeResult {
  * `isMember` 까지 봐야 교체되어 버려진 계정에 기기 교체를 걸어 두는 일이 없다 — 그런 계정으로
  * 보낸 `setActiveDevice` 는 웹에서 `NotRegistered` 로 되돌아간다.
  */
-async function requireCallerOwnsAccount(uid: string, account: Hex): Promise<void> {
+async function requireCallerOwnsAccount(uid: string, account: Hex): Promise<Hex> {
   const personId = (await db.collection(USERS).doc(uid).get()).get('personId') as Hex | undefined;
   if (!personId) throw new HttpsError('failed-precondition', 'NO_PERSON');
 
@@ -65,6 +66,7 @@ async function requireCallerOwnsAccount(uid: string, account: Hex): Promise<void
   if (!member || onChain.toLowerCase() !== personId.toLowerCase()) {
     throw new HttpsError('permission-denied', 'PERSON_MISMATCH');
   }
+  return personId;
 }
 
 /**
@@ -121,24 +123,28 @@ export const lockDevice = onCall(
  *  - `sms` — Firebase 전화번호 재인증 세션(`sign_in_provider === 'phone'`)으로 들어와서,
  *    넘긴 번호의 HMAC 이 `users/{uid}.phoneHmac` 과 같아야 한다. 평문 번호는 HMAC 비교
  *    한 번 외에 어디에도 남지 않는다(저장·로그·응답 전부).
- *  - `kyc` — 체인의 `kycLevelOf(account)` 가 1이어야 한다. 아직 0이면 `startKyc` 로
- *    Didit 재검증을 먼저 끝내고 다시 온다.
+ *  - `kyc` — 체인의 `kycLevelOf(account)` 가 1이어야 한다. 아직 0이면 `KYC_REQUIRED` 로
+ *    거절하되, **`startKyc` 와 같은 세션 생성기**로 연 Didit 링크를 `details.kycUrl` 에 실어 준다.
+ *    오류만 던지면 웹이 `startKyc` 를 한 번 더 불러 같은 판단을 되풀이하고, 그 사이에 열린
+ *    세션이 둘이 될 수 있다.
  *
  * 쿨타임은 언제나 체인의 `deviceUpdatedAt` 에서 읽는다. Firestore 의 값은 참고용 사본이라
  * 여기에 쓰지 않는다(스펙 §9.3).
  */
 export const startDeviceChange = onCall(
   // 이 함수는 체인을 읽기만 한다. 어테스터 키는 필요 없고, 받지도 않는다.
-  { secrets: [PHONE_INDEX_KEY] },
+  // Didit 키는 `KYC_REQUIRED` 일 때 재검증 세션을 여는 데만 쓴다.
+  { secrets: [PHONE_INDEX_KEY, DIDIT_API_KEY, DIDIT_WORKFLOW_ID] },
   async (request): Promise<DeviceChangeResult> => {
     const uid = request.auth?.uid;
     if (!uid) throw new HttpsError('unauthenticated', 'AUTH_REQUIRED');
 
-    const { method, phone, deviceX, deviceY } = (request.data ?? {}) as {
+    const { method, phone, deviceX, deviceY, callbackUrl } = (request.data ?? {}) as {
       method?: string;
       phone?: string;
       deviceX?: Hex;
       deviceY?: Hex;
+      callbackUrl?: unknown;
     };
     if (method !== 'sms' && method !== 'kyc') throw new HttpsError('invalid-argument', 'BAD_METHOD');
 
@@ -157,7 +163,7 @@ export const startDeviceChange = onCall(
     }
 
     const account = await resolveCallerAccount(request);
-    await requireCallerOwnsAccount(uid, account);
+    const personId = await requireCallerOwnsAccount(uid, account);
 
     if (method === 'sms') {
       const provider = (request.auth?.token as { firebase?: { sign_in_provider?: string } })?.firebase
@@ -188,7 +194,16 @@ export const startDeviceChange = onCall(
       })) as number;
       // "최소한 신분 확인은 끝난 사람" 이 조건이다. 나중에 레벨 2가 생겨도
       // 가장 많이 검증된 사람이 복구 경로를 잃으면 안 된다.
-      if (Number(level) < 1) throw new HttpsError('failed-precondition', 'KYC_REQUIRED');
+      if (Number(level) < 1) {
+        // 레벨을 올리는 길은 Didit 재검증 하나뿐이다. 어디로 가야 하는지까지 함께 준다.
+        const callback =
+          callbackUrl === undefined ? defaultCallbackUrl() : assertCallbackUrl(callbackUrl);
+        const session = await ensureKycSession(personId, callback);
+        throw new HttpsError('failed-precondition', 'KYC_REQUIRED', {
+          kycUrl: session.kycUrl,
+          sessionId: session.sessionId,
+        });
+      }
     }
 
     const updatedAt = (await publicClient().readContract({
