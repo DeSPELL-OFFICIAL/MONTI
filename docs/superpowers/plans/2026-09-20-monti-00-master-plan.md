@@ -118,7 +118,7 @@ Go/No-Go for the whole gate design. Uses sub-plan 04 Task 1 (HCE plugin skeleton
 
 ### Task 0.4: Spike S2 — passkey user operation on Monad testnet
 
-- [ ] **Step 1:** Deploy Coinbase Smart Wallet `CoinbaseSmartWalletFactory` to 10143 with the canonical CREATE2 deployer `0x4e59b44847b379578588920cA78FbF26c0B4956C` so the address matches mainnet (sub-plan 01 Task 12 has the script; run it early).
+- [ ] **Step 1:** Deploy Coinbase Smart Wallet `CoinbaseSmartWalletFactory` to 10143 with the canonical CREATE2 deployer `0x4e59b44847b379578588920cA78FbF26c0B4956C` so the address matches mainnet (sub-plan 01 Task 31 has the script; run it early).
 - [ ] **Step 2:** In a throwaway web page: `createWebAuthnCredential` → `toWebAuthnAccount` → `toCoinbaseSmartAccount({ owners: [webAuthnAccount] })` → `sendUserOperation` via Pimlico calling `Identity.register` **is not allowed** (attester only), so call a `Counter.increment()` test contract. Verify inclusion on MonadVision, and gas used for validation ≈ 25–35k (precompile path). Record `preVerificationGas`, `verificationGasLimit`, `callGasLimit`.
 - [ ] **Step 3:** Repeat inside the Capacitor iOS shell with `@capgo/capacitor-passkey` and in Android shell; confirm Android `origin` is `android:apk-key-hash:…`. **Go** if both platforms produce a valid user op. If not within 2 days → switch sub-plan 03 to ZeroDev Kernel v3.3 (validator `0x7ab16Ff354AcB328452F1D445b3Ddee9a91e9e69`).
 
@@ -131,7 +131,7 @@ Go/No-Go for the whole gate design. Uses sub-plan 04 Task 1 (HCE plugin skeleton
 
 - [ ] **S4:** Didit sandbox: create a workflow with ID + passive liveness + face match + Face Search; open hosted link in the system browser (`@capacitor/browser`), return via deep link `monti://kyc/callback?session=…`; run two sessions with the same face → second is `Declined` with duplicate reason. Check Console → Countries: 주민등록증/운전면허증/여권/외국인등록증 and Korean UI; record. Turn OFF "Help improve Didit's models"; set retention 24 months; enable auto-refill.
 - [ ] **S5:** Firebase project `monti-dev` (asia-northeast3), Blaze plan, Phone sign-in enabled, SMS regions allowlist KR, US, JP, GB, DE, SG. Test OTP to one KR and one US number from the web app; on an Android device confirm instant verification path (no SMS) at least once.
-- [ ] **S6:** Deploy `MontiPaymaster` (sub-plan 01 Task 11) to 10143, `addStake(86400)` with 1 MON and `depositPlatform` 5 MON from the faucet, send one sponsored user op through Pimlico; confirm `BudgetDebited` event. Simulate the op with Tenderly `tenderly_simulateBundle` and record the gas numbers in `spikes.md`.
+- [ ] **S6:** Deploy `MontiPaymaster` (sub-plan 01 Tasks 25–28) to 10143, `addStake(86400)` with 1 MON and `depositPlatform` 5 MON from the faucet, send one sponsored user op through Pimlico; confirm `BudgetDebited` event. Simulate the op with Tenderly `tenderly_simulateBundle` and record the gas numbers in `spikes.md`.
 
 ---
 
