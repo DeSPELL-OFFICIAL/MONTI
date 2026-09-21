@@ -1,5 +1,5 @@
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
-import { error } from 'firebase-functions/logger';
+import { error, info } from 'firebase-functions/logger';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { TransactionReceiptNotFoundError } from 'viem';
 import { identityAbi, type Hex, type PersonStatus } from '@monti/shared';
@@ -24,10 +24,22 @@ const STALE_MS = 2 * 60 * 1000;
  * 나머지 스윕은 영영 돌지 않는다. 상한을 넘긴 문서는 다음 실행이 가져간다.
  */
 const SWEEP_LIMIT = 200;
+/**
+ * 한 실행이 어테스터로 내보낼 `setKycLevel` 재전송 수. 상한이 없으면 밀린 `kyc_ok` 이
+ * 한 실행에서 최대 `SWEEP_LIMIT` 건 직렬로 나가 300초 타임아웃을 넘기고, 가스도 상한 없이 쓴다.
+ * 미룬 문서는 `updatedAt` 을 건드리지 않으므로 다음 5분 틱이 이들을 가장 먼저 집는다.
+ */
+const MAX_KYC_RESENDS_PER_RUN = 20;
 const SCHEDULE = 'every 5 minutes';
 
 type PublicClient = ReturnType<typeof publicClient>;
 type Doc = FirebaseFirestore.QueryDocumentSnapshot;
+
+/** 한 실행의 재전송 예산. 남은 장수와 다음 틱으로 미룬 문서 수만 들고 다닌다. */
+interface ResendBudget {
+  left: number;
+  deferred: number;
+}
 
 /**
  * 고칠 수 없는 문서를 **질의의 꼬리로 돌린다**. persons 질의는 `updatedAt` 에 부등호가 걸려
@@ -67,6 +79,25 @@ async function accountOnChain(pc: PublicClient, identity: Hex, personId: Hex): P
 }
 
 /**
+ * 계정에 올라가 있는 본인인증 레벨. `kycLevelOf` 는 personId 가 아니라 **주소**를 받으므로
+ * (`abi/Identity.json`) 주소를 모르면 물어볼 수가 없다 — 그때는 `null` 을 돌려주고
+ * 부르는 쪽이 그냥 보낸다(`setKycLevel` 은 단순 대입이라 두 번 보내도 결과가 같다).
+ */
+async function kycLevelOnChain(pc: PublicClient, doc: Doc, identity: Hex): Promise<number | null> {
+  const account =
+    (doc.get('account') as Hex | undefined) ?? (await accountOnChain(pc, identity, doc.id as Hex));
+  if (!account || account === ZERO) return null;
+  return Number(
+    await pc.readContract({
+      address: identity,
+      abi: identityAbi,
+      functionName: 'kycLevelOf',
+      args: [account],
+    }),
+  );
+}
+
+/**
  * 복구한 사람의 세션에 클레임을 심는다. uid 는 `registerIdentity` 가 묶어 둔
  * `users/{uid}.personId` 를 거꾸로 찾아 쓴다(`loginVerify` 와 같은 질의).
  * 묶인 uid 가 없으면 심을 세션 자체가 없다 — 기록만 남기고 넘어간다.
@@ -92,8 +123,40 @@ async function mintClaimsForPerson(personId: Hex, account: Hex): Promise<void> {
  * 바로 이어 읽으면 드롭으로 오독해 그 해시를 도로 지운다. 다음 실행(2분 컷오프 뒤)이
  * 기존 영수증 경로로 `active` 까지 끌고 간다.
  */
-async function resendKycLevel(doc: Doc): Promise<void> {
+async function resendKycLevel(
+  doc: Doc,
+  pc: PublicClient,
+  identity: Hex,
+  budget: ResendBudget,
+): Promise<void> {
   const personId = doc.id as Hex;
+
+  // 체인이 이미 레벨을 갖고 있으면 보낼 것이 없다 — "전송 후 finalize 전 사망" 이 이 모양으로
+  // 남는다(해시는 없고 레벨은 올라가 있다). 기다릴 영수증이 없으니 두 실행이 아니라
+  // **이 실행에서** 바로 닫는다. 중복 트랜잭션 한 건도 함께 아낀다.
+  const level = await kycLevelOnChain(pc, doc, identity);
+  if (level !== null && level > 0) {
+    assertStatusTransition('kyc_ok', 'active');
+    await doc.ref.set(
+      {
+        status: 'active',
+        kycLevel: level,
+        chain: { kycLevelError: FieldValue.delete() },
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+    return;
+  }
+
+  // 이번 실행 몫을 다 썼다. `updatedAt` 을 **건드리지 않아야** 이 문서가 앞줄에 남아
+  // 다음 틱이 가장 먼저 집는다(꼬리로 돌리는 `rotate` 와 정반대 의도다).
+  if (budget.left <= 0) {
+    budget.deferred += 1;
+    return;
+  }
+  budget.left -= 1;
+
   let txHash: Hex;
   try {
     txHash = await sendSetKycLevel(personId);
@@ -116,10 +179,15 @@ async function resendKycLevel(doc: Doc): Promise<void> {
  * `kyc_ok` = Didit 이 승인했지만 `setKycLevel` 이 아직 확정되지 않은 중간 상태
  * (diditWebhook 4번 주석). 해시가 있으면 따라가고, 없으면 다시 보낸다.
  */
-async function reconcileKycLevel(doc: Doc, pc: PublicClient): Promise<void> {
+async function reconcileKycLevel(
+  doc: Doc,
+  pc: PublicClient,
+  identity: Hex,
+  budget: ResendBudget,
+): Promise<void> {
   const levelTx = doc.get('chain.kycLevelTx') as Hex | undefined;
   if (!levelTx) {
-    await resendKycLevel(doc);
+    await resendKycLevel(doc, pc, identity, budget);
     return;
   }
 
@@ -254,17 +322,22 @@ async function sweepPersons(): Promise<void> {
 
   const pc = publicClient();
   const identity = deployment().identity;
+  const budget: ResendBudget = { left: MAX_KYC_RESENDS_PER_RUN, deferred: 0 };
 
   for (const doc of snapshot.docs) {
     // 문서 하나가 터져도 나머지는 계속 간다 — 깨진 문서 하나가 밀린 전부를 막지 않는다.
     try {
       const status = doc.get('status') as PersonStatus;
-      if (status === 'kyc_ok') await reconcileKycLevel(doc, pc);
+      if (status === 'kyc_ok') await reconcileKycLevel(doc, pc, identity, budget);
       else await reconcileRegistration(doc, pc, identity, status);
     } catch (cause) {
       error('reconcile.person', { personId: doc.id, reason: (cause as Error).message });
     }
   }
+
+  // 몇 건을 다음 틱으로 넘겼는지는 남겨야 한다. 이 수가 계속 0 이 아니면 5분에 20건으로는
+  // 밀린 것을 못 따라잡는다는 뜻이다.
+  if (budget.deferred > 0) info('reconcile.kycLevel.deferred', { count: budget.deferred });
 }
 
 /**
@@ -272,20 +345,21 @@ async function sweepPersons(): Promise<void> {
  * 읽으므로, 죽은 초대가 쌓이면 살아 있는 초대가 그 50건 밖으로 밀려난다. 체인에는 손대지 않는다 —
  * 오퍼의 원본은 언제나 `Ticket.offerOf` 다.
  *
- * 만료 판정은 메모리에서 한다. `status` + `expiresAt` 복합 색인을 새로 만들지 않기 위해서다.
- * 내려간 문서는 `sent` 집합에서 빠지므로 다음 실행이 같은 문서를 다시 보지 않는다.
+ * 만료 판정은 **질의가** 한다(루트 `firestore.indexes.json` 의 `transferInvites (status, expiresAt)`).
+ * 메모리에서 거르면 200칸 창이 문서 id 순이라, 살아 있는 `sent` 가 200개를 넘고 id 가 앞서는
+ * 순간 만료 건이 창에 못 들어온다. 부등호가 걸리면 Firestore 가 `expiresAt` 오름차순으로
+ * 정렬해 주므로 가장 오래 죽어 있던 것부터 내려간다.
  */
 async function sweepTransferInvites(): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
   const snapshot = await db
     .collection(TRANSFER_INVITES)
     .where('status', '==', 'sent')
+    .where('expiresAt', '<', now)
     .limit(SWEEP_LIMIT)
     .get();
 
   for (const doc of snapshot.docs) {
-    const expiresAt = doc.get('expiresAt') as number | undefined;
-    if (typeof expiresAt !== 'number' || expiresAt >= now) continue;
     try {
       await doc.ref.set({ status: 'expired' }, { merge: true });
     } catch (cause) {

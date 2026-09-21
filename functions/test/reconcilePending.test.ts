@@ -184,7 +184,7 @@ const getTransactionReceipt = vi.fn(async (_args: { hash: string }) => ({
   blockNumber: 100n,
 }));
 const getBlock = vi.fn(async (_args: { blockTag: string }) => ({ number: 200n }));
-const readContract = vi.fn(async (_args: { functionName: string }) => ZERO as string);
+const readContract = vi.fn(async (_args: { functionName: string }) => ZERO as string | number);
 const sendAttesterTx = vi.fn(async (_tx: Record<string, unknown>) => KYC_TX);
 
 vi.mock('../src/lib/chain.js', () => ({
@@ -444,6 +444,54 @@ describe('reconcilePending — 멈춘 본인인증 레벨', () => {
     expect(getTransactionReceipt).not.toHaveBeenCalled();
   });
 
+  it('skips the re-send when the chain already carries the level and closes in one run', async () => {
+    // "전송 후 finalize 전 사망" 이 이 모양으로 남는다 — 해시는 없고 체인에는 레벨이 있다.
+    readContract.mockImplementation(async ({ functionName }: { functionName: string }) =>
+      functionName === 'kycLevelOf' ? 1 : ACCOUNT,
+    );
+    seedPerson(P1, {
+      status: 'kyc_ok',
+      kycLevel: 0,
+      account: ACCOUNT,
+      chain: { kycLevelError: 'reverted' },
+    });
+
+    await run({} as never);
+
+    expect(sendAttesterTx).not.toHaveBeenCalled();
+    // 레벨은 personId 가 아니라 **계정 주소**로 읽는다(`Identity.kycLevelOf(address)`).
+    expect(readContract.mock.calls.at(-1)![0]).toMatchObject({
+      address: IDENTITY,
+      functionName: 'kycLevelOf',
+      args: [ACCOUNT],
+    });
+    const person = snapshot(`persons/${P1}`);
+    expect(person.get('status')).toBe('active');
+    expect(person.get('kycLevel')).toBe(1);
+    expect(person.get('chain.kycLevelError')).toBeUndefined();
+    expect(person.get('chain.kycLevelTx')).toBeUndefined();
+    // 영수증을 기다릴 해시가 없다. 두 실행이 아니라 이 실행에서 끝난다.
+    expect(getTransactionReceipt).not.toHaveBeenCalled();
+  });
+
+  it('caps the attester re-sends per run and leaves the rest at the head of the queue', async () => {
+    const ids = Array.from(
+      { length: 25 },
+      (_, i) => `0x${i.toString(16).padStart(2, '0').repeat(32)}`,
+    );
+    for (const id of ids) seedPerson(id, { status: 'kyc_ok', kycLevel: 0 });
+
+    await run({} as never);
+
+    expect(sendAttesterTx).toHaveBeenCalledTimes(20);
+    const sent = ids.filter((id) => snapshot(`persons/${id}`).get('chain.kycLevelTx') === KYC_TX);
+    expect(sent).toHaveLength(20);
+    // 미룬 문서는 `updatedAt` 을 그대로 둔다 — 다음 5분 틱이 이들을 가장 먼저 집는다.
+    const deferred = ids.filter((id) => !sent.includes(id));
+    expect(deferred).toHaveLength(5);
+    expect(deferred.every((id) => !rotated(id))).toBe(true);
+  });
+
   it('takes the attester lease for the re-send and gives it back', async () => {
     seedPerson(P1, { status: 'kyc_ok', kycLevel: 0 });
 
@@ -536,11 +584,14 @@ describe('reconcilePending — 죽은 양도 초대', () => {
     expect(writes).toEqual([]);
   });
 
-  it('scans only invites that still say sent', async () => {
+  it('asks the index for the expired ones instead of filtering the window in memory', async () => {
     await run({} as never);
 
     const invites = queries.find((q) => q.name === 'transferInvites');
-    expect(invites?.filters).toEqual([['status', '==', 'sent']]);
+    expect(invites?.filters).toEqual([
+      ['status', '==', 'sent'],
+      ['expiresAt', '<', expect.any(Number)],
+    ]);
   });
 });
 

@@ -22,6 +22,8 @@ const attester = privateKeyToAccount(PK);
 
 const KEY = 'monti-test-key';
 const TICKET = '0x3333333333333333333333333333333333333333';
+/** `eventOf(tokenId)` 가 돌려주는 공연 id. `eventMeta` 가 이 값으로 불려야 한다. */
+const EVENT_ID = 42n;
 /** 티켓 주인이자 보내는 사람. 숫자만 쓰는 주소라 EIP-55 체크섬이 대소문자를 바꾸지 않는다. */
 const OWNER = '0x9999999999999999999999999999999999999999';
 /** 받는 사람의 계정. `acceptOffer` 의 msg.sender 가 될 주소다. */
@@ -115,7 +117,7 @@ interface ChainOffer {
 
 const NO_OFFER: ChainOffer = { from: ZERO, recipientCommitment: ZERO32, expiresAt: 0n };
 /** 체인 상태. 토큰 주인과 `offerOf` 가 돌려줄 오퍼. */
-const chain = { owner: OWNER as string, offers: new Map<string, ChainOffer>() };
+const chain = { owner: OWNER as string, offers: new Map<string, ChainOffer>(), requireKyc: false };
 const reads: Array<{ functionName: string; args: readonly unknown[] }> = [];
 
 vi.mock('../src/lib/chain.js', () => ({
@@ -133,6 +135,8 @@ vi.mock('../src/lib/chain.js', () => ({
       if (functionName === 'offerOf') {
         return chain.offers.get(String(args[0] as bigint)) ?? NO_OFFER;
       }
+      if (functionName === 'eventOf') return EVENT_ID;
+      if (functionName === 'eventMeta') return { requireKyc: chain.requireKyc };
       throw new Error(`UNEXPECTED_READ:${functionName}`);
     },
   }),
@@ -191,6 +195,7 @@ beforeEach(() => {
   writeCount = 0;
   chain.owner = OWNER;
   chain.offers.clear();
+  chain.requireKyc = false;
   givenUser('uid-sender', SENDER_PHONE);
   givenUser('uid-recipient', PHONE);
 });
@@ -285,6 +290,46 @@ describe('createTransferInvite', () => {
       create({ data: { tokenId: '7', phoneE164: PHONE }, auth: senderAuth } as never),
     ).rejects.toThrow('OFFER_ALREADY_OPEN');
     expect(writeCount).toBe(0);
+  });
+
+  it('adds one identity-verification sentence when the event requires it', async () => {
+    chain.requireKyc = true;
+
+    const { smsText } = await givenInvite();
+
+    expect(smsText).toContain('가입 후 본인인증이 필요해요.');
+    // 조건의 원본은 공연 메타다 — `eventOf` 가 돌려준 id 로 `eventMeta` 를 읽어야 한다.
+    expect(reads.map((r) => r.functionName)).toContain('eventOf');
+    expect(reads.find((r) => r.functionName === 'eventMeta')?.args).toEqual([EVENT_ID]);
+  });
+
+  it('leaves the sentence out when the event does not require identity verification', async () => {
+    const { smsText } = await givenInvite();
+
+    expect(smsText).not.toContain('본인인증');
+    expect(smsText.toLowerCase()).not.toContain('verify');
+  });
+
+  it('writes the identity-verification sentence in the sender locale', async () => {
+    chain.requireKyc = true;
+    givenUser('uid-sender', SENDER_PHONE, 'en');
+
+    const { smsText } = await givenInvite();
+
+    expect(smsText).toContain("You'll need to verify your identity after signing up.");
+    expect(/[가-힣]/.test(smsText)).toBe(false);
+  });
+
+  it('keeps crypto vocabulary out of the identity-verification sentence too', async () => {
+    chain.requireKyc = true;
+    const korean = (await givenInvite()).smsText;
+    givenUser('uid-sender', SENDER_PHONE, 'en');
+    const english = (await givenInvite()).smsText;
+
+    for (const word of BANNED_ATTENDEE_WORDS) {
+      expect(korean.toLowerCase()).not.toContain(word.toLowerCase());
+      expect(english.toLowerCase()).not.toContain(word.toLowerCase());
+    }
   });
 
   it('lets the sender re-send the same invite while their own offer is still open', async () => {

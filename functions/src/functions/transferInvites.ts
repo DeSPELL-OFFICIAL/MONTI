@@ -30,6 +30,11 @@ interface ChainOffer {
   expiresAt: bigint;
 }
 
+/** `Ticket.eventMeta` 에서 이 함수가 읽는 칸 하나. 나머지 필드는 여기서 쓰지 않는다. */
+interface ChainEventMeta {
+  requireKyc: boolean;
+}
+
 export interface TransferInviteResult {
   inviteId: string;
   commitment: Hex;
@@ -47,12 +52,19 @@ export interface PendingOffer {
 /**
  * 받는 사람이 읽는 문구. 크립토 낱말을 쓰지 않는다(`BANNED_ATTENDEE_WORDS`).
  * 링크에는 초대 id 말고 아무것도 없다 — 번호도 티켓 번호도 보내는 사람도 들어가지 않는다.
+ *
+ * 본인인증이 필요한 공연이면 한 문장을 더 붙인다. 받는 사람은 링크를 누르기 전에 무엇이
+ * 기다리는지 알아야 한다 — 가입을 마치고 나서야 알게 되면 거기서 멈춘다.
+ * 링크는 언제나 맨 뒤다(문자 앱이 끝에 오는 URL 을 가장 잘 집어낸다).
  */
-function inviteText(locale: Locale, inviteId: string): string {
+function inviteText(locale: Locale, inviteId: string, requireKyc: boolean): string {
   const link = `https://${RP_ID.value()}/i/${inviteId}`;
-  return locale === 'en'
-    ? `[MONTI] A ticket is waiting for you. Open the link and tap Receive. ${link}`
-    : `[MONTI] 티켓을 보냈습니다. 앱에서 받기를 눌러 주세요. ${link}`;
+  if (locale === 'en') {
+    const kyc = requireKyc ? " You'll need to verify your identity after signing up." : '';
+    return `[MONTI] A ticket is waiting for you. Open the link and tap Receive.${kyc} ${link}`;
+  }
+  const kyc = requireKyc ? ' 가입 후 본인인증이 필요해요.' : '';
+  return `[MONTI] 티켓을 보냈습니다. 앱에서 받기를 눌러 주세요.${kyc} ${link}`;
 }
 
 function nowSeconds(): number {
@@ -124,6 +136,22 @@ export const createTransferInvite = onCall(
       offer.recipientCommitment.toLowerCase() !== commitment.toLowerCase();
     if (openForSomebodyElse) throw new HttpsError('failed-precondition', 'OFFER_ALREADY_OPEN');
 
+    // 본인인증이 필요한 공연인지는 **공연 메타**에만 있다. 티켓은 공연 id 만 알고 있으므로
+    // 읽기가 두 번 더 든다(`eventOf` → `eventMeta`). 쓰기 전에 읽어 두어야 초대장만
+    // 남고 문구는 틀린 상태가 생기지 않는다.
+    const eventId = (await pc.readContract({
+      address: contracts.ticket,
+      abi: ticketAbi,
+      functionName: 'eventOf',
+      args: [BigInt(tokenId)],
+    })) as bigint;
+    const meta = (await pc.readContract({
+      address: contracts.ticket,
+      abi: ticketAbi,
+      functionName: 'eventMeta',
+      args: [eventId],
+    })) as ChainEventMeta;
+
     const inviteId = randomUUID();
     const expiresAt = nowSeconds() + TRANSFER_INVITE_TTL_SECONDS;
     await db.collection(TRANSFER_INVITES).doc(inviteId).set({
@@ -136,7 +164,7 @@ export const createTransferInvite = onCall(
       expiresAt,
     });
 
-    const smsText = inviteText(locale, inviteId);
+    const smsText = inviteText(locale, inviteId, meta.requireKyc);
     return {
       inviteId,
       commitment,
