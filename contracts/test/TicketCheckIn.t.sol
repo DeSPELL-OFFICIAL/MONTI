@@ -2,6 +2,7 @@
 pragma solidity 0.8.31;
 
 import {MontiTest} from "./Base.t.sol";
+import {P256} from "solady/utils/P256.sol";
 import {Ticket} from "../src/Ticket.sol";
 import {P256Vectors} from "./utils/P256Vectors.sol";
 
@@ -176,6 +177,29 @@ contract TicketCheckInTest is MontiTest {
         vm.prank(GATE_A);
         vm.expectRevert(Ticket.NotMember.selector);
         ticket.checkIn(tokenId, _code(gateAId), _sigA());
+    }
+
+    /// @dev C2. (r, N - s) 는 같은 메시지·같은 키에 대해 암호학적으로 유효한 서명이라 0x100 은
+    ///      1을 돌려준다. 그런데도 거절된다면 그 거절은 Solady 의 low-s 검사가 한 것이다 —
+    ///      그 검사를 지우는 뮤테이션(M6)이 바로 이 테스트를 깨뜨린다.
+    ///      이 요구는 클라이언트에도 그대로 간다: 03/04 는 서명 직후 s > N/2 면 s = N - s 로
+    ///      정규화해야 한다. 안 하면 정상 탭의 절반이 DENY DEVICE_MISMATCH 로 떨어진다.
+    function test_C2_highSSignatureRejected() public {
+        uint256 highS = P256.N - uint256(P256Vectors.GATE1_S);
+        assertGt(highS, P256.N / 2, "the counterpart of a low-s signature is high-s");
+
+        vm.prank(GATE_A);
+        vm.expectRevert(Ticket.BadDeviceSignature.selector);
+        ticket.checkIn(tokenId, _code(gateAId), abi.encode(P256Vectors.GATE1_R, bytes32(highS)));
+    }
+
+    /// @dev 같은 벡터의 low-s 쪽은 통과한다. 위 테스트가 '서명이 틀려서'가 아니라 '고-s 라서'
+    ///      거절됐음을 이 한 쌍이 함께 증명한다.
+    function test_C2_theLowSCounterpartOfTheSameSignatureIsAccepted() public {
+        assertLt(uint256(P256Vectors.GATE1_S), P256.N / 2, "the generated vectors are low-s by construction");
+        vm.prank(GATE_A);
+        ticket.checkIn(tokenId, _code(gateAId), _sigA());
+        assertEq(ticket.checkInOf(tokenId).gateId, gateAId);
     }
 
     function test_T6_wrongDeviceKeyRejected() public {
