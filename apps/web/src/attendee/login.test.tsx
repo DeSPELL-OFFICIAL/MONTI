@@ -39,6 +39,7 @@ vi.mock('react-router-dom', async (orig) => ({
 }));
 
 const { Login } = await import('./Login');
+const { NoPasskeyOnDevice } = await import('../shared/passkey');
 
 function renderScreen() {
   return render(
@@ -91,7 +92,9 @@ describe('passkey-only sign-in', () => {
   });
 
   it('tells a phone with no passkey to sign up first', async () => {
-    signPasskeyAssertion.mockRejectedValueOnce(new Error('No passkey on this device'));
+    // The class, not a sentence: rewording the message must not downgrade this to the
+    // generic failure line, which is why getPasskeyAccount throws a named error.
+    signPasskeyAssertion.mockRejectedValueOnce(new NoPasskeyOnDevice());
     renderScreen();
     await userEvent.click(screen.getByRole('button', { name: '로그인' }));
 

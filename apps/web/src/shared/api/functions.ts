@@ -1,7 +1,7 @@
 import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
 import type { FunctionsErrorCodeCore } from 'firebase/functions';
-import type { Hex, SnapshotWire } from '@monti/shared';
+import type { Hex, ResolveRecipientResult, SnapshotWire } from '@monti/shared';
 import { getFirebaseFunctions } from './firebase';
 
 /** The gRPC status the server chose, with Firebase's `functions/` prefix stripped. */
@@ -86,6 +86,34 @@ function call<Req, Res>(name: string): (payload?: Req) => Promise<Res> {
 
 export type SignupStatus = 'pending' | 'kyc_ok' | 'rejected' | 'active' | 'rotated';
 
+/**
+ * What `createTransferInvite` answers with, field for field
+ * (functions/src/functions/transferInvites.ts). The server wrote the sentence and built the
+ * `sms:` link from the number the sender just typed; neither is rewritten on this side, and
+ * neither is stored anywhere — the number lives in this answer and nowhere else.
+ */
+export interface TransferInviteResult {
+  inviteId: string;
+  commitment: Hex;
+  expiresAt: number;
+  smsText: string;
+  smsUri: string;
+}
+
+/**
+ * One invite waiting for the signed-in attendee. `attesterSig` is what `Ticket.acceptOffer`
+ * takes; the server binds it to this caller's account, so another account picking it up
+ * cannot spend it. `inviteId` is opaque — it is carried back, never read.
+ */
+export interface PendingOffer {
+  tokenId: string;
+  attesterSig: Hex;
+  inviteId: string;
+}
+
+/** The callable answers `{ offers }`; every caller wants the rows, so the wrapper unwraps. */
+const callPendingOffers = call<void, { offers: PendingOffer[] }>('pendingOffers');
+
 export const api = {
   startSignup: call<void, { personId: Hex }>('startSignup'),
   // Identity verification is per event, not part of signup. startKyc opens a fresh Didit session.
@@ -123,15 +151,16 @@ export const api = {
   loginVerify: call<{ assertion: unknown }, { token: string; personId: Hex; account: Hex }>('loginVerify'),
   lockDevice: call<void, { txHash: Hex }>('lockDevice'),
   startDeviceChange: call<{ method: 'sms' | 'kyc' }, { allowedAt: number; kycUrl?: string }>('startDeviceChange'),
+  // The result type is the server's own (packages/shared), so a change there breaks this
+  // call site rather than silently disagreeing with it.
   resolveRecipient: call<
     { type: 'phone' | 'nickname' | 'address'; value: string },
-    { member: boolean; account?: Hex; nickname?: string; commitment?: Hex }
+    ResolveRecipientResult
   >('resolveRecipient'),
-  createTransferInvite: call<
-    { tokenId: string; phoneE164: string },
-    { inviteId: string; commitment: Hex; expiresAt: number; smsText: string; smsUri: string }
-  >('createTransferInvite'),
-  pendingOffers: call<void, Array<{ tokenId: string; attesterSig: Hex }>>('pendingOffers'),
+  createTransferInvite: call<{ tokenId: string; phoneE164: string }, TransferInviteResult>(
+    'createTransferInvite',
+  ),
+  pendingOffers: async (): Promise<PendingOffer[]> => (await callPendingOffers()).offers,
   joinEventChat: call<{ eventId: string }, { ok: true }>('joinEventChat'),
   reportMessage: call<{ eventId: string; msgId: string }, { ok: true }>('reportMessage'),
   listAttendees: call<

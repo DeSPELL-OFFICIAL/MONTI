@@ -47,6 +47,12 @@ vi.mock('../../shared/deviceKey', () => ({
   DeviceKeyUnavailable,
 }));
 
+/** The hydrator reads the claims out of a fresh token; the screen only asks for one. */
+const getIdToken = vi.fn(async (_force?: boolean) => 'id-token');
+vi.mock('../../shared/api/firebase', () => ({
+  getFirebaseAuth: () => ({ currentUser: { getIdToken } }),
+}));
+
 const getPlatform = vi.fn(() => 'ios');
 vi.mock('@capacitor/core', () => ({ Capacitor: { getPlatform: () => getPlatform(), isNativePlatform: () => true } }));
 
@@ -147,7 +153,10 @@ describe('device step', () => {
       deviceY: DEVICE_Y,
       platform: 'ios',
     });
-    expect(getSession()).toEqual({ status: 'signedIn', personId: PERSON_ID, account: ACCOUNT });
+    // Signing in is the hydrator's call, not this screen's: it reads `{ personId, account }`
+    // off the Firebase token, so all the screen may do is ask for a fresh one.
+    expect(getIdToken).toHaveBeenCalledWith(true);
+    expect(getSession().status).toBe('anonymous');
     expect(navigate).toHaveBeenCalledWith('/signup/done');
   });
 
@@ -158,7 +167,16 @@ describe('device step', () => {
 
     await waitFor(() => expect(navigate).toHaveBeenCalledWith('/signup/done'));
     expect(screen.queryByRole('alert')).toBeNull();
-    expect(getSession().status).toBe('signedIn');
+    expect(getIdToken).toHaveBeenCalledWith(true);
+  });
+
+  it('finishes signup even when the token refresh fails, because registration already landed', async () => {
+    getIdToken.mockRejectedValueOnce(new Error('network'));
+    renderScreen(<DeviceStep />);
+    await userEvent.click(screen.getByRole('button', { name: '등록하기' }));
+
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/signup/done'));
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('reports a desktop browser as the web platform', async () => {
@@ -194,7 +212,8 @@ describe('device step', () => {
     // Retrying cannot help, so the only button left finishes signup without a hardware key.
     await userEvent.click(screen.getByRole('button', { name: '이대로 계속하기' }));
     expect(navigate).toHaveBeenCalledWith('/signup/done');
-    expect(getSession().status).toBe('signedIn');
+    // Nothing was registered, so nothing may claim a session either.
+    expect(getSession().status).toBe('anonymous');
   });
 
   it('refuses to start without the account the passkey step produced', async () => {

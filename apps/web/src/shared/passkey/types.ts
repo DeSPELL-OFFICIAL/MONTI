@@ -3,7 +3,11 @@ import type { Hex } from '@monti/shared';
 
 export interface WebAuthnCredential {
   id: string;
-  /** Uncompressed P-256 point, 0x04 || x || y. */
+  /**
+   * Uncompressed P-256 point, 0x04 || x || y — what both platforms hand back. The smart account
+   * owner is the same point with the prefix dropped; `getPasskeyAccount` is the one place that
+   * converts, so nothing else may pass this value to viem as an owner.
+   */
   publicKey: Hex;
   transports: string[];
   /** Serialized WebAuthn registration response, forwarded verbatim to registerPasskey. */

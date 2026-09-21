@@ -6,7 +6,7 @@ import { useCopy } from '../../shared/i18n';
 import type { Copy } from '../../shared/copy/index';
 import { ATTENDEE_KEY_ALIAS, DeviceKeyUnavailable, ensureDeviceKey } from '../../shared/deviceKey';
 import { api, callableFailure } from '../../shared/api/functions';
-import { setSession } from '../../shared/session';
+import { getFirebaseAuth } from '../../shared/api/firebase';
 import { readSignup } from './useSignup';
 
 /** The three the server accepts; anything else (a desktop browser) registers as `web`. */
@@ -47,6 +47,22 @@ function message(copy: Copy, failure: unknown): string {
 }
 
 /**
+ * The session is never written by hand here. `shared/api/sessionHydrator` reads `{ personId,
+ * account }` out of the Firebase token's claims and is the only thing that may say "signed in";
+ * a local `setSession` would be a second source of truth that the next `onIdTokenChanged`
+ * contradicts. Forcing a refresh is how the claims the server just wrote reach that hydrator.
+ * The registration itself already succeeded, so a refresh that fails must not undo it — and
+ * until the server sets the claims this is simply a no-op and signup still finishes.
+ */
+async function refreshClaims(): Promise<void> {
+  try {
+    await getFirebaseAuth().currentUser?.getIdToken(true);
+  } catch {
+    // A stale token costs one sign-in, a thrown one costs the whole signup.
+  }
+}
+
+/**
  * Signup step 3 of 3. The phone's secure chip mints a key that never leaves it, and the
  * attester writes its public half next to the account so the door can recognise this phone.
  * A browser has no such chip: that attendee finishes signup here and shows a code at the door.
@@ -61,9 +77,7 @@ export function DeviceStep() {
   const [unavailable, setUnavailable] = useState(false);
 
   function finish(): void {
-    const { personId, account } = readSignup();
-    if (personId && account) setSession({ status: 'signedIn', personId, account });
-    // The state itself is dropped on the done screen, which is where signup actually ends.
+    // The signup state itself is dropped on the done screen, which is where signup ends.
     navigate('/signup/done');
   }
 
@@ -84,6 +98,7 @@ export function DeviceStep() {
       // Resolving at all is success. `alreadyRegistered` means the server found this account
       // on chain already and sent nothing — there is no hash to wait for and nothing to redo.
       await api.registerIdentity({ personId, deviceX: x, deviceY: y, platform: platform() });
+      await refreshClaims();
       finish();
     } catch (failure) {
       if (isDeviceKeyUnavailable(failure)) {

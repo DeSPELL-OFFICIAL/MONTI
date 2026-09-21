@@ -67,7 +67,8 @@ vi.mock('@capgo/capacitor-passkey', () => ({
   },
 }));
 
-const { createPasskey, storedCredential, clearCredential } = await import('./index');
+const { createPasskey, getPasskeyAccount, storedCredential, clearCredential, NoPasskeyOnDevice } =
+  await import('./index');
 const { getFnNative } = await import('./native');
 
 beforeEach(() => {
@@ -92,7 +93,8 @@ describe('createPasskey (web)', () => {
       userVerification: 'required',
     });
     expect(credential.id).toBe('Y3JlZC1pZA');
-    // 0x04 || x(32) || y(32) — the uncompressed point viem hands to toCoinbaseSmartAccount.
+    // 0x04 || x(32) || y(32) — the uncompressed point the authenticator produced. The smart
+    // account owner drops that prefix; getPasskeyAccount is the one place that converts.
     expect(credential.publicKey).toMatch(/^0x04[0-9a-f]{128}$/);
     expect(JSON.parse(credential.attestationJson).type).toBe('public-key');
     expect(storedCredential()?.id).toBe('Y3JlZC1pZA');
@@ -126,6 +128,24 @@ describe('createPasskey (native)', () => {
     expect(Object.keys(credential).sort()).toEqual(['attestationJson', 'id', 'publicKey', 'transports']);
     expect(storedCredential()?.publicKey).toBe(credential.publicKey);
     expect(signalAllAcceptedCredentials).not.toHaveBeenCalled();
+  });
+});
+
+describe('getPasskeyAccount', () => {
+  it('owns the account with the 64-byte x || y, not the stored uncompressed point', async () => {
+    const credential = await createPasskey('MONTI', CHALLENGE);
+    const account = await getPasskeyAccount();
+
+    // viem hands a webAuthn owner to the factory verbatim, and registerPasskey salts the
+    // address over ownerBytes(x, y) (functions/src/lib/webauthn.ts). 65 bytes here would
+    // predict an address the server, the Identity contract and the rules have never seen.
+    expect(account.publicKey).toBe(`0x${credential.publicKey.slice(4)}`);
+    expect((account.publicKey.length - 2) / 2).toBe(64);
+  });
+
+  it('throws NoPasskeyOnDevice when nothing is stored, so sign-in can say "sign up first"', async () => {
+    clearCredential();
+    await expect(getPasskeyAccount()).rejects.toBeInstanceOf(NoPasskeyOnDevice);
   });
 });
 

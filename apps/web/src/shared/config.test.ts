@@ -38,6 +38,12 @@ describe('getConfig', () => {
     expect(() => getConfig()).toThrow('VITE_ADDR_TICKET');
   });
 
+  it('boots without a Pinata token: the attendee app never pins', () => {
+    for (const [key, value] of Object.entries(BASE)) vi.stubEnv(key, value);
+    vi.stubEnv('VITE_PINATA_JWT', '');
+    expect(getConfig().pinataJwt).toBe('');
+  });
+
   it('never hardcodes the chain id in logic', () => {
     for (const [key, value] of Object.entries(BASE)) vi.stubEnv(key, value);
     vi.stubEnv('VITE_CHAIN_ID', '143');

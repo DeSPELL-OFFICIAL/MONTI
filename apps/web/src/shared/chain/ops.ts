@@ -1,7 +1,7 @@
 import { encodeFunctionData, type Abi, type Hex } from 'viem';
 import type { SmartAccount } from 'viem/account-abstraction';
 import { getConfig } from '../config';
-import { identityAbi, organizersAbi, ticketAbi } from './abis';
+import { identityAbi, organizersAbi, ticketAbi, type UsedContract, type UsedFunction } from './abis';
 import { sendSponsoredOp, type SponsoredOpReceipt } from './sendSponsoredOp';
 
 /** The operation did not succeed — the contract reverted, or `wait` timed out before it
@@ -35,13 +35,16 @@ export async function sendOp(options: SendOpArgs): Promise<SponsoredOpReceipt> {
   return receipt;
 }
 
-type ContractOpArgs = Omit<SendOpArgs, 'to' | 'abi'>;
+/** The contract is fixed, and the function name is one `USED_ABI` declares for it — so a
+ *  write this app has not declared fails to compile instead of at the bundler. */
+type ContractOpArgs<C extends UsedContract> =
+  Omit<SendOpArgs, 'to' | 'abi' | 'functionName'> & { functionName: UsedFunction<C> };
 
-export const ticketOp = (options: ContractOpArgs) =>
+export const ticketOp = (options: ContractOpArgs<'Ticket'>) =>
   sendOp({ ...options, to: getConfig().addresses.ticket, abi: ticketAbi });
 
-export const identityOp = (options: ContractOpArgs) =>
+export const identityOp = (options: ContractOpArgs<'Identity'>) =>
   sendOp({ ...options, to: getConfig().addresses.identity, abi: identityAbi });
 
-export const organizersOp = (options: ContractOpArgs) =>
+export const organizersOp = (options: ContractOpArgs<'Organizers'>) =>
   sendOp({ ...options, to: getConfig().addresses.organizers, abi: organizersAbi });
