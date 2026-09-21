@@ -1,0 +1,15 @@
+node_modules
+dist
+.env*
+!.env.example
+contracts/out
+contracts/cache
+contracts/broadcast
+ios/App/Pods
+android/.gradle
+android/app/build
+.firebase
+.DS_Store
+apps/web/ios/App/Pods
+apps/web/android/.gradle
+apps/web/android/app/build
