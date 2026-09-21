@@ -5,6 +5,9 @@ import {Test} from "forge-std/Test.sol";
 import {Identity} from "../src/Identity.sol";
 import {Organizers} from "../src/Organizers.sol";
 import {Ticket} from "../src/Ticket.sol";
+import {P256} from "solady/utils/P256.sol";
+import {MockP256Precompile} from "./mocks/MockP256Precompile.sol";
+import {P256Vectors} from "./utils/P256Vectors.sol";
 
 abstract contract MontiTest is Test {
     Identity internal identity;
@@ -25,13 +28,31 @@ abstract contract MontiTest is Test {
     bytes32 internal constant DEV_Y = bytes32(uint256(0x2222));
     uint64 internal constant T0 = 1_800_000_000;
 
+    address internal constant P256_PRECOMPILE = address(0x100);
+
     function _deployMonti() internal {
         attester = vm.addr(ATTESTER_PK);
         identity = new Identity(attester);
         organizers = new Organizers();
         ticket = new Ticket(address(identity), address(organizers));
         organizers.setTicket(address(ticket));
+        _etchP256Mock();
         vm.warp(T0);
+    }
+
+    /// @dev Osaka+ EVMs (our evm_version, and Monad) ship the real EIP-7951 P256VERIFY precompile at
+    ///      0x100, which verifies the generated vectors for real — so we use it directly and skip the
+    ///      mock (Foundry also refuses to vm.etch a live precompile). The mock stays for EVMs without it.
+    function _etchP256Mock() internal {
+        if (P256.hasPrecompile()) return;
+        MockP256Precompile mock = new MockP256Precompile();
+        vm.etch(P256_PRECOMPILE, address(mock).code);
+        vm.label(P256_PRECOMPILE, "P256Precompile");
+    }
+
+    function _memberWithDeviceKey(address account, uint256 personSeed) internal {
+        vm.prank(attester);
+        identity.register(bytes32(personSeed), account, P256Vectors.DEVICE_X, P256Vectors.DEVICE_Y, 1);
     }
 
     /// @dev Default members are fully verified (kycLevel 1).
