@@ -26,13 +26,13 @@ function projectId(): string {
 }
 
 export function piiKeyName(): string {
-  const location = process.env.KMS_LOCATION ?? 'asia-northeast3';
+  const location = process.env.KMS_LOCATION ?? 'us-east1';
   const keyRing = process.env.KMS_KEY_RING ?? 'monti';
   return `projects/${projectId()}/locations/${location}/keyRings/${keyRing}/cryptoKeys/pii`;
 }
 
 export function attesterKeyName(version = '1'): string {
-  const location = process.env.KMS_LOCATION ?? 'asia-northeast3';
+  const location = process.env.KMS_LOCATION ?? 'us-east1';
   const keyRing = process.env.KMS_KEY_RING ?? 'monti';
   return `projects/${projectId()}/locations/${location}/keyRings/${keyRing}/cryptoKeys/attester/cryptoKeyVersions/${version}`;
 }

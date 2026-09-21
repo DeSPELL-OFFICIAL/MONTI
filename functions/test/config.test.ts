@@ -3,7 +3,7 @@ import { REGION, expectedOrigins } from '../src/config.js';
 
 describe('config', () => {
   it('pins the Seoul region for every function', () => {
-    expect(REGION).toBe('asia-northeast3');
+    expect(REGION).toBe('us-east1');
   });
 
   it('accepts both the web origin and the Android apk-key-hash origin', () => {

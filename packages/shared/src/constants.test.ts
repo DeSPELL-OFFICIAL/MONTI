@@ -52,7 +52,7 @@ describe('protocol timings', () => {
     expect(DEVICE_COOLDOWN_SECONDS).toBe(604_800);
     expect(HCE_AID).toBe('D2760000850101');
     expect(QR_PREFIX).toBe('MONTI1:');
-    expect(FIREBASE_REGION).toBe('asia-northeast3');
+    expect(FIREBASE_REGION).toBe('us-east1');
   });
 
   it('pins the social limits shared by rules and server code', () => {

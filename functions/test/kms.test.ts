@@ -102,7 +102,7 @@ describe('AAD binding', () => {
 describe('key name construction', () => {
   it('builds the pii key resource name from GCP_PROJECT_ID / asia-northeast3 / monti / pii', () => {
     expect(piiKeyName()).toBe(
-      'projects/monti-dev/locations/asia-northeast3/keyRings/monti/cryptoKeys/pii',
+      'projects/monti-dev/locations/us-east1/keyRings/monti/cryptoKeys/pii',
     );
   });
 });

@@ -44,7 +44,7 @@ export const DIDIT_WEBHOOK_TOLERANCE_SECONDS = 300;
 export const SNAPSHOT_TTL_SECONDS = 12 * 60 * 60;
 export const AUTH_CHALLENGE_TTL_SECONDS = 300;
 
-export const FIREBASE_REGION = 'asia-northeast3';
+export const FIREBASE_REGION = 'us-east1';
 
 /**
  * 관객 화면 카피에 등장하면 안 되는 금지어 목록(스펙 §3.2).
