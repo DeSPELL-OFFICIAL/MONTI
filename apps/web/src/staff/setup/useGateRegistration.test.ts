@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -36,7 +37,8 @@ vi.mock('../gate/gateKey', () => ({
   gateKeyCoordinates: (key: { x: string; y: string }) => ({ kx: key.x, ky: key.y }),
 }));
 
-const { gatePayloadText, useGateRegistration } = await import('./useGateRegistration');
+const { GATE_QR_PREFIX, gatePayloadText, parseGatePayloadText, useGateRegistration } =
+  await import('./useGateRegistration');
 
 /** What the hook is handed back by a chain that has already registered this device. */
 function registered(): void {
@@ -131,7 +133,11 @@ describe('gate registration', () => {
 
     const sent = submitPendingGate.mock.calls[0]?.[0];
     expect(result.current.payload).toEqual(sent);
-    expect(gatePayloadText(result.current.payload!)).toBe(JSON.stringify(sent));
+    const text = gatePayloadText(result.current.payload!);
+    // Scheme-tagged like the attendee QR, so an organizer's scanner has something to key on.
+    expect(text).toBe(`${GATE_QR_PREFIX}${JSON.stringify(sent)}`);
+    // And it reads back as the same four values, which is the only thing the tag is for.
+    expect(parseGatePayloadText(text)).toEqual(sent);
   });
 
   it('types a rejected application and keeps polling behind the fallback', async () => {
@@ -148,13 +154,44 @@ describe('gate registration', () => {
     await waitFor(() => expect(gateOf.mock.calls.length).toBeGreaterThan(1));
   });
 
-  it('separates a refused application from a signed-out one', async () => {
-    submitPendingGate.mockRejectedValue(
-      Object.assign(new Error('BAD_EVENT_ID'), { code: 'invalid-argument' }),
-    );
-    const { result } = renderHook(() => useGateRegistration({ eventId: '42', pollMs: 5 }));
+  it('keeps every backend reason code the staff member can act on', async () => {
+    // functions/src/functions/pendingGates.ts throws exactly these. Each one has a different
+    // answer, so each one has to survive the trip to the screen as itself.
+    for (const [code, reason, expected] of [
+      ['unauthenticated', 'AUTH_REQUIRED', 'AUTH_REQUIRED'],
+      ['permission-denied', 'NOT_YOUR_GATE', 'NOT_YOUR_GATE'],
+      ['resource-exhausted', 'TOO_MANY_PENDING', 'TOO_MANY_PENDING'],
+      ['not-found', 'UNKNOWN_EVENT', 'UNKNOWN_EVENT'],
+      ['invalid-argument', 'BAD_EVENT_ID', 'SUBMIT_REJECTED'],
+      ['invalid-argument', 'BAD_DEVICE_KEY', 'SUBMIT_REJECTED'],
+      ['internal', 'UNKNOWN', 'SUBMIT_REJECTED'],
+    ] as const) {
+      submitPendingGate.mockReset().mockRejectedValue(Object.assign(new Error(reason), { code }));
+      const { result, unmount } = renderHook(() => useGateRegistration({ eventId: '42', pollMs: 5 }));
+      await waitFor(() => expect(result.current.error).toBe(expected));
+      unmount();
+    }
+  });
 
-    await waitFor(() => expect(result.current.error).toBe('SUBMIT_REJECTED'));
+  it('asks only once per mount, even when StrictMode runs the effect twice', async () => {
+    const { result } = renderHook(() => useGateRegistration({ eventId: '42', pollMs: 5 }), {
+      wrapper: StrictMode,
+    });
+
+    await waitFor(() => expect(result.current.submitted).toBe(true));
+    // A second application per mount would be a second row in the organizer's queue.
+    expect(submitPendingGate).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    });
+    expect(submitPendingGate).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses nothing that is not ours when reading a scanned code back', () => {
+    expect(parseGatePayloadText(JSON.stringify({ eventId: '1' }))).toBeNull();
+    expect(parseGatePayloadText(`${GATE_QR_PREFIX}not json`)).toBeNull();
+    expect(parseGatePayloadText(`${GATE_QR_PREFIX}{"eventId":1}`)).toBeNull();
+    expect(parseGatePayloadText('MONTI1:{"eventId":"1"}')).toBeNull();
   });
 
   it('types a failed chain read, keeps retrying, and clears it on the next good one', async () => {

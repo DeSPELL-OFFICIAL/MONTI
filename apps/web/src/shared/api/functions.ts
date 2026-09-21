@@ -188,9 +188,12 @@ export const api = {
   >('listAttendees'),
   // Sub-plan 04's staff gate-registration screen calls this instead of writing Firestore directly.
   submitPendingGate: call<PendingGateSubmission, { ok: true }>('submitPendingGate'),
+  // The row is the server's `PendingGateRow` (functions/src/functions/pendingGates.ts): the
+  // three `registerGate` arguments plus the time it arrived. There is no label — the device
+  // never sends one — and the timestamp is `submittedAt`, not `createdAt`.
   listPendingGates: call<
     { eventId: string },
-    { gates: Array<{ gateAccount: Hex; kx: Hex; ky: Hex; label: string; createdAt: number }> }
+    { gates: Array<{ gateAccount: Hex; kx: Hex; ky: Hex; submittedAt: number }> }
   >('listPendingGates'),
   createInvite: call<
     { orgId: string; role: 'admin' | 'manager'; phoneE164: string; permissionBits?: number; canApprove?: boolean },

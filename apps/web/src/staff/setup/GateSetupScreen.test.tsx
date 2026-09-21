@@ -1,5 +1,6 @@
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { GateRegistration } from './useGateRegistration';
@@ -17,7 +18,7 @@ vi.mock('./useGateRegistration', async (importOriginal) => ({
   useGateRegistration: (params?: { eventId?: string }) => useGateRegistration(params),
 }));
 
-const { GateSetupScreen } = await import('./GateSetupScreen');
+const { GateSetupScreen, PHONE_SIGN_IN_PATH, STAFF_SETUP_PATH } = await import('./GateSetupScreen');
 const { staffSetupKo } = await import('./copy');
 const { SEEDED_EVENT_ID } = await import('../constants');
 
@@ -35,13 +36,26 @@ function registration(overrides: Partial<GateRegistration> = {}): GateRegistrati
   };
 }
 
+/** Stands in for the attendee phone screen, and reports the return target it was handed. */
+function SignInProbe() {
+  const { state } = useLocation();
+  return <div data-testid="sign-in">{(state as { returnTo?: string } | null)?.returnTo ?? ''}</div>;
+}
+
 /**
  * The fallback QR is generated asynchronously, so a bare `render` leaves one React update
  * outstanding. Flushing it here keeps every assertion below act-clean without any test having
  * to know that the code exists.
  */
 async function renderSetup(): Promise<ReturnType<typeof render>> {
-  const view = render(<GateSetupScreen />);
+  const view = render(
+    <MemoryRouter initialEntries={[STAFF_SETUP_PATH]}>
+      <Routes>
+        <Route path={STAFF_SETUP_PATH} element={<GateSetupScreen />} />
+        <Route path={PHONE_SIGN_IN_PATH} element={<SignInProbe />} />
+      </Routes>
+    </MemoryRouter>,
+  );
   await act(async () => undefined);
   return view;
 }
@@ -52,10 +66,25 @@ beforeEach(() => {
 });
 
 describe('gate setup screen', () => {
-  it('applies for the seeded demo event without anyone typing', async () => {
+  it('asks before it applies: nothing is submitted on mount', async () => {
     await renderSetup();
-    expect(useGateRegistration).toHaveBeenCalledWith({ eventId: SEEDED_EVENT_ID });
+    // `undefined` is what makes the hook poll without submitting. An event registered on the
+    // wrong number cannot be moved: `registerGate` refuses the account a second time and
+    // `revokeGate` does not free it.
+    expect(useGateRegistration).toHaveBeenCalledWith({ eventId: undefined });
+    expect(useGateRegistration).not.toHaveBeenCalledWith({ eventId: SEEDED_EVENT_ID });
+    // The seeded event is prefilled so the demo is one press away, not zero.
     expect(screen.getByDisplayValue(SEEDED_EVENT_ID)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: staffSetupKo.eventApply })).toBeEnabled();
+    expect(screen.getByText(staffSetupKo.notRequested)).toBeInTheDocument();
+  });
+
+  it('applies for the prefilled event on one press', async () => {
+    const user = userEvent.setup();
+    await renderSetup();
+
+    await user.click(screen.getByRole('button', { name: staffSetupKo.eventApply }));
+    expect(useGateRegistration).toHaveBeenCalledWith({ eventId: SEEDED_EVENT_ID });
   });
 
   it('applies for a different event only once the staff member confirms it', async () => {
@@ -83,7 +112,10 @@ describe('gate setup screen', () => {
   });
 
   it('says the request is in, and how long it has been in, while it waits', async () => {
+    const user = userEvent.setup();
     await renderSetup();
+    await user.click(screen.getByRole('button', { name: staffSetupKo.eventApply }));
+
     expect(screen.getByText(staffSetupKo.submitted)).toBeInTheDocument();
     expect(screen.getByText(/초째 기다리는 중$/)).toBeInTheDocument();
   });
@@ -106,6 +138,9 @@ describe('gate setup screen', () => {
     for (const [error, line] of [
       ['KEY_UNAVAILABLE', staffSetupKo.errKeyUnavailable],
       ['AUTH_REQUIRED', staffSetupKo.errAuthRequired],
+      ['NOT_YOUR_GATE', staffSetupKo.errNotYourGate],
+      ['TOO_MANY_PENDING', staffSetupKo.errTooManyPending],
+      ['UNKNOWN_EVENT', staffSetupKo.errUnknownEvent],
       ['SUBMIT_REJECTED', staffSetupKo.errSubmitRejected],
       ['CHAIN_UNREACHABLE', staffSetupKo.errChainUnreachable],
     ] as const) {
@@ -114,6 +149,23 @@ describe('gate setup screen', () => {
       expect(screen.getByText(line)).toBeInTheDocument();
       view.unmount();
     }
+  });
+
+  it('offers a way in, and comes back here, when the phone is signed out', async () => {
+    const user = userEvent.setup();
+    useGateRegistration.mockReturnValue(registration({ error: 'AUTH_REQUIRED', submitted: false }));
+    await renderSetup();
+
+    await user.click(screen.getByRole('button', { name: staffSetupKo.signIn }));
+    // The attendee phone step, which is the only sign-in this app ships, plus the target that
+    // brings the staff member back to the gate instead of into the attendee app.
+    expect(await screen.findByTestId('sign-in')).toHaveTextContent(STAFF_SETUP_PATH);
+  });
+
+  it('offers no sign-in button for a failure signing in would not fix', async () => {
+    useGateRegistration.mockReturnValue(registration({ error: 'TOO_MANY_PENDING', submitted: false }));
+    await renderSetup();
+    expect(screen.queryByRole('button', { name: staffSetupKo.signIn })).toBeNull();
   });
 
   it('hands off the gate, event and organizer ids once the chain says it is registered', async () => {
