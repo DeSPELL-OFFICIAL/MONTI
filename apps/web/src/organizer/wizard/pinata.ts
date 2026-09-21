@@ -111,19 +111,33 @@ export interface PinnedEvent {
 }
 
 /**
- * Pins the picture and the metadata document in one server call. `meta` is exactly the two
- * readable fields the document carries beside the image — the same `{ name, description,
- * image }` the discover screens read back.
+ * Pins the picture and the metadata document in one server call. `meta` is the readable half of
+ * the event — the `{ name, description, venue, category, region }` the discover screens read
+ * back out of the document beside the image, because the chain holds only hashes of them.
+ *
+ * All five are required here: `validateDraft` refuses a blank venue, an unlisted region and a
+ * theme outside the four before Publish can reach this, so there is no half-filled call to
+ * describe. `category` is a number — the server refuses a plain string `BAD_META`, and the
+ * reader only takes it when `typeof === 'number'` (`shared/envio/ipfs.ts`).
  */
 export async function pinEventImage(args: {
   orgId: string;
   image: PreparedImage;
   name: string;
   description: string;
+  venue: string;
+  category: number;
+  region: string;
 }): Promise<PinnedEvent> {
   return api.pinEventMetadata({
     orgId: args.orgId,
     image: { base64: args.image.base64, mime: args.image.mime },
-    meta: { name: args.name, description: args.description },
+    meta: {
+      name: args.name,
+      description: args.description,
+      venue: args.venue,
+      category: args.category,
+      region: args.region,
+    },
   });
 }

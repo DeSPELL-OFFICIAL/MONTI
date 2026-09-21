@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { base64UrlEncode } from '@monti/shared';
 
-vi.mock('../config', () => ({ getConfig: () => ({ rpId: 'monti.app' }) }));
+vi.mock('../config', () => ({ getConfig: () => ({ rpId: 'monti.despell.io' }) }));
 vi.mock('@capacitor/core', () => ({ Capacitor: { isNativePlatform: () => false } }));
 
 /** The authenticator, standing in for the browser: whatever it is asked to sign, it signs. */
@@ -105,7 +105,7 @@ describe('signPasskeyAssertion', () => {
     // The challenge reaches the authenticator as the hash it signs, and the stored credential
     // is the one asked — a different credential would resolve to a different account.
     expect(toWebAuthnAccount).toHaveBeenCalledWith(
-      expect.objectContaining({ credential: expect.objectContaining({ id: 'cred' }), rpId: 'monti.app' }),
+      expect.objectContaining({ credential: expect.objectContaining({ id: 'cred' }), rpId: 'monti.despell.io' }),
     );
     expect(sign).toHaveBeenCalledWith({ hash: `0x${'2a'.repeat(32)}` });
     expect(assertion).toMatchObject({ id: 'cred', response: { clientDataJSON: 'e30' } });

@@ -59,6 +59,57 @@ describe('callable wrappers', () => {
   });
 
   /**
+   * `listInvites` answers `{ invites }` and every caller wants the rows, so the wrapper unwraps
+   * — the same shape `pendingOffers` and `listPendingGates` have. A row is exactly what
+   * `invites.ts` `InviteRow` carries: no phone, no permission bits, nobody's uid, and
+   * `requiredSender` only where the server put one (an `accepted` row).
+   */
+  it('unwraps the invitation list to its rows', async () => {
+    const owner = `0x${'ab'.repeat(20)}` as const;
+    nextResult = {
+      invites: [
+        { inviteId: 'i2', role: 'admin', status: 'accepted', createdAt: 40, expiresAt: 80, requiredSender: owner },
+        { inviteId: 'i1', role: 'manager', status: 'sent', createdAt: 30, expiresAt: 70 },
+      ],
+    };
+    await expect(api.listInvites({ orgId: '9' })).resolves.toEqual([
+      { inviteId: 'i2', role: 'admin', status: 'accepted', createdAt: 40, expiresAt: 80, requiredSender: owner },
+      { inviteId: 'i1', role: 'manager', status: 'sent', createdAt: 30, expiresAt: 70 },
+    ]);
+  });
+
+  /**
+   * `listPinned` is the only read path an organiser has to their own notices — they hold no
+   * ticket, so `joinEventChat` refuses them the room and the rules refuse them the messages.
+   * It answers `{ messages }`, unwrapped here the same way; a row carries no uid and no
+   * report count.
+   */
+  it('unwraps the pinned notices to their rows', async () => {
+    nextResult = { messages: [{ messageId: 'm1', text: '문 앞에서 만나요', createdAt: 7 }] };
+    await expect(api.listPinned({ eventId: '5' })).resolves.toEqual([
+      { messageId: 'm1', text: '문 앞에서 만나요', createdAt: 7 },
+    ]);
+  });
+
+  /**
+   * The landed `pinEventMetadata` takes three optional readable fields beside the two required
+   * ones, and `category` is a **number** — the chain's `uint8`. A string there is refused with
+   * `BAD_META`, and the attendee reader only reads `category` when it is a number.
+   */
+  it('carries the optional metadata fields, with the theme as a number', async () => {
+    await expect(
+      api.pinEventMetadata({
+        orgId: '9',
+        image: { base64: 'AQID', mime: 'image/png' },
+        meta: { name: 'n', description: 'd', venue: '한남동', category: 2, region: 'KR-11' },
+      }),
+    ).resolves.toMatchObject({
+      name: 'pinEventMetadata',
+      payload: { meta: { name: 'n', description: 'd', venue: '한남동', category: 2, region: 'KR-11' } },
+    });
+  });
+
+  /**
    * `pinMessage` takes `messageId`, never `msgId` — the server refuses an unknown target with
    * `BAD_PIN_TARGET` — and authoring a notice is the `text` shape, with no `pinned` alongside
    * it (`BAD_PINNED`). Both go to the same callable and both answer with the message id.

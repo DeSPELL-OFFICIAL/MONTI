@@ -24,9 +24,13 @@ const listAttendees = vi.fn(async () => [
   { tokenId: '2', nickname: 'bob', tier: 0, checkedIn: false, kycLevel: 0 as const },
 ]);
 const pinMessage = vi.fn(async () => ({ ok: true as const, messageId: 'm1' }));
+// The notice section this screen embeds reads the notices already pinned as soon as it renders.
+// It is stubbed empty here rather than left out: an absent mock is a `TypeError` inside an
+// effect, which vitest reports as an unhandled rejection long after the assertion it broke.
+const listPinned = vi.fn(async () => []);
 vi.mock('../shared/api/functions', async (orig) => ({
   ...(await orig<typeof import('../shared/api/functions')>()),
-  api: { listAttendees, pinMessage },
+  api: { listAttendees, pinMessage, listPinned },
 }));
 
 const DRAFT_EVENT = {

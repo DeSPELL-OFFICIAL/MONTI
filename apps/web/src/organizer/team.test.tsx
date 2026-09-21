@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -25,14 +25,35 @@ vi.mock('../shared/chain/reads', async (orig) => ({
   readOrganizers: () => ({ ownerOf, adminBitsOf, managerOf }),
 }));
 
+/** One row of `listInvites`, which carries no number, no permission bits and nobody's uid. */
+interface ServerInvite {
+  inviteId: string;
+  role: 'admin' | 'manager';
+  status: string;
+  createdAt: number;
+  expiresAt?: number;
+  requiredSender?: string;
+}
+
+/**
+ * Two epoch seconds fixed on either side of every run of this suite. Expiry is a comparison
+ * against the clock, so a fixture built from `Date.now()` would drift along with the thing it
+ * is meant to pin down — one of these is 2020 and the other 2096, and neither can be overtaken
+ * while a test runs.
+ */
+const LONG_AGO = 1_600_000_000;
+const FAR_OFF = 4_000_000_000;
+
 const createInvite = vi.fn(async () => ({ inviteId: 'i1', link: 'https://monti.test/org/invite/i1' }));
 const revokeInvite = vi.fn(async () => ({ status: 'revoked' as const }));
+const listInvites = vi.fn(async (_args: { orgId: string }): Promise<ServerInvite[]> => []);
 vi.mock('../shared/api/functions', async (orig) => ({
   ...(await orig<typeof import('../shared/api/functions')>()),
-  api: { createInvite, revokeInvite },
+  api: { createInvite, revokeInvite, listInvites },
 }));
 
 const { OpReverted } = await import('../shared/chain/ops');
+const { CallableError } = await import('../shared/api/functions');
 const { organizerCopy } = await import('./copy');
 const { Team } = await import('./Team');
 const copy = organizerCopy.ko.team;
@@ -46,11 +67,33 @@ function open() {
   );
 }
 
+/** The one row a grant can start from: `requiredSender` is the server's `ownerOf` as it is now. */
+function accepted(role: 'admin' | 'manager'): ServerInvite {
+  return { inviteId: 'a1', role, status: 'accepted', createdAt: LONG_AGO, requiredSender: OWNER };
+}
+
+/** Lists one accepted row and presses its grant action, which is what opens the panel. */
+async function openGrant(user: ReturnType<typeof userEvent.setup>, role: 'admin' | 'manager') {
+  listInvites.mockResolvedValue([accepted(role)]);
+  open();
+  await waitFor(() => expect(ownerOf).toHaveBeenCalled());
+  await user.click(await screen.findByRole('button', { name: copy.grant }));
+}
+
+/** One of several matches, as `noUncheckedIndexedAccess` wants it read: a match that is not
+ *  there is a failed test, not something to reach past with `?.`. */
+function nth(found: HTMLElement[], index: number): HTMLElement {
+  const one = found[index];
+  if (one === undefined) throw new Error(`no match at ${index}`);
+  return one;
+}
+
 beforeEach(() => {
   ownerOf.mockResolvedValue(OWNER);
   adminBitsOf.mockResolvedValue(0);
   managerOf.mockResolvedValue({ exists: false, canApprove: false });
   createInvite.mockResolvedValue({ inviteId: 'i1', link: 'https://monti.test/org/invite/i1' });
+  listInvites.mockResolvedValue([]);
 });
 
 describe('inviting somebody', () => {
@@ -66,7 +109,27 @@ describe('inviting somebody', () => {
       }),
     );
     expect(await screen.findByText(/monti.test\/org\/invite\/i1/)).toBeInTheDocument();
-    expect(screen.getByText(copy.sessionOnly)).toBeInTheDocument();
+    expect(screen.getByText(copy.linkOnce)).toBeInTheDocument();
+  });
+
+  /**
+   * `listInvites` answers with the invite id and nothing else, so an invitation made here has
+   * to appear without a refetch or the organiser would watch their own invitation vanish.
+   */
+  it('puts the invitation it just made at the top of the list without asking again', async () => {
+    const user = userEvent.setup();
+    listInvites.mockResolvedValue([
+      { inviteId: 'old', role: 'admin', status: 'sent', createdAt: LONG_AGO, expiresAt: FAR_OFF },
+    ]);
+    open();
+    await user.type(screen.getByLabelText(copy.phone), '+821012345678');
+    await user.click(screen.getByRole('button', { name: copy.invite }));
+
+    await waitFor(() => expect(screen.getAllByRole('listitem')).toHaveLength(2));
+    const rows = screen.getAllByRole('listitem');
+    expect(within(nth(rows, 0)).getByText(/monti.test\/org\/invite\/i1/)).toBeInTheDocument();
+    expect(within(nth(rows, 0)).getByText(copy.status.sent)).toBeInTheDocument();
+    expect(listInvites).toHaveBeenCalledTimes(1);
   });
 
   it('refuses a number that is not in international form before it leaves', async () => {
@@ -85,7 +148,76 @@ describe('inviting somebody', () => {
     await user.click(screen.getByRole('button', { name: copy.invite }));
     await user.click(await screen.findByRole('button', { name: copy.revoke }));
     await waitFor(() => expect(revokeInvite).toHaveBeenCalledWith({ inviteId: 'i1' }));
-    expect(await screen.findByText(copy.revoked)).toBeInTheDocument();
+    expect(await screen.findByText(copy.status.revoked)).toBeInTheDocument();
+  });
+});
+
+describe('the invitations the server lists', () => {
+  it('shows the ones this session did not create, with their role and their state', async () => {
+    listInvites.mockResolvedValue([
+      { inviteId: 's1', role: 'admin', status: 'sent', createdAt: LONG_AGO, expiresAt: FAR_OFF },
+      { inviteId: 's2', role: 'manager', status: 'accepted', createdAt: LONG_AGO, requiredSender: OWNER },
+    ]);
+    open();
+
+    const rows = await screen.findAllByRole('listitem');
+    expect(listInvites).toHaveBeenCalledWith({ orgId: '9' });
+    expect(rows).toHaveLength(2);
+    expect(within(nth(rows, 0)).getByText(copy.admin)).toBeInTheDocument();
+    expect(within(nth(rows, 0)).getByText(copy.status.sent)).toBeInTheDocument();
+    expect(within(nth(rows, 1)).getByText(copy.manager)).toBeInTheDocument();
+    expect(within(nth(rows, 1)).getByText(copy.status.accepted)).toBeInTheDocument();
+    // The link is never in the answer, so a row this session did not create cannot show one.
+    expect(screen.queryByText(copy.linkOnce)).not.toBeInTheDocument();
+  });
+
+  it('says there is nothing to show when the organisation has no invitations', async () => {
+    open();
+    expect(await screen.findByText(copy.invitesEmpty)).toBeInTheDocument();
+  });
+
+  /** `acceptInvite` refuses an invitation past its deadline, so the stored word outlives it. */
+  it('reads a sent invitation whose deadline has passed as expired', async () => {
+    listInvites.mockResolvedValue([
+      { inviteId: 'e1', role: 'manager', status: 'sent', createdAt: LONG_AGO, expiresAt: LONG_AGO + 60 },
+    ]);
+    open();
+    expect(await screen.findByText(copy.status.expired)).toBeInTheDocument();
+    expect(screen.queryByText(copy.status.sent)).not.toBeInTheDocument();
+  });
+
+  /** A `0` is a `serverTimestamp()` that had not settled when the row was read: unknown, not past. */
+  it('leaves a deadline the server had not written yet as sent rather than expired', async () => {
+    listInvites.mockResolvedValue([
+      { inviteId: 'u1', role: 'manager', status: 'sent', createdAt: 0, expiresAt: 0 },
+    ]);
+    open();
+    expect(await screen.findByText(copy.status.sent)).toBeInTheDocument();
+    expect(screen.queryByText(copy.status.expired)).not.toBeInTheDocument();
+  });
+
+  /**
+   * `permission-denied` is the ordinary answer for a manager without `PERM_MANAGE_MANAGERS`,
+   * not a failure: the rest of the screen still has work to do for them.
+   */
+  it('says the list is not theirs to see instead of raising a failure', async () => {
+    listInvites.mockRejectedValue(new CallableError('permission-denied', 'NOT_ALLOWED_TO_INVITE'));
+    open();
+    expect(await screen.findByText(copy.invitesNotAllowed)).toBeInTheDocument();
+    expect(screen.queryByText(copy.problems.failed)).not.toBeInTheDocument();
+    expect(screen.queryByText(copy.problems.notAllowed)).not.toBeInTheDocument();
+    expect(screen.getByLabelText(copy.phone)).toBeInTheDocument();
+  });
+
+  it('withdraws an invitation somebody else created', async () => {
+    const user = userEvent.setup();
+    listInvites.mockResolvedValue([
+      { inviteId: 's9', role: 'manager', status: 'sent', createdAt: LONG_AGO, expiresAt: FAR_OFF },
+    ]);
+    open();
+    await user.click(await screen.findByRole('button', { name: copy.revoke }));
+    await waitFor(() => expect(revokeInvite).toHaveBeenCalledWith({ inviteId: 's9' }));
+    expect(await screen.findByText(copy.status.revoked)).toBeInTheDocument();
   });
 });
 
@@ -97,17 +229,26 @@ describe('putting the role on chain', () => {
    */
   it('offers the last step to the owner only', async () => {
     ownerOf.mockResolvedValue(STRANGER);
+    listInvites.mockResolvedValue([accepted('manager')]);
     open();
+    expect(await screen.findByText(copy.status.accepted)).toBeInTheDocument();
     expect(await screen.findByText(copy.notOwner)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: copy.grant })).not.toBeInTheDocument();
   });
 
+  it('names the account the last step has to be sent from on the accepted row', async () => {
+    listInvites.mockResolvedValue([accepted('manager')]);
+    open();
+    expect(await screen.findByText(`${copy.requiredSender} ${OWNER}`)).toBeInTheDocument();
+  });
+
   it('sends setManager with the approval right the organiser chose', async () => {
     const user = userEvent.setup();
-    open();
-    await waitFor(() => expect(ownerOf).toHaveBeenCalled());
+    await openGrant(user, 'manager');
     await user.type(screen.getByLabelText(copy.account), INVITED);
-    await user.click(screen.getByLabelText(copy.requestOnly));
+    // The approval right is one choice the screen makes, shown both where an invitation is
+    // written and where the role is granted, so either checkbox moves the same value.
+    await user.click(nth(screen.getAllByLabelText(copy.requestOnly), 0));
     await user.click(screen.getByRole('button', { name: copy.grant }));
 
     await waitFor(() =>
@@ -117,11 +258,10 @@ describe('putting the role on chain', () => {
     );
   });
 
+  /** The row's own role decides the write, not whatever the invite form happens to be set to. */
   it('sends setAdmin with exactly the permission bits that were ticked', async () => {
     const user = userEvent.setup();
-    open();
-    await waitFor(() => expect(ownerOf).toHaveBeenCalled());
-    await user.selectOptions(screen.getByLabelText(copy.role), 'admin');
+    await openGrant(user, 'admin');
     await user.type(screen.getByLabelText(copy.account), INVITED);
     // Starts on createEvent|manageGates (1|2); ticking approveOverride makes it 7.
     await user.click(screen.getByLabelText(copy.perms.approveOverride));
@@ -141,8 +281,7 @@ describe('putting the role on chain', () => {
   it('reads completion off the chain rather than waiting on the invite document', async () => {
     const user = userEvent.setup();
     managerOf.mockResolvedValue({ exists: true, canApprove: false });
-    open();
-    await waitFor(() => expect(ownerOf).toHaveBeenCalled());
+    await openGrant(user, 'manager');
     await user.type(screen.getByLabelText(copy.account), INVITED);
     await user.click(screen.getByRole('button', { name: copy.check }));
 
@@ -152,8 +291,7 @@ describe('putting the role on chain', () => {
 
   it('refuses an address that is not one before anything is sent', async () => {
     const user = userEvent.setup();
-    open();
-    await waitFor(() => expect(ownerOf).toHaveBeenCalled());
+    await openGrant(user, 'manager');
     await user.type(screen.getByLabelText(copy.account), '0xnope');
     await user.click(screen.getByRole('button', { name: copy.grant }));
     expect(await screen.findByText(copy.problems.account)).toBeInTheDocument();
@@ -163,8 +301,7 @@ describe('putting the role on chain', () => {
 
 describe('what comes back from the grant', () => {
   async function grant(user: ReturnType<typeof userEvent.setup>) {
-    open();
-    await waitFor(() => expect(ownerOf).toHaveBeenCalled());
+    await openGrant(user, 'manager');
     await user.type(screen.getByLabelText(copy.account), INVITED);
     await user.click(screen.getByRole('button', { name: copy.grant }));
   }
@@ -221,8 +358,7 @@ describe('what comes back from the grant', () => {
    */
   it('refuses a mixed-case address whose checksum does not add up', async () => {
     const user = userEvent.setup();
-    open();
-    await waitFor(() => expect(ownerOf).toHaveBeenCalled());
+    await openGrant(user, 'manager');
     await user.type(screen.getByLabelText(copy.account), `0xA${INVITED.slice(3)}`);
     await user.click(screen.getByRole('button', { name: copy.grant }));
     expect(await screen.findByText(copy.problems.account)).toBeInTheDocument();

@@ -1,11 +1,13 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { PinnedMessage } from '../shared/api/functions';
 
 const pinMessage = vi.fn(async () => ({ ok: true as const, messageId: 'm1' }));
+const listPinned = vi.fn<(args: { eventId: string }) => Promise<PinnedMessage[]>>(async () => []);
 vi.mock('../shared/api/functions', async (orig) => ({
   ...(await orig<typeof import('../shared/api/functions')>()),
-  api: { pinMessage },
+  api: { pinMessage, listPinned },
 }));
 
 // Nothing here may reach Firestore: `pinned` is a permission claim and the rules refuse it
@@ -19,6 +21,7 @@ const copy = organizerCopy.ko.announce;
 
 beforeEach(() => {
   pinMessage.mockResolvedValue({ ok: true, messageId: 'm1' });
+  listPinned.mockResolvedValue([]);
 });
 
 describe('the organiser notice', () => {
@@ -32,16 +35,91 @@ describe('the organiser notice', () => {
     expect(firestore).not.toHaveBeenCalled();
   });
 
-  /** The organiser holds no ticket, so there is no room to read back — only what was just sent. */
-  it('lists what it posted this session and says that is all it can show', async () => {
-    const user = userEvent.setup();
+  /**
+   * The organiser holds no ticket, so the room itself is closed to them; `listPinned` is the
+   * only way a notice posted before this browser was opened can appear at all.
+   */
+  it('lists the notices pinned in an earlier session, asking by the event it was given', async () => {
+    listPinned.mockResolvedValueOnce([
+      { messageId: 'm2', text: '어제 올린 공지', createdAt: 200 },
+      { messageId: 'm1', text: '그제 올린 공지', createdAt: 100 },
+    ]);
     render(<Announce eventId="5" />);
-    await user.type(screen.getByRole('textbox'), '공지 하나');
+
+    expect(await screen.findByText('어제 올린 공지')).toBeInTheDocument();
+    expect(screen.getByText('그제 올린 공지')).toBeInTheDocument();
+    expect(listPinned).toHaveBeenCalledWith({ eventId: '5' });
+  });
+
+  it('keeps the order the server gave and puts what it just posted above it', async () => {
+    const user = userEvent.setup();
+    listPinned.mockResolvedValueOnce([
+      { messageId: 'm2', text: '어제 올린 공지', createdAt: 200 },
+      { messageId: 'm1', text: '그제 올린 공지', createdAt: 100 },
+    ]);
+    pinMessage.mockResolvedValueOnce({ ok: true, messageId: 'm9' });
+    render(<Announce eventId="5" />);
+    await screen.findByText('어제 올린 공지');
+
+    await user.type(screen.getByRole('textbox'), '방금 올린 공지');
     await user.click(screen.getByRole('button', { name: copy.post }));
 
-    expect(await screen.findByText('공지 하나')).toBeInTheDocument();
-    expect(screen.getByText(copy.sessionOnly)).toBeInTheDocument();
+    expect(await screen.findByText('방금 올린 공지')).toBeInTheDocument();
+    expect(screen.getAllByRole('listitem').map((row) => row.textContent)).toEqual([
+      '방금 올린 공지',
+      '어제 올린 공지',
+      '그제 올린 공지',
+    ]);
     expect(screen.getByRole('textbox')).toHaveValue('');
+  });
+
+  /** The same notice arrives twice — once from `pinMessage`, once inside the page it lands in. */
+  it('lists a notice once when the load catches up with what was just posted', async () => {
+    const user = userEvent.setup();
+    let answer: (rows: PinnedMessage[]) => void = () => {};
+    listPinned.mockReturnValueOnce(
+      new Promise<PinnedMessage[]>((resolve) => {
+        answer = resolve;
+      }),
+    );
+    pinMessage.mockResolvedValueOnce({ ok: true, messageId: 'm9' });
+    render(<Announce eventId="5" />);
+    await user.type(screen.getByRole('textbox'), '방금 올린 공지');
+    await user.click(screen.getByRole('button', { name: copy.post }));
+    expect(await screen.findByText('방금 올린 공지')).toBeInTheDocument();
+
+    answer([
+      { messageId: 'm9', text: '방금 올린 공지', createdAt: 300 },
+      { messageId: 'm1', text: '어제 올린 공지', createdAt: 100 },
+    ]);
+
+    expect(await screen.findByText('어제 올린 공지')).toBeInTheDocument();
+    expect(screen.getAllByText('방금 올린 공지')).toHaveLength(1);
+  });
+
+  it('says there is no notice yet rather than showing an empty list', async () => {
+    render(<Announce eventId="5" />);
+    expect(await screen.findByText(copy.none)).toBeInTheDocument();
+  });
+
+  /** A history nobody could read is not a refusal to post, and must not be dressed as one. */
+  it('says the load failed on its own line, and posts anyway', async () => {
+    const user = userEvent.setup();
+    listPinned.mockRejectedValueOnce(
+      Object.assign(new Error('NOT_ORGANIZER_ADMIN'), { code: 'permission-denied' }),
+    );
+    pinMessage.mockResolvedValueOnce({ ok: true, messageId: 'm9' });
+    render(<Announce eventId="5" />);
+
+    expect(await screen.findByText(copy.loadFailed)).toBeInTheDocument();
+    expect(screen.queryByText(copy.notAllowed)).not.toBeInTheDocument();
+    expect(screen.queryByText(copy.failed)).not.toBeInTheDocument();
+
+    await user.type(screen.getByRole('textbox'), '그래도 올린 공지');
+    await user.click(screen.getByRole('button', { name: copy.post }));
+
+    expect(await screen.findByText('그래도 올린 공지')).toBeInTheDocument();
+    expect(screen.getByText(copy.loadFailed)).toBeInTheDocument();
   });
 
   it('says who may post rather than "try again" when the server refuses this caller', async () => {

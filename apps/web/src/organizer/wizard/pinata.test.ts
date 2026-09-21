@@ -2,7 +2,21 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
-const pinEventMetadata = vi.fn(async () => ({ imageCid: 'bafkImage', metadataCid: 'bafyMeta' }));
+/**
+ * The argument as the callable takes it (functions/src/functions/organizer.ts `requireMeta`),
+ * typed here so the recorded call can be read field by field rather than only compared whole —
+ * `category` is the one value whose *type* matters as much as its value.
+ */
+interface PinCall {
+  orgId: string;
+  image: { base64: string; mime: string };
+  meta: { name: string; description: string; venue: string; category: number; region: string };
+}
+
+const pinEventMetadata = vi.fn(async (_args: PinCall) => ({
+  imageCid: 'bafkImage',
+  metadataCid: 'bafyMeta',
+}));
 vi.mock('../../shared/api/functions', async (orig) => ({
   ...(await orig<typeof import('../../shared/api/functions')>()),
   api: { pinEventMetadata },
@@ -53,14 +67,42 @@ describe('pinEventImage', () => {
       image: { base64: 'AQID', mime: 'image/png', fileName: 'a.png' },
       name: '재즈 나이트',
       description: '한남동 라이브',
+      venue: '한남동 어딘가',
+      category: 2,
+      region: 'KR-11',
     });
     expect(pinEventMetadata).toHaveBeenCalledWith({
       orgId: '9',
       image: { base64: 'AQID', mime: 'image/png' },
-      meta: { name: '재즈 나이트', description: '한남동 라이브' },
+      meta: {
+        name: '재즈 나이트',
+        description: '한남동 라이브',
+        venue: '한남동 어딘가',
+        category: 2,
+        region: 'KR-11',
+      },
     });
     expect(result).toEqual({ imageCid: 'bafkImage', metadataCid: 'bafyMeta' });
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  /**
+   * `toHaveBeenCalledWith` would pass on the string `'2'` as readily as on the number, and both
+   * ends refuse it: the server answers `BAD_META` to a plain string, and the attendee reader
+   * only takes `category` when `typeof === 'number'` (`shared/envio/ipfs.ts`).
+   */
+  it('sends the theme as the number the chain and the reader both want', async () => {
+    await pinEventImage({
+      orgId: '9',
+      image: { base64: 'AQID', mime: 'image/png', fileName: 'a.png' },
+      name: '재즈 나이트',
+      description: '한남동 라이브',
+      venue: '한남동 어딘가',
+      category: 2,
+      region: 'KR-11',
+    });
+    const call = pinEventMetadata.mock.calls.at(-1)?.[0];
+    expect(typeof call?.meta.category).toBe('number');
   });
 });
 

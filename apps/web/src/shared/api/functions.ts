@@ -163,6 +163,42 @@ export interface InviteCalldata {
   requiredSender: Hex;
 }
 
+/**
+ * One invitation as the team screen reads it (functions/src/functions/invites.ts `InviteRow`).
+ * It carries no phone number, no permission bits and nobody's uid — the number is only ever an
+ * HMAC index on the server, and the bits live on chain.
+ *
+ * `createdAt` and `expiresAt` are epoch **seconds**, and either is `0` for a row whose
+ * `serverTimestamp()` had not settled when it was read — not a date in 1970, an unknown one.
+ * `requiredSender` is present on an `accepted` row only: that is the one state where calldata
+ * is waiting, and the value is `ownerOf` as it is *now*, not whatever the invitation stored.
+ */
+export interface InviteRow {
+  inviteId: string;
+  role: 'admin' | 'manager';
+  /** The stored word, passed through: `sent`, `accepted` or `revoked`. */
+  status: string;
+  createdAt: number;
+  expiresAt?: number;
+  requiredSender?: Hex;
+}
+
+/** Same unwrapping as `pendingOffers`: the callable answers `{ invites }`. */
+const callListInvites = call<{ orgId: string }, { invites: InviteRow[] }>('listInvites');
+
+/**
+ * One pinned notice (functions/src/functions/pinMessage.ts `PinnedMessage`). Neither the room
+ * identity that wrote it nor its report count leaves the server. `createdAt` is epoch seconds.
+ */
+export interface PinnedMessage {
+  messageId: string;
+  text: string;
+  createdAt: number;
+}
+
+/** Same unwrapping again: the callable answers `{ messages }`. */
+const callListPinned = call<{ eventId: string }, { messages: PinnedMessage[] }>('listPinned');
+
 /** Authoring a notice, or turning the pin of an existing message on and off. Never both. */
 export type PinMessageArgs =
   | { eventId: string; text: string }
@@ -276,6 +312,12 @@ export const api = {
   acceptInvite: call<{ inviteId: string }, InviteCalldata>('acceptInvite'),
   // Owner-only, and idempotent: a second call answers `revoked` rather than refusing.
   revokeInvite: call<{ inviteId: string }, { status: 'revoked' }>('revokeInvite'),
+  /** Every invitation of one organisation, newest first, for the owner or a holder of
+   *  `PERM_MANAGE_MANAGERS` — anybody else is refused `NOT_ALLOWED_TO_INVITE`. This is the
+   *  only way a team screen can show an invitation somebody else created
+   *  (functions/src/functions/invites.ts). */
+  listInvites: async (args: { orgId: string }): Promise<InviteRow[]> =>
+    (await callListInvites(args)).invites,
   // Staff-only, consumed by sub-plan 04 through this same module.
   // The gate device account never authenticates; these go out on the staff member's Firebase
   // session and the server authorises them against organizers.isOpenGate(eventId, gateAccount).
@@ -295,6 +337,11 @@ export const api = {
    * The argument is `messageId`, never `msgId`, and the answer carries the id either way.
    */
   pinMessage: call<PinMessageArgs, { ok: true; messageId: string }>('pinMessage'),
+  /** The notices already pinned for one event, newest first. Authorised exactly like
+   *  `pinMessage` — an organiser holds no ticket for their own event, so this callable is the
+   *  only read path they have to what they posted (functions/src/functions/pinMessage.ts). */
+  listPinned: async (args: { eventId: string }): Promise<PinnedMessage[]> =>
+    (await callListPinned(args)).messages,
   // The web never holds a pinning token. The organiser sends the cover picture and the two
   // readable fields; the server checks that this caller may create events for `orgId`, pins
   // the picture, then pins `{ name, description, image: "ipfs://<imageCid>" }` and answers
@@ -303,11 +350,21 @@ export const api = {
   // Refusals worth their own sentence: `permission-denied` (not this caller's organisation),
   // `invalid-argument` with `IMAGE_TOO_LARGE` or `BAD_MIME`.
   // See functions/src/functions/organizer.ts (sub-plan 02, task C5).
+  // `meta.venue`, `meta.category` and `meta.region` are optional and are pinned into the same
+  // document beside `name`/`description`; an empty one is dropped by the server rather than
+  // pinned blank, because the attendee reader fills a missing field with its own default.
+  // `category` is a **number** — the chain's `uint8` — and a string is refused `BAD_META`.
   pinEventMetadata: call<
     {
       orgId: string;
       image: { base64: string; mime: string };
-      meta: { name: string; description: string };
+      meta: {
+        name: string;
+        description: string;
+        venue?: string;
+        category?: number;
+        region?: string;
+      };
     },
     { imageCid: string; metadataCid: string }
   >('pinEventMetadata'),

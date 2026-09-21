@@ -105,12 +105,17 @@ export function usePublish(
       const { metadataCid } = await pinEventImage({
         orgId,
         image: draft.image,
-        // C4: `pinEventMetadata` reads `name` and `description` and nothing else
-        // (functions/src/functions/organizer.ts `requireMeta`). The venue, the theme and the
-        // region are on chain in `EventMeta`; the day the callable accepts them here too, they
-        // join this object — sending unknown fields today would only be ignored.
+        // `EventMeta` carries the title, the description and the venue as hashes only, so the
+        // readable words of all three go into the pinned document — along with the theme and
+        // the region — or the discover screens have nothing to show. The region is the code
+        // (`KR-11`), the same value `buildEventMeta` hashes into `regionCode` and the discover
+        // filter hashes back, never its label; and the theme goes as a number because the
+        // reader takes `category` only when `typeof === 'number'` (`shared/envio/ipfs.ts`).
         name: draft.title,
         description: draft.description,
+        venue: draft.venue,
+        category: draft.category,
+        region: draft.regionCode,
       });
       setPhase('sending');
       const receipt = await ticketOp({

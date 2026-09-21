@@ -1,7 +1,14 @@
+// @vitest-environment node
+//
+// Nothing here touches the DOM — the file reads `vercel.json`, the asset-links JSON and the
+// vite config off disk. It has to run in node because importing the vite config pulls in
+// esbuild, and esbuild refuses to load under jsdom's TextEncoder.
+
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import viteConfig from '../../vite.config';
 
 /**
  * The hosting contract. `vercel.json` is the only place that decides how a client route,
@@ -114,6 +121,29 @@ describe('vercel.json build settings', () => {
   });
 });
 
+describe('the vite build', () => {
+  /**
+   * `build.sourcemap` is not a taste question here. `cap sync` copies the whole of `dist/`
+   * into the Android APK, so a production sourcemap hands every reader of the APK the
+   * entire TypeScript source — names, comments and all — in a file nobody meant to ship.
+   * A development build keeps its map, because that is where a stack trace has to be read.
+   *
+   * The mode is passed in rather than read from the environment: `vite build` resolves
+   * `production` on its own, and a test that asserted against `process.env` would be
+   * asserting about the test runner instead of about the artefact.
+   */
+  const buildOptions = (mode: string) => viteConfig({ command: 'build', mode }).build;
+
+  it('drops the sourcemap from a production build and keeps it in development', () => {
+    expect(buildOptions('production')?.sourcemap).toBe(false);
+    expect(buildOptions('development')?.sourcemap).toBe(true);
+  });
+
+  it('still writes the directory vercel.json publishes', () => {
+    expect(buildOptions('production')?.outDir).toBe('dist');
+  });
+});
+
 describe('vercel.json SPA rewrite', () => {
   // Every path the client router owns. A server that answers 404 here is a broken invite link.
   const CLIENT_ROUTES = [
@@ -162,11 +192,12 @@ describe('the Android asset-links file', () => {
     for (const statement of statements) {
       expect(statement.target.namespace).toBe('android_app');
       expect(statement.relation).toContain('delegate_permission/common.handle_all_urls');
+      // Both apps sign in with a passkey against this same RP, so Credential Manager has to be
+      // allowed to hand each of them the credential; the gate phone's staff app is no exception.
+      expect(statement.relation).toContain('delegate_permission/common.get_login_creds');
       // The founder's signing key does not exist yet; the placeholder has to stay loud.
       expect(statement.target.sha256_cert_fingerprints).toEqual(['REPLACE_WITH_SIGNING_CERT_SHA256']);
     }
-    // Passkeys on Android read this relation; without it the attendee app cannot sign in.
-    expect(statements[0]?.relation).toContain('delegate_permission/common.get_login_creds');
   });
 
   it('publishes no Apple association file, because iOS is out of scope', () => {

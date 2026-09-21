@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../config', () => ({
   getConfig: () => ({
-    rpId: 'monti.app',
+    rpId: 'monti.despell.io',
     chainId: 10143,
     rpcUrls: ['https://rpc.example'],
     wsUrl: 'wss://ws.example',
