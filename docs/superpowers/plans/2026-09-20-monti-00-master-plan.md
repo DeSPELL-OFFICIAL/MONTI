@@ -406,3 +406,10 @@ function offerOf(uint256 tokenId) external view returns (Offer memory);
 - `sendSponsoredOp` receipt stays `{ success, txHash, blockNumber, revertReason? }`, but `revertReason` is now `Hex | 'TIMEOUT'`. `wait(timeoutMs)` never throws: on deadline it resolves `{ success: false, txHash: '0x', blockNumber: 0n, revertReason: 'TIMEOUT' }`; transient RPC errors inside the poll are swallowed until the deadline. The `SponsoredOpTimeout` class in plan 03 §Task 11 "Produces" no longer exists.
 - Consumers in plan 04 (`mapRevertToDenyCode`, gate queue `lastError`): `'TIMEOUT'` is not a deny. Treat it as "confirmation pending" — keep the chain-event subscription as the source of truth and show the neutral "확인 중 / Confirming" state, never a red screen. Only a `Hex` revert reason maps to a DENY code.
 - viem's default `baseFeeMultiplier` is kept (fee cap only; effective price is base + priority on Monad), so it does not compound with the ×1.075 gas-limit headroom.
+
+## Delta after 01 Tasks 25–26 review (MontiPaymaster hardening)
+
+- `orgId` is derived from the verified inner call (per-selector arg-kind table → `Ticket.eventOf/eventOrg`), never from `paymasterAndData`. Slot = `selfSponsored[orgId] ? orgId : 0`.
+- `postOp` IS implemented (overrides spec §8.4 "no postOp"): validation checks `budget[slot] >= maxCost` and returns `abi.encode(slot, maxCost)`; `postOp` debits `actualGasCost`. Without it a single op with an inflated `maxFeePerGas` zeroes a slot while the EntryPoint refunds the excess to the deposit (stranded funds).
+- Validation also rejects `value != 0`, batches longer than 8, truncated calldata (named errors), and non-member senders (`Identity.isMember`). Targets are immutable constructor args; `setTargets` removed; `deposit(orgId)` requires an existing organizer.
+- Web/staff consumers: nothing in `paymasterAndData` beyond the paymaster address (no orgId hint); `sendSponsoredOp({ orgId })` keeps the field only for pre-flight budget warnings via `budgetOf`.
