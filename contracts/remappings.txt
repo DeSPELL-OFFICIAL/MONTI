@@ -1,3 +1,4 @@
+lib/account-abstraction/:@openzeppelin/contracts/=test/shims/openzeppelin-v4/
 forge-std/=lib/forge-std/src/
 @openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/
 solady/=lib/solady/src/
