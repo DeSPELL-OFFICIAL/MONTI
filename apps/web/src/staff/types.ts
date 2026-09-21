@@ -97,14 +97,17 @@ export const GATE_STATES = [
 export type GateState = (typeof GATE_STATES)[number];
 
 /**
- * The answer the signed snapshot alone can give, before any chain call. `ok: false` always
- * carries the `deny` that says why, so a refusal never reaches the screen without a reason.
+ * The answer the signed snapshot alone can give, before any chain call.
+ *
+ * A union rather than one shape with optional fields, so the two arms cannot be confused: a
+ * refusal **always** carries the `deny` that says why — the compiler will not let one through
+ * without it — and a pass carries no `deny` at all. `ok: true` with no `ticket` is the third
+ * answer: the snapshot did not recognise the token, which online means "send it, the chain
+ * decides" and offline means a refusal. `isUnknownToSnapshot` (Task 20) names that branch.
  */
-export interface PreflightResult {
-  ok: boolean;
-  deny?: DenyCode;
-  ticket?: SnapshotTicket;
-}
+export type PreflightResult =
+  | { ok: true; deny?: undefined; ticket?: SnapshotTicket }
+  | { ok: false; deny: DenyCode; ticket?: SnapshotTicket };
 
 /**
  * One check-in waiting to reach the chain. It is a record of a person who already walked in,
@@ -141,6 +144,17 @@ export interface GateContext {
   ticket?: SnapshotTicket;
   blockNumber?: bigint;
   finalized: boolean;
+  /**
+   * Spec §7.3's two thresholds while an operation is in flight, and neither of them is a state:
+   * the gate is `confirming` throughout, because the operation is still alive throughout.
+   *
+   * `checking` goes up at 2 s — before that a tap usually resolves and a label would only
+   * flicker. `retapHint` goes up at 5 s and says "다시 대세요", which is advice and not a
+   * verdict: the chain has not answered yet and a `CheckedIn` arriving at six seconds still
+   * turns this tap green. Nothing here ever becomes an admit on its own.
+   */
+  checking: boolean;
+  retapHint: boolean;
   pendingCount: number;
   snapshotAgeMs: number;
   online: boolean;
