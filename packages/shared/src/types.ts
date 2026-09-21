@@ -78,6 +78,10 @@ export interface SnapshotWire {
  * 01 의 T20/T21 이후 `Ticket` 커스텀 에러 이름이 `GateMismatch → GATE_MISMATCH`,
  * `EventCancelled → EVENT_CANCELLED` 로 정리됐고, 이 목록이 그 셀렉터 맵의 키다.
  *
+ * `UNKNOWN_REVERT` 는 컨트랙트 에러가 아니다 — 이 빌드가 모르는 셀렉터로 revert 했다는 뜻,
+ * 즉 컨트랙트가 앱보다 앞서 나갔다는 뜻이다. 그래도 거절이다(이유를 못 읽는 게이트가 그
+ * 이유로 입장시킬 수는 없다). 사유 자체가 없었던 `TX_FAILED` 와는 다른 사건이라 따로 둔다.
+ *
  * `TIMEOUT` 은 **여기 없다.** 쓰기가 시간 안에 답을 못 받은 것은 "아직 확인 중"이지 거절이
  * 아니다. 관객 화면은 그것을 기다림으로 다루고, 거절 문장으로 번역하지 않는다.
  */
@@ -94,6 +98,7 @@ export const GATE_DENY_CODES = [
   'EVENT_ENDED',
   'EVENT_CANCELLED',
   'TX_FAILED',
+  'UNKNOWN_REVERT',
 ] as const;
 
 export type GateDenyCode = (typeof GATE_DENY_CODES)[number];

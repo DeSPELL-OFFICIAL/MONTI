@@ -10,6 +10,9 @@ import { ko } from '../../shared/copy/index';
 const ACCOUNT = `0x${'ab'.repeat(20)}` as const;
 const DAY = 86_400;
 const NOW = () => Math.floor(Date.now() / 1000);
+const AUTH = { name: 'auth' };
+/** The grace period the server answers with: seven days, in epoch seconds. */
+const SCHEDULED_FOR = Math.floor(Date.now() / 1000) + 7 * DAY;
 
 const isLocked = vi.fn(async () => false);
 const deviceUpdatedAt = vi.fn(async () => BigInt(NOW() - 2 * DAY));
@@ -26,9 +29,17 @@ const startDeviceChange = vi.fn(async () => ({
   allowedAt: NOW(), now: NOW(), cooldownSeconds: DEVICE_COOLDOWN_SECONDS, allowed: true,
 }));
 const getSignupStatus = vi.fn(async () => ({ status: 'active', kycLevel: 1 }));
+const requestAccountDeletion = vi.fn(async () => ({ scheduledFor: SCHEDULED_FOR, onChainRetained: true as const }));
 vi.mock('../../shared/api/functions', async (orig) => ({
   ...(await orig<typeof import('../../shared/api/functions')>()),
-  api: { lockDevice, startDeviceChange, getSignupStatus },
+  api: { lockDevice, startDeviceChange, getSignupStatus, requestAccountDeletion },
+}));
+
+const signOut = vi.fn(async () => undefined);
+vi.mock('firebase/auth', () => ({ signOut }));
+vi.mock('../../shared/api/firebase', () => ({
+  getFirebaseAuth: () => AUTH,
+  getFirebaseFunctions: () => ({ name: 'functions' }),
 }));
 
 const saveUserProfile = vi.fn(async () => undefined);
@@ -198,10 +209,53 @@ describe('Profile', () => {
     );
   });
 
-  it('hands account deletion off by mail, because no callable does it', async () => {
+  it('states the three facts before it deletes anything', async () => {
     wrap(<Profile />);
-    expect(await screen.findByText(ko.me.deleteRequestNote)).toBeInTheDocument();
-    const link = screen.getByRole('link', { name: ko.me.deleteAccount });
-    expect(link.getAttribute('href')).toMatch(/^mailto:/);
+    await userEvent.click(await screen.findByRole('button', { name: ko.me.deleteCta }));
+    // Signing in stops now, the personal details go in seven days, the public record stays.
+    expect(screen.getByText(ko.me.deleteSignOut)).toBeInTheDocument();
+    expect(screen.getByText(ko.me.deleteErase)).toBeInTheDocument();
+    expect(screen.getByText(ko.me.deleteRetained)).toBeInTheDocument();
+    // Asking is not requesting: nothing has been sent while the dialog is up.
+    expect(requestAccountDeletion).not.toHaveBeenCalled();
+  });
+
+  it('requests the deletion once, shows the date and signs the person out', async () => {
+    wrap(<Profile />);
+    await userEvent.click(await screen.findByRole('button', { name: ko.me.deleteCta }));
+    await userEvent.click(screen.getByRole('button', { name: ko.me.deleteConfirmCta }));
+
+    await waitFor(() => expect(requestAccountDeletion).toHaveBeenCalledTimes(1));
+    const date = new Date(SCHEDULED_FOR * 1_000).toLocaleDateString('ko');
+    expect(await screen.findByText(fmt(ko.me.deleteScheduled, { date }))).toBeInTheDocument();
+    // The server already revoked this session; leaving the app looking signed in would only
+    // hand back opaque refusals on the next tap.
+    await waitFor(() => expect(signOut).toHaveBeenCalledWith(AUTH));
+    // Nothing left to press: the account is on its way out.
+    expect(screen.queryByRole('button', { name: ko.me.deleteCta })).not.toBeInTheDocument();
+  });
+
+  it('does nothing at all when the person backs out', async () => {
+    wrap(<Profile />);
+    await userEvent.click(await screen.findByRole('button', { name: ko.me.deleteCta }));
+    await userEvent.click(screen.getByRole('button', { name: ko.common.cancel }));
+
+    expect(requestAccountDeletion).not.toHaveBeenCalled();
+    expect(signOut).not.toHaveBeenCalled();
+    expect(screen.queryByText(ko.me.deleteSignOut)).not.toBeInTheDocument();
+    // The way back in is still there.
+    expect(screen.getByRole('button', { name: ko.me.deleteCta })).toBeInTheDocument();
+  });
+
+  it('keeps the person signed in when the request did not go through', async () => {
+    requestAccountDeletion.mockRejectedValueOnce(new Error('unavailable') as never);
+    wrap(<Profile />);
+    await userEvent.click(await screen.findByRole('button', { name: ko.me.deleteCta }));
+    await userEvent.click(screen.getByRole('button', { name: ko.me.deleteConfirmCta }));
+
+    expect(await screen.findByText(ko.me.deleteFailed)).toBeInTheDocument();
+    expect(signOut).not.toHaveBeenCalled();
+    // The dialog is still up, so a second try is one tap away.
+    expect(screen.getByRole('button', { name: ko.me.deleteConfirmCta })).toBeInTheDocument();
   });
 });

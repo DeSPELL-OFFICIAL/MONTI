@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Screen, Spinner } from '../../shared/ui';
 import { useCopy } from '../../shared/i18n';
-import { api } from '../../shared/api/functions';
+import { api, callableFailure } from '../../shared/api/functions';
 import {
   KYC_WEB_MARKER,
   KYC_WEB_MARKER_DONE,
@@ -15,6 +15,17 @@ import {
 
 const POLL_INTERVAL_MS = 2_000;
 const POLL_LIMIT = 45; // 90 seconds
+
+/**
+ * Another call of this person's is already opening a session and holds the 60-second claim
+ * (`functions/src/lib/kycSession.ts`). It is the one refusal that fixes itself: a second tap
+ * after the claim lapses goes through, so it gets "wait a moment and try again" and a button,
+ * not the generic sentence that tells somebody to go away and hope.
+ */
+function isSessionInFlight(cause: unknown): boolean {
+  const { code, reason } = callableFailure(cause);
+  return code === 'aborted' || reason === 'KYC_SESSION_IN_FLIGHT';
+}
 
 /** Only an in-app path is a return target; anything else goes to the profile. */
 function safeReturnTo(raw: string | null): string {
@@ -31,6 +42,7 @@ export function VerifyIdentity() {
   const [error, setError] = useState('');
   const [polling, setPolling] = useState(false);
   const [timedOut, setTimedOut] = useState(false);
+  const [inFlight, setInFlight] = useState(false);
   const stopped = useRef(false);
   const run = useRef(0);
 
@@ -50,6 +62,7 @@ export function VerifyIdentity() {
     const alive = () => !stopped.current && run.current === mine;
     setError('');
     setTimedOut(false);
+    setInFlight(false);
     setPolling(true);
     for (let attempt = 0; attempt < POLL_LIMIT && alive(); attempt += 1) {
       // A dropped call is a missed tick, not a verdict: it must never throw out of the effect and
@@ -112,14 +125,17 @@ export function VerifyIdentity() {
   async function start() {
     setError('');
     setTimedOut(false);
+    setInFlight(false);
     try {
       const { kycUrl } = await api.startKyc();
       // Polling waits for the return. On native `Browser.open` resolves on presentation, not on
       // dismissal, so starting here would burn the whole 90 s ceiling while the person is still
       // holding up their ID; on the web this tab leaves for the hosted page altogether.
       await openHostedFlow(kycUrl);
-    } catch {
-      setError(copy.common.error);
+    } catch (cause) {
+      const busy = isSessionInFlight(cause);
+      setError(busy ? copy.kyc.inFlight : copy.common.error);
+      setInFlight(busy);
     }
   }
 
@@ -131,6 +147,11 @@ export function VerifyIdentity() {
       {polling ? <><Spinner /><p>{copy.kyc.waiting}</p></> : null}
       {timedOut ? (
         <Button variant="ghost" onClick={() => void poll()}>{copy.common.retry}</Button>
+      ) : null}
+      {/* Never up at the same time as the one above: both `start` and `poll` clear the other's
+          flag before they run, so there is only ever one "try again" on the screen. */}
+      {inFlight ? (
+        <Button variant="ghost" onClick={() => void start()}>{copy.common.retry}</Button>
       ) : null}
       <Button onClick={start} disabled={polling}>{copy.kyc.cta}</Button>
     </Screen>

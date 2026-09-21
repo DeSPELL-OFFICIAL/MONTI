@@ -311,4 +311,18 @@ export const api = {
     },
     { imageCid: string; metadataCid: string }
   >('pinEventMetadata'),
+  /**
+   * The person asks for their account to be destroyed (functions/src/functions/accountDeletion.ts).
+   * Idempotent: a second call answers with the date the first one set rather than pushing it back.
+   *
+   * Two facts the screen must say out loud, because both are true the moment this resolves:
+   *  - signing in stops **now** — the server disables the account and revokes its refresh tokens,
+   *    so the grace period is time to change one's mind, not time to keep using the app;
+   *  - `onChainRetained` is always `true`: the public record of the tickets stays, because
+   *    `personId` is a random number and the addresses carry nothing personal.
+   * `scheduledFor` is epoch **seconds** — the day the personal details are actually erased.
+   */
+  requestAccountDeletion: call<void, { scheduledFor: number; onChainRetained: true }>(
+    'requestAccountDeletion',
+  ),
 };

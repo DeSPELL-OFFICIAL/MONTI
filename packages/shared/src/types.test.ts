@@ -105,8 +105,17 @@ describe('gate DENY codes', () => {
     expect([...GATE_DENY_CODES]).toEqual([
       'ALREADY_USED', 'WRONG_EVENT', 'REVOKED', 'EXPIRED_CODE', 'NO_TICKET', 'GATE_CLOSED',
       'DEVICE_LOCKED', 'DEVICE_MISMATCH', 'GATE_MISMATCH', 'EVENT_ENDED', 'EVENT_CANCELLED',
-      'TX_FAILED',
+      'TX_FAILED', 'UNKNOWN_REVERT',
     ]);
+  });
+
+  it('counts a revert it cannot read as a refusal of its own', () => {
+    // 이유를 못 읽었다는 것은 이유가 없었다는 것과 다른 사건이다: `TX_FAILED` 는 체인이
+    // 사유를 주지 않은 경우이고, `UNKNOWN_REVERT` 는 사유는 왔는데 이 빌드가 그 셀렉터를
+    // 모르는 경우 — 컨트랙트가 앱보다 앞서 나갔다는 뜻이다. 둘을 한 코드로 합치면
+    // 스태프 화면이 "배포가 밀렸다"는 사실을 영영 말할 수 없게 된다.
+    expect(isGateDenyCode('UNKNOWN_REVERT')).toBe(true);
+    expect(GATE_DENY_CODES).toHaveLength(13);
   });
 
   it('isGateDenyCode accepts every frozen code and nothing else', () => {

@@ -1,7 +1,11 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { signOut } from 'firebase/auth';
 import { Alert, Button, Field, Screen } from '../../shared/ui';
-import { setLocale, useCopy, useLocale } from '../../shared/i18n';
+import { fmt, setLocale, useCopy, useLocale } from '../../shared/i18n';
 import type { Locale } from '../../shared/copy/index';
+import { api } from '../../shared/api/functions';
+import { getFirebaseAuth } from '../../shared/api/firebase';
 import { saveUserProfile } from '../../shared/api/firestore';
 import { getConfig } from '../../shared/config';
 import { useSession } from '../../shared/session';
@@ -30,20 +34,73 @@ export function KycStatus() {
 }
 
 /**
- * Deleting an account is a legal obligation, and sub-plan 02 has not built the callable for it
- * (`functions/src/index.ts` exports no `requestAccountDeletion`). A button wired to a callable
- * that is not deployed would fail as an opaque `internal` at the one moment a person must be
- * taken seriously, and a deletion this app performed only on its own side would be a lie —
- * the records live on the server. So this is a hand-off to people, stated as one.
+ * Deleting an account is a legal obligation (개인정보 보호법 §36), and
+ * `functions/src/functions/accountDeletion.ts` is the one place it happens: the request is
+ * written, sign-in is disabled and the refresh tokens are revoked on the spot, and a scheduled
+ * job erases the personal details once the grace period is up.
+ *
+ * The three sentences in the dialog are the three facts that are already true by the time the
+ * call resolves, and all three are ones a person would be right to be angry about learning
+ * afterwards: the session ends immediately, the personal details go seven days later, and the
+ * public record of the tickets stays (`onChainRetained`) because nothing in it is personal.
+ * Saying "everything is deleted" would be the easy sentence and a false one.
+ *
+ * Signing out here is not housekeeping — the server has already made this session worthless,
+ * so leaving the app looking signed in would only hand back opaque refusals on the next tap.
+ * A failed sign-out does not undo the request, so it never becomes an error sentence.
  */
-function DeleteRequest() {
+function DeleteAccount() {
   const copy = useCopy();
-  const subject = encodeURIComponent(copy.me.deleteAccount);
+  const locale = useLocale();
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [scheduled, setScheduled] = useState('');
+
+  async function run(): Promise<void> {
+    setBusy(true);
+    setError('');
+    let scheduledFor: number;
+    try {
+      ({ scheduledFor } = await api.requestAccountDeletion());
+    } catch {
+      setError(copy.me.deleteFailed);
+      setBusy(false);
+      return;
+    }
+    setAsking(false);
+    setScheduled(fmt(copy.me.deleteScheduled, {
+      date: new Date(scheduledFor * 1_000).toLocaleDateString(locale),
+    }));
+    // The session hydrator turns the sign-out into an anonymous session; nothing is set by hand.
+    await signOut(getFirebaseAuth()).catch(() => undefined);
+    setBusy(false);
+  }
+
   return (
     <section>
       <h2>{copy.me.deleteAccount}</h2>
-      <Alert tone="warn">{copy.me.deleteRequestNote}</Alert>
-      <a href={`mailto:${copy.me.deleteRequestEmail}?subject=${subject}`}>{copy.me.deleteAccount}</a>
+      {scheduled ? <Alert tone="info">{scheduled}</Alert> : null}
+      {error ? <Alert tone="error">{error}</Alert> : null}
+      {asking ? (
+        <dialog open aria-label={copy.me.deleteConfirmTitle}>
+          <h3>{copy.me.deleteConfirmTitle}</h3>
+          <ul>
+            <li>{copy.me.deleteSignOut}</li>
+            <li>{copy.me.deleteErase}</li>
+            <li>{copy.me.deleteRetained}</li>
+          </ul>
+          <Button variant="danger" onClick={() => void run()} disabled={busy}>
+            {copy.me.deleteConfirmCta}
+          </Button>
+          <Button variant="ghost" onClick={() => setAsking(false)} disabled={busy}>
+            {copy.common.cancel}
+          </Button>
+        </dialog>
+      ) : null}
+      {asking || scheduled ? null : (
+        <Button variant="ghost" onClick={() => setAsking(true)}>{copy.me.deleteCta}</Button>
+      )}
     </section>
   );
 }
@@ -76,7 +133,7 @@ export function Profile() {
       <p>
         <a href={`${explorerBase}/address/${session.account ?? ''}`}>{copy.me.publicRecord}</a>
       </p>
-      <DeleteRequest />
+      <DeleteAccount />
     </Screen>
   );
 }

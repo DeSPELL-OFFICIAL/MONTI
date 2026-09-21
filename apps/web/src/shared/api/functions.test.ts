@@ -72,11 +72,18 @@ describe('callable wrappers', () => {
     });
   });
 
-  it('offers nothing sub-plan 02 never deployed', () => {
-    // `requestAccountDeletion` is planned, not built (functions/src/index.ts exports no such
-    // name). A wrapper for it would fail as `internal`/`UNKNOWN` at the worst possible moment —
-    // somebody asking to be erased — so the profile hands that request off by mail instead.
-    expect(Object.keys(api)).not.toContain('requestAccountDeletion');
+  /**
+   * The deletion request takes no argument at all: the server reads the caller's uid and
+   * nothing else, so a body here could only ever be somebody else's account.
+   */
+  it('asks for deletion on the signed-in caller alone', async () => {
+    nextResult = { scheduledFor: 1_800_000_000, onChainRetained: true };
+    await expect(api.requestAccountDeletion()).resolves.toEqual({
+      scheduledFor: 1_800_000_000, onChainRetained: true,
+    });
+    await expect(api.requestAccountDeletion()).resolves.toMatchObject({
+      name: 'requestAccountDeletion', payload: {},
+    });
   });
 
   it('asks for a register-purpose challenge, which is the only way registerPasskey is reachable', async () => {

@@ -9,6 +9,8 @@ const POLL_INTERVAL_MS = 2_000;
 const POLL_LIMIT = 45;
 const KYC_URL = 'https://verify.didit.me/s/abc';
 const TIMEOUT_COPY = '아직 확인 결과가 오지 않았어요. 잠시 뒤 다시 확인해 주세요.';
+const GENERIC_COPY = '문제가 생겼어요. 잠시 뒤 다시 시도해 주세요.';
+const IN_FLIGHT_COPY = '잠시 후 다시 시도해 주세요.';
 
 // The screen only ever sees a URL and a remover, so the listener is captured here and fired by
 // hand. The matcher is the real one — a mocked matcher is how the dead web leg survived review.
@@ -28,7 +30,12 @@ vi.mock('../../shared/api/deepLink', async (orig) => ({
 
 const startKyc = vi.fn(async () => ({ kycUrl: KYC_URL, sessionId: 'sess-1' }));
 const getSignupStatus = vi.fn();
-vi.mock('../../shared/api/functions', () => ({ api: { startKyc, getSignupStatus } }));
+// `callableFailure` is the real one: the screen's in-flight branch reads a server status, and a
+// stubbed reader would let that branch pass while the real one never fired.
+vi.mock('../../shared/api/functions', async (orig) => ({
+  ...(await orig<typeof import('../../shared/api/functions')>()),
+  api: { startKyc, getSignupStatus },
+}));
 
 const navigate = vi.fn();
 vi.mock('react-router-dom', async (orig) => ({
@@ -89,7 +96,31 @@ describe('VerifyIdentity', () => {
     startKyc.mockRejectedValueOnce(new Error('unavailable'));
     renderScreen();
     await userEvent.click(cta());
-    expect(await screen.findByText('문제가 생겼어요. 잠시 뒤 다시 시도해 주세요.')).toBeInTheDocument();
+    expect(await screen.findByText(GENERIC_COPY)).toBeInTheDocument();
+    // Nothing here gets better by waiting, so the generic sentence gets no "try again" button.
+    expect(screen.queryByRole('button', { name: '다시 시도' })).toBeNull();
+  });
+
+  it('asks the person to wait when another call already holds the session claim', async () => {
+    // `ensureKycSession` throws aborted/KYC_SESSION_IN_FLIGHT while the 60 s claim is held.
+    startKyc.mockRejectedValueOnce({ code: 'aborted', message: 'KYC_SESSION_IN_FLIGHT' } as never);
+    renderScreen();
+    await userEvent.click(cta());
+    expect(await screen.findByText(IN_FLIGHT_COPY)).toBeInTheDocument();
+    expect(screen.queryByText(GENERIC_COPY)).toBeNull();
+  });
+
+  it('lets the claim lapse and start over from the same screen', async () => {
+    startKyc.mockRejectedValueOnce({ code: 'aborted', message: 'KYC_SESSION_IN_FLIGHT' } as never);
+    renderScreen();
+    await userEvent.click(cta());
+    await screen.findByText(IN_FLIGHT_COPY);
+
+    await userEvent.click(screen.getByRole('button', { name: '다시 시도' }));
+    // The claim has lapsed, so the second attempt opens the hosted page and the sentence goes.
+    expect(startKyc).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(openHostedFlow).toHaveBeenCalledWith(KYC_URL));
+    expect(screen.queryByText(IN_FLIGHT_COPY)).toBeNull();
   });
 
   it('reports a duplicate face with the "already have an account" copy', async () => {
