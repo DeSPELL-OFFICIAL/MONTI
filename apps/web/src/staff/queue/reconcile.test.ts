@@ -27,15 +27,15 @@ vi.mock('../../shared/api/functions', () => ({ issueSnapshot: vi.fn(), getPhotoF
 
 // Imported after the mocks, as the rest of this sub-plan's tests do: a static import would be
 // hoisted above the `vi.fn()`s the factories close over.
-const { reconcileQueue } = await import('./reconcile');
-const { QUEUE_STORE, allEntries, retryEntry } = await import('./opQueue');
+const { MAX_REARMS, REARM_AFTER_MS, reconcileQueue } = await import('./reconcile');
+const { QUEUE_STORE, RESEND_EXHAUSTED, allEntries, retryEntry } = await import('./opQueue');
 const { staffDb } = await import('../snapshot/store');
 
-type ReconciledEntry = Awaited<ReturnType<typeof allEntries>>[number] & {
-  firstGateId?: string;
-  firstTs?: number;
-  deny?: string;
-};
+/**
+ * The real shape, so a field added to the settlement cannot drift out of these assertions. A
+ * type-only import is erased, so it does not race the `vi.mock` factories above.
+ */
+type ReconciledEntry = import('./reconcile').ReconciledEntry;
 
 const NOW = 1_700_000_000_000;
 /** The chain's clock is in seconds; this is half a minute before {@link NOW}. */
@@ -75,6 +75,8 @@ interface SeedRow {
   attempts?: number;
   firstGateId?: string;
   firstTs?: number;
+  sentAt?: number;
+  rearms?: number;
 }
 
 /** One row straight into the store, at whatever state the drain would have left it in. */
@@ -103,6 +105,8 @@ async function seed(row: SeedRow): Promise<ReconciledEntry> {
     seq,
     firstGateId: row.firstGateId,
     firstTs: row.firstTs,
+    sentAt: row.sentAt,
+    rearms: row.rearms,
   } as ReconciledEntry;
   await (await staffDb()).put(QUEUE_STORE, entry);
   return entry;
@@ -137,7 +141,7 @@ describe('queue reconciliation', () => {
 
       expect(report.confirmed).toBe(1);
       expect(report.conflicts).toEqual([
-        { tokenId: '123', firstGateId: '9', firstTs: Number(CHAIN_TS) },
+        { tokenId: '123', firstGateId: '9', firstTs: Number(CHAIN_TS), manual: false },
       ]);
       expect(report.failed).toBe(0);
       expect(checkInOf).toHaveBeenCalledWith(123n);
@@ -228,7 +232,9 @@ describe('queue reconciliation', () => {
 
       const report = await reconcileQueue({ orgId: 5n });
 
-      expect(report.conflicts).toEqual([{ tokenId: '200', firstGateId: '3', firstTs: Number(CHAIN_TS) }]);
+      expect(report.conflicts).toEqual([
+        { tokenId: '200', firstGateId: '3', firstTs: Number(CHAIN_TS), manual: false },
+      ]);
       expect(report.confirmed).toBe(0);
       const row = await rowOf('s');
       expect(row?.status).toBe('conflict');
@@ -236,7 +242,8 @@ describe('queue reconciliation', () => {
     });
 
     it('leaves a sent entry alone while the chain has nothing on that ticket', async () => {
-      await seed({ id: 's', tokenId: '200', status: 'sent', lastError: 'TIMEOUT' });
+      // Sent a minute ago: still well inside the window an operation is allowed to take.
+      await seed({ id: 's', tokenId: '200', status: 'sent', lastError: 'TIMEOUT', sentAt: NOW - 60_000 });
       checkInOf.mockResolvedValue(NO_CHECK_IN);
 
       const report = await reconcileQueue({ orgId: 5n });
@@ -246,14 +253,138 @@ describe('queue reconciliation', () => {
       expect((await rowOf('s'))?.status).toBe('sent');
     });
 
-    it('leaves a sent entry alone when the chain cannot be read', async () => {
-      await seed({ id: 's', tokenId: '200', status: 'sent', lastError: 'TIMEOUT' });
+    it('leaves a sent entry alone when the chain cannot be read, however old it is', async () => {
+      // Old enough to be re-armed on an *answer*, but a read that throws is not an answer.
+      await seed({ id: 's', tokenId: '200', status: 'sent', lastError: 'TIMEOUT', sentAt: NOW - 10 * REARM_AFTER_MS });
       checkInOf.mockRejectedValue(new Error('offline'));
 
       const report = await reconcileQueue({ orgId: 5n });
 
       expect(report).toEqual({ confirmed: 0, conflicts: [], failed: 0 });
+      const row = await rowOf('s');
+      expect(row?.status).toBe('sent');
+      expect(row?.rearms).toBeUndefined();
+    });
+
+    it('sends it again once the chain has answered "nothing" for ten minutes', async () => {
+      await seed({ id: 's', tokenId: '200', status: 'sent', lastError: 'TIMEOUT', sentAt: NOW - REARM_AFTER_MS });
+      checkInOf.mockResolvedValue(NO_CHECK_IN);
+
+      const report = await reconcileQueue({ orgId: 5n });
+
+      // Back in the drain's hands, not counted as anything yet.
+      expect(report).toEqual({ confirmed: 0, conflicts: [], failed: 0 });
+      const row = await rowOf('s');
+      expect(row?.status).toBe('pending');
+      expect(row?.attempts).toBe(0);
+      expect(row?.rearms).toBe(1);
+      expect(row?.nextAttemptAt).toBe(NOW);
+      expect(row?.lastError).toBeUndefined();
+    });
+
+    it('parks it as RESEND_EXHAUSTED rather than cycling forever', async () => {
+      await seed({
+        id: 's',
+        tokenId: '200',
+        status: 'sent',
+        lastError: 'TIMEOUT',
+        sentAt: NOW - REARM_AFTER_MS,
+        rearms: MAX_REARMS,
+      });
+      checkInOf.mockResolvedValue(NO_CHECK_IN);
+
+      const report = await reconcileQueue({ orgId: 5n });
+
+      expect(report.failed).toBe(1);
+      const row = await rowOf('s');
+      expect(row?.status).toBe('failed');
+      expect(row?.lastError).toBe(RESEND_EXHAUSTED);
+    });
+
+    it('falls back to the tap time for a row stored before sends were stamped', async () => {
+      // `createdAt` is NOW, so a row with no `sentAt` is treated as young and left alone.
+      await seed({ id: 's', tokenId: '200', status: 'sent', lastError: 'TIMEOUT' });
+      checkInOf.mockResolvedValue(NO_CHECK_IN);
+
+      await reconcileQueue({ orgId: 5n });
+
       expect((await rowOf('s'))?.status).toBe('sent');
+    });
+
+    it('leaves a row whose nonce it cannot hash unsettled, rather than blaming a gate', async () => {
+      await seed({ id: 's', tokenId: '200', status: 'sent', lastError: 'TIMEOUT', nonce: '0xdead' as Hex });
+      checkInOf.mockResolvedValue(checkIn({ gateId: 3n }));
+
+      const report = await reconcileQueue({ orgId: 5n });
+
+      expect(report).toEqual({ confirmed: 0, conflicts: [], failed: 0 });
+      expect((await rowOf('s'))?.status).toBe('sent');
+    });
+  });
+
+  describe("an organizer's manual override", () => {
+    it('is recorded as a manual admission, never as another gate tapping first', async () => {
+      await seed({ id: 's', tokenId: '200', status: 'sent', lastError: 'TIMEOUT' });
+      // `Ticket.manualOverride` writes `nonceHash = bytes32(0)` with `manual = true`.
+      checkInOf.mockResolvedValue(
+        checkIn({ gateId: 7n, manual: true, nonceHash: `0x${'00'.repeat(32)}` as Hex }),
+      );
+
+      const report = await reconcileQueue({ orgId: 5n });
+
+      expect(report.conflicts).toEqual([
+        { tokenId: '200', firstGateId: '7', firstTs: Number(CHAIN_TS), manual: true },
+      ]);
+      const row = await rowOf('s');
+      expect(row?.status).toBe('conflict');
+      expect(row?.manual).toBe(true);
+    });
+
+    it('is still a manual admission when our own nonce would have matched', async () => {
+      await seed({ id: 'a', tokenId: '123', status: 'failed', lastError: ALREADY_CHECKED_IN });
+      checkInOf.mockResolvedValue(checkIn({ gateId: 7n, manual: true, nonceHash: hashOf(OURS) }));
+
+      const report = await reconcileQueue({ orgId: 5n });
+
+      expect(report.confirmed).toBe(0);
+      expect(report.conflicts[0]?.manual).toBe(true);
+    });
+  });
+
+  describe('writing onto a row that moved', () => {
+    it('does not undo a retry that landed while the chain was being read', async () => {
+      await seed({ id: 'a', tokenId: '123', status: 'failed', lastError: ALREADY_CHECKED_IN, attempts: 20 });
+      // The staff member taps 다시 보내기 while the `eth_call` is in the air.
+      checkInOf.mockImplementation(async () => {
+        await retryEntry('a', NOW + 5);
+        return checkIn({ gateId: 9n });
+      });
+
+      const report = await reconcileQueue({ orgId: 5n });
+
+      // Nothing is reported, because nothing was written: the row is no longer the one we read.
+      expect(report.conflicts).toEqual([]);
+      const row = await rowOf('a');
+      expect(row?.status).toBe('pending');
+      expect(row?.attempts).toBe(0);
+      expect(row?.rearms).toBe(0);
+    });
+
+    it('merges the settlement onto the stored row rather than the drain snapshot', async () => {
+      await seed({ id: 's', tokenId: '200', status: 'sent', lastError: 'TIMEOUT' });
+      // A concurrent writer touches the row without changing its status.
+      checkInOf.mockImplementation(async () => {
+        const db = await staffDb();
+        const current = (await db.get(QUEUE_STORE, 's')) as ReconciledEntry;
+        await db.put(QUEUE_STORE, { ...current, userOpHash: '0xbeef' });
+        return checkIn({ gateId: 7n, nonceHash: hashOf(OURS) });
+      });
+
+      await reconcileQueue({ orgId: 5n });
+
+      const row = await rowOf('s');
+      expect(row?.status).toBe('confirmed');
+      expect(row?.userOpHash).toBe('0xbeef');
     });
   });
 
@@ -275,12 +406,20 @@ describe('queue reconciliation', () => {
 
   describe('manual retry', () => {
     it('re-arms a parked entry with its attempts reset', async () => {
-      await seed({ id: 'd', tokenId: '126', status: 'failed', lastError: 'LATE_WINDOW_ELAPSED', attempts: 20 });
+      await seed({
+        id: 'd',
+        tokenId: '126',
+        status: 'failed',
+        lastError: 'LATE_WINDOW_ELAPSED',
+        attempts: 20,
+        rearms: MAX_REARMS,
+      });
 
       const retried = await retryEntry('d');
 
       expect(retried?.status).toBe('pending');
       expect(retried?.attempts).toBe(0);
+      expect(retried?.rearms).toBe(0);
       expect(retried?.nextAttemptAt).toBe(NOW);
       expect(retried?.lastError).toBeUndefined();
       expect((await rowOf('d'))?.status).toBe('pending');

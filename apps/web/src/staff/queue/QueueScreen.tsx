@@ -17,7 +17,7 @@
 import { fmt, useLocale } from '../../shared/i18n';
 import { Alert, Button, Screen } from '../../shared/ui';
 import { useStaffQueueCopy, type StaffQueueCopy } from './copy';
-import { DRY_RUN_MARK, LATE_WINDOW_ELAPSED } from './opQueue';
+import { DRY_RUN_MARK, LATE_WINDOW_ELAPSED, RESEND_EXHAUSTED } from './opQueue';
 import type { ReconciledEntry } from './reconcile';
 
 export interface QueueScreenProps {
@@ -37,15 +37,31 @@ const CONFLICTS_HEADING = 'staff-queue-conflicts';
 const PARKED_HEADING = 'staff-queue-parked';
 
 /**
- * Why an entry stopped, in the one vocabulary a staff member can act on. The two queue marks get
- * their own sentence because they mean opposite things — one is "this event is over", the other
- * is "this build cannot send it yet" — and everything else is shown with its raw `lastError`
- * beside the generic line, so a field report can name what this screen could not.
+ * Why an entry stopped. The queue's own marks each get a sentence because they mean different
+ * things to do — "this event is over", "this build cannot send it yet", "it was sent again and
+ * again and never landed" — and `'other'` is the one that also shows the raw `lastError`, so a
+ * field report can name what this screen could not.
+ *
+ * The discriminant is the **mark**, never the sentence. Deciding anything by comparing rendered
+ * copy makes two lines that happen to read alike in one locale change what the screen does.
  */
-function reasonFor(entry: ReconciledEntry, copy: StaffQueueCopy): string {
-  if (entry.lastError === LATE_WINDOW_ELAPSED) return copy.reasonLateWindow;
-  if (entry.lastError === DRY_RUN_MARK) return copy.reasonNotDeployed;
-  return copy.reasonOther;
+type ParkReason = 'late' | 'notDeployed' | 'exhausted' | 'other';
+
+const REASON_BY_MARK: Record<string, ParkReason> = {
+  [LATE_WINDOW_ELAPSED]: 'late',
+  [DRY_RUN_MARK]: 'notDeployed',
+  [RESEND_EXHAUSTED]: 'exhausted',
+};
+
+const REASON_LINE: Record<ParkReason, keyof StaffQueueCopy> = {
+  late: 'reasonLateWindow',
+  notDeployed: 'reasonNotDeployed',
+  exhausted: 'reasonResendExhausted',
+  other: 'reasonOther',
+};
+
+function parkReason(entry: ReconciledEntry): ParkReason {
+  return REASON_BY_MARK[entry.lastError ?? ''] ?? 'other';
 }
 
 export function QueueScreen({ entries, onReconcile, onRetry, busy = false, retrying }: QueueScreenProps) {
@@ -79,7 +95,7 @@ export function QueueScreen({ entries, onReconcile, onRetry, busy = false, retry
           <ul aria-labelledby={CONFLICTS_HEADING}>
             {conflicts.map((entry) => (
               <li key={entry.id}>
-                {fmt(copy.conflictLine, {
+                {fmt(entry.manual ? copy.conflictLineManual : copy.conflictLine, {
                   tokenId: entry.tokenId,
                   gateId: entry.firstGateId ?? '',
                   time: new Date((entry.firstTs ?? 0) * 1000).toLocaleTimeString(locale),
@@ -95,22 +111,25 @@ export function QueueScreen({ entries, onReconcile, onRetry, busy = false, retry
           <h2 id={PARKED_HEADING}>{copy.parkedTitle}</h2>
           <p>{copy.parkedHint}</p>
           <ul aria-labelledby={PARKED_HEADING}>
-            {parked.map((entry) => (
-              <li key={entry.id}>
-                <span>{fmt(copy.ticket, { tokenId: entry.tokenId })}</span>
-                <span>{reasonFor(entry, copy)}</span>
-                {reasonFor(entry, copy) === copy.reasonOther && entry.lastError !== undefined ? (
-                  <code className="mono">{entry.lastError}</code>
-                ) : null}
-                <Button
-                  variant="ghost"
-                  onClick={() => onRetry(entry.id)}
-                  disabled={retrying !== undefined}
-                >
-                  {retrying === entry.id ? copy.retrying : copy.retry}
-                </Button>
-              </li>
-            ))}
+            {parked.map((entry) => {
+              const reason = parkReason(entry);
+              return (
+                <li key={entry.id}>
+                  <span>{fmt(copy.ticket, { tokenId: entry.tokenId })}</span>
+                  <span>{copy[REASON_LINE[reason]]}</span>
+                  {reason === 'other' && entry.lastError !== undefined ? (
+                    <code className="mono">{entry.lastError}</code>
+                  ) : null}
+                  <Button
+                    variant="ghost"
+                    onClick={() => onRetry(entry.id)}
+                    disabled={retrying !== undefined}
+                  >
+                    {retrying === entry.id ? copy.retrying : copy.retry}
+                  </Button>
+                </li>
+              );
+            })}
           </ul>
         </section>
       )}

@@ -59,6 +59,17 @@ describe('queue screen', () => {
     expect(screen.getByText(staffQueueKo.conflictsHint)).toBeInTheDocument();
   });
 
+  it("says an organizer's manual override was exactly that, naming no gate that tapped", () => {
+    renderQueue({
+      entries: [
+        entry({ id: '4', tokenId: '103', status: 'conflict', firstGateId: '7', firstTs: TS, manual: true }),
+      ],
+    });
+
+    expect(screen.getByText(`티켓 103 · 7번 게이트에서 ${at(TS)}에 수동 승인됐어요`)).toBeInTheDocument();
+    expect(screen.queryByText(/먼저 받았어요/)).not.toBeInTheDocument();
+  });
+
   it('offers no retry on a conflict, because there is nothing left to send', async () => {
     const { onRetry } = renderQueue({
       entries: [entry({ id: '4', tokenId: '103', status: 'conflict', firstGateId: '9', firstTs: TS })],
@@ -73,18 +84,22 @@ describe('queue screen', () => {
       entries: [
         entry({ id: '5', tokenId: '104', status: 'failed', lastError: 'LATE_WINDOW_ELAPSED' }),
         entry({ id: '6', tokenId: '105', status: 'failed', lastError: 'CHECK_IN_LATE_UNAVAILABLE' }),
-        entry({ id: '7', tokenId: '106', status: 'failed', lastError: 'fetch failed' }),
+        entry({ id: '7', tokenId: '106', status: 'failed', lastError: 'RESEND_EXHAUSTED' }),
+        entry({ id: '8', tokenId: '107', status: 'failed', lastError: 'fetch failed' }),
       ],
     });
 
     const parked = screen.getByRole('list', { name: staffQueueKo.parkedTitle });
     const rows = within(parked).getAllByRole('listitem');
-    expect(rows).toHaveLength(3);
+    expect(rows).toHaveLength(4);
     expect(within(rows[0]!).getByText(staffQueueKo.reasonLateWindow)).toBeInTheDocument();
     expect(within(rows[1]!).getByText(staffQueueKo.reasonNotDeployed)).toBeInTheDocument();
-    expect(within(rows[2]!).getByText(staffQueueKo.reasonOther)).toBeInTheDocument();
+    expect(within(rows[2]!).getByText(staffQueueKo.reasonResendExhausted)).toBeInTheDocument();
+    expect(within(rows[3]!).getByText(staffQueueKo.reasonOther)).toBeInTheDocument();
     // An error nobody has a sentence for is still shown, so a field report can name it.
-    expect(within(rows[2]!).getByText('fetch failed')).toBeInTheDocument();
+    expect(within(rows[3]!).getByText('fetch failed')).toBeInTheDocument();
+    // …and a mark that does have one is not printed raw beside it.
+    expect(within(rows[2]!).queryByText('RESEND_EXHAUSTED')).not.toBeInTheDocument();
 
     await userEvent.click(within(rows[0]!).getByRole('button', { name: staffQueueKo.retry }));
     expect(onRetry).toHaveBeenCalledExactlyOnceWith('5');

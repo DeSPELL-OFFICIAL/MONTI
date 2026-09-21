@@ -218,6 +218,45 @@ describe('durable check-in queue', () => {
       expect(after.find((e) => e.id === entry.id)).toMatchObject({ status: 'failed', lastError: '0xdeadbeef' });
     });
 
+    it('runs one pass at a time, so two callers cannot send the same op twice', async () => {
+      const entry = await tap('782', '2b');
+      // The row stays `pending` in the store for the whole of this await, which is exactly the
+      // window a second caller would read it as unsent in. The gate is built before the mock so
+      // `release` exists whether or not the send has been reached yet.
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      sendCheckIn.mockImplementationOnce(async () => {
+        await held;
+        return landed();
+      });
+
+      const first = drainQueue({ orgId: 5n, now: entry.nextAttemptAt });
+      const second = drainQueue({ orgId: 5n, now: entry.nextAttemptAt });
+      release();
+      const [a, b] = await Promise.all([first, second]);
+
+      expect(sendCheckIn).toHaveBeenCalledTimes(1);
+      // The joining caller gets the pass it joined, not a second answer.
+      expect(b).toEqual(a);
+      expect(a.find((e) => e.id === entry.id)).toMatchObject({ status: 'confirmed' });
+    });
+
+    it('lets the next pass run after one throws', async () => {
+      const entry = await tap('783', '3c');
+      // `allEntries()` is the first thing a pass does; failing its read fails the pass itself.
+      const originalGetAll = IDBObjectStore.prototype.getAll;
+      IDBObjectStore.prototype.getAll = function throwing(this: IDBObjectStore) {
+        throw new Error('store gone');
+      } as IDBObjectStore['getAll'];
+      await expect(drainQueue({ orgId: 5n, now: entry.nextAttemptAt })).rejects.toThrow('store gone');
+      IDBObjectStore.prototype.getAll = originalGetAll;
+
+      await expect(drainQueue({ orgId: 5n, now: entry.nextAttemptAt })).resolves.toHaveLength(1);
+      expect(sendCheckIn).toHaveBeenCalledTimes(1);
+    });
+
     it('treats a wait timeout as sent, never as a failure to re-send', async () => {
       const entry = await tap('781', '1a');
       sendCheckIn.mockResolvedValueOnce({
@@ -226,10 +265,15 @@ describe('durable check-in queue', () => {
       });
 
       const after = await drainQueue({ orgId: 5n, now: entry.nextAttemptAt });
-      expect(after.find((e) => e.id === entry.id)).toMatchObject({ status: 'sent', userOpHash: '0xbeef' });
+      expect(after.find((e) => e.id === entry.id)).toMatchObject({
+        status: 'sent',
+        userOpHash: '0xbeef',
+        // Stamped here and nowhere else — Task 29 measures its ten minutes of silence from it.
+        sentAt: entry.nextAttemptAt,
+      });
 
-      // An op that may still land is never sent twice: a resend would revert `AlreadyCheckedIn`
-      // and Task 29 would read our own success as a double-entry conflict.
+      // This loop never sends it again on its own. Only Task 29 may, and only after the chain
+      // has answered that nothing is recorded for ten minutes.
       await drainQueue({ orgId: 5n, now: entry.nextAttemptAt + BACKOFF_CAP_MS });
       expect(sendCheckIn).toHaveBeenCalledTimes(1);
 

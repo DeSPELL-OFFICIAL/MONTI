@@ -14,10 +14,17 @@
 // first. Order matters at reconciliation: when two isolated gates admit the same ticket, the
 // earlier submission is the one the chain keeps, and the queue must not shuffle that.
 //
-// **Never send an op twice.** A `wait()` timeout is not a failure (Task 21): the operation may
-// still land. Such an entry becomes `sent`, not `pending`, and is left for Task 29 to settle
-// against the chain. Re-sending it would revert `AlreadyCheckedIn` and Task 29 would read our
-// own success as a double-entry conflict — a clean check-in recorded as a security incident.
+// **Never send an op twice on a guess.** A `wait()` timeout is not a failure (Task 21): the
+// operation may still land. Such an entry becomes `sent`, not `pending`, and *this loop* never
+// touches it again — Task 29's reconciliation settles it against the chain.
+//
+// Task 29 is also the one thing allowed to put a `sent` row back into `pending`, and only on
+// evidence: ten minutes in which `checkInOf(tokenId)` answered that nothing is recorded at all.
+// What makes that safe is the nonce. The row keeps the raw `gateCode.nonce`, the chain stores
+// `keccak256(abi.encode(nonce))`, so a duplicate that does land is recognised as **ours** and
+// settles `confirmed`. Re-sending on anything weaker than that read — a timer, an attempt count,
+// a staff member's hunch — would read our own success as a double-entry conflict, filing a clean
+// check-in as a security incident.
 import { ticketAbi } from '../../shared/chain/abis';
 import type { SponsoredOpReceipt } from '../../shared/chain/sendSponsoredOp';
 import { sendCheckIn, type CheckInFunction } from '../gate/checkInOp';
@@ -82,6 +89,13 @@ export const LATE_CHECK_IN_FUNCTION = 'checkInLate' as const;
 export const DRY_RUN_MARK = 'CHECK_IN_LATE_UNAVAILABLE';
 /** `lastError` on an entry parked because the event's deadline passed. See {@link DrainParams.endsAt}. */
 export const LATE_WINDOW_ELAPSED = 'LATE_WINDOW_ELAPSED';
+/**
+ * `lastError` on an entry Task 29 re-armed its limit of times and the chain still has no record
+ * of. A queue mark, deliberately **not** a `DenyCode`: `GATE_DENY_CODES` is the refusal
+ * vocabulary both apps read, and nothing on chain refused this — the operation simply never
+ * arrived. Only a person can take it from here.
+ */
+export const RESEND_EXHAUSTED = 'RESEND_EXHAUSTED';
 
 /**
  * The name, typed for `sendCheckIn`. `USED_ABI.Ticket` (the app's usage manifest) does not list
@@ -101,6 +115,18 @@ const CHECK_IN_LATE = LATE_CHECK_IN_FUNCTION as unknown as CheckInFunction;
  */
 export interface StoredQueueEntry extends QueueEntry {
   seq: number;
+  /**
+   * When the operation this row is waiting on was handed to the bundler — set with
+   * `status: 'sent'` and nowhere else. `createdAt` cannot stand in for it: up to twenty attempts
+   * of capped backoff separate the tap from the send that finally went out, and Task 29's
+   * "ten minutes of silence" would then be counted from the wrong end.
+   */
+  sentAt?: number;
+  /**
+   * How many times Task 29 has put this row back into `pending` after finding nothing on chain.
+   * Bounded there, so a send that is being dropped somewhere parks instead of cycling forever.
+   */
+  rearms?: number;
 }
 
 /** `1 s, 2 s, 4 s …` up to {@link BACKOFF_CAP_MS}. `attempts` is the count *already* made. */
@@ -207,6 +233,9 @@ export async function retryEntry(id: string, now = Date.now()): Promise<StoredQu
     ...entry,
     status: 'pending',
     attempts: 0,
+    // Both counters, for the same reason: a person deciding the network is back is new
+    // information, and neither the twenty sends nor Task 29's re-arms should be held against it.
+    rearms: 0,
     nextAttemptAt: now,
     lastError: undefined,
   };
@@ -236,7 +265,38 @@ export interface DrainParams {
 }
 
 /**
- * One pass over the queue, run when the gate comes back online.
+ * The pass that is running, if one is.
+ *
+ * **There is exactly one writer.** A row stays `pending` in IndexedDB across `sendCheckIn` and
+ * `wait()` — up to {@link QUEUE_WAIT_TIMEOUT_MS} of it — so two overlapping passes would each
+ * read it as unsent and each send the same sponsored operation, then each write back its own
+ * stale copy of the row with last-write-wins. That is a double check-in on the chain and a
+ * `confirmed` row overwritten by the loser's `failed`. There are two entry points into this loop
+ * — Task 26's connectivity watcher and the queue screen's "지금 맞춰 보기" — so the overlap is
+ * the normal case, not a corner.
+ *
+ * Module-level rather than a lock object because the queue is one per device, and the promise is
+ * cleared in `finally` so a pass that throws does not wedge every later one.
+ */
+let inFlight: Promise<StoredQueueEntry[]> | undefined;
+
+/**
+ * One pass over the queue, run when the gate comes back online — or **the pass already running**.
+ * Callers never overlap; see {@link inFlight}. A joining caller's parameters are dropped with
+ * the pass it joined, which is right for the two that exist (the watcher and the screen ask for
+ * the same thing) and is why this is not a general-purpose scheduler.
+ */
+export function drainQueue(params: DrainParams): Promise<StoredQueueEntry[]> {
+  // A second caller joins the pass already running rather than starting its own, and gets the
+  // same answer. `??=` short-circuits, so `drainPass` is not even called on the joining path.
+  inFlight ??= drainPass(params).finally(() => {
+    inFlight = undefined;
+  });
+  return inFlight;
+}
+
+/**
+ * The pass itself.
  *
  * Sequential on purpose: entries go out in tap order, and one entry's failure only pushes that
  * entry's next attempt out — the rest of the queue keeps going.
@@ -245,7 +305,7 @@ export interface DrainParams {
  * terminal cannot manufacture an entry here (spec T15); what it can do is fail to send one,
  * which is why nothing in this function ever deletes a row.
  */
-export async function drainQueue(params: DrainParams): Promise<StoredQueueEntry[]> {
+async function drainPass(params: DrainParams): Promise<StoredQueueEntry[]> {
   const now = params.now ?? Date.now();
   if (params.isOnline && !params.isOnline()) return allEntries();
 
@@ -289,7 +349,7 @@ export async function drainQueue(params: DrainParams): Promise<StoredQueueEntry[
         functionName: CHECK_IN_LATE,
       });
       const receipt = await handle.wait(QUEUE_WAIT_TIMEOUT_MS);
-      await db.put(QUEUE_STORE, settled(entry, handle.userOpHash, receipt));
+      await db.put(QUEUE_STORE, settled(entry, handle.userOpHash, receipt, now));
     } catch (cause) {
       await db.put(QUEUE_STORE, retried(entry, cause, now));
     }
@@ -302,13 +362,21 @@ export async function drainQueue(params: DrainParams): Promise<StoredQueueEntry[
  * What one answered send does to the entry.
  *
  * The `'TIMEOUT'` sentinel is the branch worth reading twice: it is a `success: false` that is
- * **not** a verdict — `wait()` stopped looking, the op did not stop existing. It becomes `sent`
- * so nothing re-sends it, and Task 29 asks the chain what became of it.
+ * **not** a verdict — `wait()` stopped looking, the op did not stop existing. It becomes `sent`,
+ * which this loop skips forever, and Task 29 asks the chain what became of it. `sentAt` is
+ * stamped here because that is the moment the silence starts being worth measuring.
  */
-function settled(entry: StoredQueueEntry, userOpHash: Hex, receipt: SponsoredOpReceipt): StoredQueueEntry {
+function settled(
+  entry: StoredQueueEntry,
+  userOpHash: Hex,
+  receipt: SponsoredOpReceipt,
+  now: number,
+): StoredQueueEntry {
   const attempts = entry.attempts + 1;
   if (receipt.success) return { ...entry, attempts, userOpHash, status: 'confirmed', lastError: undefined };
-  if (receipt.revertReason === 'TIMEOUT') return { ...entry, attempts, userOpHash, status: 'sent', lastError: 'TIMEOUT' };
+  if (receipt.revertReason === 'TIMEOUT') {
+    return { ...entry, attempts, userOpHash, status: 'sent', sentAt: now, lastError: 'TIMEOUT' };
+  }
   return { ...entry, attempts, userOpHash, status: 'failed', lastError: receipt.revertReason };
 }
 
