@@ -353,34 +353,35 @@ contract Ticket is ERC721, ITicket {
     }
 
     /// @notice Spec 13: a manager without approval rights files a request; someone with rights admits.
-    ///         The gate must be one of this event's gates, open or closed, so the request names a real
-    ///         door; an unregistered gateId (0 included) reports eventId 0 and is rejected.
+    ///         Checks run authority first, so nothing about the ticket or the door is told to a stranger:
+    ///         the ticket must exist (its event is what authority is measured against), the caller must
+    ///         belong to that organizer, and only then must the gate be one of this event's gates — open
+    ///         or closed, since a request is not a tap. An unregistered gateId (0 included) reports
+    ///         eventId 0 and is rejected.
     function requestOverride(uint256 tokenId, uint256 gateId, uint8 reason) external {
         if (_ownerOf(tokenId) == address(0)) revert NoSuchTicket();
         uint256 eventId = _eventOf[tokenId];
-        (uint256 gateEventId,,,,,) = organizers.gateInfo(gateId);
-        if (gateEventId != eventId) revert GateMismatch();
-
         uint256 orgId = _events[eventId].orgId;
+
         (bool exists,) = organizers.managerOf(orgId, msg.sender);
         if (!exists && !organizers.hasPermission(orgId, msg.sender, PERM_APPROVE_OVERRIDE)) revert Unauthorized();
+
+        (uint256 gateEventId,,,,,) = organizers.gateInfo(gateId);
+        if (gateEventId != eventId) revert GateMismatch();
         emit OverrideRequested(tokenId, gateId, msg.sender, reason);
     }
 
     /// @notice ROLE_APPROVER = admin (or owner) holding PERM_APPROVE_OVERRIDE, ROLE_MANAGER = manager
     ///         with canApprove. The event and ticket must be admissible for the same reasons checkIn
-    ///         demands; only the NFC tap itself is waived. Emits CheckedIn as well so the staff screen
-    ///         and the indexer watch one event only.
+    ///         demands; only the NFC tap itself is waived. Checks run authority first — the ticket has
+    ///         to exist for its organizer to be known, then the caller must have approval rights, and
+    ///         only then are the ticket's state, the event's status and the gate examined, so an
+    ///         unauthorised caller learns nothing about the ticket. Emits CheckedIn as well so the
+    ///         staff screen and the indexer watch one event only.
     function manualOverride(uint256 tokenId, uint256 gateId, uint8 reason) external {
         if (_ownerOf(tokenId) == address(0)) revert NoSuchTicket();
         uint256 eventId = _eventOf[tokenId];
         uint256 orgId = _events[eventId].orgId;
-
-        (uint256 gateEventId,,,,,) = organizers.gateInfo(gateId);
-        if (gateEventId != eventId) revert GateMismatch();
-        EventStatus status = eventStatus(eventId);
-        if (status == EventStatus.Ended) revert EventEnded();
-        if (status == EventStatus.Cancelled) revert EventCancelled();
 
         uint8 role = ROLE_NONE;
         if (organizers.hasPermission(orgId, msg.sender, PERM_APPROVE_OVERRIDE)) {
@@ -390,8 +391,14 @@ contract Ticket is ERC721, ITicket {
             if (exists && canApprove) role = ROLE_MANAGER;
         }
         if (role == ROLE_NONE) revert Unauthorized();
+
         if (_revoked[tokenId]) revert TicketRevoked();
         if (_checkIns[tokenId].ts != 0) revert AlreadyCheckedIn();
+        EventStatus status = eventStatus(eventId);
+        if (status == EventStatus.Ended) revert EventEnded();
+        if (status == EventStatus.Cancelled) revert EventCancelled();
+        (uint256 gateEventId,,,,,) = organizers.gateInfo(gateId);
+        if (gateEventId != eventId) revert GateMismatch();
 
         _checkIns[tokenId] = CheckIn({gateId: gateId, ts: uint64(block.timestamp), nonceHash: bytes32(0), manual: true});
         if (_offers[tokenId].from != address(0)) {
