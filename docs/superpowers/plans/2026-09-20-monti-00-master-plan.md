@@ -413,3 +413,9 @@ function offerOf(uint256 tokenId) external view returns (Offer memory);
 - `postOp` IS implemented (overrides spec §8.4 "no postOp"): validation checks `budget[slot] >= maxCost` and returns `abi.encode(slot, maxCost)`; `postOp` debits `actualGasCost`. Without it a single op with an inflated `maxFeePerGas` zeroes a slot while the EntryPoint refunds the excess to the deposit (stranded funds).
 - Validation also rejects `value != 0`, batches longer than 8, truncated calldata (named errors), and non-member senders (`Identity.isMember`). Targets are immutable constructor args; `setTargets` removed; `deposit(orgId)` requires an existing organizer.
 - Web/staff consumers: nothing in `paymasterAndData` beyond the paymaster address (no orgId hint); `sendSponsoredOp({ orgId })` keeps the field only for pre-flight budget warnings via `budgetOf`.
+
+## Delta after 02 Task 16 (phone storage)
+
+- `users/{uid}` has no plaintext `phoneE164`. The phone number exists only as the HMAC-SHA256 index document id (`phoneIndex/{hmac}`) and as `users/{uid}.phoneEnc`, a KMS envelope bound with AAD `personId:phoneE164` (`piiAad(personId, 'phoneE164')`). Every later reader (Tasks 20/21/24/25/42, SMS invite flows) decrypts with that AAD; nothing ever logs or returns the plaintext to a client except the owner's own profile screen.
+- A second Firebase uid presenting an already-indexed phone gets `already-exists / PHONE_ALREADY_REGISTERED`; recovery goes through the KYC re-verify or SMS recovery flow, never a silent rebind.
+- `encryptField(plaintext, aad = '', client?)` / `decryptField(envelope, aad = '', client?)`: AAD is mandatory for PII fields; envelope format unchanged.
