@@ -303,6 +303,9 @@ const SHORT_RECORD = fromHex('D40B046D6F6E74692E6170703A6701020304');
 /** 길이가 다른 두 번째 레코드. 페이로드 교체가 보이는지 보려고 쓴다. */
 const OTHER_RECORD = fromHex('D40302666F6FAABB');
 
+/** 세 번째 레코드. 한 탭 동안 회전이 두 번 돌았을 때 어느 것이 남는지 보려고 쓴다. */
+const THIRD_RECORD = fromHex('D4010267AABB');
+
 /** 0,1,2,… 로 채운 페이로드. 위치가 그대로 보여 창이 어긋나면 눈에 띈다. */
 const counting = (size: number): Uint8Array => Uint8Array.from({ length: size }, (_, i) => i & 0xff);
 
@@ -336,6 +339,13 @@ function externalRecord(type: string, payload: Uint8Array): Uint8Array {
  */
 const gateRecord = (payloadSize = 389): Uint8Array =>
   externalRecord(NDEF_GATE_TYPE, counting(payloadSize));
+
+/**
+ * 같은 크기, 다른 바이트의 게이트 레코드. 회전 전후를 한 바이트로 구별하려고 `tag` 만큼
+ * 밀어서 채운다 — 창이 섞이면 이어 붙인 결과가 곧바로 어긋난다.
+ */
+const taggedGateRecord = (tag: number, payloadSize = 389): Uint8Array =>
+  externalRecord(NDEF_GATE_TYPE, Uint8Array.from({ length: payloadSize }, (_, i) => (i + tag) & 0xff));
 
 /** 관객 폰이 써 넣는 진짜 응답. `GateResponseWire` CBOR 은 162바이트다. */
 const RESPONSE_WIRE: GateResponseWire = {
@@ -375,6 +385,21 @@ function run(m: ReferenceStateMachine, script: ReadonlyArray<readonly [string, s
     expect(`${request} → ${exchange(m, request)}`).toBe(`${request} → ${expected}`);
   }
 }
+
+/** MLe 보다 큰 파일을 리더처럼 창을 옮겨 가며 읽는다. 데이터만 돌려주고 9000 은 확인한다. */
+function readWindow(m: ReferenceStateMachine, offset: number, le: number): Uint8Array {
+  const request = `00B0${toHex(Uint8Array.from([(offset >> 8) & 0xff, offset & 0xff, le]))}`;
+  const response = m.process(fromHex(request));
+  expect(`${request} → ${toHex(response.slice(response.length - 2))}`).toBe(`${request} → 9000`);
+  return response.slice(0, response.length - 2);
+}
+
+const concat = (a: Uint8Array, b: Uint8Array): Uint8Array => {
+  const out = new Uint8Array(a.length + b.length);
+  out.set(a, 0);
+  out.set(b, a.length);
+  return out;
+};
 
 /** SELECT AID → SELECT E104. 쓰기는 NDEF 파일을 고른 뒤에만 된다. */
 function openNdefFile(m: ReferenceStateMachine): void {
@@ -825,6 +850,101 @@ describe('when the payload changes', () => {
       ['00B0000002', '07FE9000'], // NLEN = 2046, 파일은 정확히 2048
     ]);
   });
+
+  /**
+   * 회전 타이머는 리더가 붙어 있는지 모른 채 3초마다 돈다(Task 18). 창과 창 사이에서 코드가
+   * 바뀌면 관객 폰은 앞이 A, 뒤가 B인 메시지를 읽어 간다 — NLEN 은 A의 길이인데 본문은 B다.
+   */
+  it('leaves every later window of one tap on the bytes the tap started with', () => {
+    const old = taggedGateRecord(0x00);
+    const fresh = taggedGateRecord(0x40);
+    expect(old).toHaveLength(406); // MLe 하나에 안 들어간다 — 그래서 창이 여러 개다
+    const m = machine(old);
+    run(m, [
+      [SELECT_AID, '9000'],
+      [SELECT_NDEF, '9000'],
+    ]);
+    expect(toHex(readWindow(m, 0, 2))).toBe('0196'); // NLEN = 406
+    const first = readWindow(m, 2, 0xff); // 레코드 0..254
+
+    m.setPendingPayload(fresh); // 창과 창 사이에서 회전 타이머가 돈다
+
+    const second = readWindow(m, 257, 0xff); // 레코드 255..405
+    expect(second).toHaveLength(151);
+    expect(toHex(concat(first, second))).toBe(toHex(old));
+    // 길이 선언도 그대로다. 이게 바뀌면 리더가 파일 밖을 읽으러 간다.
+    expect(toHex(readWindow(m, 0, 2))).toBe('0196');
+    expect(toHex(m.activePayload)).toBe(toHex(old));
+  });
+
+  it('shows the swap on the very first read of the next tap', () => {
+    const m = machine(SHORT_RECORD);
+    run(m, [[SELECT_AID, '9000']]);
+    const fresh = taggedGateRecord(0x11);
+    m.setPendingPayload(fresh);
+    m.onDeactivated();
+
+    run(m, [
+      [SELECT_AID, '9000'],
+      [SELECT_NDEF, '9000'],
+      ['00B0000002', '01969000'], // 첫 읽기부터 새 길이다
+    ]);
+    expect(toHex(concat(readWindow(m, 2, 0xff), readWindow(m, 257, 0xff)))).toBe(toHex(fresh));
+  });
+
+  it('keeps only the last of several swaps made during one tap', () => {
+    const m = machine(SHORT_RECORD);
+    run(m, [
+      [SELECT_AID, '9000'],
+      [SELECT_NDEF, '9000'],
+    ]);
+    // 탭 하나가 3초보다 오래 걸리면 회전이 두 번 돈다. 중간 코드는 아무도 보지 않는다.
+    m.setPendingPayload(OTHER_RECORD);
+    m.setPendingPayload(THIRD_RECORD);
+    expect(exchange(m, '00B0000002')).toBe('00129000'); // 여전히 SHORT_RECORD (18바이트)
+    expect(toHex(m.activePayload)).toBe(toHex(SHORT_RECORD));
+
+    m.onDeactivated();
+    expect(toHex(m.activePayload)).toBe(toHex(THIRD_RECORD));
+    run(m, [
+      [SELECT_AID, '9000'],
+      [SELECT_NDEF, '9000'],
+      ['00B0000002', '00069000'], // THIRD_RECORD 는 6바이트
+    ]);
+  });
+
+  it('does not disturb the message the reader is halfway through writing', () => {
+    const m = machine(SHORT_RECORD);
+    openNdefFile(m);
+    run(m, [
+      [updateBinary(0, nlen(0)), '9000'],
+      [updateBinary(2, fromHex('112233')), '9000'],
+    ]);
+
+    m.setPendingPayload(OTHER_RECORD); // 쓰기 한가운데서 회전 타이머가 돈다
+    expect(m.messages).toHaveLength(0);
+
+    run(m, [[updateBinary(0, nlen(3)), '9000']]);
+    expectOneMessage(m, fromHex('112233'));
+    // 쓰기 버퍼와 읽기 페이로드는 서로 모른다: 읽기 쪽은 여전히 옛 코드다.
+    expect(toHex(m.activePayload)).toBe(toHex(SHORT_RECORD));
+  });
+
+  it('promotes at once when no tap is in progress', () => {
+    const m = new ReferenceStateMachine();
+    m.setPendingPayload(SHORT_RECORD);
+    expect(toHex(m.activePayload)).toBe(toHex(SHORT_RECORD));
+    m.setPendingPayload(OTHER_RECORD);
+    expect(toHex(m.activePayload)).toBe(toHex(OTHER_RECORD));
+  });
+
+  it('copies the caller\'s array instead of holding on to it', () => {
+    const m = new ReferenceStateMachine();
+    const mutable = SHORT_RECORD.slice();
+    m.setPendingPayload(mutable);
+    mutable[mutable.length - 1] = 0xff; // 부르는 쪽이 같은 배열을 다시 채워 쓰는 경우
+    expect(toHex(m.activePayload)).toBe(toHex(SHORT_RECORD));
+  });
 });
 
 // ── §source pins: 위 벡터가 기대는 결정표가 Kotlin 원본에 실제로 있는가 ───────
@@ -860,6 +980,7 @@ const scope = {
   process: kotlinFunctionBody(machineSource, 'fun process(apdu: ByteArray)'),
   setPendingPayload: kotlinFunctionBody(machineSource, 'fun setPendingPayload'),
   onDeactivated: kotlinFunctionBody(machineSource, 'fun onDeactivated'),
+  promotePendingPayload: kotlinFunctionBody(machineSource, 'private fun promotePendingPayload'),
   handleSelect: kotlinFunctionBody(machineSource, 'private fun handleSelect'),
   currentFile: kotlinFunctionBody(machineSource, 'private fun currentFile'),
   handleReadBinary: kotlinFunctionBody(machineSource, 'private fun handleReadBinary'),
@@ -932,6 +1053,7 @@ const pins: ReadonlyArray<readonly [keyof typeof scope, string, string]> = [
   ['setPendingPayload', 'a message too big for the declared file is refused', 'require(ndef.size <= Type4Files.MAX_NDEF_SIZE)'],
   ['setPendingPayload', 'the payload only moves while no session is open', 'if (!appSelected) promotePendingPayload()'],
   ['onDeactivated', 'a tap that ends closes the session, drops a half write and promotes what is waiting', 'appSelected = false selected = Selected.NONE resetWriteState() promotePendingPayload()'],
+  ['promotePendingPayload', 'the swap copies, so neither the caller nor the next code can reach into what is being read', 'activePayload = pendingPayload.copyOf()'],
 ];
 
 describe('the Kotlin the vectors stand for', () => {
@@ -949,6 +1071,19 @@ describe('the Kotlin the vectors stand for', () => {
     const assemblies = (machineSource.match(/ApduStatus\.respond\(/g) ?? []).length;
     expect(assemblies).toBeGreaterThanOrEqual(20);
     expect(words).toBe(assemblies);
+  });
+
+  it('swaps the payload in exactly the three places a session can begin or end', () => {
+    // 1. setPendingPayload — 세션이 없을 때만  2. SELECT AID — 새 세션  3. onDeactivated — 끝난 세션.
+    // 네 번째 자리가 생기면 그게 곧 "탭 한가운데서 바뀔 수 있다"는 뜻이다.
+    const mentions = (machineSource.match(/promotePendingPayload\(\)/g) ?? []).length;
+    expect(mentions).toBe(4); // 선언 하나 + 부르는 곳 셋
+    expect(squeeze(scope.setPendingPayload)).toContain('if (!appSelected) promotePendingPayload()');
+    expect(squeeze(scope.handleSelect)).toContain('promotePendingPayload()');
+    expect(squeeze(scope.onDeactivated)).toContain('promotePendingPayload()');
+    // 그리고 activePayload 는 그 한 곳에서만 대입된다 — private set 이 나머지를 막는다.
+    expect((machineSource.match(/activePayload = /g) ?? []).length).toBe(1);
+    expect(squeeze(machineSource)).toContain('var activePayload: ByteArray = ByteArray(0) private set');
   });
 
   it('keeps one buffer for the write path, sized by the declared file', () => {
