@@ -94,7 +94,7 @@ describe('<Enter /> arming', () => {
     armDeviceKey.mockRejectedValue(new Error('biometry failed'));
     await tapEnter();
     expect(readGateCode).not.toHaveBeenCalled();
-    expect(screen.getByRole('alert')).toHaveTextContent(ko.common.error);
+    expect(screen.getByRole('alert')).toHaveTextContent(ko.enter.armFailed);
   });
 
   it('offers the code when the phone has no NFC at all, after arming', async () => {
@@ -103,6 +103,96 @@ describe('<Enter /> arming', () => {
     expect(armDeviceKey).toHaveBeenCalledTimes(1);
     expect(readGateCode).not.toHaveBeenCalled();
     expect(screen.getByText(ko.enter.qrTitle)).toBeInTheDocument();
+  });
+
+  it('keeps the armed sentence and the timer on the same second', async () => {
+    vi.useFakeTimers();
+    verifyGate.mockReturnValue(new Promise(() => undefined));
+    render(<Enter />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: ko.enter.cta }));
+    });
+    for (let second = 0; second < 3; second += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+    }
+    const left = Number(screen.getByRole('timer').textContent);
+    expect(left).toBeLessThan(ARM_WINDOW_SECONDS);
+    expect(screen.getByText(fmt(ko.enter.armed, { seconds: left }))).toBeInTheDocument();
+  });
+
+  it('drops a read that lands after the window closed', async () => {
+    vi.useFakeTimers();
+    let land!: (wire: GateCodeWire) => void;
+    readGateCode.mockReturnValue(
+      new Promise<GateCodeWire>((resolve) => {
+        land = resolve;
+      }),
+    );
+    render(<Enter />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: ko.enter.cta }));
+    });
+    for (let second = 0; second <= ARM_WINDOW_SECONDS; second += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+    }
+    expect(screen.getByText(ko.enter.expired)).toBeInTheDocument();
+
+    // The secure chip closed the window; a code that arrives now must not restart the flow.
+    await act(async () => {
+      land(WIRE);
+    });
+    expect(verifyGate).not.toHaveBeenCalled();
+    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: ko.enter.cta })).toBeInTheDocument();
+  });
+
+  it('drops a verification that lands after the window closed', async () => {
+    vi.useFakeTimers();
+    verifyGate.mockReturnValue(new Promise(() => undefined));
+    let settle!: (verdict: { ok: boolean }) => void;
+    verifyGate.mockReturnValue(
+      new Promise<{ ok: boolean }>((resolve) => {
+        settle = resolve;
+      }),
+    );
+    render(<Enter />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: ko.enter.cta }));
+    });
+    for (let second = 0; second <= ARM_WINDOW_SECONDS; second += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+    }
+    await act(async () => {
+      settle({ ok: true });
+    });
+    expect(screen.getByText(ko.enter.expired)).toBeInTheDocument();
+    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
+  });
+
+  it('aborts the reader session when the window closes', async () => {
+    vi.useFakeTimers();
+    readGateCode.mockReturnValue(new Promise(() => undefined));
+    render(<Enter />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: ko.enter.cta }));
+    });
+    const options = readGateCode.mock.calls[0]?.[0] as { signal: AbortSignal };
+    expect(options.signal.aborted).toBe(false);
+
+    for (let second = 0; second <= ARM_WINDOW_SECONDS; second += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+    }
+    // Otherwise the iOS reader sheet outlives the window it belongs to, inviting a tap into a
+    // flow that can no longer sign.
+    expect(options.signal.aborted).toBe(true);
   });
 
   it('does not re-arm on its own when the window runs out', async () => {

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { bytesToHex, hexToBytes, type Hex } from 'viem';
+import { HttpRequestError, bytesToHex, hexToBytes, type Hex } from 'viem';
 import { CLOCK_SKEW_SECONDS, CODE_WINDOW_SECONDS, gateCodePreimage, type GateCodeWire } from '@monti/shared';
 
 const gateInfo = vi.fn();
@@ -52,6 +52,13 @@ async function newGateKey(): Promise<{ kx: Hex; ky: Hex; sign: (wire: GateCodeWi
 const NONCE = `0x${'5a'.repeat(32)}` as Hex;
 const TOKEN_ID = '7';
 const NOW = 1_790_000_000;
+
+/**
+ * What "the chain is unreachable" actually looks like coming out of viem. It matters that the
+ * tests throw this rather than a bare `Error`: the cache is consulted only for transport
+ * failures, so a bare `Error` here would no longer exercise the offline path.
+ */
+const offline = (): Error => new HttpRequestError({ url: 'http://rpc.invalid' });
 
 const unsigned: Omit<GateCodeWire, 'sig'> = {
   v: 1,
@@ -259,7 +266,7 @@ describe('verifyGate', () => {
     const key = await newGateKey();
     const wire = await signedBy(key);
     cacheGate(wire, TOKEN_ID, { kx: key.kx, ky: key.ky });
-    gateInfo.mockRejectedValueOnce(new Error('offline'));
+    gateInfo.mockRejectedValueOnce(offline());
     await expect(verifyGate(wire, { tokenId: TOKEN_ID, nowSeconds: NOW })).resolves.toEqual({ ok: true });
   });
 
@@ -268,7 +275,7 @@ describe('verifyGate', () => {
     const forger = await newGateKey();
     const forged = await signedBy(forger);
     cacheGate(forged, TOKEN_ID, { kx: real.kx, ky: real.ky });
-    gateInfo.mockRejectedValueOnce(new Error('offline'));
+    gateInfo.mockRejectedValueOnce(offline());
     await expect(verifyGate(forged, { tokenId: TOKEN_ID, nowSeconds: NOW })).resolves.toEqual({
       ok: false,
       reason: 'badSignature',
@@ -278,7 +285,7 @@ describe('verifyGate', () => {
   it('refuses an unreachable chain with nothing cached for this gate and ticket', async () => {
     const key = await newGateKey();
     const wire = await signedBy(key);
-    gateInfo.mockRejectedValue(new Error('offline'));
+    gateInfo.mockRejectedValue(offline());
     await expect(verifyGate(wire, { tokenId: TOKEN_ID, nowSeconds: NOW })).resolves.toEqual({
       ok: false,
       reason: 'unknownGate',
@@ -311,5 +318,16 @@ describe('verifyGate', () => {
     await expect(verifyGate(wire, { tokenId: TOKEN_ID, nowSeconds: NOW })).resolves.toEqual({ ok: true });
     setItem.mockRestore();
   });
-});
 
+  it('does not read the cache when the chain read failed for a reason that is not the network', async () => {
+    // An ABI drift or a bug in `reads.ts` must not look like a phone in a basement: it would
+    // silently move every tap onto a cached key that no chain answer can correct.
+    const key = await newGateKey();
+    const wire = await signedBy(key);
+    cacheGate(wire, TOKEN_ID, { kx: key.kx, ky: key.ky });
+    gateInfo.mockRejectedValueOnce(new Error('AbiFunctionNotFoundError'));
+    await expect(verifyGate(wire, { tokenId: TOKEN_ID, nowSeconds: NOW })).rejects.toThrow(
+      'AbiFunctionNotFoundError',
+    );
+  });
+});

@@ -6,7 +6,7 @@
 // for two reasons: iOS puts its reader sheet over everything, so a biometric prompt behind it is
 // a dead screen; and a gate code read into a phone that then refuses to sign is a code burned
 // for nothing. Nothing in here re-arms on its own — an expired window is the person tapping again.
-import { useCallback, useState, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { ARM_WINDOW_SECONDS, ATTENDEE_KEY_ALIAS, DeviceKeyUnavailable, armDeviceKey } from '../../shared/deviceKey';
 import { NFC_ERROR, NfcError, type NfcErrorCode } from '../../shared/nfc';
 
@@ -58,32 +58,54 @@ export function tapEnding(cause: unknown): PhaseEnding {
 export interface Arm {
   state: ArmState;
   setState: Dispatch<SetStateAction<ArmState>>;
-  arm: () => Promise<boolean>;
+  /** The `armedAt` stamp of the window this call opened, or 0 if it did not open one. */
+  arm: () => Promise<number>;
+  /**
+   * Is `armedAt` still the window the chip is holding open? Every step of the tap runs behind
+   * an `await`, and the countdown can expire inside any of them: a late `readGateCode` or a
+   * late verification must not put a closed window back on screen, and Task 25 must not sign
+   * with a key the chip has already re-locked. Backed by a ref, never by the render's state,
+   * so an async closure asking this question gets today's answer and not the one it captured.
+   */
+  isCurrent: (armedAt: number) => boolean;
   windowSeconds: number;
 }
 
 export const IDLE: ArmState = { phase: 'idle', error: '', armedAt: 0 };
 
 export function useArm(): Arm {
-  const [state, setState] = useState<ArmState>(IDLE);
+  const [state, setRenderState] = useState<ArmState>(IDLE);
+  const armedAtRef = useRef(0);
 
-  const arm = useCallback(async (): Promise<boolean> => {
+  // Every write goes through here, so the ref cannot fall behind the state it mirrors.
+  const setState = useCallback<Dispatch<SetStateAction<ArmState>>>((update) => {
+    setRenderState((prev) => {
+      const next = typeof update === 'function' ? (update as (value: ArmState) => ArmState)(prev) : update;
+      armedAtRef.current = next.armedAt;
+      return next;
+    });
+  }, []);
+
+  const isCurrent = useCallback((armedAt: number): boolean => armedAt !== 0 && armedAtRef.current === armedAt, []);
+
+  const arm = useCallback(async (): Promise<number> => {
     setState({ phase: 'arming', error: '', armedAt: 0 });
     try {
       await armDeviceKey({ alias: ATTENDEE_KEY_ALIAS });
-      setState({ phase: 'armed', error: '', armedAt: Date.now() });
-      return true;
+      const armedAt = Date.now();
+      setState({ phase: 'armed', error: '', armedAt });
+      return armedAt;
     } catch (cause) {
       // A browser has no non-syncing hardware key at all: that is the QR path, not an error.
       const unavailable = cause instanceof DeviceKeyUnavailable;
       setState({
         phase: unavailable ? 'qr' : 'failed',
-        error: unavailable ? 'deviceUnavailable' : 'failed',
+        error: unavailable ? 'deviceUnavailable' : 'armFailed',
         armedAt: 0,
       });
-      return false;
+      return 0;
     }
-  }, []);
+  }, [setState]);
 
-  return { state, setState, arm, windowSeconds: ARM_WINDOW_SECONDS };
+  return { state, setState, arm, isCurrent, windowSeconds: ARM_WINDOW_SECONDS };
 }

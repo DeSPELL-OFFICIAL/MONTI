@@ -134,6 +134,7 @@ export const ko = {
     tapCancelled: '대는 것을 멈췄어요. 다시 눌러 주세요.',
     tapTimeout: '단말기를 찾지 못했어요. 다시 눌러 주세요.',
     tapFailed: '읽지 못했어요. 다시 눌러 주세요.',
+    armFailed: '확인을 마치지 못했어요. 다시 눌러 주세요.',
     writeFailed: '전달하지 못했어요. QR로 보여드릴게요.',
     qrTitle: '이 화면을 스태프에게 보여주세요',
     done: '입장 완료', resultWaiting: '확인하고 있어요',

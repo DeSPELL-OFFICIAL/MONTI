@@ -13,7 +13,7 @@
 // The digest is `@monti/shared`'s `gateCodeHash`, the same bytes the staff device signs; the
 // signature is checked through WebCrypto's ECDSA/P-256/SHA-256, which hashes the message
 // itself, so it is handed `gateCodePreimage` rather than the digest. One definition, two uses.
-import { hexToBytes, type Hex } from 'viem';
+import { BaseError, HttpRequestError, TimeoutError, hexToBytes, type Hex } from 'viem';
 import {
   CLOCK_SKEW_SECONDS,
   CODE_WINDOW_SECONDS,
@@ -167,6 +167,22 @@ export function cachedGateKey(wire: GateCodeWire, tokenId: string): GatePublicKe
   }
 }
 
+/**
+ * Was this the network, or this app? Only the first may fall back to the cached gate key. A
+ * bare `catch` here would let an ABI drift or a bug in `reads.ts` move every tap silently onto
+ * a stale key that no chain answer can correct — the one failure the cache must not absorb.
+ *
+ * `TypeError` is in the list because that is what `fetch` itself raises when the request never
+ * leaves the phone, before viem has anything to wrap.
+ */
+function isTransportFailure(cause: unknown): boolean {
+  if (cause instanceof HttpRequestError || cause instanceof TimeoutError || cause instanceof TypeError) return true;
+  if (cause instanceof BaseError) {
+    return cause.walk((inner) => inner instanceof HttpRequestError || inner instanceof TimeoutError) !== null;
+  }
+  return false;
+}
+
 export interface GateCheckInput {
   tokenId: string;
   /** Unix seconds; defaults to this phone's clock. Passed in by tests and by a caller that froze it. */
@@ -175,14 +191,17 @@ export interface GateCheckInput {
 
 /**
  * The whole of step 3, in the order the layers have to run. The cache is consulted only when the
- * chain read *throws* — a chain that answers "revoked" is the answer, and a stale cache must
- * never talk over it.
+ * chain read fails *as a transport* — a chain that answers "revoked" is the answer, and a stale
+ * cache must never talk over it. Any other throw is re-raised for the screen to report.
  */
 export async function verifyGate(wire: GateCodeWire, input: GateCheckInput): Promise<GateVerdict> {
   const now = input.nowSeconds ?? Math.floor(Date.now() / 1000);
   if (!isGateCodeFresh(wire, now)) return fail('codeExpired');
 
-  const registration = await verifyGateRegistered(wire, input.tokenId).catch((): null => null);
+  const registration = await verifyGateRegistered(wire, input.tokenId).catch((cause: unknown): null => {
+    if (!isTransportFailure(cause)) throw cause;
+    return null;
+  });
   if (registration !== null && !registration.ok) return registration;
   const gateKey = registration?.ok ? registration.key : cachedGateKey(wire, input.tokenId);
   if (!gateKey) return fail('unknownGate');

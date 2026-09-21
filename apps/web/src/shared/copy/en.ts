@@ -136,6 +136,7 @@ export const en: typeof ko = {
     tapCancelled: 'You stopped before it read. Tap Enter again.',
     tapTimeout: 'No reader found. Tap Enter again.',
     tapFailed: 'Could not read it. Tap Enter again.',
+    armFailed: 'Could not finish checking. Tap Enter again.',
     writeFailed: 'Could not hand it over. Showing a QR code instead.',
     qrTitle: 'Show this screen to the staff',
     done: 'You are in', resultWaiting: 'Confirming',
