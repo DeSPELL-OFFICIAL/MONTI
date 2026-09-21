@@ -47,5 +47,13 @@ contract MockEntryPoint {
         return IPaymaster(paymaster).validatePaymasterUserOp(op, opHash, maxCost);
     }
 
+    /// @notice EntryPoint v0.6 charges the paymaster's deposit the real cost and then runs postOp.
+    function callPostOp(address paymaster, IPaymaster.PostOpMode mode, bytes calldata context, uint256 actualGasCost)
+        external
+    {
+        balanceOf[paymaster] -= actualGasCost;
+        IPaymaster(paymaster).postOp(mode, context, actualGasCost);
+    }
+
     receive() external payable {}
 }
