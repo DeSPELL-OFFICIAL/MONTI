@@ -31,10 +31,17 @@ export const HCE_ERROR = {
   /** A required option was missing, or a `Base64` string was not spelled as above. */
   invalidArgument: 'INVALID_ARGUMENT',
   /**
-   * This build cannot emulate a card at all — a browser, or iOS. Permanent, so the caller
-   * falls back to the QR path rather than asking the holder to tap again.
+   * This build cannot emulate a card at all — a browser, iOS, or an Android phone with no
+   * NFC hardware. Permanent, so the caller falls back to the QR path rather than asking the
+   * holder to tap again.
    */
   unavailable: 'UNAVAILABLE',
+  /**
+   * The hardware is there but NFC is switched off. Recoverable, and the recovery is two
+   * taps in Settings — so the caller says "turn NFC on" rather than dropping the whole gate
+   * to the QR fallback for the rest of the shift.
+   */
+  nfcDisabled: 'NFC_DISABLED',
 } as const;
 
 export type HceErrorCode = (typeof HCE_ERROR)[keyof typeof HCE_ERROR];
