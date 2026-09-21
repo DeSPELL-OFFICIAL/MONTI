@@ -13,6 +13,7 @@ describe('staff constants match the spec parameter table (§7.3, §11)', () => {
   it('pins the timing parameters', () => {
     expect(C.GATE_CODE_ROTATE_MS).toBe(3000);
     expect(C.CODE_WINDOW_SECONDS).toBe(60);
+    expect(C.CLOCK_SKEW_SECONDS).toBe(5);
     expect(C.SNAPSHOT_REFRESH_MS).toBe(600_000);
     expect(C.CONFIRM_SPINNER_MS).toBe(2000);
     expect(C.RETAP_PROMPT_MS).toBe(5000);

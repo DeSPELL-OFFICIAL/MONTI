@@ -14,6 +14,7 @@ export {
   QR_PREFIX,
   GATE_CODE_ROTATE_MS,
   CODE_WINDOW_SECONDS,
+  CLOCK_SKEW_SECONDS,
 } from '@monti/shared';
 
 /** 게이트 단말기 키. 생체 인증 없이 3초마다 서명해야 하므로 관객 기기 키와 별칭이 다르다. */
