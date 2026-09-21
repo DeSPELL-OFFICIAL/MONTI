@@ -162,3 +162,67 @@ export function fromQrPayload(text: string): GateResponseWire {
   if (!text.startsWith(QR_PREFIX)) throw new Error('BAD_QR_PREFIX');
   return decodeGateResponse(base64UrlDecode(text.slice(QR_PREFIX.length)));
 }
+
+function hexToBytes(hex: Hex): Uint8Array {
+  const bare = hex.slice(2);
+  const out = new Uint8Array(bare.length / 2);
+  for (let i = 0; i < out.length; i += 1) out[i] = Number.parseInt(bare.slice(i * 2, i * 2 + 2), 16);
+  return out;
+}
+
+function bytesToHex(bytes: Uint8Array): Hex {
+  let out = '0x';
+  for (let i = 0; i < bytes.length; i += 1) out += (bytes[i] as number).toString(16).padStart(2, '0');
+  return out as Hex;
+}
+
+export function splitRs(sig: Hex): { r: Hex; s: Hex } {
+  if (!/^0x[0-9a-fA-F]{128}$/.test(sig)) throw new Error('BAD_RS_LENGTH');
+  return { r: `0x${sig.slice(2, 66)}` as Hex, s: `0x${sig.slice(66)}` as Hex };
+}
+
+export function joinRs(r: Hex, s: Hex): Hex {
+  if (!/^0x[0-9a-fA-F]{64}$/.test(r) || !/^0x[0-9a-fA-F]{64}$/.test(s)) throw new Error('BAD_RS_LENGTH');
+  return `0x${r.slice(2)}${s.slice(2)}` as Hex;
+}
+
+/** DER INTEGER 는 최소 길이 + 양수 표현이라 선행 0을 버리고 최상위 비트가 1이면 0x00을 붙인다. */
+function toDerInteger(value: Uint8Array): Uint8Array {
+  let start = 0;
+  while (start < value.length - 1 && value[start] === 0) start += 1;
+  const trimmed = value.subarray(start);
+  const needsPad = ((trimmed[0] as number) & 0x80) !== 0;
+  const body = needsPad ? new Uint8Array([0, ...trimmed]) : trimmed;
+  return new Uint8Array([0x02, body.length, ...body]);
+}
+
+export function rsToDer(sig: Hex): Hex {
+  const { r, s } = splitRs(sig);
+  const rDer = toDerInteger(hexToBytes(r));
+  const sDer = toDerInteger(hexToBytes(s));
+  const body = new Uint8Array([...rDer, ...sDer]);
+  return bytesToHex(new Uint8Array([0x30, body.length, ...body]));
+}
+
+function readDerInteger(bytes: Uint8Array, offset: number): { value: Uint8Array; next: number } {
+  if (bytes[offset] !== 0x02) throw new Error('BAD_DER');
+  const length = bytes[offset + 1];
+  if (length === undefined || offset + 2 + length > bytes.length) throw new Error('BAD_DER');
+  let value = bytes.subarray(offset + 2, offset + 2 + length);
+  while (value.length > 32 && value[0] === 0) value = value.subarray(1);
+  if (value.length > 32) throw new Error('BAD_DER');
+  const padded = new Uint8Array(32);
+  padded.set(value, 32 - value.length);
+  return { value: padded, next: offset + 2 + length };
+}
+
+export function derToRs(der: Hex): Hex {
+  if (!/^0x([0-9a-fA-F]{2})+$/.test(der)) throw new Error('BAD_DER');
+  const bytes = hexToBytes(der);
+  if (bytes[0] !== 0x30) throw new Error('BAD_DER');
+  if (bytes[1] !== bytes.length - 2) throw new Error('BAD_DER');
+  const r = readDerInteger(bytes, 2);
+  const s = readDerInteger(bytes, r.next);
+  if (s.next !== bytes.length) throw new Error('BAD_DER');
+  return joinRs(bytesToHex(r.value), bytesToHex(s.value));
+}
