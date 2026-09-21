@@ -34,6 +34,21 @@ import { sendSponsoredOp, type SponsoredOpHandle } from '../../shared/chain/send
 export { PERM_APPROVE_OVERRIDE };
 
 /**
+ * This account may not let anybody in, by hand or by request.
+ *
+ * A class rather than a message, the same as `NoPasskeyOnDevice`: the dialog has to tell "you do
+ * not have this right" apart from "it did not go through", because the first is a sentence about
+ * the person holding the phone and the second is an invitation to press again. Matching on
+ * `error.message` would let a reworded string silently downgrade the one into the other.
+ */
+export class OverrideDenied extends Error {
+  constructor() {
+    super('OVERRIDE_DENIED');
+    this.name = 'OverrideDenied';
+  }
+}
+
+/**
  * The vocabulary comes from `staff/types.ts`, where the console reads it too. A second spelling
  * of `'manualOverride' | 'requestOverride'` here would be a screen and a chain call agreeing by
  * coincidence rather than by type.
@@ -120,7 +135,7 @@ export async function submitOverride(params: SubmitOverrideParams): Promise<Over
   const account = await getStaffAccount();
   const approver = account.address as Address;
   const { route, role } = await readOverrideAuthority({ orgId: params.orgId, account: approver });
-  if (route === 'denied') throw new Error('OVERRIDE_DENIED');
+  if (route === 'denied') throw new OverrideDenied();
 
   const handle = await sendSponsoredOp({
     account,
@@ -137,5 +152,6 @@ export async function submitOverride(params: SubmitOverrideParams): Promise<Over
     ],
   });
 
-  return { ...handle, wait: (timeoutMs?: number) => handle.wait(timeoutMs), route, role, approver, reason: params.reason };
+  // `SponsoredOpHandle` is a plain object with no `this`, so the spread carries `wait` as it is.
+  return { ...handle, route, role, approver, reason: params.reason };
 }

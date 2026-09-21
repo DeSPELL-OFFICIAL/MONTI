@@ -122,27 +122,50 @@ export async function setPin(pin: string): Promise<void> {
  * `now` is a parameter for the same reason `snapshotAgeMs` takes one — it is the only way to
  * test a sixty-second window without a sixty-second test — and never for the caller to move.
  */
+/**
+ * Attempts, one at a time.
+ *
+ * `checkPin` is a read-modify-write across two `await`s, and the caller is a button a person
+ * presses with a queue watching — a double press races two attempts through the same read and
+ * one failure is simply lost. Two lost failures in a row is a five-try lockout that takes seven,
+ * which is the whole defence leaking. There is no transaction to hold across `deriveBits`, so
+ * the attempts are serialised on a promise chain instead: cheap, and the only contention is a
+ * person's thumb.
+ */
+let queue: Promise<unknown> = Promise.resolve();
+
 export async function checkPin(pin: string, now: number = Date.now()): Promise<PinVerdict> {
+  const run = queue.then(() => attempt(pin, now));
+  // The chain must not break on a rejection, or every later attempt inherits it.
+  queue = run.catch(() => undefined);
+  return run;
+}
+
+async function attempt(pin: string, now: number): Promise<PinVerdict> {
   const row = await readRow();
   if (!row) return { ok: false, reason: 'UNSET' };
 
   if (row.lockedUntil > now) return { ok: false, reason: 'LOCKED', retryInMs: row.lockedUntil - now };
 
-  if (equals(await derive(pin, row.salt), row.hash)) {
-    // The lockout that has just expired goes with the failures that earned it: a staff member
-    // who waited out the minute and typed the right PIN is not one wrong try from another one.
-    if (row.failures !== 0 || row.lockedUntil !== 0) {
-      await writeRow({ ...row, failures: 0, lockedUntil: 0 });
+  // A lockout that has expired takes its failures with it, and it does so **here** rather than
+  // only on a correct PIN. Otherwise `failures` stays at the cap for ever and every single wrong
+  // try from then on re-locks for a full minute with no countdown — the staff member is never
+  // told they have four tries again, because they never do.
+  const served = row.lockedUntil === 0 ? row : { ...row, failures: 0, lockedUntil: 0 };
+
+  if (equals(await derive(pin, served.salt), served.hash)) {
+    if (served.failures !== 0 || row.lockedUntil !== 0) {
+      await writeRow({ ...served, failures: 0, lockedUntil: 0 });
     }
     return { ok: true };
   }
 
-  const failures = row.failures + 1;
+  const failures = served.failures + 1;
   if (failures >= PIN_MAX_ATTEMPTS) {
-    await writeRow({ ...row, failures, lockedUntil: now + PIN_LOCKOUT_MS });
+    await writeRow({ ...served, failures, lockedUntil: now + PIN_LOCKOUT_MS });
     return { ok: false, reason: 'LOCKED', retryInMs: PIN_LOCKOUT_MS };
   }
-  await writeRow({ ...row, failures, lockedUntil: 0 });
+  await writeRow({ ...served, failures, lockedUntil: 0 });
   return { ok: false, reason: 'WRONG', triesLeft: PIN_MAX_ATTEMPTS - failures };
 }
 

@@ -65,6 +65,22 @@ export const DEVICE_CHANGE_WINDOW_MS = 24 * 60 * 60 * 1000;
 export const GATE_OPEN_RECHECK_MS = 60_000;
 
 /**
+ * How old this device's remembered `isOpenGate` answer may be and still open a door.
+ *
+ * The memory exists because a staff APK that cold-starts at a venue with no signal would
+ * otherwise never open at all — `gateOpen` stays `undefined` for ever and the screen blocks.
+ * But a remembered permission is a permission nobody has re-granted, and the case it gets
+ * dangerous is precisely the one it is for: a gate revoked while the phone was offline keeps
+ * taking taps, and every tap becomes a durable row that can only ever revert.
+ *
+ * An hour is a door's worth of memory — long enough that a terminal rebooted between two sets
+ * comes back up working, short enough that a revocation cannot outlive one shift block. Past it
+ * the answer is thrown away and the screen goes back to blocking, which is the honest state:
+ * this device does not know whether it may open.
+ */
+export const GATE_OPEN_STALE_MS = 60 * 60_000;
+
+/**
  * How often the gate refreshes the three numbers in its header — guest-list age, entries waiting
  * to be sent, entries parked. None of them is a verdict, so they are polled rather than pushed;
  * they are read from IndexedDB, so polling them is free.

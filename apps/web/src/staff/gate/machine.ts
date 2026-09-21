@@ -24,6 +24,7 @@ import type {
   GateState,
   Hex,
   OverrideOutcome,
+  OverrideRole,
   PreflightResult,
   SnapshotTicket,
 } from '../types';
@@ -80,7 +81,12 @@ export type TapRefusal = (typeof TAP_REFUSAL)[keyof typeof TAP_REFUSAL];
  * already paid for the moment the staff member presses on.
  */
 export interface SettledTap {
-  tap: TapId;
+  /**
+   * Optional since Task 32: a manual approval can be filed with **no tap at all** — an attendee
+   * whose phone produces nothing is exactly the case the override exists for — and dropping
+   * those from 직전 탭 would throw away the only record of an approval that is on chain.
+   */
+  tap?: TapId;
   state: Extract<GateState, 'admit' | 'offlineAdmit' | 'deny' | 'override'>;
   ticket?: SnapshotTicket;
   blockNumber?: bigint;
@@ -99,6 +105,22 @@ export type StopWatching = () => void;
  * handle it gets back: nothing else can know when the tap is done with it.
  */
 export type WatchFactory = (tap: TapId, onVerdict: (verdict: Verdict) => void) => StopWatching;
+
+/** What a filed request is answered by: somebody else's `ManualOverride` for the same ticket. */
+export interface OverrideApproval {
+  approver: Hex;
+  role: OverrideRole;
+}
+
+/**
+ * Opens the watch for a filed `requestOverride` — `watchManualOverride` in production. Injected
+ * for the same reason {@link WatchFactory} is, and owned here for the same reason too: it is a
+ * per-screen subscription, and `toWaiting()` / `stop()` are the only places that know it is over.
+ */
+export type OverrideWatchFactory = (
+  tokenId: bigint,
+  onApproved: (approval: OverrideApproval) => void,
+) => StopWatching;
 
 export interface GateMachine {
   state(): GateState;
@@ -143,7 +165,18 @@ export interface GateMachine {
    * into a queued one.
    */
   setOnline(online: boolean): void;
-  onOverride(): void;
+  /**
+   * A staff member pressed 수동 승인. **Answers whether it was taken**, like
+   * {@link GateMachine.onResponse}, and for the same reason: a check-in that is still confirming
+   * must not be interrupted.
+   *
+   * The refusal matters more here than anywhere else. `ticket` is set at `onPreflight`, i.e.
+   * before the operation goes out, so the button is live all through `confirming` — and taking
+   * the screen then would drop the `CheckedIn` watch for an operation that is still running and
+   * already paid for. If it lands, nothing on the phone ever says so, and the override sent a
+   * moment later reverts `AlreadyCheckedIn` in front of the attendee.
+   */
+  onOverride(): boolean;
   /**
    * How the manual approval went (Task 32), pushed in as it moves: `sending` while the passkey
    * and the chain are being asked, then `requested` / `approved` / `failed`.
@@ -173,6 +206,8 @@ export interface GateMachineDeps {
    * caller feeds `onVerdict` itself.
    */
   watch?: WatchFactory;
+  /** How a filed `requestOverride` learns it was approved; production passes `watchManualOverride`. */
+  watchOverride?: OverrideWatchFactory;
 }
 
 /** The fields a settled tap leaves behind, cleared on the way to waiting for the next one. */
@@ -204,6 +239,8 @@ export function createGateMachine(deps: GateMachineDeps): GateMachine {
   /** The tap the machine is currently about. Everything with a `nonce` is matched against it. */
   let tap: TapId | undefined;
   let stopWatching: StopWatching | undefined;
+  /** The filed-request watch, when one is open. Closed by the same discipline as the tap's. */
+  let stopWatchingOverride: StopWatching | undefined;
   let refusal: TapRefusal | undefined;
   let settledTap: SettledTap | undefined;
 
@@ -220,6 +257,8 @@ export function createGateMachine(deps: GateMachineDeps): GateMachine {
   const closeWatch = (): void => {
     stopWatching?.();
     stopWatching = undefined;
+    stopWatchingOverride?.();
+    stopWatchingOverride = undefined;
   };
 
   /**
@@ -247,7 +286,8 @@ export function createGateMachine(deps: GateMachineDeps): GateMachine {
 
   /** Moves the tap on screen into the "직전 탭" slot on the way back to waiting. */
   const keepAsLastSettled = (): void => {
-    if (!settled() || !tap) return;
+    // No `tap` guard: an override filed without one still has to be remembered (see `SettledTap`).
+    if (!settled()) return;
     settledTap = {
       tap,
       state: context.state as SettledTap['state'],
@@ -278,6 +318,11 @@ export function createGateMachine(deps: GateMachineDeps): GateMachine {
   };
 
   const applyVerdict = (verdict: Verdict): void => {
+    // A dialog is open about whoever is standing there. A late verdict for the previous tap —
+    // the finalized repeat of a speculative admit, most often — must not replace it: the dialog
+    // is the only record of an approval that may already be on chain, and the tap it would be
+    // about has been answered already.
+    if (context.state === 'override') return;
     // A verdict for a tap that is no longer on screen is somebody else's answer. Dropping it
     // is the point of `TapId`: op A's admit must never land on attendee B's photo.
     if (!isCurrentTap(verdict.nonce)) return;
@@ -415,10 +460,20 @@ export function createGateMachine(deps: GateMachineDeps): GateMachine {
     },
 
     onOverride() {
-      // A staff button press. It is inherently about whoever is on screen, so it names no tap.
+      // One thing at a time, the same rule `onResponse` holds. A check-in in flight owns the
+      // screen until it is answered: the operation is paid for, its `CheckedIn` watch is open,
+      // and closing that watch to draw a dialog would lose the answer for good.
+      if (context.state === 'confirming') {
+        refusal = TAP_REFUSAL.confirming;
+        return false;
+      }
+      refusal = undefined;
+      // The clocks go — they belong to a tap that is no longer what this screen is about — but
+      // the **watch stays**. A speculative admit is still waiting for its finalized repeat, and
+      // nothing here is a reason to stop listening for it.
       clearTimers();
-      closeWatch();
       emit({ state: 'override', checking: false, waitHint: false, override: undefined });
+      return true;
     },
 
     onOverrideResult(outcome: OverrideOutcome) {
@@ -427,6 +482,21 @@ export function createGateMachine(deps: GateMachineDeps): GateMachine {
       // the next attendee's tap.
       if (context.state !== 'override') return;
       emit({ override: outcome });
+
+      // A filed request is the one outcome that is not an ending. `requestOverride` writes no
+      // check-in and emits no verdict this screen can read, so without this watch the staff
+      // member who filed it has no way to learn it was granted except by asking the attendee to
+      // tap again — and the attendee is standing there precisely because they cannot.
+      if (outcome.status !== 'requested' || outcome.tokenId === undefined) return;
+      stopWatchingOverride?.();
+      stopWatchingOverride = deps.watchOverride?.(BigInt(outcome.tokenId), (approval) => {
+        // The dialog may be long gone by the time somebody approves. Saying so onto whatever is
+        // on screen now would be an admit for the wrong person.
+        if (context.state !== 'override') return;
+        emit({
+          override: { ...outcome, status: 'approved', role: approval.role, approver: approval.approver },
+        });
+      });
     },
 
     reset() {

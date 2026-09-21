@@ -20,11 +20,14 @@
 // open and a `CheckedIn` at six seconds still admits (spec §7.3, Task 21 ruling 3).
 import { decodeAbiParameters, hexToBigInt, keccak256, numberToHex, type Hex } from 'viem';
 
-import { USED_EVENTS, eventTopic } from '../../shared/chain/abis';
+import { OVERRIDE_ROLE } from '@monti/shared';
+
+import { eventTopic } from '../../shared/chain/abis';
 import { readTicket } from '../../shared/chain/reads';
 import { subscribeLogs, type ChainLog } from '../../shared/chain/subscribeLogs';
 import { getConfig } from '../../shared/config';
 import type { TapId, Verdict } from './machine';
+import type { OverrideRole } from '../types';
 
 /**
  * What `subscribeLogs` hands back: stop listening. Derived rather than re-declared, so there is
@@ -53,6 +56,14 @@ export function nonceHashOf(nonce: Hex): Hex {
 const CHECKED_IN_TOPIC = eventTopic('Ticket', 'CheckedIn');
 
 /**
+ * The events that mean "this tap was taken". Named rather than taken from `USED_EVENTS.Ticket`
+ * wholesale, because that map now also carries `ManualOverride` (Task 32) — an event about the
+ * same ticket that answers a different question, and one a tap's filter must not widen to. The
+ * split is the reason `checkedInTopics` below still returns exactly the check-in signatures.
+ */
+const CHECK_IN_EVENTS = ['CheckedIn', 'CheckedInLate'] as const;
+
+/**
  * The log filter: any of the check-in events, for this ticket only.
  *
  * `topic0` is an array because the 01b redeploy splits check-in in two — a tap recorded outside
@@ -63,9 +74,9 @@ const CHECKED_IN_TOPIC = eventTopic('Ticket', 'CheckedIn');
  * with no change here.
  */
 export function checkedInTopics(tokenId: bigint): (Hex | Hex[] | null)[] | null {
-  const signatures = Object.keys(USED_EVENTS.Ticket)
-    .map((eventName) => eventTopic('Ticket', eventName))
-    .filter((topic): topic is Hex => topic !== null);
+  const signatures = CHECK_IN_EVENTS.map((eventName) => eventTopic('Ticket', eventName)).filter(
+    (topic): topic is Hex => topic !== null,
+  );
   // `null`, never `[]`: a node reads an empty `topic0` as "match any topic0", which would admit
   // on the next `Transfer` this ticket emits.
   if (signatures.length === 0) return null;
@@ -167,6 +178,80 @@ export function watchCheckedIn(tap: TapId, onVerdict: (verdict: Verdict) => void
       if (checkIn.ts > 0n && checkIn.nonceHash.toLowerCase() === expected) admit(true);
     })
     .catch(() => undefined);
+
+  return () => {
+    live = false;
+    stopLogs();
+  };
+}
+
+/** `topic0` for `ManualOverride`, resolved once out of the generated ABI. */
+const MANUAL_OVERRIDE_TOPIC = eventTopic('Ticket', 'ManualOverride');
+
+/**
+ * Who approved a filed request. What `ManualOverride` carries beyond the ticket it is about.
+ */
+export interface OverrideApproval {
+  approver: Hex;
+  role: OverrideRole;
+}
+
+/** `Ticket.ROLE_*` back into the name the screen and the machine speak. */
+function roleOf(code: number): OverrideRole {
+  if (code === OVERRIDE_ROLE.approver) return 'approver';
+  if (code === OVERRIDE_ROLE.manager) return 'manager';
+  return 'none';
+}
+
+/**
+ * Watches for **somebody else** approving a request this terminal filed (Task 32, ruling 2).
+ *
+ * `requestOverride` emits `OverrideRequested` and writes no check-in, so the screen that filed it
+ * has nothing else to learn from: the tap watch above matches on a nonce and a manual approval
+ * carries `bytes32(0)` there (`Ticket.sol:426`), which is exactly why that watch cannot be reused.
+ * This one filters on the approval event itself, narrowed to this ticket by its indexed `tokenId`.
+ *
+ * Two differences from {@link watchCheckedIn}, both because of what it is watching for:
+ *
+ *  * **No one-shot storage read.** `checkInOf` would answer `manual: true` for an override filed
+ *    last week by somebody else, and the question here is "was *this* request answered", asked
+ *    from the moment it was filed. A subscription is the whole of it.
+ *  * **The approver comes out of the log, not out of this device.** The screen must say what the
+ *    chain says — `msg.sender` at the moment of approval — and that is a person this terminal
+ *    has never heard of.
+ *
+ * Stopping unsubscribes, so an approval that lands after the staff member moved on says nothing.
+ */
+export function watchManualOverride(
+  tokenId: bigint,
+  onApproved: (approval: OverrideApproval) => void,
+): LogSubscription {
+  if (!MANUAL_OVERRIDE_TOPIC) return () => undefined;
+  let live = true;
+  let answered = false;
+
+  const stopLogs = subscribeLogs({
+    address: getConfig().addresses.ticket,
+    topics: [MANUAL_OVERRIDE_TOPIC, numberToHex(tokenId, { size: 32 })],
+    onLog: (log) => {
+      if (!live || answered) return;
+      // The approver is the third indexed parameter, so it is a topic rather than data: a 32-byte
+      // word whose low 20 bytes are the address.
+      const approverTopic = log.topics[3];
+      if (typeof approverTopic !== 'string') return;
+      try {
+        const [role] = decodeAbiParameters([{ type: 'uint8' }, { type: 'uint8' }], log.data);
+        answered = true;
+        onApproved({
+          approver: `0x${approverTopic.slice(-40)}` as Hex,
+          role: roleOf(Number(role)),
+        });
+      } catch {
+        // A body this build cannot read is not an approval, and saying nothing is the only
+        // honest thing left: the request may still be open.
+      }
+    },
+  });
 
   return () => {
     live = false;

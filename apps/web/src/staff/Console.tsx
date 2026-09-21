@@ -12,10 +12,11 @@ import {
   ReceivedCard,
   RefusedToast,
   StaffShell,
+  StaleDoorBanner,
   TapPrompt,
 } from './components';
 import type { SettledTap, TapRefusal } from './gate/machine';
-import type { GateContext, OverrideReason, PrecheckResult } from './types';
+import type { GateContext, OverrideReason, PrecheckResult, SnapshotTicket } from './types';
 
 /** 표 번호에서 마지막 두 글자만 남긴다. 관객이 같이 보는 화면에 전체 번호를 띄우지 않는다. */
 const MASK = '••';
@@ -68,8 +69,15 @@ export interface GateConsoleProps {
    */
   actions?: ReactNode;
   canApprove?: boolean;
+  /** 명단에서 사람을 찾는 법. 탭이 없어도 수동 승인이 열리므로 창이 이것을 쓴다(04 T32). */
+  onOverrideSearch?: (query: string) => readonly SnapshotTicket[];
+  /**
+   * 문이 열려 있다는 답을 이번 회차에 받지 못해, 이 단말기가 기억한 지난 답으로 열려 있다.
+   * 판정이 아니라 상태이므로 `OfflineBadge`·`QueueBanner` 와 같은 배너 자리에 산다.
+   */
+  gateOpenStale?: boolean;
   onDone?: () => void;
-  onOverrideSubmit?: (pin: string, reason: OverrideReason) => void;
+  onOverrideSubmit?: (pin: string, reason: OverrideReason, tokenId?: string) => void;
   onOverrideCancel?: () => void;
 }
 
@@ -99,6 +107,8 @@ export function GateConsole({
   queueError,
   actions,
   canApprove,
+  onOverrideSearch,
+  gateOpenStale,
   onDone,
   onOverrideSubmit,
   onOverrideCancel,
@@ -154,6 +164,8 @@ export function GateConsole({
         return (
           <OverrideDialog
             canApprove={canApprove ?? false}
+            ticket={ticket}
+            onSearch={onOverrideSearch}
             outcome={context.override}
             onSubmit={onOverrideSubmit ?? noop}
             onCancel={onOverrideCancel ?? noop}
@@ -176,6 +188,7 @@ export function GateConsole({
         <>
           {/* 남은 건수는 바로 옆 `QueueBanner` 가 말한다. 같은 문장을 두 번 띄우지 않는다. */}
           <OfflineBadge online={context.online} snapshotAgeMs={context.snapshotAgeMs} />
+          <StaleDoorBanner stale={gateOpenStale} />
           <QueueBanner
             pendingCount={context.pendingCount}
             parkedCount={parkedCount ?? 0}

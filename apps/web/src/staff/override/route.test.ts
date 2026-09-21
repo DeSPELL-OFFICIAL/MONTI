@@ -47,7 +47,7 @@ const staffAccount = { address: STAFF };
 const getStaffAccount = vi.fn(async () => staffAccount);
 vi.mock('../../shared/chain/accounts', () => ({ getStaffAccount: () => getStaffAccount() }));
 
-const { PERM_APPROVE_OVERRIDE, readOverrideAuthority, decideOverrideRoute, submitOverride } =
+const { OverrideDenied, PERM_APPROVE_OVERRIDE, readOverrideAuthority, decideOverrideRoute, submitOverride } =
   await import('./route');
 
 const WHO = { orgId: 5n, account: STAFF } as const;
@@ -169,7 +169,7 @@ describe('the override operation', () => {
     chainSays([false, false], false);
     await expect(
       submitOverride({ orgId: 5n, tokenId: 1n, gateId: 7n, reason: OVERRIDE_REASON.other }),
-    ).rejects.toThrow('OVERRIDE_DENIED');
+    ).rejects.toBeInstanceOf(OverrideDenied);
     expect(sendSponsoredOp).not.toHaveBeenCalled();
   });
 

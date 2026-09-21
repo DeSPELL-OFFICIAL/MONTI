@@ -142,7 +142,9 @@ function RunningGate({ gateId, eventId, orgId, gateAccount, open, revoked }: Run
       queueError={gate.queueError}
       onDone={gate.retry}
       canApprove={gate.canApprove}
-      onOverrideSubmit={(pin, reason) => void gate.submitOverride(pin, reason)}
+      gateOpenStale={gate.gateOpenStale}
+      onOverrideSearch={gate.searchGuests}
+      onOverrideSubmit={(pin, reason, tokenId) => void gate.submitOverride(pin, reason, tokenId)}
       // Cancelling is the way out of the dialog, and it is `retry` — the same press that clears
       // any other settled screen — so the result lands in 직전 탭 on the way back to waiting.
       onOverrideCancel={gate.retry}
@@ -152,24 +154,24 @@ function RunningGate({ gateId, eventId, orgId, gateAccount, open, revoked }: Run
             {copy.qr.scanButton}
           </Button>
           {/*
-            The way into manual approval, and the only one (04 T32). It is offered exactly when
-            there is something to approve — `manualOverride(tokenId, …)` needs a ticket, and the
-            only ticket this screen knows is the one the guest list matched on the tap that is on
-            screen — and it is hidden while the dialog is open so the screen never shows two
-            buttons that both say 수동 승인.
+            The way into manual approval, and the only one (04 T32).
+
+            It does **not** wait for a tap. The attendee this feature exists for is the one whose
+            phone produces nothing at all, so the dialog opens with a guest-list search and finds
+            them by name or ticket number; requiring a tap first would leave exactly that person
+            with nowhere to go.
+
+            It is hidden in two states, for two different reasons. While the dialog is open, so
+            the screen never shows two buttons that both say 수동 승인. While a check-in is
+            confirming, because the machine would refuse it anyway — that operation is paid for
+            and its verdict is still coming, and a button that can only produce a refusal is a
+            button that teaches a staff member to ignore refusals.
           */}
-          {gate.ticket === undefined || gate.state === 'override' ? null : (
+          {gate.state === 'override' || gate.state === 'confirming' ? null : (
             <Button variant="ghost" onClick={gate.openOverride}>
               {copy.override.open}
             </Button>
           )}
-          {/*
-            The door is open on a remembered answer rather than a fresh one. It still opens —
-            refusing every attendee because a venue's wifi is down is the worse failure — but a
-            permission read last session is a fact about last session, and whoever is holding the
-            phone gets told so rather than finding out from a queue of reverts.
-          */}
-          {gate.gateOpenStale ? <Alert tone="warn">{copy.setup.gateOpenStale}</Alert> : null}
           {/*
             The only way into the queue screen. Without it a terminal that took people in during a
             signal drop has no path to the one screen that can re-send them or show the conflicts,

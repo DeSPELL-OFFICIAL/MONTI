@@ -17,12 +17,12 @@
 import { openDB, type IDBPDatabase } from 'idb';
 import type { Address } from 'viem';
 
-import { SNAPSHOT_TTL_SECONDS, type SnapshotWire } from '@monti/shared';
+import { SNAPSHOT_TTL_SECONDS, type SnapshotTicket, type SnapshotWire } from '@monti/shared';
 
 import { getPhotoForGate, issueSnapshot } from '../../shared/api/functions';
 import { SNAPSHOT_REFRESH_MS, STAFF_DB_NAME, STAFF_DB_VERSION } from '../constants';
 import type { SnapshotStore } from '../gate/preflight';
-import { deviceKeyIn, lookupIn, type DeviceKey, type SnapshotLookup } from './lookup';
+import { deviceKeyIn, lookupIn, searchIn, type DeviceKey, type SnapshotLookup } from './lookup';
 import { SnapshotError, snapshotBody, snapshotFitsCaps, verifySnapshot } from './verify';
 
 interface StoredSnapshot {
@@ -145,6 +145,17 @@ export function current(): SnapshotWire | undefined {
 /** What this gate knows about one token. See `lookup.ts` for why "unknown" is not a refusal. */
 export function lookup(tokenId: string): SnapshotLookup {
   return lookupIn(held, tokenId);
+}
+
+/**
+ * Somebody in the guest list, by name or ticket number (Task 32's manual approval).
+ *
+ * Synchronous like `lookup()` and for the same reason: it is read while a staff member types in
+ * front of a queue, and it reads the snapshot already held in memory. An empty query answers
+ * nothing rather than everything — a list of every attendee is not a search result.
+ */
+export function search(query: string): readonly SnapshotTicket[] {
+  return searchIn(held, query);
 }
 
 /** The attendee's active device key, for Task 27 to check an offline `deviceSig` against. */

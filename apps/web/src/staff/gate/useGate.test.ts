@@ -115,7 +115,8 @@ const { staffDb } = await import('../snapshot/store');
 const { allEntries } = await import('../queue/opQueue');
 const { nonceHashOf } = await import('./verdict');
 const { useGate } = await import('./useGate');
-const { GATE_CODE_ROTATE_MS, GATE_OPEN_RECHECK_MS, GATE_STATUS_POLL_MS } = await import('../constants');
+const { GATE_CODE_ROTATE_MS, GATE_OPEN_RECHECK_MS, GATE_OPEN_STALE_MS, GATE_STATUS_POLL_MS } =
+  await import('../constants');
 const { DRY_RUN_MARK } = await import('../types');
 const { staffKo } = await import('../copy');
 
@@ -227,6 +228,23 @@ function tapWith(code: ReturnType<typeof servedCode>, tokenId = TOKEN_ID): void 
 }
 
 const CHECKED_IN = toEventSelector('CheckedIn(uint256,uint256,uint256,bytes32,uint64)');
+const MANUAL_OVERRIDE = toEventSelector('ManualOverride(uint256,uint256,address,uint8,uint8)');
+
+/** `ManualOverride` as the node reports it: approver in topic 3, role and reason in the body. */
+function manualOverrideLog(approver: Hex, role: number, reason: number) {
+  return {
+    address: TICKET_ADDRESS,
+    topics: [
+      MANUAL_OVERRIDE,
+      numberToHex(BigInt(TOKEN_ID), { size: 32 }),
+      numberToHex(GATE_ID, { size: 32 }),
+      `0x${'00'.repeat(12)}${approver.slice(2)}`,
+    ],
+    data: encodeAbiParameters([{ type: 'uint8' }, { type: 'uint8' }], [role, reason]),
+    blockNumber: '0x64',
+    stage: 'finalized',
+  };
+}
 
 /** A `CheckedIn` exactly as `monadLogs` reports it — quantities as hex strings, not bigints. */
 function checkedInLog(nonce: Hex, stage: 'speculative' | 'finalized') {
@@ -788,15 +806,28 @@ describe('the QR fallback', () => {
  *  * **the PIN** — five tries and a minute, on disk, before anything is signed.
  */
 describe('manual approval', () => {
-  /** A tap on screen, so there is a ticket to approve, and a PIN this terminal agreed on. */
+  /**
+   * A running gate and a PIN this terminal agreed on — and **no tap**, which is the case the
+   * feature exists for: an attendee whose phone produces nothing at all. The ticket is named by
+   * the dialog's search instead.
+   */
   async function ready() {
     const { setPin } = await import('../override/pin');
     await setPin('4821');
     const rendered = await openGate();
+    sendSponsoredOp.mockClear();
+    return rendered;
+  }
+
+  /** The other way in: a tap that was answered, and a staff member who overrides the answer. */
+  async function afterRefusal() {
+    const rendered = await ready();
+    // The check-in reverts, so the tap settles and the screen is free for an override.
+    wait.mockResolvedValueOnce({ success: false, txHash: `0x${'00'.repeat(32)}`, blockNumber: 0n });
     await act(async () => {
       tapWith(servedCode());
     });
-    await waitFor(() => expect(rendered.result.current.state).toBe('confirming'));
+    await waitFor(() => expect(rendered.result.current.state).toBe('deny'));
     sendSponsoredOp.mockClear();
     return rendered;
   }
@@ -825,7 +856,7 @@ describe('manual approval', () => {
     await waitFor(() => expect(result.current.canApprove).toBe(true));
 
     await act(async () => {
-      await result.current.submitOverride('4821', 2);
+      await result.current.submitOverride('4821', 2, TOKEN_ID);
     });
 
     const sent = await sentOverride();
@@ -855,7 +886,7 @@ describe('manual approval', () => {
     });
     await waitFor(() => expect(result.current.canApprove).toBe(true));
     await act(async () => {
-      await result.current.submitOverride('4821', 1);
+      await result.current.submitOverride('4821', 1, TOKEN_ID);
     });
     expect(result.current.override).toMatchObject({ role: 'approver', route: 'manualOverride' });
   });
@@ -874,7 +905,7 @@ describe('manual approval', () => {
     await waitFor(() => expect(result.current.canApprove).toBe(false));
 
     await act(async () => {
-      await result.current.submitOverride('4821', 3);
+      await result.current.submitOverride('4821', 3, TOKEN_ID);
     });
 
     const sent = await sentOverride();
@@ -891,7 +922,7 @@ describe('manual approval', () => {
       result.current.openOverride();
     });
     await act(async () => {
-      await result.current.submitOverride('0000', 1);
+      await result.current.submitOverride('0000', 1, TOKEN_ID);
     });
     expect(sendSponsoredOp).not.toHaveBeenCalled();
     expect(result.current.override?.status).toBe('failed');
@@ -906,11 +937,11 @@ describe('manual approval', () => {
     });
     for (let attempt = 0; attempt < 5; attempt += 1) {
       await act(async () => {
-        await result.current.submitOverride('0000', 1);
+        await result.current.submitOverride('0000', 1, TOKEN_ID);
       });
     }
     await act(async () => {
-      await result.current.submitOverride('4821', 1);
+      await result.current.submitOverride('4821', 1, TOKEN_ID);
     });
     expect(sendSponsoredOp).not.toHaveBeenCalled();
     expect(result.current.override?.detail).toBe(staffKo.override.pinLocked.replace('{{seconds}}', '60'));
@@ -924,10 +955,124 @@ describe('manual approval', () => {
     });
     await waitFor(() => expect(result.current.canApprove).toBe(false));
     await act(async () => {
-      await result.current.submitOverride('4821', 1);
+      await result.current.submitOverride('4821', 1, TOKEN_ID);
     });
     expect(sendSponsoredOp).not.toHaveBeenCalled();
     expect(result.current.override).toMatchObject({ status: 'failed', detail: staffKo.override.denied });
+  });
+
+  /**
+   * The critical one. `ticket` is set at `onPreflight`, before anything is sent, so the button
+   * used to be live all through `confirming` — and taking the screen there closed the
+   * `CheckedIn` watch for an operation that is running and already paid for.
+   */
+  it('refuses to open while a check-in is confirming, and that check-in still lands', async () => {
+    const { result } = await ready();
+    const code = servedCode();
+    await act(async () => {
+      tapWith(code);
+    });
+    await waitFor(() => expect(result.current.state).toBe('confirming'));
+
+    await act(async () => {
+      expect(result.current.openOverride()).toBe(false);
+    });
+    expect(result.current.state).toBe('confirming');
+    expect(result.current.refusal).toBe('CONFIRMING');
+
+    // The watch was never closed, so the verdict still arrives and still admits.
+    await act(async () => {
+      feedVerdict(checkedInLog(code.nonce, 'finalized'));
+    });
+    await waitFor(() => expect(result.current.state).toBe('admit'));
+  });
+
+  it('falls back to the tap on screen when the dialog named nobody', async () => {
+    const { result } = await afterRefusal();
+    await act(async () => {
+      result.current.openOverride();
+    });
+    await act(async () => {
+      await result.current.submitOverride('4821', 1);
+    });
+    const sent = await sentOverride();
+    expect(sent.args).toEqual([BigInt(TOKEN_ID), GATE_ID, 1]);
+  });
+
+  it('finds somebody in the held guest list by name and by ticket number', async () => {
+    const { result } = await ready();
+    expect(result.current.searchGuests('김입장').map((row) => row.tokenId)).toEqual([TOKEN_ID]);
+    expect(result.current.searchGuests(TOKEN_ID.slice(-2)).map((row) => row.tokenId)).toEqual([TOKEN_ID]);
+    expect(result.current.searchGuests('없는사람')).toEqual([]);
+    expect(result.current.searchGuests('')).toEqual([]);
+  });
+
+  /**
+   * Ruling 2. `requestOverride` writes no check-in, so without this the staff member who filed
+   * one has no way to learn it was granted except by asking the attendee to tap again — and the
+   * attendee is standing there precisely because they cannot.
+   */
+  it('follows a filed request until somebody approves it, then says 승인됨', async () => {
+    managerOf = [true, false];
+    const { result } = await ready();
+    await act(async () => {
+      result.current.openOverride();
+    });
+    await act(async () => {
+      await result.current.submitOverride('4821', 1, TOKEN_ID);
+    });
+    await waitFor(() => expect(result.current.override?.status).toBe('requested'));
+
+    // The machine opened a second subscription, for `ManualOverride` on this ticket.
+    const watch = subscribeLogs.mock.calls.at(-1)?.[0] as {
+      topics: unknown[];
+      onLog: (log: unknown) => void;
+    };
+    expect(watch.topics[0]).toBe(MANUAL_OVERRIDE);
+    expect(watch.topics[1]).toBe(numberToHex(BigInt(TOKEN_ID), { size: 32 }));
+
+    await act(async () => {
+      watch.onLog(manualOverrideLog(`0x${'cc'.repeat(20)}`, 1, 1));
+    });
+    await waitFor(() => expect(result.current.override?.status).toBe('approved'));
+    expect(result.current.override).toMatchObject({
+      role: 'approver',
+      approver: `0x${'cc'.repeat(20)}`,
+      route: 'requestOverride',
+    });
+  });
+
+  it('says a dismissed identity check is not a failure', async () => {
+    const { result } = await ready();
+    const cancelled = Object.assign(new Error('nope'), { name: 'NotAllowedError' });
+    sendSponsoredOp.mockRejectedValueOnce(cancelled);
+    await act(async () => {
+      result.current.openOverride();
+    });
+    await act(async () => {
+      await result.current.submitOverride('4821', 1, TOKEN_ID);
+    });
+    expect(result.current.override).toMatchObject({
+      status: 'failed',
+      detail: staffKo.override.cancelled,
+    });
+  });
+
+  /** A rejected `wait()` is not a timeout. Swallowing it left the dialog with no ending at all. */
+  it('gives a receipt it could not read its own sentence', async () => {
+    const { result } = await ready();
+    wait.mockRejectedValueOnce(new Error('bundler said no'));
+    await act(async () => {
+      result.current.openOverride();
+    });
+    await act(async () => {
+      await result.current.submitOverride('4821', 1, TOKEN_ID);
+    });
+    expect(result.current.override).toMatchObject({
+      status: 'failed',
+      detail: staffKo.override.unreachable,
+      route: 'manualOverride',
+    });
   });
 
   it('has a way out: the result lands in 직전 탭 and the gate waits for the next attendee', async () => {
@@ -936,7 +1081,7 @@ describe('manual approval', () => {
       result.current.openOverride();
     });
     await act(async () => {
-      await result.current.submitOverride('4821', 1);
+      await result.current.submitOverride('4821', 1, TOKEN_ID);
     });
     await waitFor(() => expect(result.current.override?.status).toBe('approved'));
 
@@ -986,6 +1131,41 @@ describe('a door open on a remembered answer', () => {
     await waitFor(() => expect(readContract).toHaveBeenCalled());
     expect(result.current.gateOpen).toBeUndefined();
     expect(result.current.gateOpenStale).toBe(false);
+  });
+
+  /**
+   * Ruling 3. A remembered permission is one nobody has re-granted, so it expires: past an hour
+   * the screen goes back to blocking rather than opening a door this device cannot vouch for.
+   */
+  it('throws away an answer older than the window, and blocks instead', async () => {
+    await (await staffDb()).put('settings', {
+      key: 'gateOpen',
+      gateId: GATE_ID.toString(),
+      open: true,
+      checkedAt: Date.now() - GATE_OPEN_STALE_MS - 1,
+    });
+    openGateAnswer = () => {
+      throw new Error('offline');
+    };
+    const { result } = renderHook(() => useGate(params));
+    await waitFor(() => expect(readContract).toHaveBeenCalled());
+    expect(result.current.gateOpen).toBeUndefined();
+    expect(result.current.gateOpenStale).toBe(false);
+  });
+
+  it('still opens on one inside the window', async () => {
+    await (await staffDb()).put('settings', {
+      key: 'gateOpen',
+      gateId: GATE_ID.toString(),
+      open: true,
+      checkedAt: Date.now() - GATE_OPEN_STALE_MS + 60_000,
+    });
+    openGateAnswer = () => {
+      throw new Error('offline');
+    };
+    const { result } = renderHook(() => useGate(params));
+    await waitFor(() => expect(result.current.gateOpen).toBe(true));
+    expect(result.current.gateOpenStale).toBe(true);
   });
 
   /** A fresh answer beats a remembered one, in both directions and immediately. */

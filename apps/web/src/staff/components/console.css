@@ -377,6 +377,37 @@
   color: var(--muted);
 }
 
+.gate-dialog__hint {
+  margin: 0;
+  font-size: 15px;
+  color: var(--muted);
+}
+
+/* 찾기 결과. 한 손으로 누를 수 있게 줄마다 단추 하나, 세로로만 쌓인다. */
+.gate-dialog__matches {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gate-dialog__matches .btn {
+  width: 100%;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.gate-dialog__chosen {
+  margin: 0;
+  font-size: 17px;
+}
+
+.gate-dialog__chosen > span {
+  color: var(--muted);
+}
+
 .gate-dialog__outcome {
   margin: 4px 0 0;
   padding: 12px;

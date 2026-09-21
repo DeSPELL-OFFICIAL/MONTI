@@ -69,6 +69,14 @@ export const USED_EVENTS = {
      * `checkInLate`. Pending until the redeploy.
      */
     CheckedInLate: 4,
+    /**
+     * `ManualOverride(uint256 indexed tokenId, uint256 indexed gateId, address indexed approver,
+     * uint8 role, uint8 reason)` — **five** parameters (`Ticket.sol:114-116`). A gate subscribes
+     * to it for one case only: after this terminal filed a `requestOverride`, it is the log that
+     * says somebody with the right approved it. Without it a filed request is a dead end on the
+     * phone — `requestOverride` writes no check-in, so nothing else will ever mention it again.
+     */
+    ManualOverride: 5,
   },
 } as const satisfies Record<UsedContract, Readonly<Record<string, number>>>;
 

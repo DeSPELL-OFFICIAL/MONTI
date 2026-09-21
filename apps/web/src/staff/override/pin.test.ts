@@ -114,6 +114,39 @@ describe('local staff PIN', () => {
     expect(await checkPin(WRONG)).toEqual({ ok: false, reason: 'WRONG', triesLeft: PIN_MAX_ATTEMPTS - 1 });
   });
 
+  /**
+   * Once `failures` reached the cap, nothing but a correct PIN used to clear it — so after the
+   * first lockout every single wrong try re-locked for a full minute and the countdown could
+   * never be shown again. The staff member was never told they had four tries, because they
+   * never did.
+   */
+  it('gives the tries back once the lockout is walked past, not only on a correct PIN', async () => {
+    await setPin(RIGHT);
+    const at = 1_000_000;
+    for (let attempt = 0; attempt < PIN_MAX_ATTEMPTS; attempt += 1) await checkPin(WRONG, at);
+
+    expect(await checkPin(WRONG, at + PIN_LOCKOUT_MS)).toEqual({
+      ok: false,
+      reason: 'WRONG',
+      triesLeft: PIN_MAX_ATTEMPTS - 1,
+    });
+  });
+
+  /**
+   * The caller is a button somebody presses with a queue watching. Two attempts racing through
+   * the same read lose a failure each, and two lost failures is a five-try lockout that takes
+   * seven — the whole defence leaking one press at a time.
+   */
+  it('counts every attempt when they are pressed at once', async () => {
+    await setPin(RIGHT);
+    const at = 1_000_000;
+    await Promise.all(
+      Array.from({ length: PIN_MAX_ATTEMPTS }, () => checkPin(WRONG, at)),
+    );
+    expect((await pinRow())?.failures).toBe(PIN_MAX_ATTEMPTS);
+    expect(await checkPin(RIGHT, at)).toEqual({ ok: false, reason: 'LOCKED', retryInMs: PIN_LOCKOUT_MS });
+  });
+
   it('starts a newly set PIN unlocked, whatever the old one was doing', async () => {
     await setPin(RIGHT);
     const at = 1_000_000;

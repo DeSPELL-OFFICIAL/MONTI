@@ -252,6 +252,14 @@ export type OverrideRole = 'approver' | 'manager' | 'none';
 export interface OverrideOutcome {
   status: 'sending' | 'requested' | 'approved' | 'failed';
   reason: OverrideReason;
+  /**
+   * Who it is about. Present from the moment the operation goes out, and load-bearing on the
+   * request path: it is the key the `ManualOverride` watch filters on, so a filed request can
+   * turn into 승인됨 when somebody with the right acts on it.
+   */
+  tokenId?: string;
+  /** The name on the ticket, so 직전 탭 can still say who was let in after the dialog closes. */
+  displayName?: string;
   route?: OverrideCall;
   role?: OverrideRole;
   /** The account the chain will record as approver — the staff member's own, never the gate's. */

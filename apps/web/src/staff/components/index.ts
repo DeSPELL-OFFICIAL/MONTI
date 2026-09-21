@@ -22,4 +22,5 @@ export { RefusedToast, type RefusedToastProps } from './RefusedToast';
 export { LastTapChip, type LastTapChipProps } from './LastTapChip';
 export { OfflineBadge, type OfflineBadgeProps } from './OfflineBadge';
 export { QueueBanner, type QueueBannerProps } from './QueueBanner';
+export { StaleDoorBanner, type StaleDoorBannerProps } from './StaleDoorBanner';
 export { OverrideDialog, type OverrideDialogProps } from './OverrideDialog';

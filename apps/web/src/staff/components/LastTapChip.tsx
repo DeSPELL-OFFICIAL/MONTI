@@ -2,6 +2,7 @@ import type { ReactElement } from 'react';
 
 import { useStaffCopy, type StaffCopy } from '../copy';
 import type { SettledTap } from '../gate/machine';
+import { ROLE_KEY, reasonKey, shortAccount } from './overrideText';
 
 const STATE_WORD: Record<SettledTap['state'], keyof StaffCopy['lastTap']> = {
   admit: 'admit',
@@ -23,6 +24,10 @@ export interface LastTapChipProps {
  * 이 줄이 그 질문에 답한다.
  *
  * 거절이었다면 사유까지 남긴다. 거절은 다시 물어보러 오는 유일한 판정이다.
+ *
+ * 수동 승인이었다면 **승인한 사람·권한·사유**까지 남긴다(04 T32). 이 셋은 체인 사건이 남기는
+ * 것과 같은 셋이고, 창이 닫히는 순간 화면에서 사라지면 그 뒤로는 폰에서 물어볼 곳이 없다 —
+ * 손으로 문을 연 기록이야말로 나중에 누가 그랬냐고 묻게 되는 바로 그 기록이다.
  */
 export function LastTapChip({ lastTap }: LastTapChipProps): ReactElement {
   const copy = useStaffCopy();
@@ -31,7 +36,8 @@ export function LastTapChip({ lastTap }: LastTapChipProps): ReactElement {
     return <p className="gate-last-tap">{copy.lastTap.none}</p>;
   }
 
-  const name = lastTap.ticket?.displayName;
+  const name = lastTap.ticket?.displayName ?? lastTap.override?.displayName;
+  const override = lastTap.state === 'override' ? lastTap.override : undefined;
   return (
     <p className="gate-last-tap">
       <span>{copy.lastTap.label}</span>
@@ -40,6 +46,15 @@ export function LastTapChip({ lastTap }: LastTapChipProps): ReactElement {
       {lastTap.state === 'deny' && lastTap.deny !== undefined ? (
         <span>{copy.deny[lastTap.deny]}</span>
       ) : null}
+      {override === undefined ? null : (
+        <>
+          <span>{copy.override[reasonKey(override.reason)]}</span>
+          {override.role === undefined ? null : <span>{copy.override[ROLE_KEY[override.role]]}</span>}
+          {override.approver === undefined ? null : (
+            <span className="mono">{shortAccount(override.approver)}</span>
+          )}
+        </>
+      )}
     </p>
   );
 }

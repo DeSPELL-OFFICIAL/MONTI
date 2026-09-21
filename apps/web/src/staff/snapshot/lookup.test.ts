@@ -4,7 +4,7 @@ import type { SnapshotWire } from '@monti/shared';
 
 import { DENY_CODES, type Hex, type SnapshotTicket } from '../types';
 
-import { deviceKeyIn, lookupIn, snapshotDeny } from './lookup';
+import { SEARCH_LIMIT, deviceKeyIn, lookupIn, searchIn, snapshotDeny } from './lookup';
 
 const ticket: SnapshotTicket = {
   tokenId: '123',
@@ -100,5 +100,58 @@ describe('deviceKeyIn', () => {
   it('gives nothing for a locked device rather than 32 zero bytes', () => {
     expect(deviceKeyIn({ ...snapshot, tickets: [{ ...ticket, deviceX: ZERO }] }, '123')).toBeUndefined();
     expect(deviceKeyIn({ ...snapshot, tickets: [{ ...ticket, deviceY: ZERO }] }, '123')).toBeUndefined();
+  });
+});
+
+/**
+ * Finding somebody by what a staff member can actually read off them, for the manual approval
+ * that starts with no tap at all (Task 32, ruling 1).
+ */
+describe('searchIn', () => {
+  const other: SnapshotTicket = { ...ticket, tokenId: '9901', displayName: '박관객' };
+  const list: SnapshotWire = { ...snapshot, tickets: [ticket, other] };
+
+  it('matches a name by any part of it, because a staff member types what they hear', () => {
+    expect(searchIn(list, '입장').map((row) => row.tokenId)).toEqual(['123']);
+    expect(searchIn(list, '박').map((row) => row.tokenId)).toEqual(['9901']);
+  });
+
+  /**
+   * By suffix, because the console masks all but the last two digits — the digits a staff member
+   * can see are the trailing ones. A full number still matches: a string is a suffix of itself.
+   */
+  it('matches a ticket number by its tail, and by the whole of it', () => {
+    expect(searchIn(list, '01').map((row) => row.tokenId)).toEqual(['9901']);
+    expect(searchIn(list, '9901').map((row) => row.tokenId)).toEqual(['9901']);
+    expect(searchIn(list, '23').map((row) => row.tokenId)).toEqual(['123']);
+  });
+
+  it('answers nothing rather than everything for an empty query', () => {
+    expect(searchIn(list, '')).toEqual([]);
+    expect(searchIn(list, '   ')).toEqual([]);
+    expect(searchIn(undefined, '김')).toEqual([]);
+  });
+
+  /**
+   * A row the list already refuses is **not** hidden. An `ALREADY_USED` ticket is exactly the
+   * kind of case that gets escalated to a manual approval, and hiding it would leave the staff
+   * member unable to name the person in front of them.
+   */
+  it('keeps rows the guest list would refuse', () => {
+    const used: SnapshotWire = { ...snapshot, tickets: [{ ...ticket, checkedIn: true }] };
+    expect(searchIn(used, '김입장')).toHaveLength(1);
+  });
+
+  /** A one-character query over a real guest list matches most of it. Type another letter. */
+  it('caps what it puts on the phone at once', () => {
+    const many: SnapshotWire = {
+      ...snapshot,
+      tickets: Array.from({ length: SEARCH_LIMIT + 5 }, (_, index) => ({
+        ...ticket,
+        tokenId: String(1000 + index),
+        displayName: `김입장${index}`,
+      })),
+    };
+    expect(searchIn(many, '김입장')).toHaveLength(SEARCH_LIMIT);
   });
 });

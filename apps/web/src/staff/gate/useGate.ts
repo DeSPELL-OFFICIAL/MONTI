@@ -43,20 +43,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Address } from 'viem';
 
-import type { GateResponseWire, SnapshotWire } from '@monti/shared';
+import type { GateResponseWire, SnapshotTicket, SnapshotWire } from '@monti/shared';
 
 import { getStaffAccount } from '../../shared/chain/accounts';
+import { passkeyProblem } from '../../shared/passkey/errors';
 import { readIdentity, readOrganizers, readTicket } from '../../shared/chain/reads';
 import {
   CHECK_IN_WAIT_MS,
   DEVICE_CHANGE_WINDOW_MS,
   GATE_OPEN_RECHECK_MS,
+  GATE_OPEN_STALE_MS,
   GATE_STATUS_POLL_MS,
 } from '../constants';
 import { useStaffCopy } from '../copy';
 import { warn } from '../log';
 import { checkPin } from '../override/pin';
-import { readOverrideAuthority, submitOverride as sendOverride } from '../override/route';
+import { OverrideDenied, readOverrideAuthority, submitOverride as sendOverride } from '../override/route';
 import { createOnlineWatcher } from '../net/online';
 import { offlineAdmit } from '../offline/offlineAdmit';
 import { drainQueue, parkedCount, pendingCount } from '../queue/opQueue';
@@ -65,11 +67,12 @@ import {
   lastGateOpen,
   photoFor,
   rememberGateOpen,
+  search as searchSnapshot,
   snapshotAgeMs,
   startSnapshotRefresh,
 } from '../snapshot/store';
 import type { GateContext, OverrideOutcome, OverrideReason, PreflightResult } from '../types';
-import { overrideNotice } from '../components/OverrideDialog';
+import { overrideNotice } from '../components/overrideText';
 import { sendCheckIn } from './checkInOp';
 import { matchIssuedCode } from './decodeResponse';
 import { DENY_LABELS, mapRevertToDenyCode } from './denyMap';
@@ -82,7 +85,7 @@ import {
   type TapRefusal,
 } from './machine';
 import { preflight } from './preflight';
-import { watchCheckedIn } from './verdict';
+import { watchCheckedIn, watchManualOverride } from './verdict';
 
 export interface UseGateParams {
   gateId: bigint;
@@ -151,10 +154,18 @@ export type UseGateResult = GateContext & {
    * to file a request, which every manager may do.
    */
   canApprove: boolean;
-  /** Opens the manual-approval dialog for whoever is on screen, and asks who this staff is. */
-  openOverride(): void;
-  /** The PIN, then the chain. Never throws: every outcome is a sentence in the dialog. */
-  submitOverride(pin: string, reason: OverrideReason): Promise<void>;
+  /**
+   * Opens the manual-approval dialog and asks who this staff member is. Answers `false` when the
+   * gate refused to open it — today that is a check-in still confirming, and `refusal` says so.
+   */
+  openOverride(): boolean;
+  /** Finds somebody in the held guest list by name or ticket number, for the dialog's search. */
+  searchGuests(query: string): readonly SnapshotTicket[];
+  /**
+   * The PIN, then the chain. `tokenId` is whoever the dialog picked; without one it falls back to
+   * the tap on screen. Never throws: every outcome is a sentence in the dialog.
+   */
+  submitOverride(pin: string, reason: OverrideReason, tokenId?: string): Promise<void>;
   /** The one receiving path NFC and the QR fallback (Task 31) share. */
   handleResponse(response: GateResponseWire): Promise<void>;
   /** Clear the verdict and wait for the next attendee. The only thing that clears one. */
@@ -178,7 +189,14 @@ export function useGate(params: UseGateParams): UseGateResult {
   // not mounted until `gateOf` has answered), so a machine keyed on them is a machine keyed on
   // nothing that moves.
   const machineRef = useRef<GateMachine | null>(null);
-  machineRef.current ??= createGateMachine({ gateId, eventId, orgId, watch: watchCheckedIn });
+  machineRef.current ??= createGateMachine({
+    gateId,
+    eventId,
+    orgId,
+    watch: watchCheckedIn,
+    // A filed `requestOverride` writes no check-in, so the tap watch above can never answer it.
+    watchOverride: watchManualOverride,
+  });
   const machine = machineRef.current;
 
   const [context, setContext] = useState<GateContext>(() => machine.snapshot());
@@ -480,6 +498,12 @@ export function useGate(params: UseGateParams): UseGateResult {
         if (!alive || answered) return;
         const remembered = await lastGateOpen(gateId);
         if (!alive || answered || remembered === undefined) return;
+        // And it expires. A remembered permission is one nobody has re-granted, and the case it
+        // gets dangerous is the case it is for: a gate revoked while this phone was offline
+        // would otherwise keep taking taps for the rest of the shift, every one of them a
+        // durable row that can only ever revert. Past the window the screen goes back to
+        // blocking, which is the honest state — this device does not know whether it may open.
+        if (Date.now() - remembered.checkedAt > GATE_OPEN_STALE_MS) return;
         setGateOpen(remembered.open);
         setGateOpenStale(true);
       }
@@ -584,9 +608,14 @@ export function useGate(params: UseGateParams): UseGateResult {
    * an organizer can promote or demote a manager between doors. `canApprove` drops to `false`
    * first, so a second opening never shows the previous staff member's rights.
    */
-  const openOverride = useCallback(() => {
+  const openOverride = useCallback((): boolean => {
+    // The machine may refuse — a check-in that is still confirming owns the screen, and taking
+    // it would drop the watch for an operation that is running and already paid for.
+    if (!machine.onOverride()) {
+      setRefusal(machine.refusal());
+      return false;
+    }
     setCanApprove(false);
-    machine.onOverride();
     void (async () => {
       try {
         const account = await getStaffAccount();
@@ -599,7 +628,11 @@ export function useGate(params: UseGateParams): UseGateResult {
         setCanApprove(false);
       }
     })();
+    return true;
   }, [machine, orgId]);
+
+  /** The dialog's search, bound to the snapshot this gate is running on. */
+  const searchGuests = useCallback((query: string) => searchSnapshot(query), []);
 
   /**
    * One manual approval, start to finish. Nothing here decides anything: the PIN decides whether
@@ -613,19 +646,21 @@ export function useGate(params: UseGateParams): UseGateResult {
    * button that does nothing in front of a queue, so every ending is a sentence.
    */
   const submitOverride = useCallback(
-    async (pin: string, reason: OverrideReason): Promise<void> => {
+    async (pin: string, reason: OverrideReason, picked?: string): Promise<void> => {
       const fail = (detail: string, extra: Partial<OverrideOutcome> = {}): void =>
         machine.onOverrideResult({ status: 'failed', reason, detail, ...extra });
 
-      // `manualOverride(tokenId, …)` needs a ticket, and the only ticket this screen knows is
-      // the one the guest list matched on the tap that is on screen. No tap, nothing to approve.
-      const tokenId = machine.snapshot().ticket?.tokenId;
+      // `manualOverride(tokenId, …)` has to be told who. The dialog's pick comes first — an
+      // attendee whose phone produces nothing is the case this feature exists for — and the tap
+      // on screen is the fallback for the ordinary case where somebody did manage to tap.
+      const tokenId = picked ?? machine.snapshot().ticket?.tokenId;
       if (tokenId === undefined) {
         fail(copy.override.noTicket);
         return;
       }
+      const displayName = searchSnapshot(tokenId).find((row) => row.tokenId === tokenId)?.displayName;
 
-      machine.onOverrideResult({ status: 'sending', reason });
+      machine.onOverrideResult({ status: 'sending', reason, tokenId, displayName });
 
       const verdict = await checkPin(pin);
       if (!verdict.ok) {
@@ -640,21 +675,37 @@ export function useGate(params: UseGateParams): UseGateResult {
         submission = await sendOverride({ orgId, gateId, tokenId: BigInt(tokenId), reason });
       } catch (error) {
         warn('gate', 'override was not sent', error);
-        fail((error as Error).message === 'OVERRIDE_DENIED' ? copy.override.denied : copy.override.failed);
+        // Three endings, because "다시 해 보세요" is wrong advice for two of them. A refusal is
+        // about this account and pressing again cannot change it; a dismissed biometric prompt
+        // did not fail at all, and the sentence has to say what is missing.
+        if (error instanceof OverrideDenied) fail(copy.override.denied);
+        else if (passkeyProblem(error) === 'cancelled') fail(copy.override.cancelled);
+        else fail(copy.override.failed);
         return;
       }
 
       const filed: OverrideOutcome = {
         status: 'sending',
         reason,
+        tokenId,
+        displayName,
         route: submission.route,
         role: submission.role,
         approver: submission.approver,
       };
       machine.onOverrideResult(filed);
 
-      const receipt = await submission.wait(CHECK_IN_WAIT_MS).catch(() => undefined);
-      if (receipt === undefined || receipt.revertReason === 'TIMEOUT') {
+      let receipt;
+      try {
+        receipt = await submission.wait(CHECK_IN_WAIT_MS);
+      } catch (error) {
+        // A rejected `wait()` is not a timeout: the bundler answered with an error, or the RPC
+        // dropped. Swallowing it leaves the dialog on 보내고 있어요 for ever with no ending.
+        warn('gate', 'override receipt could not be read', error);
+        fail(copy.override.unreachable, { route: submission.route, role: submission.role, approver: submission.approver });
+        return;
+      }
+      if (receipt.revertReason === 'TIMEOUT') {
         // The operation is still out there, exactly as a slow check-in is (spec §7.3). Saying
         // "실패" here would be a lie a staff member would act on by sending a second one.
         return;
@@ -706,6 +757,7 @@ export function useGate(params: UseGateParams): UseGateResult {
     gateOpenStale,
     canApprove,
     openOverride,
+    searchGuests,
     submitOverride,
     handleResponse,
     retry,

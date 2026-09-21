@@ -234,6 +234,12 @@ export const staffKo = {
     approve: '수동 승인',
     request: '결재 요청 보내기',
     cancel: '취소',
+    /** 탭이 없을 때 명단에서 사람을 찾는 칸(04 T32 룰링 1). */
+    searchLabel: '이름 또는 표 번호',
+    searchHint: '이름 일부나 표 번호 뒷자리를 넣으세요.',
+    searchEmpty: '명단에서 찾지 못했어요. 다르게 넣어 보세요.',
+    chosenLabel: '들여보낼 사람',
+    searchAgain: '다시 찾기',
     /** 보낸 뒤. 체인 사건이 남길 것과 같은 세 가지를 화면에도 그대로 적는다. */
     sending: '보내고 있어요. 잠시만요.',
     requested: '요청됨 — 승인 대기',
@@ -249,7 +255,10 @@ export const staffKo = {
     pinLocked: 'PIN을 여러 번 틀렸어요. {{seconds}}초 뒤에 다시 해 보세요.',
     pinUnset: '이 단말기에는 아직 PIN이 없어요. 등록 화면에서 먼저 정하세요.',
     denied: '이 계정에는 손으로 들여보낼 권한이 없어요. 관리자에게 문의하세요.',
-    noTicket: '표를 먼저 확인한 다음에 할 수 있어요.',
+    noTicket: '누구를 들여보낼지 먼저 고르세요.',
+    /** 잠금 화면을 닫았을 때. "다시 해 보세요"는 여기서 틀린 안내다 — 실패한 게 아니다. */
+    cancelled: '본인 확인을 끝내야 보낼 수 있어요.',
+    unreachable: '보냈는지 확인하지 못했어요. 연결을 확인하고 다시 해 보세요.',
   },
 
   /** 카드를 닫고 다음 관객을 받는다. */
@@ -431,6 +440,11 @@ export const staffEn: typeof staffKo = {
     approve: 'Approve manually',
     request: 'Send for approval',
     cancel: 'Cancel',
+    searchLabel: 'Name or ticket number',
+    searchHint: 'Type part of the name, or the last digits of the ticket number.',
+    searchEmpty: 'Nobody in the list matches. Try something else.',
+    chosenLabel: 'Letting in',
+    searchAgain: 'Search again',
     sending: 'Sending. One moment.',
     requested: 'Requested - waiting for approval',
     approved: 'They are in.',
@@ -444,7 +458,9 @@ export const staffEn: typeof staffKo = {
     pinLocked: 'Too many wrong PINs. Try again in {{seconds}}s.',
     pinUnset: 'This device has no PIN yet. Set one on the registration screen.',
     denied: 'This account may not let people in by hand. Ask your organizer.',
-    noTicket: 'Check a ticket first.',
+    noTicket: 'Pick who to let in first.',
+    cancelled: 'Finish the identity check to send it.',
+    unreachable: 'We could not tell whether it went out. Check the connection and try again.',
   },
 
   done: 'Next',

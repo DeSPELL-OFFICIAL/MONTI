@@ -60,3 +60,50 @@ export function deviceKeyIn(snapshot: SnapshotWire | undefined, tokenId: string)
   if (!ticket || isZeroWord(ticket.deviceX) || isZeroWord(ticket.deviceY)) return undefined;
   return { x: ticket.deviceX, y: ticket.deviceY };
 }
+
+/**
+ * How many rows a search may put on the phone at once.
+ *
+ * It is a cap rather than a scroll on purpose. A one-character query over a ten-thousand-row
+ * guest list matches most of it, and a staff member who has to scroll past forty faces to find
+ * a name is slower than one who is told to type another letter — and the whole point of this
+ * path is the attendee standing there with a phone that will not open.
+ */
+export const SEARCH_LIMIT = 8;
+
+/**
+ * Finding somebody in the guest list by what a staff member can actually read off them: the
+ * name on the ticket, or the ticket number they can read aloud.
+ *
+ * It lives here rather than in the dialog for the same reason `lookupIn` does — one place
+ * decides what a snapshot row means. The dialog is handed the answer.
+ *
+ * The two matches are deliberately different. A **name** matches as a substring, because a staff
+ * member types what they hear and Korean names are short. A **number** matches by suffix, because
+ * the console masks all but the last two digits (`Console.tsx`'s `maskTicketId`), so the digits a
+ * staff member can see are the trailing ones — and an exact full number still matches, since a
+ * string is a suffix of itself.
+ *
+ * A row the list already refuses (`snapshotDeny`) is **not** filtered out. An `ALREADY_USED`
+ * ticket is exactly the kind of case that gets escalated to a manual approval, and hiding it
+ * would leave the staff member unable to name the person they are standing in front of.
+ */
+export function searchIn(
+  snapshot: SnapshotWire | undefined,
+  query: string,
+  limit = SEARCH_LIMIT,
+): readonly SnapshotTicket[] {
+  const needle = query.trim().toLowerCase();
+  if (needle === '' || !snapshot) return [];
+  const digits = /^[0-9]+$/.test(needle);
+  const out: SnapshotTicket[] = [];
+  for (const ticket of snapshot.tickets) {
+    const hit = digits
+      ? ticket.tokenId.endsWith(needle)
+      : ticket.displayName.toLowerCase().includes(needle);
+    if (!hit) continue;
+    out.push(ticket);
+    if (out.length >= limit) break;
+  }
+  return out;
+}

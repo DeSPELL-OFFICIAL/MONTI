@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { act } from 'react';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -404,6 +404,51 @@ describe('LastTapChip', () => {
     render(<LastTapChip lastTap={settled({ state: 'offlineAdmit', finalized: false })} />);
     expect(screen.getByText(staffKo.lastTap.offlineAdmit)).toBeInTheDocument();
   });
+
+  /**
+   * The three facts the chain event carries, kept after the dialog closes. Before this they were
+   * on screen only while the dialog was open — and a manual approval is exactly the record
+   * somebody comes back and asks about.
+   */
+  it('keeps who let somebody in by hand, with what rights and why', () => {
+    render(
+      <LastTapChip
+        lastTap={settled({
+          state: 'override',
+          finalized: false,
+          override: {
+            status: 'approved',
+            reason: 2,
+            route: 'manualOverride',
+            role: 'manager',
+            approver: `0x${'bb'.repeat(20)}`,
+            displayName: '박관객',
+          },
+        })}
+      />,
+    );
+    expect(screen.getByText(staffKo.lastTap.override)).toBeInTheDocument();
+    expect(screen.getByText(staffKo.override.reason2)).toBeInTheDocument();
+    expect(screen.getByText(staffKo.override.roleManager)).toBeInTheDocument();
+    expect(screen.getByText('0xbbbb…bbbb')).toBeInTheDocument();
+    // The name comes off the outcome when there is no tap to carry a ticket.
+    expect(screen.getByText('박관객')).toBeInTheDocument();
+  });
+
+  /** An override filed with no tap at all still has to be remembered. */
+  it('renders one that never had a tap', () => {
+    render(
+      <LastTapChip
+        lastTap={{
+          state: 'override',
+          finalized: false,
+          override: { status: 'requested', reason: 1, route: 'requestOverride', role: 'none' },
+        }}
+      />,
+    );
+    expect(screen.getByText(staffKo.lastTap.override)).toBeInTheDocument();
+    expect(screen.getByText(staffKo.override.roleNone)).toBeInTheDocument();
+  });
 });
 
 describe('OfflineBadge', () => {
@@ -511,7 +556,8 @@ describe('OverrideDialog', () => {
     await user.type(screen.getByLabelText(staffKo.override.pin), '1234');
     await user.selectOptions(screen.getByLabelText(staffKo.override.reasonLabel), '2');
     await user.click(screen.getByRole('button', { name: staffKo.override.request }));
-    expect(onSubmit).toHaveBeenCalledWith('1234', 2);
+    // No ticket was picked and none was handed in, so the wiring falls back to the tap on screen.
+    expect(onSubmit).toHaveBeenCalledWith('1234', 2, undefined);
   });
 
   it('backs out without submitting', async () => {
@@ -603,6 +649,64 @@ describe('OverrideDialog', () => {
    * both leave the button there: neither is a reason to make the staff member close the dialog
    * and start again with a queue watching.
    */
+  /**
+   * Ruling 1. Nobody tapped, and there is still somebody to let in — which is the whole case the
+   * feature exists for. The dialog finds them in the guest list and hands the token out.
+   */
+  it('finds somebody in the guest list when no tap put one on screen', async () => {
+    const found = ticket({ tokenId: '1042', displayName: '박관객' });
+    const onSearch = vi.fn(() => [found]);
+    const onSubmit = vi.fn();
+    const user = userEvent.setup();
+    render(<OverrideDialog canApprove onSearch={onSearch} onSubmit={onSubmit} onCancel={noop} />);
+
+    expect(screen.getByText(staffKo.override.searchHint)).toBeInTheDocument();
+    await user.type(screen.getByLabelText(staffKo.override.searchLabel), '박관');
+    expect(onSearch).toHaveBeenLastCalledWith('박관');
+
+    await user.click(screen.getByRole('button', { name: /박관객/ }));
+    expect(screen.getByText(/박관객/)).toBeInTheDocument();
+    await user.type(screen.getByLabelText(staffKo.override.pin), '4821');
+    await user.click(screen.getByRole('button', { name: staffKo.override.approve }));
+    expect(onSubmit).toHaveBeenCalledWith('4821', 1, '1042');
+  });
+
+  it('says so when the guest list has nobody by that name', async () => {
+    const user = userEvent.setup();
+    render(<OverrideDialog canApprove onSearch={() => []} onSubmit={noop} onCancel={noop} />);
+    await user.type(screen.getByLabelText(staffKo.override.searchLabel), '없는사람');
+    expect(screen.getByText(staffKo.override.searchEmpty)).toBeInTheDocument();
+  });
+
+  it('starts on the tap already on screen, and lets a staff member change it', async () => {
+    const user = userEvent.setup();
+    render(
+      <OverrideDialog canApprove ticket={ticket()} onSearch={() => []} onSubmit={noop} onCancel={noop} />,
+    );
+    expect(screen.queryByLabelText(staffKo.override.searchLabel)).toBeNull();
+    await user.click(screen.getByRole('button', { name: staffKo.override.searchAgain }));
+    expect(screen.getByLabelText(staffKo.override.searchLabel)).toBeInTheDocument();
+  });
+
+  /** A queue is watching. Nobody edits a failed PIN in front of it. */
+  it('clears the PIN field after a wrong try', () => {
+    const view = render(<OverrideDialog canApprove ticket={ticket()} onSubmit={noop} onCancel={noop} />);
+    const field = screen.getByLabelText(staffKo.override.pin) as HTMLInputElement;
+    fireEvent.change(field, { target: { value: '9999' } });
+    expect(field.value).toBe('9999');
+
+    view.rerender(
+      <OverrideDialog
+        canApprove
+        ticket={ticket()}
+        outcome={{ status: 'failed', reason: 1, detail: '틀렸어요' }}
+        onSubmit={noop}
+        onCancel={noop}
+      />,
+    );
+    expect((screen.getByLabelText(staffKo.override.pin) as HTMLInputElement).value).toBe('');
+  });
+
   it('keeps the button after a failure, and shows the sentence it was given', async () => {
     const onSubmit = vi.fn();
     const user = userEvent.setup();
@@ -785,7 +889,7 @@ describe('GateConsole', () => {
     renderConsole({ state: 'override' }, { canApprove: true, onOverrideSubmit, onOverrideCancel });
     await user.type(screen.getByLabelText(staffKo.override.pin), '99');
     await user.click(screen.getByRole('button', { name: staffKo.override.approve }));
-    expect(onOverrideSubmit).toHaveBeenCalledWith('99', 1);
+    expect(onOverrideSubmit).toHaveBeenCalledWith('99', 1, undefined);
     await user.click(screen.getByRole('button', { name: staffKo.override.cancel }));
     expect(onOverrideCancel).toHaveBeenCalledTimes(1);
   });

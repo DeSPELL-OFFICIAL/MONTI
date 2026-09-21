@@ -335,10 +335,59 @@ describe('the states that are not admit', () => {
     expect(machine.snapshot().online).toBe(false);
   });
 
-  it('override is its own state as well', () => {
+  /** A tap that has been answered — the usual way into a manual approval. */
+  function refused() {
     const machine = inFlight();
-    machine.onOverride();
+    machine.onVerdict({ kind: 'deny', nonce: A.nonce, code: 'DEVICE_LOCKED', detail: '기기 잠김' });
+    return machine;
+  }
+
+  it('override is its own state as well', () => {
+    const machine = refused();
+    expect(machine.onOverride()).toBe(true);
     expect(machine.state()).toBe('override');
+  });
+
+  /**
+   * **A check-in in flight owns the screen.** `ticket` is set at `onPreflight`, before anything
+   * is sent, so the 수동 승인 button is live all through `confirming`. Taking the screen then
+   * would close the `CheckedIn` watch for an operation that is running and already paid for: if
+   * it lands, nothing on the phone says so, the entry is not counted, and the override sent a
+   * moment later reverts `AlreadyCheckedIn` in front of the attendee.
+   */
+  it('refuses an override while a check-in is still confirming, and the verdict still lands', () => {
+    const machine = inFlight();
+    expect(machine.onOverride()).toBe(false);
+    expect(machine.refusal()).toBe(TAP_REFUSAL.confirming);
+    expect(machine.state()).toBe('confirming');
+    expect(machine.snapshot().override).toBeUndefined();
+
+    machine.onVerdict({ kind: 'admit', nonce: A.nonce, blockNumber: 99n, finalized: true });
+    expect(machine.state()).toBe('admit');
+  });
+
+  /** The way the ruling asks for it: nobody tapped, and there is still somebody to let in. */
+  it('opens with no tap on screen at all', () => {
+    const machine = createGateMachine(deps);
+    machine.onReady();
+    expect(machine.onOverride()).toBe(true);
+    expect(machine.state()).toBe('override');
+
+    machine.onOverrideResult({
+      status: 'approved',
+      reason: 4,
+      route: 'manualOverride',
+      role: 'approver',
+      approver: `0x${'bb'.repeat(20)}`,
+      tokenId: '1042',
+    });
+    machine.reset();
+    // Kept, though there is no tap to hang it on — it is still an approval that is on chain.
+    expect(machine.lastSettled()).toMatchObject({
+      state: 'override',
+      override: { status: 'approved', tokenId: '1042' },
+    });
+    expect(machine.lastSettled()?.tap).toBeUndefined();
   });
 
   /**
@@ -348,7 +397,7 @@ describe('the states that are not admit', () => {
    * than drawn and forgotten.
    */
   it('carries how the override went, without leaving the override state', () => {
-    const machine = inFlight();
+    const machine = refused();
     machine.onOverride();
     machine.onOverrideResult({ status: 'sending', reason: 1 });
     expect(machine.snapshot().override).toEqual({ status: 'sending', reason: 1 });
@@ -377,7 +426,7 @@ describe('the states that are not admit', () => {
    * only copy of an approval that may already be on chain.
    */
   it('refuses a tap while the override dialog is open', () => {
-    const machine = inFlight();
+    const machine = refused();
     machine.onOverride();
     machine.onOverrideResult({ status: 'sending', reason: 1 });
     expect(machine.onResponse(B)).toBe(false);
@@ -386,8 +435,67 @@ describe('the states that are not admit', () => {
     expect(machine.snapshot().override).toMatchObject({ status: 'sending' });
   });
 
+  /**
+   * Ruling 2. `requestOverride` writes no check-in and emits no verdict this screen can read, so
+   * without a watch of its own a filed request is a dead end on the phone.
+   */
+  it('watches for somebody approving a filed request, and flips 요청됨 to 승인됨', () => {
+    let approve: ((approval: { approver: Hex; role: 'approver' | 'manager' | 'none' }) => void) | undefined;
+    const stop = vi.fn();
+    const watchOverride = vi.fn((_tokenId: bigint, onApproved: typeof approve) => {
+      approve = onApproved;
+      return stop;
+    });
+    const machine = createGateMachine({ ...deps, watchOverride });
+    machine.onReady();
+    machine.onOverride();
+
+    machine.onOverrideResult({ status: 'sending', reason: 1, tokenId: '1042' });
+    expect(watchOverride).not.toHaveBeenCalled();
+
+    machine.onOverrideResult({
+      status: 'requested',
+      reason: 1,
+      route: 'requestOverride',
+      role: 'none',
+      approver: `0x${'bb'.repeat(20)}`,
+      tokenId: '1042',
+    });
+    expect(watchOverride).toHaveBeenCalledTimes(1);
+    expect(watchOverride.mock.calls[0]?.[0]).toBe(1042n);
+
+    approve?.({ approver: `0x${'cc'.repeat(20)}`, role: 'approver' });
+    expect(machine.snapshot().override).toMatchObject({
+      status: 'approved',
+      role: 'approver',
+      approver: `0x${'cc'.repeat(20)}`,
+      route: 'requestOverride',
+    });
+
+    // The subscription is the machine's, so going back to waiting closes it.
+    machine.reset();
+    expect(stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('says nothing onto the next attendee when an approval lands after the dialog closed', () => {
+    let approve: ((approval: { approver: Hex; role: 'approver' | 'manager' | 'none' }) => void) | undefined;
+    const watchOverride = vi.fn((_tokenId: bigint, onApproved: typeof approve) => {
+      approve = onApproved;
+      return vi.fn();
+    });
+    const machine = createGateMachine({ ...deps, watchOverride });
+    machine.onReady();
+    machine.onOverride();
+    machine.onOverrideResult({ status: 'requested', reason: 1, route: 'requestOverride', tokenId: '1042' });
+    machine.reset();
+
+    approve?.({ approver: `0x${'cc'.repeat(20)}`, role: 'approver' });
+    expect(machine.state()).toBe('ready');
+    expect(machine.snapshot().override).toBeUndefined();
+  });
+
   it('keeps the override in 직전 탭 on the way back to waiting, and clears it from the screen', () => {
-    const machine = inFlight();
+    const machine = refused();
     machine.onOverride();
     machine.onOverrideResult({
       status: 'approved',
@@ -581,17 +689,33 @@ describe('the watch the machine owns, and the tap before this one', () => {
     expect(w.stop).toHaveBeenCalledTimes(1);
   });
 
-  it('closes it on reset, on an offline admit, on an override and on stop', () => {
+  it('closes it on reset, on an offline admit and on stop', () => {
     for (const settle of [
       (m: ReturnType<typeof createGateMachine>) => m.reset(),
       (m: ReturnType<typeof createGateMachine>) => m.onOfflineAdmit(A, 1),
-      (m: ReturnType<typeof createGateMachine>) => m.onOverride(),
       (m: ReturnType<typeof createGateMachine>) => m.stop(),
     ]) {
       const w = stubWatch();
       settle(inFlight(A, { watch: w.watch }));
       expect(w.stop).toHaveBeenCalledTimes(1);
     }
+  });
+
+  /**
+   * An override is **not** on that list, and that is the Task 32 fix: `onOverride()` used to
+   * close the watch of a check-in that was still running. It is refused mid-confirm now, and the
+   * one state it can still be opened from with a watch alive is a speculative admit — which is
+   * waiting for its finalized repeat and has no reason to stop listening.
+   */
+  it('keeps a live watch open across an override', () => {
+    const w = stubWatch();
+    const machine = inFlight(A, { watch: w.watch });
+    machine.onVerdict({ kind: 'admit', nonce: A.nonce, blockNumber: 99n, finalized: false });
+    expect(machine.onOverride()).toBe(true);
+    expect(w.stop).not.toHaveBeenCalled();
+    // And going back to waiting still closes it, because that is where the tap actually ends.
+    machine.reset();
+    expect(w.stop).toHaveBeenCalledTimes(1);
   });
 
   it('never leaves two watches open across taps', () => {
@@ -620,11 +744,11 @@ describe('the watch the machine owns, and the tap before this one', () => {
       finalized: true,
       ticket,
     });
-    expect(machine.lastSettled()?.tap.nonce).toBe(A.nonce);
+    expect(machine.lastSettled()?.tap?.nonce).toBe(A.nonce);
 
     // And the next tap does not disturb it until it settles in turn.
     machine.onResponse(B);
-    expect(machine.lastSettled()?.tap.nonce).toBe(A.nonce);
+    expect(machine.lastSettled()?.tap?.nonce).toBe(A.nonce);
   });
 
   it('keeps a refusal as 직전 탭 too, with the reason it was refused for', () => {

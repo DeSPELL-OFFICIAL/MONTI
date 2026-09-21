@@ -22,7 +22,8 @@ const registration = vi.fn<() => GateRegistration>();
 vi.mock('../setup/useGateRegistration', () => ({ useGateRegistration: () => registration() }));
 
 const handleResponse = vi.fn(async () => undefined);
-const openOverride = vi.fn();
+const openOverride = vi.fn(() => true);
+const searchGuests = vi.fn(() => []);
 const submitOverride = vi.fn(async () => undefined);
 const gate = vi.fn<() => UseGateResult>();
 /** What the screen handed the hook. `enabled` is the guard, so it is asserted rather than read. */
@@ -93,6 +94,7 @@ function running(over: Partial<UseGateResult> = {}): UseGateResult {
     gateOpenStale: false,
     canApprove: false,
     openOverride,
+    searchGuests,
     submitOverride,
     handleResponse,
     retry: vi.fn(),
@@ -253,14 +255,39 @@ describe('the QR fallback', () => {
  * by anybody.
  */
 describe('manual approval', () => {
-  it('offers it only once there is a ticket to approve', async () => {
+  /**
+   * Ruling 1. The attendee this exists for is the one whose phone produces nothing, so the
+   * button cannot wait for a tap — requiring one would leave exactly that person with nowhere
+   * to go.
+   */
+  it('is offered with no tap on screen at all', async () => {
     renderGate();
-    expect(screen.queryByRole('button', { name: staffKo.override.open })).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: staffKo.override.open }));
+    expect(openOverride).toHaveBeenCalledTimes(1);
+  });
 
+  it('is offered on a refusal, which is the usual way in', async () => {
     gate.mockReturnValue(running({ state: 'deny', deny: 'EXPIRED_CODE', ticket: TICKET }));
     renderGate();
     await userEvent.click(screen.getByRole('button', { name: staffKo.override.open }));
     expect(openOverride).toHaveBeenCalledTimes(1);
+  });
+
+  /** The machine refuses mid-confirm, so a button there could only ever produce a refusal. */
+  it('is not offered while a check-in is still confirming', () => {
+    gate.mockReturnValue(running({ state: 'confirming', ticket: TICKET }));
+    renderGate();
+    expect(screen.queryByRole('button', { name: staffKo.override.open })).toBeNull();
+  });
+
+  it('hands the dialog a way to search the guest list', async () => {
+    const found = [{ ...TICKET, tokenId: '1042', displayName: '박관객' }];
+    searchGuests.mockReturnValue(found as never);
+    gate.mockReturnValue(running({ state: 'override' }));
+    renderGate();
+    await userEvent.type(screen.getByLabelText(staffKo.override.searchLabel), '박');
+    expect(searchGuests).toHaveBeenCalledWith('박');
+    expect(screen.getByRole('button', { name: /박관객/ })).toBeInTheDocument();
   });
 
   it('shows one dialog and no second button once it is open', () => {
@@ -276,7 +303,7 @@ describe('manual approval', () => {
     expect(screen.getByRole('button', { name: staffKo.override.approve })).toBeInTheDocument();
     await userEvent.type(screen.getByLabelText(staffKo.override.pin), '4821');
     await userEvent.click(screen.getByRole('button', { name: staffKo.override.approve }));
-    expect(submitOverride).toHaveBeenCalledWith('4821', 1);
+    expect(submitOverride).toHaveBeenCalledWith('4821', 1, TICKET.tokenId);
   });
 
   it('offers only a request when the chain says this account may not approve', () => {
@@ -294,10 +321,12 @@ describe('manual approval', () => {
  * is a fact about an hour ago.
  */
 describe('a door open on a remembered answer', () => {
-  it('runs, and marks itself stale', () => {
+  it('runs, and marks itself stale in the banner rather than between two buttons', () => {
     gate.mockReturnValue(running({ gateOpen: true, gateOpenStale: true }));
     renderGate();
-    expect(screen.getByText(staffKo.setup.gateOpenStale)).toBeInTheDocument();
+    const notice = screen.getByText(staffKo.setup.gateOpenStale);
+    expect(notice).toBeInTheDocument();
+    expect(notice.closest('.gate__banner')).not.toBeNull();
     expect(screen.getByRole('button', { name: staffKo.qr.scanButton })).toBeInTheDocument();
   });
 

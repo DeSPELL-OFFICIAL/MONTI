@@ -2,31 +2,10 @@ import { useState, type ReactElement } from 'react';
 
 import { OVERRIDE_REASONS } from '@monti/shared';
 
-import { fmt } from '../../shared/i18n';
 import { Button } from '../../shared/ui';
-import { useStaffCopy, type StaffCopy } from '../copy';
-import type { OverrideOutcome, OverrideReason, OverrideRole } from '../types';
-
-/**
- * 사유 목록은 `@monti/shared` 의 코드에서 나온다. 이 파일이 자기 목록을 들고 있으면 계약이
- * 기록하는 숫자와 화면이 보여주는 차례가 각자 따로 살게 되고, 그 둘이 어긋난 날 남는 것은
- * "사유 3"으로 기록된 "사유 2"다.
- */
-const REASON_KEY = (code: OverrideReason): keyof StaffCopy['override'] =>
-  `reason${code}` as keyof StaffCopy['override'];
-
-const STATUS_KEY = {
-  sending: 'sending',
-  requested: 'requested',
-  approved: 'approved',
-  failed: 'failed',
-} as const satisfies Record<OverrideOutcome['status'], keyof StaffCopy['override']>;
-
-const ROLE_KEY = {
-  approver: 'roleApprover',
-  manager: 'roleManager',
-  none: 'roleNone',
-} as const satisfies Record<OverrideRole, keyof StaffCopy['override']>;
+import { useStaffCopy } from '../copy';
+import type { OverrideOutcome, OverrideReason, SnapshotTicket } from '../types';
+import { ROLE_KEY, STATUS_KEY, reasonKey, shortAccount } from './overrideText';
 
 const NON_DIGITS = /\D/g;
 
@@ -37,25 +16,33 @@ function toReason(value: string): OverrideReason {
     : OVERRIDE_REASONS[0];
 }
 
-/** 승인자 주소를 줄여서 보여준다. 줄 서 있는 사람들이 같이 보는 화면이라 전체는 띄우지 않는다. */
-function shortAccount(account: string): string {
-  return `${account.slice(0, 6)}…${account.slice(-4)}`;
-}
+/** 표 번호 뒷자리만. 콘솔의 다른 화면과 같은 가림이다. */
+const maskTicketId = (tokenId: string): string => `••${tokenId.slice(-2)}`;
 
 export interface OverrideDialogProps {
   canApprove: boolean;
   /**
-   * 이 승인이 어떻게 됐는지(04 T32). 창을 닫지 않고 여기서 그대로 보여준다 — 손으로 들여보낸
-   * 기록은 체인 사건 말고는 이 화면이 유일하고, 특히 `requestOverride` 는 입장 자체를 만들지
-   * 않으므로 "요청됨 — 승인 대기"를 읽지 못하면 스태프는 보냈는지조차 알 수 없다.
+   * 탭으로 이미 화면에 있는 표. 있으면 그 사람이 기본값이고, 없으면 아래 찾기 칸이 뜬다.
    */
+  ticket?: SnapshotTicket;
+  /**
+   * 명단에서 이름·표 번호로 찾기(`snapshot/store.ts` 의 `search`). 배선이 넘겨준다 — 이 파일은
+   * 명단을 읽지 않는다. 명단 한 줄이 무슨 뜻인지 정하는 곳은 `snapshot/lookup.ts` 하나다.
+   */
+  onSearch?: (query: string) => readonly SnapshotTicket[];
+  /** 이 승인이 어떻게 됐는지(04 T32). 창을 닫지 않고 여기서 그대로 보여준다. */
   outcome?: OverrideOutcome;
-  onSubmit: (pin: string, reason: OverrideReason) => void;
+  onSubmit: (pin: string, reason: OverrideReason, tokenId?: string) => void;
   onCancel: () => void;
 }
 
 /**
  * 수동 승인 창.
+ *
+ * **탭이 없어도 열린다.** 이 기능이 있는 이유가 바로 그 경우다 — 휴대폰이 아무것도 내놓지 못하는
+ * 관객. 그래서 창은 명단에서 사람을 찾는 칸으로 시작하고, 탭이 이미 있으면 그 사람이 기본값이다.
+ * 표를 고르지 않으면 보낼 수 없다: `Ticket.manualOverride(tokenId, …)` 는 누구인지를 반드시
+ * 알아야 한다.
  *
  * 이 파일은 여전히 **판단하지 않는다.** PIN 이 맞는지도, 이 계정이 승인할 수 있는지도 묻지
  * 않는다 — 앞의 것은 `override/pin.ts`, 뒤의 것은 `Organizers` 를 그 자리에서 읽는
@@ -66,23 +53,87 @@ export interface OverrideDialogProps {
  * 승인할 수 있는 사람에게는 "수동 승인", 없는 사람에게는 "결재 요청 보내기" — 누를 수 없는
  * 단추를 비활성으로 보여주고 끝내면, 권한 없는 스태프 앞에 선 관객은 아무 데도 갈 수 없다.
  *
- * 보낸 뒤에 적는 세 가지(승인한 사람 · 권한 · 사유)는 `ManualOverride` 가 체인에 남길 것과
- * 같은 세 가지다. 화면과 기록이 다른 말을 하면 나중에 물어볼 곳이 없어진다.
- *
- * PIN 은 가려서 받는다. 줄 서 있는 사람들이 보고 있는 화면이다.
+ * PIN 은 가려서 받고, 틀리면 지운다. 줄 서 있는 사람들이 보고 있는 화면에서 틀린 값을 고쳐
+ * 넣게 하지 않는다.
  */
-export function OverrideDialog({ canApprove, outcome, onSubmit, onCancel }: OverrideDialogProps): ReactElement {
+export function OverrideDialog({
+  canApprove,
+  ticket,
+  onSearch,
+  outcome,
+  onSubmit,
+  onCancel,
+}: OverrideDialogProps): ReactElement {
   const copy = useStaffCopy();
   const [pin, setPin] = useState('');
   const [reason, setReason] = useState<OverrideReason>(OVERRIDE_REASONS[0]);
+  const [query, setQuery] = useState('');
+  const [picked, setPicked] = useState<SnapshotTicket | undefined>(ticket);
 
   // 보내는 중이거나 이미 끝난 승인은 두 번 보내지 않는다. 실패만 다시 누를 수 있다.
   const settled = outcome?.status === 'requested' || outcome?.status === 'approved';
   const busy = outcome?.status === 'sending';
+  const locked = busy || settled;
+
+  // 틀린 PIN 은 화면에서 지운다. 상태가 바뀐 그 렌더에서 한 번만.
+  const [clearedFor, setClearedFor] = useState<OverrideOutcome>();
+  if (outcome?.status === 'failed' && outcome !== clearedFor) {
+    setClearedFor(outcome);
+    if (pin !== '') setPin('');
+  }
+
+  const matches = query.trim() === '' ? [] : (onSearch?.(query) ?? []);
 
   return (
     <div className="gate-dialog" role="dialog" aria-modal="true" aria-label={copy.override.title}>
       <h2 className="gate-dialog__title">{copy.override.title}</h2>
+
+      {picked === undefined ? (
+        <>
+          <label className="gate-dialog__field">
+            <span>{copy.override.searchLabel}</span>
+            <input
+              type="search"
+              autoComplete="off"
+              aria-label={copy.override.searchLabel}
+              value={query}
+              disabled={locked}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </label>
+          {query.trim() === '' ? (
+            <p className="gate-dialog__hint">{copy.override.searchHint}</p>
+          ) : matches.length === 0 ? (
+            <p className="gate-dialog__hint">{copy.override.searchEmpty}</p>
+          ) : (
+            <ul className="gate-dialog__matches">
+              {matches.map((match) => (
+                <li key={match.tokenId}>
+                  <Button variant="ghost" onClick={() => setPicked(match)}>
+                    {`${match.displayName} ${maskTicketId(match.tokenId)}`}
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      ) : (
+        <p className="gate-dialog__chosen">
+          <span>{copy.override.chosenLabel}</span>{' '}
+          <strong>{`${picked.displayName} ${maskTicketId(picked.tokenId)}`}</strong>{' '}
+          {locked ? null : (
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setPicked(undefined);
+                setQuery('');
+              }}
+            >
+              {copy.override.searchAgain}
+            </Button>
+          )}
+        </p>
+      )}
 
       <label className="gate-dialog__field">
         <span aria-hidden="true">{copy.override.pin}</span>
@@ -92,7 +143,7 @@ export function OverrideDialog({ canApprove, outcome, onSubmit, onCancel }: Over
           autoComplete="off"
           aria-label={copy.override.pin}
           value={pin}
-          disabled={busy || settled}
+          disabled={locked}
           onChange={(event) => setPin(event.target.value.replace(NON_DIGITS, ''))}
         />
       </label>
@@ -101,12 +152,12 @@ export function OverrideDialog({ canApprove, outcome, onSubmit, onCancel }: Over
         <span>{copy.override.reasonLabel}</span>
         <select
           value={String(reason)}
-          disabled={busy || settled}
+          disabled={locked}
           onChange={(event) => setReason(toReason(event.target.value))}
         >
           {OVERRIDE_REASONS.map((code) => (
             <option key={code} value={String(code)}>
-              {copy.override[REASON_KEY(code)]}
+              {copy.override[reasonKey(code)]}
             </option>
           ))}
         </select>
@@ -115,7 +166,7 @@ export function OverrideDialog({ canApprove, outcome, onSubmit, onCancel }: Over
       {outcome === undefined ? null : <Outcome outcome={outcome} />}
 
       {settled ? null : (
-        <Button onClick={() => onSubmit(pin, reason)} disabled={busy}>
+        <Button onClick={() => onSubmit(pin, reason, picked?.tokenId)} disabled={busy}>
           {canApprove ? copy.override.approve : copy.override.request}
         </Button>
       )}
@@ -137,7 +188,7 @@ function Outcome({ outcome }: { outcome: OverrideOutcome }): ReactElement {
       </p>
       <dl className="gate-dialog__facts">
         <dt>{copy.override.reasonLabel}</dt>
-        <dd>{copy.override[REASON_KEY(outcome.reason)]}</dd>
+        <dd>{copy.override[reasonKey(outcome.reason)]}</dd>
         {outcome.role === undefined ? null : (
           <>
             <dt>{copy.override.roleLabel}</dt>
@@ -154,11 +205,3 @@ function Outcome({ outcome }: { outcome: OverrideOutcome }): ReactElement {
     </div>
   );
 }
-
-/** 잠금·오입력 문장을 배선이 만들 때 쓰는 한 곳. 문장은 여전히 `copy.ts` 에서만 온다. */
-export const overrideNotice = {
-  pinWrong: (copy: StaffCopy, triesLeft: number): string =>
-    fmt(copy.override.pinWrong, { tries: triesLeft }),
-  pinLocked: (copy: StaffCopy, retryInMs: number): string =>
-    fmt(copy.override.pinLocked, { seconds: Math.ceil(retryInMs / 1000) }),
-};
