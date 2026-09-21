@@ -7,13 +7,14 @@
 // clears when an organizer opens the door, and the third never clears.
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { GateResponseWire } from '@monti/shared';
 
 import { staffKo } from '../copy';
 import type { GateRegistration } from '../setup/useGateRegistration';
-import type { UseGateResult } from './useGate';
+import type { UseGateParams, UseGateResult } from './useGate';
 
 const GATE_ACCOUNT = `0x${'aa'.repeat(20)}` as const;
 
@@ -22,7 +23,14 @@ vi.mock('../setup/useGateRegistration', () => ({ useGateRegistration: () => regi
 
 const handleResponse = vi.fn(async () => undefined);
 const gate = vi.fn<() => UseGateResult>();
-vi.mock('./useGate', () => ({ useGate: () => gate() }));
+/** What the screen handed the hook. `enabled` is the guard, so it is asserted rather than read. */
+let asked: UseGateParams | undefined;
+vi.mock('./useGate', () => ({
+  useGate: (p: UseGateParams) => {
+    asked = p;
+    return gate();
+  },
+}));
 
 const scanGateResponse = vi.fn<() => Promise<GateResponseWire>>();
 vi.mock('../qr/scan', async (importOriginal) => ({
@@ -75,36 +83,74 @@ function running(over: Partial<UseGateResult> = {}): UseGateResult {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  asked = undefined;
   registration.mockReturnValue(registered());
   gate.mockReturnValue(running());
 });
 
+/**
+ * The staff APK is a kiosk on a MemoryRouter and `StaffRoutes` is a descendant router mounted at
+ * `/staff/*`, so the gate and the queue are siblings *inside* it. The nesting is copied rather
+ * than flattened because it is what makes the screen's relative `../queue` resolve at all.
+ */
+function renderGate() {
+  return render(
+    <MemoryRouter initialEntries={['/staff/gate']}>
+      <Routes>
+        <Route path="/staff">
+          <Route path="gate" element={<GateScreen />} />
+          <Route path="queue" element={<div>QUEUE SCREEN</div>} />
+        </Route>
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
 describe('before the gate may take a tap', () => {
   it('waits rather than sending a registered terminal back to setup', () => {
     registration.mockReturnValue({ ...registered(), status: 'creating', gateId: undefined });
-    render(<GateScreen />);
+    renderGate();
     expect(screen.getByRole('progressbar')).toBeInTheDocument();
   });
 
   it('waits while the chain has not said whether this door is open', () => {
     gate.mockReturnValue(running({ gateOpen: undefined }));
-    render(<GateScreen />);
+    renderGate();
     expect(screen.getByRole('progressbar')).toBeInTheDocument();
   });
 
   /** Closed clears when an organizer opens the door, so it is a warning and not an alert. */
   it('stops taking taps on a gate the organizer has not opened', () => {
     gate.mockReturnValue(running({ gateOpen: false }));
-    render(<GateScreen />);
+    renderGate();
     expect(screen.getByText(staffKo.setup.notOpen)).toBeInTheDocument();
     expect(screen.queryByText(staffKo.ready.tap)).not.toBeInTheDocument();
+  });
+
+  /**
+   * The guard has to reach the hook, not just the render. A blocking screen with a live emitter
+   * behind it keeps rotating codes and keeps spending on taps the chain can only refuse — and
+   * the staff member is looking at the warning the whole time.
+   */
+  it.each([
+    ['revoked', registered({ revoked: true })],
+    ['not opened', registered({ open: false })],
+  ])('tells the hook to stand down when the gate is %s', (_case, reg) => {
+    registration.mockReturnValue(reg);
+    renderGate();
+    expect(asked?.enabled).toBe(false);
+  });
+
+  it('lets the hook run only when the registration says both', () => {
+    renderGate();
+    expect(asked?.enabled).toBe(true);
   });
 
   /** Revoked never clears: this phone is not a gate any more, whatever the door is doing. */
   it('stops taking taps on a revoked gate, before it even asks whether the door is open', () => {
     registration.mockReturnValue(registered({ revoked: true }));
     gate.mockReturnValue(running({ gateOpen: true }));
-    render(<GateScreen />);
+    renderGate();
     expect(screen.getByRole('alert')).toHaveTextContent(staffKo.setup.revoked);
   });
 });
@@ -112,7 +158,7 @@ describe('before the gate may take a tap', () => {
 describe('the running console', () => {
   it('hands the machine’s state and the wiring’s facts to the console', () => {
     gate.mockReturnValue(running());
-    render(<GateScreen />);
+    renderGate();
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(String(7n));
     expect(screen.getByText('가을 밤 콘서트')).toBeInTheDocument();
     expect(screen.getByText(staffKo.ready.tap)).toBeInTheDocument();
@@ -120,8 +166,31 @@ describe('the running console', () => {
 
   it('names the event by number until the first guest list lands', () => {
     gate.mockReturnValue(running({ eventTitle: '' }));
-    render(<GateScreen />);
+    renderGate();
     expect(screen.getByText(`${staffKo.setup.eventLabel} 42`)).toBeInTheDocument();
+  });
+});
+
+describe('the way to what the gate still owes', () => {
+  /**
+   * Without this the queue screen has no entrance anywhere in the app, and a terminal that took
+   * people in during a signal drop has no path to the one screen that can re-send them.
+   */
+  it('opens the queue screen', async () => {
+    renderGate();
+    await userEvent.click(screen.getByRole('button', { name: new RegExp(staffKo.queue.title) }));
+    expect(await screen.findByText('QUEUE SCREEN')).toBeInTheDocument();
+  });
+
+  it('carries the count, so a staff member sees the debt without opening anything', () => {
+    gate.mockReturnValue(running({ pendingCount: 2, parkedCount: 3 }));
+    renderGate();
+    expect(screen.getByRole('button', { name: `${staffKo.queue.title} 5` })).toBeInTheDocument();
+  });
+
+  it('says nothing about a count when the gate owes nothing', () => {
+    renderGate();
+    expect(screen.getByRole('button', { name: staffKo.queue.title })).toBeInTheDocument();
   });
 });
 
@@ -134,14 +203,14 @@ describe('the QR fallback', () => {
       deviceSig: `0x${'cd'.repeat(64)}` as const,
     };
     scanGateResponse.mockResolvedValue(response);
-    render(<GateScreen />);
+    renderGate();
     await userEvent.click(screen.getByRole('button', { name: staffKo.qr.scanButton }));
     await waitFor(() => expect(handleResponse).toHaveBeenCalledWith(response));
   });
 
   it('says what to do about a camera it could not use', async () => {
     scanGateResponse.mockRejectedValue(new ScanError(SCAN_ERROR.permissionDenied));
-    render(<GateScreen />);
+    renderGate();
     await userEvent.click(screen.getByRole('button', { name: staffKo.qr.scanButton }));
     expect(await screen.findByText(staffKo.qr.cameraDenied)).toBeInTheDocument();
     expect(handleResponse).not.toHaveBeenCalled();
@@ -150,7 +219,7 @@ describe('the QR fallback', () => {
   /** Closing the camera is not a failure, and a staff member who did it knows they did it. */
   it('says nothing when the staff member simply closed the camera', async () => {
     scanGateResponse.mockRejectedValue(new ScanCancelled());
-    render(<GateScreen />);
+    renderGate();
     await userEvent.click(screen.getByRole('button', { name: staffKo.qr.scanButton }));
     await waitFor(() => expect(scanGateResponse).toHaveBeenCalled());
     for (const line of [staffKo.qr.cameraDenied, staffKo.qr.failed, staffKo.qr.notGateCode]) {

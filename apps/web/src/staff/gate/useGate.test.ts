@@ -107,7 +107,8 @@ const { staffDb } = await import('../snapshot/store');
 const { allEntries } = await import('../queue/opQueue');
 const { nonceHashOf } = await import('./verdict');
 const { useGate } = await import('./useGate');
-const { GATE_OPEN_RECHECK_MS } = await import('../constants');
+const { GATE_CODE_ROTATE_MS, GATE_OPEN_RECHECK_MS, GATE_STATUS_POLL_MS } = await import('../constants');
+const { DRY_RUN_MARK } = await import('../types');
 
 // --- the attendee, with a key that really signs -------------------------------------------------
 const devicePrivate = p256.utils.randomPrivateKey();
@@ -119,7 +120,13 @@ const EVENT_ID = 42n;
 const GATE_ID = 7n;
 const ORG_ID = 5n;
 const TOKEN_ID = '1042';
-const params = { gateId: GATE_ID, eventId: EVENT_ID, orgId: ORG_ID, gateAccount: GATE_ACCOUNT };
+const params = {
+  gateId: GATE_ID,
+  eventId: EVENT_ID,
+  orgId: ORG_ID,
+  gateAccount: GATE_ACCOUNT,
+  enabled: true,
+};
 
 function ticket(overrides: Partial<SnapshotTicket> = {}): SnapshotTicket {
   return {
@@ -266,10 +273,29 @@ afterEach(() => {
 });
 
 /** The gate is running and serving codes. Everything below starts from here. */
-async function openGate() {
-  const rendered = renderHook(() => useGate(params));
+async function openGate(over: Partial<typeof params> = {}) {
+  const rendered = renderHook(() => useGate({ ...params, ...over }));
   await waitFor(() => expect(rendered.result.current.state).toBe('ready'));
   return rendered;
+}
+
+/**
+ * A check-in already written down, as a restart finds it: taken during a signal drop, committed,
+ * and still owed to the chain with no connectivity edge left to carry it out.
+ */
+async function seedQueueRow(): Promise<void> {
+  const db = await staffDb();
+  await db.put('queue', {
+    id: `${TOKEN_ID}-0xfeed`,
+    seq: 1,
+    tokenId: TOKEN_ID,
+    gateCode: { v: 1, gateId: GATE_ID.toString(), eventId: EVENT_ID.toString(), issuedAt: 1_700_000_000, nonce: `0x${'fe'.repeat(32)}`, kx: ZERO32, ky: ZERO32, sig: ZERO32 },
+    response: { v: 2, tokenId: TOKEN_ID, nonce: `0x${'fe'.repeat(32)}`, deviceSig: `0x${'11'.repeat(64)}` },
+    createdAt: Date.now(),
+    attempts: 0,
+    nextAttemptAt: 0,
+    status: 'pending',
+  });
 }
 
 describe('one tap, online', () => {
@@ -508,8 +534,10 @@ describe('one tap, offline', () => {
       window.dispatchEvent(new Event('online'));
     });
 
-    // The header follows the one watcher this screen owns, and the drain reads that same answer.
+    // The header follows the one watcher this screen owns, and the drain reads that same answer:
+    // the dry-run mark on the row is a pass that actually ran, not a badge that turned green.
     await waitFor(() => expect(result.current.online).toBe(true));
+    await waitFor(async () => expect((await allEntries())[0]?.lastError).toBe(DRY_RUN_MARK));
   });
 });
 
@@ -531,6 +559,153 @@ describe('the door’s own permission', () => {
     expect(
       readContract.mock.calls.filter((call) => call[0].functionName === 'isOpenGate').length,
     ).toBeGreaterThan(asked);
+  });
+
+  /**
+   * The half that was cosmetic. A blocking screen is not a guard: while the emitter runs, every
+   * attendee who taps a closed gate costs one sponsored operation that can only revert — or, with
+   * no signal, one durable queue row for a door that will never be allowed to send it. And the
+   * staff member is looking at the warning the whole time, so nothing says it happened.
+   */
+  it('never claims the tag for a gate the registration already refuses', async () => {
+    const { result } = renderHook(() => useGate({ ...params, enabled: false }));
+    await waitFor(() => expect(result.current.gateOpen).toBe(false));
+    // Nothing was asked of the chain on its behalf either: a revoked gate is not coming back.
+    expect(readContract.mock.calls.filter((call) => call[0].functionName === 'isOpenGate')).toHaveLength(0);
+    expect(hce.start).not.toHaveBeenCalled();
+    expect(hce.setPayload).not.toHaveBeenCalled();
+    expect(result.current.state).toBe('idle');
+  });
+
+  it('stops emitting the moment the chain says the door shut', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { result } = await openGate();
+    const code = servedCode();
+    expect(hce.start).toHaveBeenCalledTimes(1);
+
+    readContract.mockImplementation(async ({ functionName }: { functionName: string }) =>
+      functionName === 'isOpenGate' ? false : functionName === 'eventMeta' ? EVENT_META : 0n,
+    );
+    await act(async () => {
+      vi.advanceTimersByTime(GATE_OPEN_RECHECK_MS);
+    });
+    await waitFor(() => expect(hce.stop).toHaveBeenCalled());
+
+    // And a write that lands after the door shut buys nobody anything.
+    const served = hce.setPayload.mock.calls.length;
+    await act(async () => {
+      tapWith(code);
+    });
+    expect(sendSponsoredOp).not.toHaveBeenCalled();
+    expect(await allEntries()).toHaveLength(0);
+    expect(result.current.state).not.toBe('confirming');
+    await act(async () => {
+      vi.advanceTimersByTime(GATE_CODE_ROTATE_MS * 3);
+    });
+    expect(hce.setPayload.mock.calls.length).toBe(served);
+  });
+
+  it('claims the tag once the organizer opens the door again', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    readContract.mockImplementation(async ({ functionName }: { functionName: string }) =>
+      functionName === 'isOpenGate' ? false : functionName === 'eventMeta' ? EVENT_META : 0n,
+    );
+    const { result } = renderHook(() => useGate(params));
+    await waitFor(() => expect(result.current.gateOpen).toBe(false));
+    expect(hce.start).not.toHaveBeenCalled();
+
+    // The organizer opens the door. Nothing tells this phone — it finds out on the next minute.
+    readContract.mockImplementation(async ({ functionName }: { functionName: string }) =>
+      functionName === 'isOpenGate' ? true : functionName === 'eventMeta' ? EVENT_META : 0n,
+    );
+    await act(async () => {
+      vi.advanceTimersByTime(GATE_OPEN_RECHECK_MS);
+    });
+    await waitFor(() => expect(result.current.state).toBe('ready'));
+    expect(hce.start).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('what the gate still owes the chain', () => {
+  /**
+   * The case that had no path at all: a terminal restarted after a signal drop boots with rows
+   * already on disk, already online, and no rising edge left to fire. Before this they sat there
+   * for the rest of the shift.
+   *
+   * The observable proof is the dry-run mark: this build's ABI has no `checkInLate`, so the drain
+   * marks the row instead of sending it — which only a pass that actually ran can do.
+   */
+  it('drains on mount when the connection is already up', async () => {
+    await seedQueueRow();
+    await openGate();
+    await waitFor(async () => expect((await allEntries())[0]?.lastError).toBe(DRY_RUN_MARK));
+  });
+
+  it('drains again on every status tick, without waiting for a disconnection', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await openGate();
+    // Written *after* the mount drain, the way a tap taken during a brief drop would be.
+    await seedQueueRow();
+    await act(async () => {
+      vi.advanceTimersByTime(GATE_STATUS_POLL_MS);
+    });
+    await waitFor(async () => expect((await allEntries())[0]?.lastError).toBe(DRY_RUN_MARK));
+  });
+
+  it('counts what is waiting so the screen can offer a way to it', async () => {
+    await seedQueueRow();
+    const { result } = await openGate();
+    await waitFor(() => expect(result.current.pendingCount).toBe(1));
+    expect(result.current.parkedCount).toBe(0);
+  });
+});
+
+describe('unmount', () => {
+  /**
+   * Seven handles, and every one of them outlives the screen if it is dropped: the HCE claim (the
+   * phone keeps answering taps for a gate nobody is watching), the chain watch, the probe loop,
+   * the guest-list refresh — which is also what erases the faces — and three intervals. The
+   * cleanup reads correct; this is what keeps it correct.
+   */
+  it('releases the tag, the watch, the probes, the faces and every timer', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { result, unmount } = await openGate();
+    const code = servedCode();
+    await act(async () => {
+      tapWith(code);
+    });
+    await waitFor(() => expect(result.current.state).toBe('confirming'));
+    expect(subscribeLogs).toHaveBeenCalled();
+
+    const served = hce.setPayload.mock.calls.length;
+    const asked = readContract.mock.calls.length;
+    const probed = request.mock.calls.length;
+
+    await act(async () => {
+      unmount();
+    });
+
+    // The tag and the tap's chain watch.
+    await waitFor(() => expect(hce.stop).toHaveBeenCalled());
+    expect(stopLogs).toHaveBeenCalled();
+    // The faces went with the guest list — `startSnapshotRefresh`'s disposer is what erases them.
+    await waitFor(async () => expect(await (await staffDb()).get('snapshots', EVENT_ID.toString())).toBeUndefined());
+
+    // Nothing ticks afterwards: not the rotation, not the status/drain poll, not the permission
+    // re-check, not the connectivity probe.
+    await act(async () => {
+      vi.advanceTimersByTime(GATE_OPEN_RECHECK_MS * 2);
+    });
+    expect(hce.setPayload.mock.calls.length).toBe(served);
+    expect(readContract.mock.calls.length).toBe(asked);
+    expect(request.mock.calls.length).toBe(probed);
+
+    // And a write dispatched after the teardown is a tap at a gate that is already closed.
+    const sent = sendSponsoredOp.mock.calls.length;
+    await act(async () => {
+      tapWith(code);
+    });
+    expect(sendSponsoredOp.mock.calls.length).toBe(sent);
   });
 });
 

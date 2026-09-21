@@ -10,12 +10,16 @@
 // a wait — and it is a wait rather than a redirect on purpose: redirecting on "not yet" would
 // bounce a perfectly registered terminal back to setup every time the door screen opened.
 //
-// **A gate whose door was closed stops taking taps.** `isOpenGate` is re-read on mount and every
-// minute (`useGate`), because an organizer closing a door or revoking a lost phone emits nothing
-// this device subscribes to. Without the re-check the terminal keeps emitting codes, and every
-// tap becomes a sponsored operation that can only revert `GateNotOpen` — one per attendee, each
-// one a person told "no" by a door that simply was not told it had shut.
+// **A gate whose door was closed stops taking taps — actually stops.** The permission has two
+// halves: what the registration says (`open && !revoked`) and what `isOpenGate` says on mount and
+// every minute after, because an organizer closing a door or revoking a lost phone emits nothing
+// this device subscribes to. Both are handed to `useGate` as `enabled`, and they are handed to it
+// rather than checked below the hook on purpose: a blocking screen that left the emitter running
+// would keep rotating codes behind the warning, spending one sponsored operation per attendee on
+// a revert the gate already knew about — or, with no signal, writing durable queue rows for a
+// door that will never be allowed to send them, with nothing on the phone saying it happened.
 import { useCallback, useState, type ReactElement } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 import { Alert, Button, Screen, Spinner } from '../../shared/ui';
 import { GateConsole } from '../Console';
@@ -47,6 +51,7 @@ export function GateScreen(): ReactElement {
       eventId={eventId}
       orgId={orgId}
       gateAccount={address}
+      open={registration.open}
       revoked={registration.revoked}
     />
   );
@@ -67,13 +72,20 @@ interface RunningGateProps {
   eventId: bigint;
   orgId: bigint;
   gateAccount: `0x${string}`;
+  /** `gateInfo(gateId).open` — the organizer's switch for this door, and it flips both ways. */
+  open: boolean;
   /** `gateInfo(gateId).revoked` — permanent, unlike a closed door. */
   revoked: boolean;
 }
 
-function RunningGate({ gateId, eventId, orgId, gateAccount, revoked }: RunningGateProps): ReactElement {
+/** Where the entries this gate still owes the chain are read and re-sent. */
+const QUEUE_PATH = '../queue';
+
+function RunningGate({ gateId, eventId, orgId, gateAccount, open, revoked }: RunningGateProps): ReactElement {
   const copy = useStaffCopy();
-  const gate = useGate({ gateId, eventId, orgId, gateAccount });
+  const navigate = useNavigate();
+  // The hook takes the permission rather than the screen checking it afterwards — see the header.
+  const gate = useGate({ gateId, eventId, orgId, gateAccount, enabled: open && !revoked });
   const [scanError, setScanError] = useState<string>();
 
   /**
@@ -107,6 +119,8 @@ function RunningGate({ gateId, eventId, orgId, gateAccount, revoked }: RunningGa
   // waits rather than closing itself on a dropped read.
   if (gate.gateOpen === undefined) return <Waiting />;
 
+  const queued = gate.pendingCount + gate.parkedCount;
+
   if (!gate.gateOpen) {
     return (
       <Screen title={copy.setup.title}>
@@ -134,6 +148,15 @@ function RunningGate({ gateId, eventId, orgId, gateAccount, revoked }: RunningGa
         <>
           <Button variant="ghost" onClick={scan}>
             {copy.qr.scanButton}
+          </Button>
+          {/*
+            The only way into the queue screen. Without it a terminal that took people in during a
+            signal drop has no path to the one screen that can re-send them or show the conflicts,
+            and the count is on the button because a staff member has to be able to see that the
+            gate owes something without opening anything.
+          */}
+          <Button variant="ghost" onClick={() => navigate(QUEUE_PATH)}>
+            {queued === 0 ? copy.queue.title : `${copy.queue.title} ${queued}`}
           </Button>
           {scanError === undefined ? null : <Alert tone="warn">{scanError}</Alert>}
         </>

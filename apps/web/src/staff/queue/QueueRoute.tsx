@@ -10,9 +10,11 @@
 // `drainQueue` against exactly that, and this screen keeps the second caller from existing in
 // the first place — the gate screen's connectivity watcher is the other one, and the two screens
 // are sibling routes that are never mounted together.
-import { useCallback, useEffect, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
+import { useNavigate } from 'react-router-dom';
 
-import { Screen, Spinner } from '../../shared/ui';
+import { readTicket } from '../../shared/chain/reads';
+import { Button, Screen, Spinner } from '../../shared/ui';
 import { useStaffCopy } from '../copy';
 import { warn } from '../log';
 import { useGateRegistration } from '../setup/useGateRegistration';
@@ -20,13 +22,40 @@ import { allEntries, retryEntry } from './opQueue';
 import { QueueScreen } from './QueueScreen';
 import { reconcileQueue, type ReconciledEntry } from './reconcile';
 
+/** Back to the door. Relative: the staff routes are a subtree. */
+const GATE_PATH = '../gate';
+
 export function QueueRoute(): ReactElement {
   const copy = useStaffCopy();
-  const { orgId } = useGateRegistration();
+  const navigate = useNavigate();
+  const { orgId, eventId } = useGateRegistration();
   const [entries, setEntries] = useState<ReconciledEntry[]>([]);
   const [busy, setBusy] = useState(false);
   const [retrying, setRetrying] = useState<string>();
   const [loaded, setLoaded] = useState(false);
+  /**
+   * `Ticket.eventMeta(eventId).endsAt`, seconds — the same value the gate screen's drain passes.
+   * **One park policy.** Without it this pass would leave rows pending that the gate's own pass
+   * parks, so which of the two ran last would decide what a staff member is looking at.
+   */
+  const endsAt = useRef<number | undefined>(undefined);
+
+  useEffect(() => {
+    if (eventId === undefined) return;
+    let alive = true;
+    void readTicket()
+      .eventMeta(eventId)
+      .then((meta) => {
+        if (alive) endsAt.current = Number(meta.endsAt);
+      })
+      .catch(() => {
+        // Unreadable: nothing is parked early, and the attempt limit decides instead. The safe
+        // way to be wrong — a queue that parks eagerly throws away check-ins the chain still takes.
+      });
+    return () => {
+      alive = false;
+    };
+  }, [eventId]);
 
   const load = useCallback(async (): Promise<void> => {
     const rows = (await allEntries()) as ReconciledEntry[];
@@ -47,7 +76,7 @@ export function QueueRoute(): ReactElement {
   const reconcile = useCallback(() => {
     if (orgId === undefined) return;
     setBusy(true);
-    void reconcileQueue({ orgId })
+    void reconcileQueue({ orgId, endsAt: endsAt.current })
       .catch((error) => warn('queue', 'reconcile failed', error))
       .then(load)
       .catch((error) => warn('queue', 'could not read the queue', error))
@@ -75,12 +104,21 @@ export function QueueRoute(): ReactElement {
   }
 
   return (
-    <QueueScreen
-      entries={entries}
-      onReconcile={reconcile}
-      onRetry={retry}
-      busy={busy || orgId === undefined}
-      retrying={retrying}
-    />
+    <>
+      <QueueScreen
+        entries={entries}
+        onReconcile={reconcile}
+        onRetry={retry}
+        busy={busy || orgId === undefined}
+        retrying={retrying}
+      />
+      {/*
+        The way back. This is a kiosk with no address bar, so a screen with no exit is a dead end
+        — and the label is the setup screen's own hand-off line, which already says exactly this.
+      */}
+      <Button variant="ghost" onClick={() => navigate(GATE_PATH)}>
+        {copy.setup.openGate}
+      </Button>
+    </>
   );
 }

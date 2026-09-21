@@ -29,6 +29,13 @@
 // does not retroactively turn a sent check-in into a queued one, and a connection that returns
 // does not turn a queued one into a send.
 //
+// **A door that may not admit anybody does not run.** `enabled` is the registration's answer
+// (`open && !revoked`) and `isOpenGate` is the chain's, re-read every minute; until both say yes
+// the effect below never starts, and the moment either stops saying it the emitter, the watcher
+// and the guest-list refresh are torn down. A blocking screen that left the gate rotating codes
+// behind it would spend one sponsored operation per attendee on a revert the gate already knew
+// about — or, offline, write durable rows for a door that will never be allowed to send them.
+//
 // **Success is not a verdict here.** A receipt with `success: true` turns nothing green. The
 // green comes from `CheckedIn` (Task 24) through the watch the machine opened on `onSent`,
 // because the log is the only thing that carries the nonce that says *which tap* was admitted.
@@ -80,6 +87,15 @@ export interface UseGateParams {
    * authenticated party is the staff member's own Firebase session.
    */
   gateAccount: Address;
+  /**
+   * Whether this device is allowed to take taps at all, as the **registration** sees it:
+   * `gateInfo(gateId).open && !revoked`. The chain's minute-by-minute `isOpenGate` answer is the
+   * other half and is read inside this hook; the gate runs only while both agree.
+   *
+   * It is a parameter rather than something read here because a revoked gate must not even poll:
+   * the answer cannot change, and a screen that keeps asking is a screen that looks busy.
+   */
+  enabled: boolean;
 }
 
 /**
@@ -126,7 +142,7 @@ const localDeny = (tap: TapId, code: GateContext['deny'] & string, detail?: stri
   ({ kind: 'deny', nonce: tap.nonce, code, detail: detail ?? DENY_LABELS[code] }) as const;
 
 export function useGate(params: UseGateParams): UseGateResult {
-  const { gateId, eventId, orgId, gateAccount } = params;
+  const { gateId, eventId, orgId, gateAccount, enabled } = params;
 
   // One machine for the life of the screen. It is created lazily rather than in an effect
   // because the first render already reads its snapshot, and it is never recreated: the
@@ -159,7 +175,15 @@ export function useGate(params: UseGateParams): UseGateResult {
   const handlerRef = useRef<(response: GateResponseWire) => Promise<void>>(async () => {});
   const clearTapPendingRef = useRef<() => void>(() => {});
 
+  /**
+   * Both halves of the permission. `gateOpen === undefined` is "not told", not "told no", so the
+   * gate waits rather than running — a terminal that started serving codes on a question it had
+   * not yet had answered would be admitting people on an assumption.
+   */
+  const running = enabled && gateOpen === true;
+
   useEffect(() => {
+    if (!running) return;
     const key = eventId.toString();
     let emitter: GateEmitter | undefined;
     let alive = true;
@@ -203,9 +227,17 @@ export function useGate(params: UseGateParams): UseGateResult {
     };
 
     /**
-     * Everything the gate owes the chain, sent in the order it was taken. Run when the watcher
-     * says the connection is back, which is the only moment it can do any good — `drainQueue`
-     * serialises itself (Task 29), so a drain already running is joined rather than doubled.
+     * Everything the gate owes the chain, sent in the order it was taken.
+     *
+     * Run on three occasions, and the first is the one that was missing: **at mount**, because a
+     * terminal restarted after a signal drop boots with rows already on disk and no edge left to
+     * fire — they would have sat there for the rest of the shift. Then on every status tick, so a
+     * row written while the drain was busy is not waiting for the next disconnection. Then on the
+     * watcher's rising edge, which is the moment they can suddenly go out.
+     *
+     * Cheap to repeat: `drainQueue` returns immediately while the watcher says the gate is
+     * offline, and it serialises itself (Task 29), so a pass already running is joined rather
+     * than doubled.
      */
     const drain = async (): Promise<void> => {
       try {
@@ -366,7 +398,10 @@ export function useGate(params: UseGateParams): UseGateResult {
         warn('gate', 'the gate could not claim the tag', error);
       });
 
-    const status = setInterval(() => void refreshStatus(), GATE_STATUS_POLL_MS);
+    // Mount, while the connection is already up: the rows on disk have no edge coming.
+    if (watcher.online()) void drain();
+
+    const status = setInterval(() => void drain(), GATE_STATUS_POLL_MS);
 
     return () => {
       alive = false;
@@ -378,7 +413,7 @@ export function useGate(params: UseGateParams): UseGateResult {
       machine.stop();
       unsubscribe();
     };
-  }, [machine, gateId, eventId, orgId, gateAccount]);
+  }, [machine, running, gateId, eventId, orgId, gateAccount]);
 
   /**
    * Registration is permanent; permission is not. An organizer closes a gate when a door shuts
@@ -386,6 +421,12 @@ export function useGate(params: UseGateParams): UseGateResult {
    * for — so it is asked, on mount and every minute after (Task 15 carry).
    */
   useEffect(() => {
+    // A revoked gate is not coming back, and a registration that says the door is shut is already
+    // an answer. Neither is worth an `eth_call` a minute.
+    if (!enabled) {
+      setGateOpen(false);
+      return;
+    }
     let alive = true;
     const ask = async (): Promise<void> => {
       try {
@@ -402,7 +443,7 @@ export function useGate(params: UseGateParams): UseGateResult {
       alive = false;
       clearInterval(timer);
     };
-  }, [eventId, gateAccount]);
+  }, [enabled, eventId, gateAccount]);
 
   /**
    * The face, and the one case the guest list cannot answer: a ticket minted since the last
