@@ -66,7 +66,8 @@ describe('Phone screen', () => {
     render(<MemoryRouter><Phone /></MemoryRouter>);
     await userEvent.type(screen.getByRole('textbox'), '01012345678');
     await userEvent.click(screen.getByRole('button', { name: '인증번호 받기' }));
-    expect(sendOtp).toHaveBeenCalledWith('+821012345678');
+    // The screen hands its abort signal down so leaving mid-send cancels the native listeners.
+    expect(sendOtp).toHaveBeenCalledWith('+821012345678', { signal: expect.any(AbortSignal) });
     expect(navigate).toHaveBeenCalledWith('/signup/verify');
   });
 
@@ -75,7 +76,7 @@ describe('Phone screen', () => {
     await userEvent.selectOptions(screen.getByRole('combobox'), '+1');
     await userEvent.type(screen.getByRole('textbox'), '6505550101');
     await userEvent.click(screen.getByRole('button', { name: '인증번호 받기' }));
-    expect(sendOtp).toHaveBeenCalledWith('+16505550101');
+    expect(sendOtp).toHaveBeenCalledWith('+16505550101', { signal: expect.any(AbortSignal) });
   });
 
   it('refuses a number that cannot be E.164 without spending a send', async () => {
@@ -136,7 +137,9 @@ describe('Verify screen', () => {
     const resend = screen.getByRole('button', { name: '다시 보내기' });
     vi.useRealTimers();
     fireEvent.click(resend);
-    await waitFor(() => expect(sendOtp).toHaveBeenCalledWith(PHONE, { resend: true }));
+    await waitFor(() =>
+      expect(sendOtp).toHaveBeenCalledWith(PHONE, expect.objectContaining({ resend: true })),
+    );
   });
 
   it('sends an already-registered number to sign-in instead of creating a second account', async () => {
@@ -151,6 +154,23 @@ describe('Verify screen', () => {
       replace: true,
       state: { notice: '이미 가입된 번호예요. 로그인해 주세요.' },
     });
+  });
+
+  it('retries only the backend when the code was accepted but startSignup failed', async () => {
+    seedSignup({ verificationId: 'vid', phoneE164: PHONE });
+    startSignup.mockRejectedValueOnce(Object.assign(new Error('INTERNAL'), { code: 'internal' }));
+    renderScreen(<Verify />);
+    await userEvent.type(screen.getByRole('textbox'), '123456');
+    await userEvent.click(screen.getByRole('button', { name: '확인' }));
+
+    // The digits were spent, so the failure is the server's — blaming the code would hide it.
+    expect(await screen.findByRole('alert')).toHaveTextContent('문제가 생겼어요.');
+    expect(screen.queryByText('인증번호가 맞지 않아요.')).toBeNull();
+
+    await userEvent.click(screen.getByRole('button', { name: '확인' }));
+    expect(confirmOtp).toHaveBeenCalledTimes(1);
+    expect(startSignup).toHaveBeenCalledTimes(2);
+    expect(navigate).toHaveBeenCalledWith('/signup/passkey');
   });
 
   it('skips the code entirely when the platform verified the number instantly', async () => {

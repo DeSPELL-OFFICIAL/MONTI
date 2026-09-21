@@ -29,15 +29,33 @@ export function Verify() {
   // session already exists, so this screen only has the backend half left to do.
   const instant = signup.verificationId === INSTANT_VERIFICATION;
   const autoRan = useRef(false);
+  // The six digits are single-use. Once they have been spent successfully, a retry of this
+  // screen's work must never send them again — see `finish`.
+  const confirmed = useRef(false);
+  const aborter = useRef<AbortController | null>(null);
 
-  // A resend on the web needs its own invisible verifier, rendered into this screen's container.
-  useEffect(() => resetRecaptcha, []);
+  // A resend on the web needs its own invisible verifier, rendered into this screen's container;
+  // a native resend needs its listener race cancelled when the screen goes away.
+  useEffect(() => {
+    const controller = new AbortController();
+    aborter.current = controller;
+    return () => {
+      controller.abort();
+      resetRecaptcha();
+    };
+  }, []);
 
   async function finish(): Promise<void> {
     setBusy(true);
     setError('');
+    // True once the phone session exists — the code was accepted, or was never needed. A retry
+    // then resumes at startSignup instead of re-sending digits the server has already burnt.
+    const spent = instant || confirmed.current;
     try {
-      if (!instant) await confirmOtp(signup.verificationId ?? '', code);
+      if (!spent) {
+        await confirmOtp(signup.verificationId ?? '', code);
+        confirmed.current = true;
+      }
       // Creates persons/{personId} and users/{uid} from the number in the phone session.
       await finishSignup();
       navigate('/signup/passkey');
@@ -46,7 +64,9 @@ export function Verify() {
         navigate('/login', { replace: true, state: { notice: copy.signup.alreadyRegistered } });
         return;
       }
-      setError(problemMessage(copy, phoneAuthProblem(failure)));
+      // A callable rejection carries an uppercase reason code, not a phone-auth code. Showing
+      // `codeWrong` for it would blame the digits for the server's answer.
+      setError(confirmed.current || instant ? copy.common.error : problemMessage(copy, phoneAuthProblem(failure)));
     } finally {
       setBusy(false);
     }
@@ -64,9 +84,14 @@ export function Verify() {
     setBusy(true);
     setError('');
     try {
-      const verificationId = await sendOtp(signup.phoneE164, { resend: true });
+      const verificationId = await sendOtp(signup.phoneE164, {
+        resend: true,
+        signal: aborter.current?.signal,
+      });
       writeSignup({ verificationId });
       setSignup((previous) => ({ ...previous, verificationId }));
+      // A new code replaces the old one, so the "already spent" latch drops with it.
+      confirmed.current = false;
       setCode('');
       setCooling(true);
     } catch (failure) {

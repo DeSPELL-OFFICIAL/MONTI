@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Alert, Button, Field, Screen } from '../../shared/ui';
 import { useCopy } from '../../shared/i18n';
@@ -22,9 +22,18 @@ export function Phone() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  // One invisible verifier per visit. Leaving it behind would point a live widget at a
-  // container this screen has already taken out of the DOM.
-  useEffect(() => resetRecaptcha, []);
+  const aborter = useRef<AbortController | null>(null);
+
+  // Leaving on unmount ends both halves of a send in flight: the invisible verifier (a live
+  // widget pointing at a container React has removed) and the native listener race.
+  useEffect(() => {
+    const controller = new AbortController();
+    aborter.current = controller;
+    return () => {
+      controller.abort();
+      resetRecaptcha();
+    };
+  }, []);
 
   async function submit(): Promise<void> {
     const phoneE164 = toE164(value, country);
@@ -37,7 +46,7 @@ export function Phone() {
     setBusy(true);
     setError('');
     try {
-      const verificationId = await sendOtp(phoneE164);
+      const verificationId = await sendOtp(phoneE164, { signal: aborter.current?.signal });
       writeSignup({ phoneE164, verificationId });
       navigate('/signup/verify');
     } catch (failure) {

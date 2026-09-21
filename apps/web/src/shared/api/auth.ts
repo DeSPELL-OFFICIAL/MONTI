@@ -113,22 +113,28 @@ function verifier(): RecaptchaVerifier {
 }
 
 /**
- * Drops the widget and the instance. A screen calls this on unmount — a verifier still pointing
- * at a container React has removed can never solve again — and `sendOtp` calls it on failure,
- * because the challenge a failed send consumed cannot be replayed on the retry.
+ * Drops the widget and the instance. `sendOtp` calls this after every web send, success
+ * included: a reCAPTCHA token is single-use, but `RecaptchaVerifier.verify()` hands back the
+ * token it already has while the widget lives, so a kept verifier makes the second resend send
+ * a spent challenge and fail with `auth/captcha-check-failed`. Screens call it on unmount too —
+ * a verifier pointing at a container React has removed can never solve again.
  */
 export function resetRecaptcha(): void {
   recaptcha?.clear();
   recaptcha = null;
 }
 
+/** How long the native path waits for one of its three events before giving up. */
+export const OTP_TIMEOUT_MS = 60_000;
+
 /**
  * Android may settle the whole verification before any SMS goes out, so three listeners race:
- * the code being sent, the number being verified outright, and failure. They are registered
- * before the call that can fire them, and removed however this ends, so a resend never inherits
- * the previous attempt's handlers.
+ * the code being sent, the number being verified outright, and failure. Two more entrants keep
+ * that race from running forever — a timeout, and the caller's abort signal, which a screen
+ * fires on unmount. Without them a silent bridge leaves the promise pending, `finally` never
+ * runs, and three listeners outlive the screen that asked for them.
  */
-async function sendOtpNative(phoneE164: string, resend: boolean): Promise<string> {
+async function sendOtpNative(phoneE164: string, resend: boolean, signal?: AbortSignal): Promise<string> {
   let settle: (verificationId: string) => void = () => undefined;
   let fail: (error: unknown) => void = () => undefined;
   const outcome = new Promise<string>((resolve, reject) => {
@@ -140,26 +146,44 @@ async function sendOtpNative(phoneE164: string, resend: boolean): Promise<string
     FirebaseAuthentication.addListener('phoneVerificationCompleted', () => settle(INSTANT_VERIFICATION)),
     FirebaseAuthentication.addListener('phoneVerificationFailed', ({ message }) => fail(new Error(message))),
   ]);
+  // Neither reason matches a pattern in PROBLEM_PATTERNS, so both land on `unknown` and the
+  // screens show the plain try-again sentence. That is the honest answer for "nothing arrived".
+  const timer = setTimeout(() => fail(new Error('PHONE_VERIFICATION_TIMEOUT')), OTP_TIMEOUT_MS);
+  const abort = (): void => fail(new Error('PHONE_VERIFICATION_ABORTED'));
+  signal?.addEventListener('abort', abort, { once: true });
   try {
-    await FirebaseAuthentication.signInWithPhoneNumber({ phoneNumber: phoneE164, resendCode: resend });
+    // The race, not the bridge call, is what this waits on: a `signInWithPhoneNumber` that
+    // never answers is still settled by the timeout or the abort above.
+    await Promise.race([
+      FirebaseAuthentication.signInWithPhoneNumber({ phoneNumber: phoneE164, resendCode: resend }),
+      outcome,
+    ]);
     return await outcome;
   } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', abort);
     await Promise.all(handles.map((handle) => handle.remove()));
   }
 }
 
 /**
  * Starts phone verification. Resolves with the verification id to confirm against, or
- * `INSTANT_VERIFICATION` when the platform already signed the user in.
+ * `INSTANT_VERIFICATION` when the platform already signed the user in. `signal` cancels a
+ * native attempt — screens abort it on unmount.
  */
-export async function sendOtp(phoneE164: string, options: { resend?: boolean } = {}): Promise<string> {
-  if (Capacitor.isNativePlatform()) return sendOtpNative(phoneE164, options.resend === true);
+export async function sendOtp(
+  phoneE164: string,
+  options: { resend?: boolean; signal?: AbortSignal } = {},
+): Promise<string> {
+  if (Capacitor.isNativePlatform()) {
+    return sendOtpNative(phoneE164, options.resend === true, options.signal);
+  }
   try {
     const confirmation = await signInWithPhoneNumber(getFirebaseAuth(), phoneE164, verifier());
     return confirmation.verificationId;
-  } catch (error) {
+  } finally {
+    // Every send spends its challenge, so every send ends with a fresh verifier for the next one.
     resetRecaptcha();
-    throw error;
   }
 }
 
