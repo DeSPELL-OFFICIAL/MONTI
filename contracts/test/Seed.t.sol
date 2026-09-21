@@ -171,7 +171,19 @@ contract SeedTest is Test {
     ///         seed file carries every id sub-plans 03 and 04 read.
     function test_runReadsTheDeploymentAndRecordsWhatTheAppsRead() public {
         if (vm.exists(SEED_PATH)) vm.removeFile(SEED_PATH);
+
+        // `run` reads its stack out of this file, so it has to be the one this test just wrote. Left
+        // behind by an earlier run, a stale 31340.json lets the test pass against a deployment that is
+        // not the one in process -- which is exactly how it kept passing after Deploy.record() stopped
+        // writing outside a broadcast.
+        if (vm.exists(DEPLOY_PATH)) vm.removeFile(DEPLOY_PATH);
         deployScript.recordAt(DEPLOY_PATH);
+        assertTrue(vm.exists(DEPLOY_PATH), "the seed reads its stack out of this file");
+        assertEq(
+            vm.parseJsonAddress(vm.readFile(DEPLOY_PATH), ".identity"),
+            address(identity),
+            "and this run is what wrote it"
+        );
 
         vm.setEnv("DEPLOYER_PK", vm.toString(DEPLOYER_PK));
         vm.setEnv("ATTESTER_PK", vm.toString(ATTESTER_PK));

@@ -8,6 +8,16 @@ import {CoinbaseSmartWallet} from "smart-wallet/CoinbaseSmartWallet.sol";
 import {CoinbaseSmartWalletFactory} from "smart-wallet/CoinbaseSmartWalletFactory.sol";
 import {DeployCoinbaseFactory} from "../script/DeployCoinbaseFactory.s.sol";
 
+/// @notice The script, plus the one entry point the tests need and the script must not have.
+/// @dev    `record()` writes only under a broadcast, and `forge test` is not one. This is how the
+///         tests reach the writing half without giving the script a public entry point that could be
+///         pointed at the tracked deployments/10143.json.
+contract DeployCoinbaseFactoryHarness is DeployCoinbaseFactory {
+    function recordAt(string memory path) external {
+        _record(path);
+    }
+}
+
 /// @notice Spec 8.2: every MONTI account -- attendee, gate and admin -- is a Coinbase Smart Wallet,
 ///         so sub-plan 03 cannot create a single account until this factory exists on Monad testnet.
 ///         What is proved here is what a dry run cannot show: the factory really is reachable at the
@@ -43,14 +53,14 @@ contract DeployCoinbaseFactoryTest is Test {
         '"coinbaseFactory":"0x0000000000000000000000000000000000000000",'
         '"entryPoint":"0x000000000000000000000000000000000000000f",' '"block":77}';
 
-    DeployCoinbaseFactory internal script;
+    DeployCoinbaseFactoryHarness internal script;
     address internal owner;
 
     function setUp() public {
         // Same guard as Deploy.t.sol: pin the chain id so a forked run can never write the tracked
         // deployments/10143.json.
         vm.chainId(31337);
-        script = new DeployCoinbaseFactory();
+        script = new DeployCoinbaseFactoryHarness();
         owner = vm.addr(OWNER_PK);
     }
 
@@ -191,7 +201,7 @@ contract DeployCoinbaseFactoryTest is Test {
         vm.writeFile(path, SEEDED_BY_DEPLOY_SCRIPT);
 
         script.resolve();
-        script.record();
+        script.recordAt(path);
 
         string memory raw = vm.readFile(path);
         assertEq(vm.parseJsonAddress(raw, ".coinbaseFactory"), script.factoryAddress(), "coinbaseFactory");
@@ -215,7 +225,15 @@ contract DeployCoinbaseFactoryTest is Test {
         if (vm.exists(path)) vm.removeFile(path);
 
         script.resolve();
+
+        // `forge script script/DeployCoinbaseFactory.s.sol --sig 'record()' --rpc-url <monad>` reaches
+        // `record` directly, without `run` and without `--broadcast`. Unguarded, that dry run zeroes
+        // `coinbaseFactory` in the tracked deployments/10143.json and sub-plan 03 loses the account
+        // factory it creates attendee wallets with.
         script.record();
+        assertFalse(vm.exists(path), "record() called on its own records nothing");
+
+        script.recordAt(path);
 
         string memory raw = vm.readFile(path);
         assertEq(vm.parseJsonAddress(raw, ".coinbaseFactory"), script.factoryAddress(), "coinbaseFactory");
