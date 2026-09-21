@@ -1,6 +1,7 @@
 export { acceptInvite, createInvite } from './functions/invites.js';
 export { closeEndedChats, joinEventChat, reportMessage } from './functions/eventChat.js';
 export { createTransferInvite, pendingOffers } from './functions/transferInvites.js';
+export { dailyExport } from './functions/dailyExport.js';
 export { diditWebhook } from './functions/diditWebhook.js';
 export { getPhotoForGate, issueSnapshot } from './functions/snapshot.js';
 export { listAttendees } from './functions/listAttendees.js';

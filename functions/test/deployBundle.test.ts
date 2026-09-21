@@ -132,6 +132,7 @@ describe('deploy bundle', () => {
       'listAttendees',
       'tenderlyWebhook',
       'reconcilePending',
+      'dailyExport',
     ]) {
       expect(exported).toContain(name);
     }
