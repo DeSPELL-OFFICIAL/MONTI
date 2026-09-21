@@ -15,9 +15,32 @@ export interface GateCodeWire {
   sig: Hex;
 }
 
+/**
+ * The answer's wire version. **2**, and version 1 is refused rather than migrated.
+ *
+ * v1 was `{ v, tokenId, deviceSig }` — no nonce. An answer without one cannot name the code it
+ * answers: the gate serves a new code every 3 seconds and the HCE plugin swaps the served
+ * payload only *between* taps, so a write landing just after a rotation answers the code before
+ * it, and the gate cannot see which side of the swap the read fell on. Without the nonce the
+ * gate has to guess, and a wrong guess is a `BadDeviceSignature` revert at the door.
+ *
+ * Nothing is on a device yet, so there is no compatibility to keep: a v1 payload is a bug or a
+ * stale build, and `decodeGateResponse` says so with `BAD_GATE_RESPONSE_VERSION`.
+ */
+export const GATE_RESPONSE_VERSION = 2;
+
+/** What `decodeGateResponse` throws for a well-formed payload of a version this build refuses. */
+export const BAD_GATE_RESPONSE_VERSION = 'BAD_GATE_RESPONSE_VERSION';
+
 export interface GateResponseWire {
-  v: 1;
+  v: 2;
   tokenId: string;
+  /**
+   * The `nonce` of the gate code this answers — the one field that makes an answer traceable
+   * to a code. `Ticket.checkIn` burns `keccak256(abi.encode(nonce))`, so it is also what makes
+   * the answer single-use on chain.
+   */
+  nonce: Hex;
   /** r||s 64B over sha256(abi.encode(tokenId,gateId,eventId,nonce,issuedAt)) */
   deviceSig: Hex;
 }
@@ -125,5 +148,10 @@ export function isGateCodeWire(value: unknown): value is GateCodeWire {
 export function isGateResponseWire(value: unknown): value is GateResponseWire {
   if (typeof value !== 'object' || value === null) return false;
   const v = value as Record<string, unknown>;
-  return v.v === 1 && isDecimalString(v.tokenId) && isHex64(v.deviceSig);
+  return (
+    v.v === GATE_RESPONSE_VERSION &&
+    isDecimalString(v.tokenId) &&
+    isHex32(v.nonce) &&
+    isHex64(v.deviceSig)
+  );
 }

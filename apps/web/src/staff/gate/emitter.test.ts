@@ -46,7 +46,24 @@ const { fromBase64, toBase64 } = await import('@monti/hce-android');
 const { CODE_WINDOW_SECONDS, GATE_CODE_ROTATE_MS, MONTI_AID } = await import('../constants');
 const { GATE_TAP_ERROR, GateTapError, startGateEmitter } = await import('./emitter');
 
-const RESPONSE: GateResponseWire = { v: 1, tokenId: '7', deviceSig: `0x${'ab'.repeat(64)}` };
+/**
+ * `0x22…` repeated is a low-s value, which is the half of the curve order Solady's
+ * `P256.verifySignature` will look at — Task 19 refuses a high one before it ever reaches here.
+ */
+const DEVICE_SIG = `0x${'22'.repeat(64)}` as const;
+
+/** An answer to a nonce this gate never served — the shape, with nothing behind it. */
+const RESPONSE: GateResponseWire = {
+  v: 2,
+  tokenId: '7',
+  nonce: `0x${'ee'.repeat(32)}`,
+  deviceSig: DEVICE_SIG,
+};
+
+/** What the attendee writes back after reading `code`: v2 names the nonce it answers. */
+function answerTo(code: GateCodeWire): GateResponseWire {
+  return { v: 2, tokenId: '7', nonce: code.nonce, deviceSig: DEVICE_SIG };
+}
 
 /** What the plugin hands JS: one completed NDEF message, standard base64. */
 function write(bytes: Uint8Array): void {
@@ -146,57 +163,69 @@ describe('the rotation loop', () => {
 });
 
 describe('a completed tap', () => {
-  it('decodes the response and pairs it with the code on the wire', async () => {
+  it('decodes the response and pairs it with the code it names', async () => {
     const onTap = vi.fn();
     await start({ onTap });
-    write(encodeGateResponseMessage(RESPONSE));
+    const answer = answerTo(servedCodes()[0] as GateCodeWire);
+    write(encodeGateResponseMessage(answer));
 
     expect(onTap).toHaveBeenCalledTimes(1);
     const tap = onTap.mock.calls[0]?.[0];
-    expect(tap.response).toEqual(RESPONSE);
-    expect(tap.codes).toEqual(servedCodes());
+    expect(tap.response).toEqual(answer);
+    expect(tap.code).toEqual(servedCodes()[0]);
   });
 
   /**
    * The plugin applies a swap only between taps (Task 5), so a write landing just after a
-   * rotation is an answer to the code before it. The response cannot say which: it is
-   * `{ v, tokenId, deviceSig }` and carries no nonce. So every code still inside the chain's
-   * window is offered, newest first, and the sender picks the one whose `deviceSig` verifies
-   * against the snapshot's device key. Offering only the newest would refuse real attendees.
+   * rotation is an answer to the code *before* it. `GateResponseWire` v2 carries the nonce it
+   * answers, so the gate looks that code up instead of guessing which side of the swap the read
+   * fell on — guessing was what would have refused real attendees at every rotation boundary.
    */
-  it('offers the codes before it too, newest first', async () => {
+  it('resolves a tap to the older code it actually answers, not to the one now on the wire', async () => {
     const onTap = vi.fn();
     await start({ onTap });
+    const answeredCode = servedCodes()[0] as GateCodeWire;
     await vi.advanceTimersByTimeAsync(2 * GATE_CODE_ROTATE_MS);
-    write(encodeGateResponseMessage(RESPONSE));
+    write(encodeGateResponseMessage(answerTo(answeredCode)));
 
     const served = servedCodes();
     expect(served).toHaveLength(3);
-    expect(onTap.mock.calls[0]?.[0].codes).toEqual([served[2], served[1], served[0]]);
+    expect(onTap.mock.calls[0]?.[0].code).toEqual(answeredCode);
+    expect(onTap.mock.calls[0]?.[0].code).not.toEqual(served[2]);
   });
 
   it('forgets a code the chain would already refuse as a replay', async () => {
     const onTap = vi.fn();
-    await start({ onTap });
+    const onError = vi.fn();
+    await start({ onTap, onError });
+    const first = servedCodes()[0] as GateCodeWire;
     await vi.advanceTimersByTimeAsync((CODE_WINDOW_SECONDS + 10) * 1000);
-    write(encodeGateResponseMessage(RESPONSE));
+    write(encodeGateResponseMessage(answerTo(first)));
 
-    const offered: GateCodeWire[] = onTap.mock.calls[0]?.[0].codes;
-    const oldest = offered.at(-1) as GateCodeWire;
-    expect(offered.length).toBeLessThan(hce.setPayload.mock.calls.length);
-    expect(Math.floor(Date.now() / 1000) - oldest.issuedAt).toBeLessThanOrEqual(CODE_WINDOW_SECONDS + 5);
+    expect(onTap).not.toHaveBeenCalled();
+    expect(onError.mock.calls.at(-1)?.[0].code).toBe(GATE_TAP_ERROR.noLiveCode);
+
+    // The code currently on the wire still answers, so the gate has not simply stopped working.
+    write(encodeGateResponseMessage(answerTo(servedCodes().at(-1) as GateCodeWire)));
+    expect(onTap).toHaveBeenCalledTimes(1);
   });
 
-  it('never offers a code the plugin refused to serve', async () => {
+  it('never accepts an answer to a code the plugin refused to serve', async () => {
     const onTap = vi.fn();
-    await start({ onTap });
+    const onError = vi.fn();
+    await start({ onTap, onError });
     hce.setPayload.mockRejectedValueOnce(new Error('transient'));
     await vi.advanceTimersByTimeAsync(2 * GATE_CODE_ROTATE_MS);
-    write(encodeGateResponseMessage(RESPONSE));
 
-    // Three rotations, one of which never reached the wire: a code nobody was served cannot be
-    // the one that was answered.
-    expect(onTap.mock.calls[0]?.[0].codes).toHaveLength(2);
+    // Three rotations, one of which never reached the wire: nobody can have read that code, so
+    // an answer naming it is not an answer at all.
+    const built = servedCodes();
+    expect(built).toHaveLength(3);
+    onError.mockClear();
+    write(encodeGateResponseMessage(answerTo(built[1] as GateCodeWire)));
+
+    expect(onTap).not.toHaveBeenCalled();
+    expect(onError.mock.calls[0]?.[0].code).toBe(GATE_TAP_ERROR.noLiveCode);
   });
 
   it('refuses a write that is not a MONTI response instead of guessing', async () => {
@@ -217,20 +246,31 @@ describe('a completed tap', () => {
     }
   });
 
-  it('refuses a well-formed answer to a code no chain would still accept', async () => {
+  it('refuses a well-formed answer naming a nonce this gate never served', async () => {
     const onTap = vi.fn();
     const onError = vi.fn();
     await start({ onTap, onError });
-    // Every swap fails, so nothing new reaches the wire and the ring ages out. Admitting on a
-    // code the chain now calls expired would queue a check-in that can only ever revert.
-    hce.setPayload.mockRejectedValue(new Error('transient'));
-    await vi.advanceTimersByTimeAsync((CODE_WINDOW_SECONDS + 10) * 1000);
-    onError.mockClear();
     write(encodeGateResponseMessage(RESPONSE));
 
     expect(onTap).not.toHaveBeenCalled();
     expect(onError).toHaveBeenCalledTimes(1);
     expect(onError.mock.calls[0]?.[0].code).toBe(GATE_TAP_ERROR.noLiveCode);
+    // The precise reason survives on `cause` — Task 19's typed error, with its DENY screen.
+    expect(onError.mock.calls[0]?.[0].cause.code).toBe('RESPONSE_UNKNOWN_CODE');
+    expect(onError.mock.calls[0]?.[0].cause.deny).toBe('EXPIRED_CODE');
+  });
+
+  it('refuses an answer whose signature the chain could only reject', async () => {
+    const onTap = vi.fn();
+    const onError = vi.fn();
+    await start({ onTap, onError });
+    const answer = answerTo(servedCodes()[0] as GateCodeWire);
+    // High s: Solady's P256.verifySignature returns false before it verifies anything.
+    write(encodeGateResponseMessage({ ...answer, deviceSig: `0x${'ee'.repeat(64)}` }));
+
+    expect(onTap).not.toHaveBeenCalled();
+    expect(onError.mock.calls[0]?.[0].cause.code).toBe('RESPONSE_BAD_SIGNATURE');
+    expect(onError.mock.calls[0]?.[0].cause.deny).toBe('DEVICE_MISMATCH');
   });
 
   it('drops a tap that lands after the gate was stopped', async () => {

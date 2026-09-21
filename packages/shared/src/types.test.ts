@@ -24,7 +24,7 @@ const validGateCode: GateCodeWire = {
   sig: B64,
 };
 
-const validResponse: GateResponseWire = { v: 1, tokenId: '7', deviceSig: B64 };
+const validResponse: GateResponseWire = { v: 2, tokenId: '7', nonce: B32, deviceSig: B64 };
 
 describe('hex guards', () => {
   it('isHex32 accepts 32-byte hex and rejects the rest', () => {
@@ -62,6 +62,19 @@ describe('wire guards', () => {
   it('isGateResponseWire accepts the master-plan shape and rejects a bad deviceSig', () => {
     expect(isGateResponseWire(validResponse)).toBe(true);
     expect(isGateResponseWire({ ...validResponse, deviceSig: B32 })).toBe(false);
+  });
+
+  /**
+   * The nonce is what makes an answer traceable to the code it answers. A response missing it
+   * is the pre-v2 shape, and accepting one would put the gate back to guessing which of its
+   * rotating codes a tap belongs to.
+   */
+  it('isGateResponseWire refuses the v1 shape and a nonce that is not 32 bytes', () => {
+    expect(isGateResponseWire({ v: 1, tokenId: '7', deviceSig: B64 })).toBe(false);
+    expect(isGateResponseWire({ v: 1, tokenId: '7', nonce: B32, deviceSig: B64 })).toBe(false);
+    const { nonce: _nonce, ...withoutNonce } = validResponse;
+    expect(isGateResponseWire(withoutNonce)).toBe(false);
+    expect(isGateResponseWire({ ...validResponse, nonce: B64 })).toBe(false);
   });
 });
 

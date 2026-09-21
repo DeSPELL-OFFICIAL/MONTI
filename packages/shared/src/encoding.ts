@@ -2,6 +2,8 @@ import { Encoder } from 'cbor-x';
 import { encodeAbiParameters, keccak256, parseAbiParameters, sha256, stringToBytes } from 'viem';
 import { QR_PREFIX } from './constants.js';
 import {
+  BAD_GATE_RESPONSE_VERSION,
+  GATE_RESPONSE_VERSION,
   isGateCodeWire,
   isGateResponseWire,
   type GateCodeWire,
@@ -129,11 +131,24 @@ export function decodeGateCode(bytes: Uint8Array): GateCodeWire {
   return decoded;
 }
 
+/**
+ * The key order is fixed here rather than taken from the caller's object. CBOR maps keep
+ * insertion order, so two callers spelling the same answer in a different order would put
+ * different bytes on the wire — and these bytes are a cross-branch contract: the attendee app,
+ * the staff gate and the APDU write vectors all pin the same vector.
+ */
 export function encodeGateResponse(wire: GateResponseWire): Uint8Array {
   if (!isGateResponseWire(wire)) throw new Error('BAD_GATE_RESPONSE');
-  return new Uint8Array(cbor.encode(wire));
+  return new Uint8Array(
+    cbor.encode({ v: wire.v, tokenId: wire.tokenId, nonce: wire.nonce, deviceSig: wire.deviceSig }),
+  );
 }
 
+/**
+ * A payload of a version this build does not speak is told apart from one that is simply not a
+ * gate response. The gate treats both as a bad tag, but only one of them means "that phone is
+ * running a build from before the nonce landed", which is the difference a field report needs.
+ */
 export function decodeGateResponse(bytes: Uint8Array): GateResponseWire {
   let decoded: unknown;
   try {
@@ -141,7 +156,13 @@ export function decodeGateResponse(bytes: Uint8Array): GateResponseWire {
   } catch {
     throw new Error('BAD_GATE_RESPONSE');
   }
-  if (!isGateResponseWire(decoded)) throw new Error('BAD_GATE_RESPONSE');
+  if (!isGateResponseWire(decoded)) {
+    const version = (decoded as { v?: unknown } | null)?.v;
+    if (typeof version === 'number' && version !== GATE_RESPONSE_VERSION) {
+      throw new Error(BAD_GATE_RESPONSE_VERSION);
+    }
+    throw new Error('BAD_GATE_RESPONSE');
+  }
   return decoded;
 }
 

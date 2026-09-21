@@ -96,8 +96,9 @@ const LONG_HEADER = 0xc4;
 
 /** The attendee's real answer. `@monti/shared` sizes it, so a wire change lands here first. */
 const RESPONSE_WIRE: GateResponseWire = {
-  v: 1,
+  v: 2,
   tokenId: '1234567',
+  nonce: `0x${'11'.repeat(32)}`,
   deviceSig: `0x${'ab'.repeat(64)}`,
 };
 const RESPONSE_CBOR = encodeGateResponse(RESPONSE_WIRE);
@@ -196,9 +197,11 @@ describe('encodeExternalRecord', () => {
 // ── the two fixtures sub-plan 04's APDU vectors already carry ────────────────
 
 describe('the records a real tap carries', () => {
-  it('frames the real answer as the 176-byte short record the write vectors use', () => {
-    expect(RESPONSE_CBOR.length).toBe(162);
-    expect(SHORT_FIXTURE.length).toBe(176);
+  it('frames the real answer as the 250-byte short record the write vectors use', () => {
+    // 236 bytes of CBOR: `GateResponseWire` v2 carries the nonce of the code it answers, and
+    // this fixture's `tokenId` is six digits longer than the package's pinned vector.
+    expect(RESPONSE_CBOR.length).toBe(236);
+    expect(SHORT_FIXTURE.length).toBe(250);
     expect(SHORT_FIXTURE[0]).toBe(SHORT_HEADER);
     expect([...SHORT_FIXTURE.slice(3, 3 + 11)]).toEqual([...ascii(NDEF_RESPONSE_TYPE)]);
     expect([...SHORT_FIXTURE.slice(14)]).toEqual([...RESPONSE_CBOR]);
@@ -534,7 +537,7 @@ describe('the Kotlin NDEF file model this codec is sized against', () => {
       (message.length >> 8) & 0xff,
       message.length & 0xff,
     ];
-    expect(nlen(SHORT_FIXTURE)).toEqual([0x00, 0xb0]); // 176
+    expect(nlen(SHORT_FIXTURE)).toEqual([0x00, 0xfa]); // 250
     expect(nlen(LONG_FIXTURE)).toEqual([0x01, 0xa1]); // 417
     expect(nlen(encodeGateCodeMessage(GATE_CODE))).toEqual([0x01, 0x96]); // 406
     // Two NLEN bytes can carry the biggest record the codec will build, with room to spare.

@@ -8,8 +8,9 @@
 import { Hce, fromBase64, toBase64 } from '@monti/hce-android';
 import type { GateCodeWire, GateResponseWire } from '@monti/shared';
 
-import { decodeGateResponseMessage, encodeGateCodeMessage } from '../../shared/nfc/ndef';
+import { encodeGateCodeMessage } from '../../shared/nfc/ndef';
 import { GATE_CODE_ROTATE_MS, MONTI_AID } from '../constants';
+import { decodeTapResponse, matchIssuedCode } from './decodeResponse';
 import { buildGateCode, isGateCodeFresh } from './gateCode';
 import { ensureGateKey } from './gateKey';
 
@@ -18,9 +19,10 @@ export const GATE_TAP_ERROR = {
   /** Not a MONTI gate response: another app's tag, a tap that broke, or our own code echoed. */
   badTag: 'GATE_TAP_BAD_TAG',
   /**
-   * A well-formed response, but no code this gate served is still inside the chain's window.
-   * The answer cannot be turned into a check-in `Ticket.checkIn` would accept, so it is refused
-   * here rather than queued as a transaction that can only ever revert with `CodeExpired`.
+   * A well-formed response naming a nonce this gate never served, or served so long ago that it
+   * has fallen out of the ring. The answer cannot be turned into a check-in `Ticket.checkIn`
+   * would accept, so it is refused here rather than queued as a transaction that can only ever
+   * revert with `CodeExpired`.
    */
   noLiveCode: 'GATE_TAP_NO_LIVE_CODE',
 } as const;
@@ -40,18 +42,16 @@ export class GateTapError extends Error {
 export interface GateTap {
   response: GateResponseWire;
   /**
-   * The codes this response can be an answer to, newest first and never empty.
+   * The code this response answers — the ring entry whose `nonce` the response names.
    *
-   * Why more than one: `GateResponseWire` is `{ v, tokenId, deviceSig }` — it carries no nonce,
-   * so the response itself cannot name the code it answers. The plugin applies a payload swap
-   * only between taps (Task 5), so a write landing just after a rotation answers the code
-   * before it, and the gate has no way to see which side of the swap the read fell on. Every
-   * code still inside the chain's window is therefore offered; the sender picks the one whose
-   * `deviceSig` verifies against the device key the snapshot holds for this `tokenId`, which is
-   * the same P-256 check `Ticket.checkIn` runs. Offering only the newest would refuse real
-   * attendees at a rate the gate could never explain.
+   * `GateResponseWire` v2 carries that nonce precisely so this is a lookup and not a guess. It
+   * has to be: the plugin applies a payload swap only between taps (Task 5), so a write landing
+   * just after a rotation answers the code *before* it, and the gate cannot see which side of
+   * the swap the read fell on. Before the nonce the only way to tell was to try every live code
+   * against the snapshot's device key; now the answer says which one it is, and a nonce this
+   * gate never served is a `noLiveCode` refusal rather than a transaction that can only revert.
    */
-  codes: GateCodeWire[];
+  code: GateCodeWire;
 }
 
 export interface StartGateEmitterParams {
@@ -95,28 +95,35 @@ export async function startGateEmitter(params: StartGateEmitterParams): Promise<
 
   const report = (error: unknown): void => params.onError?.(error);
 
-  /** Newest first, and only what `Ticket.checkIn` would still take. */
-  const live = (): GateCodeWire[] => {
-    const nowSeconds = Math.floor(Date.now() / 1000);
-    return ring.filter((code) => isGateCodeFresh(code, nowSeconds));
-  };
 
+  /**
+   * Decoding and the nonce lookup are Task 19's (`decodeResponse.ts`); this only decides what a
+   * refusal means to a gate that has to keep running. The two error surfaces stay separate on
+   * purpose: `ResponseDecodeError` is about one answer, `GateTapError` is about one tap at this
+   * plugin boundary, and a caller of `startGateEmitter` should not have to know the first one.
+   */
   const onWrite = (event: { ndef: string }): void => {
     // A write dispatched before `remove()` landed is a tap at a gate that is already closed.
     if (stopped) return;
     let response: GateResponseWire;
+    let code: GateCodeWire;
     try {
-      response = decodeGateResponseMessage(fromBase64(event.ndef));
+      response = decodeTapResponse(fromBase64(event.ndef));
     } catch (cause) {
       report(new GateTapError(GATE_TAP_ERROR.badTag, { cause }));
       return;
     }
-    const codes = live();
-    if (codes.length === 0) {
-      report(new GateTapError(GATE_TAP_ERROR.noLiveCode));
+    try {
+      code = matchIssuedCode({ response, codes: ring });
+    } catch (cause) {
+      // Every refusal from the match means the same thing here — a MONTI answer that cannot
+      // become a check-in this gate would send. Which one it was (unknown nonce, expired code,
+      // a signature the chain would reject) is on `cause` as the `ResponseDecodeError`, along
+      // with the DENY screen it becomes, so nothing is lost by naming the class of failure.
+      report(new GateTapError(GATE_TAP_ERROR.noLiveCode, { cause }));
       return;
     }
-    params.onTap({ response, codes });
+    params.onTap({ response, code });
   };
 
   const handle = await Hce.addListener('write', onWrite);
