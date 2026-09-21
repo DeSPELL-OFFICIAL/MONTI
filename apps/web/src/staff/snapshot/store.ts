@@ -275,6 +275,7 @@ export async function photoFor(
   tokenId: string,
   gateAccount: Address,
 ): Promise<{ photoJpegB64: string; displayName: string }> {
+  const started = era;
   const known = lookup(tokenId);
   if (known.ticket?.photoJpegB64) {
     return { photoJpegB64: known.ticket.photoJpegB64, displayName: known.ticket.displayName };
@@ -288,6 +289,11 @@ export async function photoFor(
   if (cached) await db.delete('photos', tokenId);
 
   const fetched = await getPhotoForGate({ tokenId, gateAccount });
+  // The gate closed while this face was in the air. The staff member who asked for it is still
+  // handed it — they may be mid-tap — but it is never written down: a request made before the
+  // teardown must not be what puts a decrypted face back on a terminal that was just cleared.
+  // Checked again after the write, because the write is itself an await.
+  if (started !== era) return fetched;
   // The life of the guest list this face was fetched against. With no list to borrow from — the
   // very first tap of a session — it gets the attester's own TTL and no more.
   const expiresAt = held?.expiresAt ?? now + SNAPSHOT_TTL_SECONDS;
@@ -297,5 +303,6 @@ export async function photoFor(
     fetchedAt: Date.now(),
     expiresAt,
   } satisfies StoredPhoto);
+  if (started !== era) await db.delete('photos', tokenId);
   return fetched;
 }

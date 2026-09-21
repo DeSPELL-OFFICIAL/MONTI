@@ -353,6 +353,30 @@ describe('how long a face stays on the phone', () => {
     expect(current()).toBeUndefined();
   });
 
+  /**
+   * The narrow window the whole `era` counter exists for, on the path that matters most: the
+   * one that produces a plaintext JPEG. A tap resolves, the callable is decrypting a face on the
+   * backend, and the staff member closes the gate before the answer lands. The answer still
+   * reaches the caller — they may be looking at the person — but it is never written down.
+   */
+  it('never stores a face that arrived after the gate closed', async () => {
+    await refreshSnapshot('42', GATE);
+    const db = await staffDb();
+
+    let answer: (value: { photoJpegB64: string; displayName: string }) => void = () => undefined;
+    getPhotoForGate.mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
+    const inFlight = photoFor('999', GATE);
+    await settle();
+
+    await clearSnapshotData();
+    answer({ photoJpegB64: 'LATE=', displayName: '문 닫은 뒤' });
+
+    // The caller is still answered — they asked before the gate closed.
+    expect(await inFlight).toEqual({ photoJpegB64: 'LATE=', displayName: '문 닫은 뒤' });
+    await settle();
+    expect(await db.getAll('photos')).toEqual([]);
+  });
+
   it('clearSnapshotData is the same thing without touching the queue', async () => {
     const db = await staffDb();
     await refreshSnapshot('42', GATE);
