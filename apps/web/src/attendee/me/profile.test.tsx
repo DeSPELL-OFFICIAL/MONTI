@@ -123,23 +123,48 @@ describe('NewDevice', () => {
     }
   });
 
-  it('asks the server when the change is allowed and shows the answer', async () => {
+  it('asks the server when the change is allowed, and says what to do next', async () => {
     deviceUpdatedAt.mockResolvedValue(BigInt(NOW() - 8 * DAY));
     wrap(<NewDevice />);
     await userEvent.click(await screen.findByRole('button', { name: ko.me.newDeviceCta }));
-    expect(startDeviceChange).toHaveBeenCalledWith({ method: 'sms' });
+    // `sms` needs a phone re-auth session this app cannot open, so it is not offered at all.
+    expect(startDeviceChange).toHaveBeenCalledWith({ method: 'kyc' });
     expect(await screen.findByText(ko.me.newDeviceReady)).toBeInTheDocument();
+    // Nothing switched here and nothing can: the screen has to hand the person on.
+    expect(await screen.findByText(ko.me.newDeviceNext)).toBeInTheDocument();
   });
 
-  it('turns the server’s refusal reasons into their own sentences', async () => {
+  it('offers no method to pick, because only one of them can answer', async () => {
+    wrap(<NewDevice />);
+    await screen.findByRole('button', { name: ko.me.newDeviceCta });
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+  });
+
+  it('sends the unverified to the one screen that exists, and promises nothing else', async () => {
+    startDeviceChange.mockRejectedValueOnce({ code: 'failed-precondition', message: 'KYC_REQUIRED' } as never);
+    wrap(<NewDevice />);
+    await userEvent.click(await screen.findByRole('button', { name: ko.me.newDeviceCta }));
+    expect(await screen.findByText(ko.me.newDeviceNeedsKyc)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: ko.kyc.cta }));
+    expect(navigate).toHaveBeenCalledWith('/me/verify?returnTo=/me');
+  });
+
+  it('does not tell anybody to re-verify a number on a screen that does not exist', async () => {
     startDeviceChange.mockRejectedValueOnce({ code: 'failed-precondition', message: 'PHONE_REAUTH_REQUIRED' } as never);
     wrap(<NewDevice />);
     await userEvent.click(await screen.findByRole('button', { name: ko.me.newDeviceCta }));
     expect(await screen.findByText(ko.me.newDeviceNeedsPhone)).toBeInTheDocument();
+    // No route serves a phone re-authentication, so this refusal gets no button at all.
+    expect(screen.queryByRole('button', { name: ko.kyc.cta })).not.toBeInTheDocument();
+    expect(navigate).not.toHaveBeenCalled();
+  });
 
-    startDeviceChange.mockRejectedValueOnce({ code: 'failed-precondition', message: 'KYC_REQUIRED' } as never);
-    await userEvent.click(screen.getByRole('button', { name: ko.me.newDeviceCta }));
-    expect(await screen.findByText(ko.me.newDeviceNeedsKyc)).toBeInTheDocument();
+  it('says the tickets are fetched on the new phone, not that they arrive by themselves', async () => {
+    wrap(<NewDevice />);
+    const sentence = fmt(ko.me.recoveryMigrate, { hours: UNDO_HOURS });
+    expect(await screen.findByText(sentence)).toBeInTheDocument();
+    // `Ticket.migrate` is a call the NEW account has to send; nothing moves on its own.
+    expect(sentence).toContain('티켓 가져오기');
   });
 });
 

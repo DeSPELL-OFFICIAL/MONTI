@@ -27,7 +27,11 @@ export function DeviceLock() {
       .then((value) => {
         if (live) setLocked(value);
       })
-      // A read that did not answer is not "unlocked"; the button below is still the way out.
+      // A read that did not answer leaves the unlocked view on screen. That is the safe way
+      // round: the button stays available, and `lockDevice` asks the chain itself before it
+      // sends anything, so a second press on an already-locked account is a no-op, not a
+      // double lock. Claiming "locked" on a failed read would do real harm — it would tell
+      // somebody their lost phone is shut out when nobody has checked.
       .catch(() => undefined);
     return () => {
       live = false;

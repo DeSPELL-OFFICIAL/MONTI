@@ -92,6 +92,19 @@ describe('Nickname', () => {
     expect(await screen.findByText('가입을 먼저 마쳐 주세요.')).toBeInTheDocument();
   });
 
+  it('says it is still confirming when the wait timed out, and does not call it a failure', async () => {
+    nicknameOwner.mockResolvedValue(ZERO);
+    // The sentinel `OpReverted` carries when `wait` gave up: no `0x`, and the operation is
+    // still on its way. Telling somebody to retry here sends a second setNickname.
+    identityOp.mockRejectedValueOnce({ revertReason: 'TIMEOUT' });
+    await type('alex_01');
+    const alert = await screen.findByText('아직 확인 중이에요. 잠시 뒤 다시 열어 확인해 주세요.');
+    expect(alert).toBeInTheDocument();
+    expect(screen.queryByText('문제가 생겼어요. 잠시 뒤 다시 시도해 주세요.')).not.toBeInTheDocument();
+    // `Alert` gives an error the `alert` role and everything else `status`; this is not a refusal.
+    expect(alert.closest('[role="status"]')).not.toBeNull();
+  });
+
   it('falls back to the generic sentence for a revert nobody here can act on', async () => {
     nicknameOwner.mockResolvedValue(ZERO);
     identityOp.mockRejectedValueOnce(reverted('NicknameHashMismatch'));

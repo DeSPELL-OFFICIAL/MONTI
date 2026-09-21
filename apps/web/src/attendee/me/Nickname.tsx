@@ -30,32 +30,44 @@ const REVERT_SENTENCES: ReadonlyArray<readonly [string, keyof Copy['me']]> = [
 ];
 
 /**
+ * `wait` gave up before the operation landed. Not a refusal — it is still on its way, and it
+ * carries no `0x` (`ops.ts`, `sendSponsoredOp.ts`). The claim and handover screens branch on
+ * the same sentinel; a name change has to as well, or it invites a second `setNickname` on top
+ * of one that is about to land.
+ */
+const STILL_CONFIRMING = 'TIMEOUT';
+
+/**
  * The reason an operation carried back, read structurally rather than with `instanceof
  * OpReverted`, so the branch survives a screen test that mocks `chain/ops` whole — the same
  * reason `callableFailure` does it that way.
  */
-function revertReasonOf(error: unknown): Hex | undefined {
+function revertReasonOf(error: unknown): Hex | typeof STILL_CONFIRMING | undefined {
   const reason = (error as { revertReason?: unknown } | null)?.revertReason;
+  if (reason === STILL_CONFIRMING) return STILL_CONFIRMING;
   return typeof reason === 'string' && reason.startsWith('0x') ? (reason as Hex) : undefined;
 }
 
-/** The selector the generated ABI gives this error, or nothing when it no longer carries it. */
+/** The four-byte selector the generated ABI gives this error, or nothing when it dropped it. */
 function selectorOf(errorName: string): string | undefined {
   try {
-    return encodeErrorResult({ abi: identityAbi, errorName }).toLowerCase();
+    // Sliced, not compared whole: an error that later takes an argument would encode longer.
+    return encodeErrorResult({ abi: identityAbi, errorName }).slice(0, 10).toLowerCase();
   } catch {
     return undefined;
   }
 }
 
-function revertSentence(copy: Copy, error: unknown): string {
+/** What a failed send should say, and whether it is a failure at all. */
+function failure(copy: Copy, error: unknown): { tone: 'info' | 'error'; message: string } {
   const reason = revertReasonOf(error);
-  if (reason === undefined) return copy.common.error;
+  if (reason === STILL_CONFIRMING) return { tone: 'info', message: copy.me.nicknameConfirming };
+  if (reason === undefined) return { tone: 'error', message: copy.common.error };
   const selector = reason.slice(0, 10).toLowerCase();
   for (const [errorName, key] of REVERT_SENTENCES) {
-    if (selectorOf(errorName) === selector) return copy.me[key];
+    if (selectorOf(errorName) === selector) return { tone: 'error', message: copy.me[key] };
   }
-  return copy.common.error;
+  return { tone: 'error', message: copy.common.error };
 }
 
 /**
@@ -115,8 +127,9 @@ export function Nickname() {
       setTone('info');
       setMessage(copy.me.nicknameSaved);
     } catch (cause) {
-      setTone('error');
-      setMessage(revertSentence(copy, cause));
+      const outcome = failure(copy, cause);
+      setTone(outcome.tone);
+      setMessage(outcome.message);
     } finally {
       setBusy(false);
     }

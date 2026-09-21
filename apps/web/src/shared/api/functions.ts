@@ -153,19 +153,17 @@ export const api = {
   // sent and there is no hash. A caller that read it as an error would show a locked attendee
   // a failure screen. See functions/src/functions/device.ts.
   lockDevice: call<void, { txHash?: Hex; alreadyLocked?: true }>('lockDevice'),
-  // Proves the recovery right and answers when the chain will accept a device change; with the
-  // new phone's key it also records that key as pending. The server never sends
-  // `setActiveDevice` — the contract reads `msg.sender`, so that write is the new phone's own
-  // sponsored operation. Every number below is epoch seconds.
+  // Proves the recovery right and answers when the chain will accept a device change. The
+  // server never sends `setActiveDevice` — the contract reads `msg.sender`, so that write is
+  // the new phone's own sponsored operation. Numbers are epoch seconds.
+  //
+  // `device.ts` also accepts `phone` (for the `sms` method) and a `deviceX`/`deviceY` pair it
+  // records as `pendingChange`, and answers with that `pending` record. Nothing here sends
+  // either, so neither is typed: the day a screen needs them it adds them back against
+  // `DeviceChangeResult` rather than inheriting a shape nobody ever filled.
   startDeviceChange: call<
-    { method: 'sms' | 'kyc'; phone?: string; deviceX?: Hex; deviceY?: Hex },
-    {
-      allowedAt: number;
-      now: number;
-      cooldownSeconds: number;
-      allowed: boolean;
-      pending?: { deviceX: Hex; deviceY: Hex; requestedAt: number };
-    }
+    { method: 'sms' | 'kyc' },
+    { allowedAt: number; now: number; cooldownSeconds: number; allowed: boolean }
   >('startDeviceChange'),
   // The result type is the server's own (packages/shared), so a change there breaks this
   // call site rather than silently disagreeing with it.
@@ -177,8 +175,16 @@ export const api = {
     'createTransferInvite',
   ),
   pendingOffers: async (): Promise<PendingOffer[]> => (await callPendingOffers()).offers,
+  // Chain-verified on every call (a ticket for this event, the event published, not yet over)
+  // and idempotent, so it is what a room is opened with. It writes the membership the security
+  // rules check, which is why nothing in `eventChats/{eventId}` can be read before it answers.
+  // Refusals worth their own sentence: `NO_TICKET_FOR_EVENT` (permission-denied),
+  // `CHAT_CLOSED` / `EVENT_ENDED` / `EVENT_NOT_PUBLISHED` (failed-precondition).
   joinEventChat: call<{ eventId: string }, { ok: true }>('joinEventChat'),
-  reportMessage: call<{ eventId: string; msgId: string }, { ok: true }>('reportMessage'),
+  // A counter and nothing else — no reporter, no reason, no threshold that hides anything.
+  // The answer is the message's new total, which is everybody's, not this person's.
+  // See functions/src/functions/eventChat.ts.
+  reportMessage: call<{ eventId: string; msgId: string }, { reported: number }>('reportMessage'),
   listAttendees: call<
     { eventId: string },
     Array<{ tokenId: string; nickname: string; tier: number; checkedIn: boolean; kycLevel: number }>
