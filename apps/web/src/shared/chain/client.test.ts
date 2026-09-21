@@ -102,6 +102,7 @@ describe('subscribeLogs stage mapping', () => {
         onData({ result: { commitState: 'Proposed', transactionHash: '0xa', logIndex: '0x0' } });
         onData({ result: { commitState: 'Voted', transactionHash: '0xb', logIndex: '0x0' } });
         onData({ result: { commitState: 'Finalized', transactionHash: '0xa', logIndex: '0x0' } });
+        onData({ result: { commitState: 'Verified', transactionHash: '0xc', logIndex: '0x0' } });
         return { unsubscribe: async () => {} };
       },
     );
@@ -111,12 +112,14 @@ describe('subscribeLogs stage mapping', () => {
       topics: [],
       onLog: (log) => seen.push({ stage: log.stage, transactionHash: log.transactionHash }),
     });
-    await vi.waitFor(() => expect(seen).toHaveLength(3));
+    await vi.waitFor(() => expect(seen).toHaveLength(4));
     stop();
     expect(seen).toEqual([
       { stage: 'speculative', transactionHash: '0xa' },
       { stage: 'speculative', transactionHash: '0xb' },
       { stage: 'finalized', transactionHash: '0xa' },
+      // Verified is a finalized commit state, not the unknown-default speculative.
+      { stage: 'finalized', transactionHash: '0xc' },
     ]);
   });
 });

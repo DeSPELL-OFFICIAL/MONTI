@@ -35,6 +35,8 @@ const STAGE_BY_COMMIT_STATE: Record<string, LogStage> = {
   Proposed: 'speculative',
   Voted: 'speculative',
   Finalized: 'finalized',
+  // Verified is Monad's deepest commit state (after Finalized) — also finalized.
+  Verified: 'finalized',
 };
 
 export interface SubscribeLogsArgs {
