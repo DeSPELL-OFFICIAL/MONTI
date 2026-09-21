@@ -14,6 +14,7 @@ const addListener = vi.fn();
 vi.mock('@capgo/capacitor-nfc', () => ({ CapacitorNfc: { startScanning, stopScanning, write, addListener } }));
 
 const { NFC_ERROR } = await import('./errors');
+const { NFC_SESSION_TIMEOUT_MS } = await import('./session');
 const { readGateCodeNative, readThenWriteNative, writeGateResponseNative } = await import('./native');
 
 const GATE_CODE: GateCodeWire = {
@@ -45,6 +46,11 @@ function gateCodeRecord(): { tnf: number; type: number[]; id: number[]; payload:
 
 /** Lets the module register its listeners and reach `startScanning` before the tap arrives. */
 const scanning = (): Promise<void> => vi.waitFor(() => expect(startScanning).toHaveBeenCalled());
+
+/** The fake-timer twin of `scanning()`: flushes the registration microtasks without waiting. */
+const scanningOnFakeTimers = async (): Promise<void> => {
+  await vi.advanceTimersByTimeAsync(0);
+};
 
 beforeEach(() => {
   listeners.clear();
@@ -115,6 +121,14 @@ describe('native nfc session', () => {
     expect(removed).toEqual(['ndefDiscovered', 'nfcSessionEnd']);
   });
 
+  it('refuses a record that carries the gate type bytes outside an external record', async () => {
+    const tap = readGateCodeNative();
+    await scanning();
+    // TNF 2 is MIME. Same bytes, different record: not a gate code.
+    emitTag([{ tnf: 2, type: typeBytes('monti.app:g'), id: [], payload: [...encodeGateCode(GATE_CODE)] }]);
+    await expect(tap).rejects.toMatchObject({ code: NFC_ERROR.noGateRecord });
+  });
+
   it('turns each way an iOS session can end into its own code', async () => {
     const cancelled = readGateCodeNative();
     await scanning();
@@ -128,10 +142,68 @@ describe('native nfc session', () => {
     await expect(timedOut).rejects.toMatchObject({ code: NFC_ERROR.timeout });
 
     startScanning.mockClear();
-    const lost = readGateCodeNative();
+    const invalidated = readGateCodeNative();
     await scanning();
     emitSessionEnd('invalidated');
-    await expect(lost).rejects.toMatchObject({ code: NFC_ERROR.tagLost });
+    await expect(invalidated).rejects.toMatchObject({ code: NFC_ERROR.readFailed });
+  });
+
+  it('gives up the tap when the gate screen aborts, rather than waiting for a tag forever', async () => {
+    const controller = new AbortController();
+    const sign = vi.fn();
+    const tap = readThenWriteNative(sign, { signal: controller.signal });
+    await scanning();
+    controller.abort();
+    await expect(tap).rejects.toMatchObject({ code: NFC_ERROR.cancelled });
+    expect(sign).not.toHaveBeenCalled();
+    expect(stopScanning).toHaveBeenCalledTimes(1);
+    expect(removed).toEqual(['ndefDiscovered', 'nfcSessionEnd']);
+  });
+
+  it('refuses a signal that was already aborted without opening a session at all', async () => {
+    await expect(readGateCodeNative({ signal: AbortSignal.abort() })).rejects.toMatchObject({
+      code: NFC_ERROR.cancelled,
+    });
+    expect(startScanning).not.toHaveBeenCalled();
+    expect(stopScanning).not.toHaveBeenCalled();
+  });
+
+  // The rejection is claimed before the clock moves: advancing timers is what rejects the tap,
+  // and a rejection nobody is holding yet is an unhandled one.
+  it('ends the tap on its own once the iOS session lifetime is up', async () => {
+    vi.useFakeTimers();
+    const timedOut = expect(readGateCodeNative()).rejects.toMatchObject({ code: NFC_ERROR.timeout });
+    await scanningOnFakeTimers();
+    await vi.advanceTimersByTimeAsync(NFC_SESSION_TIMEOUT_MS);
+    await timedOut;
+    expect(stopScanning).toHaveBeenCalledTimes(1);
+    expect(removed).toEqual(['ndefDiscovered', 'nfcSessionEnd']);
+  });
+
+  it('honours a shorter deadline than the session default', async () => {
+    vi.useFakeTimers();
+    const timedOut = expect(readGateCodeNative({ timeoutMs: 5_000 })).rejects.toMatchObject({
+      code: NFC_ERROR.timeout,
+    });
+    await scanningOnFakeTimers();
+    await vi.advanceTimersByTimeAsync(5_000);
+    await timedOut;
+  });
+
+  it('ignores a tag delivered after the session was torn down', async () => {
+    vi.useFakeTimers();
+    const timedOut = expect(readGateCodeNative()).rejects.toMatchObject({ code: NFC_ERROR.timeout });
+    await scanningOnFakeTimers();
+    // The plugin may still hand a tag to a handler the bridge has not finished removing.
+    const staleHandler = listeners.get('ndefDiscovered');
+    await vi.advanceTimersByTimeAsync(NFC_SESSION_TIMEOUT_MS);
+    await timedOut;
+    expect(removed).toEqual(['ndefDiscovered', 'nfcSessionEnd']);
+
+    staleHandler?.({ type: 'ndef', tag: { ndefMessage: [gateCodeRecord()] } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(write).not.toHaveBeenCalled();
+    expect(stopScanning).toHaveBeenCalledTimes(1);
   });
 
   it('tears the session down even when signing throws', async () => {

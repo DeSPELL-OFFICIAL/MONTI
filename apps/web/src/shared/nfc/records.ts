@@ -7,7 +7,7 @@
 import {
   QR_PREFIX,
   decodeGateCode,
-  encodeGateResponse as encodeGateResponseBytes,
+  encodeGateResponse,
   fromQrPayload,
   toQrPayload,
   type GateCodeWire,
@@ -44,8 +44,22 @@ export function recordTypeMatches(bytes: readonly number[] | undefined, type: st
   return bytes.every((byte, index) => byte === type.charCodeAt(index));
 }
 
-export function encodeGateResponse(wire: GateResponseWire): NdefExternalRecord {
-  return { type: GATE_RESPONSE_RECORD_TYPE, payload: encodeGateResponseBytes(wire) };
+/**
+ * Named for what it returns, not for the shared function it wraps: `@monti/shared` exports an
+ * `encodeGateResponse` that returns the bare CBOR, and a file importing both must not have to
+ * guess which shape it got.
+ */
+export function gateResponseRecord(wire: GateResponseWire): NdefExternalRecord {
+  return { type: GATE_RESPONSE_RECORD_TYPE, payload: encodeGateResponse(wire) };
+}
+
+/**
+ * The read-side twin of what `plugin.ts` writes. TNF is checked as well as the type bytes: a
+ * TNF-2 (MIME) record carrying the bytes `monti.app:g` is not a gate code, and accepting one
+ * would let any tag in the field put a payload in front of the decoder.
+ */
+export function isGateCodeRecord(record: { tnf?: number; type?: readonly number[] }): boolean {
+  return record.tnf === TNF_EXTERNAL && recordTypeMatches(record.type, GATE_CODE_RECORD_TYPE);
 }
 
 /** The iPhone-browser answer: the same CBOR the NDEF record would have carried, as a QR string. */

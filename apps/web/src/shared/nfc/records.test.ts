@@ -7,8 +7,9 @@ import {
   QR_PREFIX,
   TNF_EXTERNAL,
   decodeGateCode,
-  encodeGateResponse,
+  gateResponseRecord,
   gateResponseToQr,
+  isGateCodeRecord,
   qrToGateResponse,
   recordTypeBytes,
   recordTypeMatches,
@@ -84,13 +85,22 @@ describe('nfc records', () => {
 
   it('writes the response as an external record and round-trips through the QR form', () => {
     const wire: GateResponseWire = { v: 1, tokenId: '42', deviceSig: `0x${'ab'.repeat(64)}` };
-    const record = encodeGateResponse(wire);
+    const record = gateResponseRecord(wire);
     expect(record.type).toBe('monti.app:s');
     // v + tokenId + a 64-byte signature as 130 hex chars: comfortably over 140 bytes.
     expect(record.payload.byteLength).toBeGreaterThan(140);
     const qr = gateResponseToQr(wire);
     expect(qr.startsWith(QR_PREFIX)).toBe(true);
     expect(qrToGateResponse(qr)).toEqual(wire);
+  });
+
+  it('accepts a gate code only as an external record, never as any other TNF', () => {
+    const type = [...'monti.app:g'].map((character) => character.charCodeAt(0));
+    expect(isGateCodeRecord({ tnf: TNF_EXTERNAL, type })).toBe(true);
+    // TNF 2 is MIME: same bytes, different kind of record.
+    expect(isGateCodeRecord({ tnf: 2, type })).toBe(false);
+    expect(isGateCodeRecord({ type })).toBe(false);
+    expect(isGateCodeRecord({ tnf: TNF_EXTERNAL, type: [1, 2, 3] })).toBe(false);
   });
 
   it('refuses a QR string that is not a MONTI payload', () => {

@@ -9,10 +9,9 @@ export const NFC_ERROR = {
   cancelled: 'NFC_CANCELLED',
   /** iOS closed the session before a tag arrived (~60 s). */
   timeout: 'NFC_TIMEOUT',
-  /** The session died with the phone still at the gate — almost always the tag leaving the field. */
-  tagLost: 'NFC_TAG_LOST',
-  /** A tag was read, but it carried no `monti.app:g` record. */
+  /** A tag was read, but it carried no `monti.app:g` external record. */
   noGateRecord: 'NFC_NO_GATE_RECORD',
+  /** The read itself failed, or the session was invalidated for a reason iOS did not name. */
   readFailed: 'NFC_READ_FAILED',
 } as const;
 
