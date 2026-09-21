@@ -1,7 +1,116 @@
-import { Screen } from '../../shared/ui';
-import { useCopy } from '../../shared/i18n';
+import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Alert, Button, Countdown, Field, Screen, Spinner } from '../../shared/ui';
+import { fmt, useCopy } from '../../shared/i18n';
+import {
+  INSTANT_VERIFICATION,
+  RECAPTCHA_CONTAINER_ID,
+  confirmOtp,
+  phoneAuthProblem,
+  resetRecaptcha,
+  sendOtp,
+} from '../../shared/api/auth';
+import { finishSignup, isAlreadyRegistered, problemMessage, readSignup, writeSignup } from './useSignup';
+
+const CODE_LENGTH = 6;
+
+/** Firebase's own resend guidance, and the window the SMS itself is worth. */
+const RESEND_COOLDOWN_SECONDS = 60;
 
 export function Verify() {
   const copy = useCopy();
-  return <Screen title={copy.signup.codeTitle}>{copy.signup.verifyCta}</Screen>;
+  const navigate = useNavigate();
+  const [signup, setSignup] = useState(readSignup);
+  const [code, setCode] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [cooling, setCooling] = useState(true);
+  // Android can verify without ever sending a code; there is then nothing to type and the
+  // session already exists, so this screen only has the backend half left to do.
+  const instant = signup.verificationId === INSTANT_VERIFICATION;
+  const autoRan = useRef(false);
+
+  // A resend on the web needs its own invisible verifier, rendered into this screen's container.
+  useEffect(() => resetRecaptcha, []);
+
+  async function finish(): Promise<void> {
+    setBusy(true);
+    setError('');
+    try {
+      if (!instant) await confirmOtp(signup.verificationId ?? '', code);
+      // Creates persons/{personId} and users/{uid} from the number in the phone session.
+      await finishSignup();
+      navigate('/signup/passkey');
+    } catch (failure) {
+      if (isAlreadyRegistered(failure)) {
+        navigate('/login', { replace: true, state: { notice: copy.signup.alreadyRegistered } });
+        return;
+      }
+      setError(problemMessage(copy, phoneAuthProblem(failure)));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!instant || autoRan.current) return;
+    autoRan.current = true;
+    // Runs once, the moment this screen learns the platform already verified the number.
+    void finish();
+  }, [instant]);
+
+  async function resend(): Promise<void> {
+    if (!signup.phoneE164) return;
+    setBusy(true);
+    setError('');
+    try {
+      const verificationId = await sendOtp(signup.phoneE164, { resend: true });
+      writeSignup({ verificationId });
+      setSignup((previous) => ({ ...previous, verificationId }));
+      setCode('');
+      setCooling(true);
+    } catch (failure) {
+      setError(problemMessage(copy, phoneAuthProblem(failure)));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (instant) {
+    return (
+      <Screen title={copy.signup.codeTitle}>
+        {error ? <Alert tone="error">{error}</Alert> : <Spinner />}
+      </Screen>
+    );
+  }
+
+  return (
+    <Screen title={copy.signup.codeTitle}>
+      <p>{fmt(copy.signup.codeSentTo, { phone: signup.phoneE164 ?? '' })}</p>
+      <Field label={copy.signup.codeTitle}>
+        <input
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          maxLength={CODE_LENGTH}
+          value={code}
+          onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))}
+        />
+      </Field>
+      {error ? <Alert tone="error">{error}</Alert> : null}
+      <div id={RECAPTCHA_CONTAINER_ID} />
+      {cooling ? (
+        <div className="resend">
+          <Countdown seconds={RESEND_COOLDOWN_SECONDS} onExpire={() => setCooling(false)} />
+          {copy.signup.codeResendWait}
+        </div>
+      ) : (
+        <Button variant="ghost" onClick={resend} disabled={busy}>
+          {copy.signup.codeResend}
+        </Button>
+      )}
+      <Button onClick={finish} disabled={busy || code.length !== CODE_LENGTH}>
+        {copy.signup.verifyCta}
+      </Button>
+    </Screen>
+  );
 }
