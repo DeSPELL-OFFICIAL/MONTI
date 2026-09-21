@@ -43,6 +43,19 @@
   },
   {
     "type": "function",
+    "name": "MIGRATE_DELAY",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "ROLE_APPROVER",
     "inputs": [],
     "outputs": [
@@ -1863,6 +1876,11 @@
   {
     "type": "error",
     "name": "PaidTiersNotEnabled",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "RotationPending",
     "inputs": []
   },
   {

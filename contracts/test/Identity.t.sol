@@ -12,6 +12,7 @@ contract IdentityTest is Test {
     address internal constant ATTESTER = address(0xA11CE);
     address internal constant ALICE = address(0xA1);
     address internal constant BOB = address(0xB0B);
+    address internal constant CAROL = address(0xCA);
     bytes32 internal constant PERSON_A = bytes32(uint256(0xAAAA));
     bytes32 internal constant PERSON_B = bytes32(uint256(0xBBBB));
     bytes32 internal constant DEV_X = bytes32(uint256(0x1111));
@@ -22,6 +23,7 @@ contract IdentityTest is Test {
     event DeviceChanged(address indexed account, bytes32 x, bytes32 y);
     event KycLevelSet(address indexed account, uint8 level);
     event DeviceLocked(address indexed account, bool locked);
+    event RotationCancelled(bytes32 indexed personId, address indexed account);
 
     function setUp() public {
         identity = new Identity(ATTESTER);
@@ -342,5 +344,192 @@ contract IdentityTest is Test {
         }
         assertEq(locks, 0, "already locked: no second DeviceLocked");
         assertTrue(identity.isLocked(ALICE));
+    }
+
+    function test_rotatedAtStampsRegistrationAndRotation() public {
+        uint64 registeredAt = uint64(block.timestamp);
+        vm.prank(ATTESTER);
+        identity.register(PERSON_A, ALICE, DEV_X, DEV_Y, 1);
+        assertEq(identity.rotatedAt(PERSON_A), registeredAt);
+
+        vm.warp(block.timestamp + 7 days);
+        uint64 rotatedAt = uint64(block.timestamp);
+        vm.prank(ATTESTER);
+        identity.rotateAccount(PERSON_A, BOB);
+        assertEq(identity.rotatedAt(PERSON_A), rotatedAt);
+    }
+
+    /// @dev 6.3 T11. 어테스터가 털려도 직전 계정 본인이 하루 안에 되돌릴 수 있다.
+    function test_cancelRotationRestoresTheOldAccount() public {
+        vm.prank(ATTESTER);
+        identity.register(PERSON_A, ALICE, DEV_X, DEV_Y, 1);
+        vm.warp(block.timestamp + 7 days);
+        vm.prank(ATTESTER);
+        identity.rotateAccount(PERSON_A, BOB);
+        assertTrue(identity.isMember(BOB));
+        assertEq(identity.rotatedFrom(PERSON_A), ALICE, "the rotation records who it pushed aside");
+
+        vm.expectEmit(true, true, true, false);
+        emit AccountRotated(PERSON_A, BOB, ALICE);
+        vm.expectEmit(true, true, false, false);
+        emit RotationCancelled(PERSON_A, ALICE);
+        vm.prank(ALICE);
+        identity.cancelRotation();
+
+        assertEq(identity.accountOf(PERSON_A), ALICE);
+        assertTrue(identity.isMember(ALICE));
+        assertFalse(identity.isMember(BOB));
+        assertEq(identity.personOf(BOB), bytes32(0), "the other address is freed, not burned");
+        assertEq(identity.rotatedFrom(PERSON_A), address(0), "one undo per rotation");
+    }
+
+    /// @dev 취소는 잠금을 풀지 않는다. 되살아난 계정은 정상적인 기기 변경 경로로만 다시 열린다 —
+    ///      동기화된 패스키가 취소만으로 문을 열 수 있으면 T6 의 잔존 위험이 커진다.
+    function test_cancelRotationLeavesTheRotationLockInPlace() public {
+        vm.prank(ATTESTER);
+        identity.register(PERSON_A, ALICE, DEV_X, DEV_Y, 1);
+        vm.warp(block.timestamp + 7 days);
+        vm.prank(ATTESTER);
+        identity.rotateAccount(PERSON_A, BOB);
+        assertTrue(identity.isLocked(ALICE));
+
+        vm.prank(ALICE);
+        identity.cancelRotation();
+        assertTrue(identity.isLocked(ALICE), "the lock survives the undo");
+
+        // 정상 경로로만 풀린다. 마지막 기기 변경이 7일 넘게 지났으므로 지금 바로 된다.
+        vm.prank(ALICE);
+        identity.setActiveDevice(DEV_X, DEV_Y);
+        assertFalse(identity.isLocked(ALICE));
+    }
+
+    /// @dev 창이 닫히면 끝이다. 이게 없으면 _personOf 가 영원히 남는 성질 때문에
+    ///      "그 사람이 지금까지 가져본 모든 계정"이 시한 없이 되돌릴 수 있게 된다.
+    function test_cancelRotationClosesAfterTheUndoWindow() public {
+        vm.prank(ATTESTER);
+        identity.register(PERSON_A, ALICE, DEV_X, DEV_Y, 1);
+        vm.warp(block.timestamp + 7 days);
+        vm.prank(ATTESTER);
+        identity.rotateAccount(PERSON_A, BOB);
+
+        vm.warp(block.timestamp + identity.ROTATION_UNDO_WINDOW());
+        vm.prank(ALICE);
+        vm.expectRevert(Identity.NoRotationToCancel.selector);
+        identity.cancelRotation();
+
+        assertEq(identity.accountOf(PERSON_A), BOB, "the recovery stands");
+    }
+
+    /// @dev 창의 마지막 1초는 아직 열려 있다. 경계가 `>=` 인지 `>` 인지를 위 테스트와 한 쌍으로 고정한다.
+    function test_cancelRotationStillWorksOneSecondBeforeTheWindowCloses() public {
+        vm.prank(ATTESTER);
+        identity.register(PERSON_A, ALICE, DEV_X, DEV_Y, 1);
+        vm.warp(block.timestamp + 7 days);
+        vm.prank(ATTESTER);
+        identity.rotateAccount(PERSON_A, BOB);
+
+        vm.warp(block.timestamp + identity.ROTATION_UNDO_WINDOW() - 1);
+        vm.prank(ALICE);
+        identity.cancelRotation();
+        assertEq(identity.accountOf(PERSON_A), ALICE);
+    }
+
+    /// @dev 두 번 회전한 뒤 가장 오래된 계정은 아무 권한도 없다. A 가 몇 년 뒤에 C 를 쫓아내
+    ///      C 의 티켓을 얼려버리는 경로가 바로 이것이었다.
+    function test_anOlderAccountCannotCancelALaterRotation() public {
+        vm.prank(ATTESTER);
+        identity.register(PERSON_A, ALICE, DEV_X, DEV_Y, 1);
+        vm.warp(block.timestamp + 7 days);
+        vm.prank(ATTESTER);
+        identity.rotateAccount(PERSON_A, BOB);
+        vm.warp(block.timestamp + 7 days);
+        vm.prank(ATTESTER);
+        identity.rotateAccount(PERSON_A, CAROL);
+
+        assertEq(identity.rotatedFrom(PERSON_A), BOB, "only the immediately previous account");
+        vm.prank(ALICE);
+        vm.expectRevert(Identity.NoRotationToCancel.selector);
+        identity.cancelRotation();
+        assertEq(identity.accountOf(PERSON_A), CAROL);
+    }
+
+    /// @dev 되돌리기는 회전 하나당 한 번이다. 두 번째 호출은 자격 자체가 사라져 있다.
+    function test_cancelRotationCannotBeRunTwice() public {
+        vm.prank(ATTESTER);
+        identity.register(PERSON_A, ALICE, DEV_X, DEV_Y, 1);
+        vm.warp(block.timestamp + 7 days);
+        vm.prank(ATTESTER);
+        identity.rotateAccount(PERSON_A, BOB);
+
+        vm.prank(ALICE);
+        identity.cancelRotation();
+
+        vm.prank(ALICE);
+        vm.expectRevert(Identity.NoRotationToCancel.selector);
+        identity.cancelRotation();
+        assertEq(identity.accountOf(PERSON_A), ALICE);
+        assertEq(identity.personOf(BOB), bytes32(0), "the second call changes nothing");
+    }
+
+    /// @dev 취소해도 쿨다운 스탬프는 되감지 않는다. 공격자는 다음 시도까지 7일을 꼬박 기다린다.
+    function test_cancelRotationDoesNotRewindTheCooldown() public {
+        vm.prank(ATTESTER);
+        identity.register(PERSON_A, ALICE, DEV_X, DEV_Y, 1);
+        vm.warp(block.timestamp + 7 days);
+        uint64 attemptedAt = uint64(block.timestamp);
+        vm.prank(ATTESTER);
+        identity.rotateAccount(PERSON_A, BOB);
+        vm.prank(ALICE);
+        identity.cancelRotation();
+
+        assertEq(identity.rotatedAt(PERSON_A), attemptedAt);
+        vm.prank(ATTESTER);
+        vm.expectRevert(Identity.CooldownActive.selector);
+        identity.rotateAccount(PERSON_A, BOB);
+    }
+
+    function test_cancelRotationTakesTheNicknameBack() public {
+        vm.prank(ATTESTER);
+        identity.register(PERSON_A, ALICE, DEV_X, DEV_Y, 1);
+        bytes32 nick = keccak256(bytes("alice_01"));
+        vm.prank(ALICE);
+        identity.setNickname(nick, "alice_01");
+        vm.warp(block.timestamp + 7 days);
+        vm.prank(ATTESTER);
+        identity.rotateAccount(PERSON_A, BOB);
+
+        vm.prank(ALICE);
+        identity.cancelRotation();
+
+        assertEq(identity.nicknameOf(ALICE), nick);
+        assertEq(identity.nicknameOwner(nick), ALICE);
+        assertEq(identity.nicknameOf(BOB), bytes32(0));
+    }
+
+    function test_cancelRotationRejectsTheCurrentAccountAndStrangers() public {
+        vm.prank(ATTESTER);
+        identity.register(PERSON_A, ALICE, DEV_X, DEV_Y, 1);
+
+        // 회전한 적이 없으므로 되돌릴 것도 없다.
+        vm.prank(ALICE);
+        vm.expectRevert(Identity.NoRotationToCancel.selector);
+        identity.cancelRotation();
+
+        vm.prank(BOB);
+        vm.expectRevert(Identity.NotRegistered.selector);
+        identity.cancelRotation();
+    }
+
+    /// @dev 회전으로 들어온 새 계정은 자기 회전을 스스로 되돌릴 수 없다.
+    function test_theNewAccountCannotCancelItsOwnRotation() public {
+        vm.prank(ATTESTER);
+        identity.register(PERSON_A, ALICE, DEV_X, DEV_Y, 1);
+        vm.warp(block.timestamp + 7 days);
+        vm.prank(ATTESTER);
+        identity.rotateAccount(PERSON_A, BOB);
+
+        vm.prank(BOB);
+        vm.expectRevert(Identity.NoRotationToCancel.selector);
+        identity.cancelRotation();
     }
 }

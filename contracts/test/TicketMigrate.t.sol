@@ -22,7 +22,14 @@ contract TicketMigrateTest is MontiTest {
         tokenId = ticket.claim(eventId, 0, "");
     }
 
+    /// @dev 회전에는 7일 쿨다운이, migrate 에는 그 뒤로 MIGRATE_DELAY(24시간)가 더 걸린다(C3).
+    ///      타임락 자체를 보는 테스트는 아래 _rotateAliceToWithoutWaiting 을 쓴다.
     function _rotateAliceTo(address newAccount) internal {
+        _rotateAliceToWithoutWaiting(newAccount);
+        vm.warp(block.timestamp + ticket.MIGRATE_DELAY());
+    }
+
+    function _rotateAliceToWithoutWaiting(address newAccount) internal {
         vm.warp(T0 + 7 days);
         vm.prank(attester);
         identity.rotateAccount(bytes32(uint256(0xA1A1)), newAccount);
@@ -81,9 +88,10 @@ contract TicketMigrateTest is MontiTest {
     }
 
     function test_migrateIgnoresMaxTransfersAndCutoff() public {
-        // maxTransfers is 0 for this event and we are past the transfer cutoff.
+        // maxTransfers is 0 for this event, and the 7-day cooldown plus MIGRATE_DELAY already put us
+        // days past the transfer cutoff (doors were T0 + 1 day). A real handoff here would revert.
         _rotateAliceTo(BOB);
-        vm.warp(T0 + 1 days - 1 minutes);
+        assertGt(block.timestamp + 2 hours, T0 + 1 days, "the migrate runs past the transfer cutoff");
         vm.prank(BOB);
         ticket.migrate(tokenId);
         assertEq(ticket.ownerOf(tokenId), BOB);
@@ -201,6 +209,8 @@ contract TicketMigrateTest is MontiTest {
         vm.warp(T0 + 14 days);
         vm.prank(attester);
         identity.rotateAccount(bytes32(uint256(0xA1A1)), CAROL);
+        // Every rotation opens its own undo window, so the second migrate waits the same day (C3).
+        vm.warp(block.timestamp + ticket.MIGRATE_DELAY());
         vm.prank(CAROL);
         ticket.migrate(tokenId);
 
@@ -215,11 +225,13 @@ contract TicketMigrateTest is MontiTest {
         uint256 offered = _offerableTicket();
         uint256 offeredEvent = ticket.eventOf(offered);
         _rotateAliceTo(BOB);
-        vm.warp(T0 + 1 hours);
 
         vm.prank(BOB);
         ticket.migrate(offered);
 
+        // The migrate had to wait out the rotation timelock, which lands well past this event's
+        // transfer cutoff; wind back inside the window so the handoff leg is about the rules, not the clock.
+        vm.warp(T0 + 1 hours);
         _member(CAROL, 0xCACA);
         vm.prank(BOB);
         ticket.transferFrom(BOB, CAROL, offered);
@@ -272,5 +284,59 @@ contract TicketMigrateTest is MontiTest {
         vm.expectRevert(Ticket.TicketRevoked.selector);
         ticket.acceptOffer(offered, _attesterSig(offered, commitment, BOB));
         assertEq(ticket.ownerOf(offered), ALICE);
+    }
+
+    /// @dev 6.3 T11: 침해된 어테스터가 계정을 바꿔도 티켓은 하루 동안 따라가지 않는다.
+    function test_migrateBlockedUntilTheRotationTimelockPasses() public {
+        _rotateAliceToWithoutWaiting(BOB);
+
+        vm.prank(BOB);
+        vm.expectRevert(Ticket.RotationPending.selector);
+        ticket.migrate(tokenId);
+
+        vm.warp(block.timestamp + ticket.MIGRATE_DELAY() - 1);
+        vm.prank(BOB);
+        vm.expectRevert(Ticket.RotationPending.selector);
+        ticket.migrate(tokenId);
+
+        vm.warp(block.timestamp + 1);
+        vm.prank(BOB);
+        ticket.migrate(tokenId);
+        assertEq(ticket.ownerOf(tokenId), BOB);
+    }
+
+    /// @dev 되돌리면 절도가 끝난다. 도둑은 더 이상 그 personId 의 계정이 아니다.
+    function test_cancelledRotationStopsTheMigrationForGood() public {
+        _rotateAliceToWithoutWaiting(BOB);
+        vm.prank(ALICE);
+        identity.cancelRotation();
+        vm.warp(block.timestamp + ticket.MIGRATE_DELAY());
+
+        vm.prank(BOB);
+        vm.expectRevert(Ticket.NotRotatedAccount.selector);
+        ticket.migrate(tokenId);
+        assertEq(ticket.ownerOf(tokenId), ALICE);
+    }
+
+    /// @dev 되돌리면 멤버십은 돌아오지만 잠금은 남는다. 그래서 되살아난 계정은 문에서도(I2)
+    ///      양도에서도(I1) 여전히 막혀 있고, setActiveDevice 라는 정상 경로를 타야 풀린다.
+    ///      "취소는 복구를 늦출 뿐 신원을 빼앗지 못한다"가 이 두 줄이다.
+    function test_cancelledRotationRestoresMembershipButNotTheDevice() public {
+        _rotateAliceToWithoutWaiting(BOB);
+        vm.prank(ALICE);
+        identity.cancelRotation();
+
+        assertTrue(identity.isMember(ALICE));
+        assertTrue(identity.isLocked(ALICE), "the rotation lock survives the undo");
+
+        vm.prank(ALICE);
+        vm.expectRevert(Ticket.DeviceLocked.selector);
+        ticket.transferFrom(ALICE, BOB, tokenId);
+    }
+
+    /// @dev 두 창은 같은 길이여야 한다. 어긋나면 되돌릴 수도 없는데 티켓은 아직 안 넘어간
+    ///      구간이 생기거나, 티켓이 넘어간 뒤에도 되돌릴 수 있는 구간이 생긴다.
+    function test_theUndoWindowAndTheMigrateTimelockAreTheSameLength() public view {
+        assertEq(ticket.MIGRATE_DELAY(), identity.ROTATION_UNDO_WINDOW());
     }
 }

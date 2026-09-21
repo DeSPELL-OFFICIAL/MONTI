@@ -5,6 +5,8 @@ pragma solidity 0.8.31;
 interface IIdentity {
     function accountOf(bytes32 personId) external view returns (address);
     function personOf(address account) external view returns (bytes32);
+    function rotatedAt(bytes32 personId) external view returns (uint64);
+    function rotatedFrom(bytes32 personId) external view returns (address);
     function isMember(address account) external view returns (bool);
     function activeDevice(address account) external view returns (bytes32 x, bytes32 y);
     function isLocked(address account) external view returns (bool);

@@ -75,6 +75,10 @@ contract Ticket is ERC721, ITicket {
     uint256 public constant CODE_WINDOW = 60;
     uint256 public constant CLOCK_SKEW = 5;
 
+    /// @notice 6.3 T11: 어테스터가 계정을 바꾼 뒤 티켓이 따라가기까지 본인에게 주는 유예.
+    ///         본인은 Identity.cancelRotation() 으로 그 안에 되돌릴 수 있다.
+    uint256 public constant MIGRATE_DELAY = 1 days;
+
     /// @notice The role tag carried by ManualOverride. ROLE_APPROVER is the owner or an admin holding
     ///         PERM_APPROVE_OVERRIDE; ROLE_MANAGER is a manager with canApprove. ROLE_NONE never admits.
     uint8 public constant ROLE_NONE = 0;
@@ -154,6 +158,7 @@ contract Ticket is ERC721, ITicket {
     error BadAttesterSig();
     error NotRotatedAccount();
     error NothingToMigrate();
+    error RotationPending();
 
     constructor(address identity_, address organizers_) ERC721("MONTI Ticket", "MONTI") {
         identity = IIdentity(identity_);
@@ -458,6 +463,8 @@ contract Ticket is ERC721, ITicket {
         address current = identity.accountOf(personId);
         if (current != msg.sender) revert NotRotatedAccount();
         if (current == holder) revert NothingToMigrate();
+        // 침해된 어테스터의 조용한 즉시 절도를, 눈에 보이고 되돌릴 수 있는 절도로 바꾼다(C3).
+        if (block.timestamp < uint256(identity.rotatedAt(personId)) + MIGRATE_DELAY) revert RotationPending();
 
         if (_revoked[tokenId]) revert TicketRevoked();
         if (_checkIns[tokenId].ts != 0) revert AlreadyCheckedIn();
