@@ -1,4 +1,5 @@
 import { FieldValue } from 'firebase-admin/firestore';
+import { warn } from 'firebase-functions/logger';
 import { onRequest } from 'firebase-functions/v2/https';
 import type { Hex, PersonStatus } from '@monti/shared';
 import { ATTESTER_PK, DIDIT_WEBHOOK_SECRET } from '../config.js';
@@ -6,7 +7,7 @@ import { awaitFinalized, publicClient } from '../lib/chain.js';
 import { KYC_SESSIONS, PERSONS, assertStatusTransition, db } from '../lib/db.js';
 import { declineReason, redactDiditPayload, verifyDiditSignature } from '../lib/didit.js';
 import { encryptField, piiAad } from '../lib/kms.js';
-import { normalizePortrait } from '../lib/portrait.js';
+import { PortraitError, normalizePortrait } from '../lib/portrait.js';
 import { sendSetKycLevel } from '../lib/kycLevel.js';
 
 const PERSON_ID_RE = /^0x[0-9a-fA-F]{64}$/;
@@ -156,9 +157,17 @@ export const diditWebhook = onRequest(
       const documentNumber = identity.document_number ?? '';
       // 원본 해상도 사진은 봉투에 **넣지 않는다.** 32 KB 스냅샷 한도 안으로 줄이고 EXIF 를
       // 털어낸 우리 규격 JPEG 만 저장한다(`lib/portrait.ts`). 원본 바이트는 여기서 끝난다.
-      const portrait = normalizePortrait(
-        (identity.portrait_image ?? '').replace(/^data:image\/[a-z]+;base64,/, ''),
-      );
+      const rawPortrait = (identity.portrait_image ?? '').replace(/^data:image\/[a-z]+;base64,/, '');
+      let portrait = '';
+      try {
+        portrait = normalizePortrait(rawPortrait);
+      } catch (cause) {
+        // 우리 규격으로 못 만든 사진은 **저장하지 않는다** — 원본을 그대로 넣으면 게이트가
+        // JPEG 로 읽는 필드에 열리지 않는 바이트가 들어간다. 본인인증 자체는 통과시킨다:
+        // 사진은 스태프 대조용 보조 수단이고, 포맷 하나 때문에 티켓을 막을 이유가 없다.
+        if (!(cause instanceof PortraitError)) throw cause;
+        warn('portrait.rejected', { sessionId, code: cause.code, bytes: rawPortrait.length });
+      }
       const [encName, encDoc, encPhoto] = await Promise.all([
         fullName ? encryptField(fullName, piiAad(personId, 'name')) : Promise.resolve(''),
         documentNumber ? encryptField(documentNumber, piiAad(personId, 'docNumber')) : Promise.resolve(''),

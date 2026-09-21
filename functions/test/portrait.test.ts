@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { decode as decodeJpeg, encode as encodeJpeg } from 'jpeg-js';
+import { PNG } from 'pngjs';
 import {
   PORTRAIT_MAX_BASE64_BYTES,
   PORTRAIT_MAX_EDGE,
+  PortraitError,
   normalizePortrait,
 } from '../src/lib/portrait.js';
 
@@ -81,16 +83,50 @@ describe('normalizePortrait', () => {
     expect(Buffer.from(normalized, 'base64').toString('latin1')).not.toContain('GPS');
   });
 
-  it('leaves bytes it cannot decode alone while they fit the cap', () => {
-    // 지금 쓰는 웹훅 픽스처의 모양. 잘린 JPEG 라 디코드되지 않지만 한도 안이다.
-    const truncated = '/9j/4AAQSkZJRgABAQ==';
-    expect(normalizePortrait(truncated)).toBe(truncated);
+  it('decodes a PNG portrait and hands back a downscaled JPEG', () => {
+    const png = new PNG({ width: 800, height: 1000 });
+    let seed = 11;
+    for (let i = 0; i < 800 * 1000; i += 1) {
+      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+      png.data[i * 4] = seed % 256;
+      png.data[i * 4 + 1] = (seed >> 8) % 256;
+      png.data[i * 4 + 2] = (seed >> 16) % 256;
+      png.data[i * 4 + 3] = 255;
+    }
+    const original = PNG.sync.write(png).toString('base64');
+
+    const normalized = normalizePortrait(original);
+
+    // 나가는 것은 언제나 JPEG 다 — 스냅샷이 이 필드를 `photoJpegB64` 로 읽는다.
+    expect(Buffer.from(normalized, 'base64').subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]));
+    expect(dimensions(normalized)).toEqual({ width: 205, height: PORTRAIT_MAX_EDGE });
+    expect(normalized.length).toBeLessThanOrEqual(PORTRAIT_MAX_BASE64_BYTES);
   });
 
-  it('drops bytes it cannot decode once they exceed the cap', () => {
+  /**
+   * 예전에는 디코드 못 한 바이트를 한도 안이면 **그대로 저장**했다. 그러면 PNG·WebP 가
+   * 원본 해상도와 EXIF 를 달고 `photoJpegB64` 라는 이름으로 게이트까지 갔다.
+   */
+  it('refuses a format it cannot open instead of storing the original', () => {
+    // WebP: 'RIFF' + 크기 + 'WEBP'. 디코더가 없다.
+    const webp = Buffer.concat([
+      Buffer.from('RIFF'),
+      Buffer.from([0x20, 0, 0, 0]),
+      Buffer.from('WEBPVP8 '),
+      Buffer.alloc(24, 0x55),
+    ]).toString('base64');
+    expect(webp.length).toBeLessThanOrEqual(PORTRAIT_MAX_BASE64_BYTES);
+
+    for (const bytes of [webp, '/9j/4AAQSkZJRgABAQ==', Buffer.alloc(64, 0x41).toString('base64')]) {
+      expect(() => normalizePortrait(bytes)).toThrow(PortraitError);
+      expect(() => normalizePortrait(bytes)).toThrow('PORTRAIT_UNSUPPORTED');
+    }
+  });
+
+  it('refuses oversized undecodable bytes too, rather than dropping them silently', () => {
     const garbage = Buffer.alloc(40 * 1024, 0x41).toString('base64');
     expect(garbage.length).toBeGreaterThan(PORTRAIT_MAX_BASE64_BYTES);
-    expect(normalizePortrait(garbage)).toBe('');
+    expect(() => normalizePortrait(garbage)).toThrow('PORTRAIT_UNSUPPORTED');
   });
 
   it('treats an empty portrait as no portrait', () => {

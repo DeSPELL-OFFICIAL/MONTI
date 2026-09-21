@@ -79,7 +79,23 @@ const TX_HASH = `0x${'bb'.repeat(32)}` as Hex;
 const NAME_FIRST = '길동';
 const NAME_LAST = '홍';
 const DOC_NUMBER = 'M12345678';
-const PORTRAIT = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ==';
+/** 실제로 디코드되는 작은 JPEG. 잘린 바이트는 이제 저장되지 않고 거절된다(`PortraitError`). */
+function smallJpeg(width = 200, height = 260): string {
+  const data = new Uint8Array(width * height * 4);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const i = (y * width + x) * 4;
+      data[i] = (x * 255) / width;
+      data[i + 1] = (y * 255) / height;
+      data[i + 2] = 128;
+      data[i + 3] = 255;
+    }
+  }
+  return encodeJpeg({ data, width, height }, 80).data.toString('base64');
+}
+
+const PORTRAIT_BODY = smallJpeg();
+const PORTRAIT = `data:image/jpeg;base64,${PORTRAIT_BODY}`;
 
 /**
  * Didit 이 실제로 보내는 모양의 사진: 신분증 촬영 해상도 그대로인 JPEG.
@@ -526,7 +542,7 @@ describe('diditWebhook', () => {
     await deliver(approvedBody());
 
     const everythingWritten = JSON.stringify([...docs.entries()]);
-    for (const secret of [NAME_FIRST, NAME_LAST, DOC_NUMBER, '1990-01-01', '서울시 어딘가', PORTRAIT.slice(23)]) {
+    for (const secret of [NAME_FIRST, NAME_LAST, DOC_NUMBER, '1990-01-01', '서울시 어딘가', PORTRAIT_BODY]) {
       expect(everythingWritten).not.toContain(secret);
     }
 
@@ -583,5 +599,28 @@ describe('diditWebhook', () => {
     expect(kyc.status).toBe('approved');
     expect(kyc.lastReason).toBeNull();
     expect(snapshot(`${PERSONS}/${PERSON}`).get('kycLevel')).toBe(1);
+  });
+
+  it('approves without a photo when the portrait format is one we cannot re-encode', async () => {
+    const body = approvedBody();
+    // WebP. 디코더가 없다 — 원본을 그대로 저장하면 게이트가 JPEG 로 읽다가 실패한다.
+    const webp = Buffer.concat([
+      Buffer.from('RIFF'),
+      Buffer.from([0x20, 0, 0, 0]),
+      Buffer.from('WEBPVP8 '),
+      Buffer.alloc(24, 0x55),
+    ]).toString('base64');
+    (body.decision.id_verification as Record<string, unknown>).portrait_image =
+      `data:image/webp;base64,${webp}`;
+
+    const res = await deliver(body);
+
+    expect(res.statusCode).toBe(200);
+    const person = snapshot(`${PERSONS}/${PERSON}`);
+    expect(person.get('kycLevel')).toBe(1); // 사진 포맷 때문에 본인인증을 막지는 않는다
+    expect(person.get('photoEnc')).toBeUndefined(); // 원본은 저장되지 않는다
+    expect(JSON.stringify([...docs.entries()])).not.toContain(webp);
+    // 이름·문서번호 봉투는 평소대로 들어간다.
+    expect((person.get('enc') as Record<string, string>).name).toBeTruthy();
   });
 });

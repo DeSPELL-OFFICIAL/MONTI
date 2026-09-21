@@ -1,4 +1,5 @@
 import { decode as decodeJpeg, encode as encodeJpeg } from 'jpeg-js';
+import { PNG } from 'pngjs';
 
 /**
  * 게이트 스냅샷이 사진 한 장에 허용하는 base64 길이(32 KB). **이 파일이 원본이고**
@@ -13,8 +14,61 @@ export const PORTRAIT_MAX_BASE64_BYTES = 32 * 1024;
  */
 export const PORTRAIT_MAX_EDGE = 256;
 
-/** 앞에서부터 써 보고 한도 안에 들어오는 첫 결과를 쓴다. 둘 다 넘치면 사진을 버린다. */
+/** 앞에서부터 써 보고 한도 안에 들어오는 첫 결과를 쓴다. */
 const QUALITIES = [70, 40];
+
+export type PortraitFailure = 'PORTRAIT_UNSUPPORTED' | 'PORTRAIT_TOO_LARGE';
+
+/**
+ * 사진을 우리 규격으로 못 만들었다는 뜻. **부르는 쪽은 원본을 저장하면 안 된다** —
+ * 스냅샷은 이 필드를 JPEG 로 읽으므로(`photoJpegB64`), 원본을 그대로 넣으면 게이트가
+ * 열지 못하는 바이트를 JPEG 라고 부르며 내보내게 된다.
+ */
+export class PortraitError extends Error {
+  constructor(readonly code: PortraitFailure) {
+    super(code);
+    this.name = 'PortraitError';
+  }
+}
+
+interface Raster {
+  width: number;
+  height: number;
+  data: Uint8Array;
+}
+
+/**
+ * 확장자도 content-type 도 믿지 않는다 — 우리가 받는 것은 base64 문자열뿐이라
+ * 앞머리 바이트가 유일한 진실이다.
+ */
+function sniff(bytes: Buffer): 'jpeg' | 'png' | 'unknown' {
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'jpeg';
+  if (bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+    return 'png';
+  }
+  return 'unknown';
+}
+
+/**
+ * 어떤 포맷이든 RGBA 픽셀로 편다. 열지 못하면 `PORTRAIT_UNSUPPORTED` 로 **던진다** —
+ * 조용히 원본을 흘려보내는 길은 없다. WebP·HEIC 는 지금 디코더가 없어 여기서 걸린다
+ * (Didit 의 문서와 픽스처는 JPEG 다).
+ */
+function decodeToRaster(bytes: Buffer): Raster {
+  try {
+    if (sniff(bytes) === 'jpeg') {
+      return decodeJpeg(bytes, { useTArray: true, maxMemoryUsageInMB: 64 });
+    }
+    if (sniff(bytes) === 'png') {
+      const png = PNG.sync.read(bytes);
+      return { width: png.width, height: png.height, data: new Uint8Array(png.data) };
+    }
+  } catch {
+    // 앞머리는 맞는데 본문이 깨진 파일. 아래와 같은 결론이다.
+    throw new PortraitError('PORTRAIT_UNSUPPORTED');
+  }
+  throw new PortraitError('PORTRAIT_UNSUPPORTED');
+}
 
 /**
  * 박스(면적 평균) 축소. 최근접 이웃은 얼굴에서 계단과 모아레를 만들어 대조를 어렵게 한다.
@@ -58,26 +112,21 @@ function downscale(
 }
 
 /**
- * Didit 이 보내 준 `portrait_image` 를 **우리 규격**으로 다시 만든다.
+ * Didit 이 보내 준 `portrait_image` 를 **우리 규격**(긴 변 256 px JPEG, ≤ 32 KB)으로 다시 만든다.
  * KMS 봉투에 넣기 **전에** 한 번만 돌고, 원본 바이트는 이 함수 밖으로 나가지 않는다.
  *
- * 원본은 신분증 촬영 해상도 그대로라 32 KB 스냅샷 한도를 쉽게 넘는다. 넘긴 사진은
- * 게이트에서 그 티켓만 사진 없이 나가므로(`snapshot.ts`), 저장 시점에 줄여 두는 것이
- * 유일하게 안전한 자리다. 다시 인코딩하면 EXIF(촬영 좌표·기기)도 함께 사라진다.
+ * 원본은 신분증 촬영 해상도 그대로라 32 KB 스냅샷 한도를 쉽게 넘는다. 넘긴 사진은 게이트에서
+ * 그 티켓만 사진 없이 나가므로(`snapshot.ts`), 저장 시점에 줄여 두는 것이 유일하게 안전한 자리다.
+ * 다시 인코딩하면 EXIF(촬영 좌표·기기)도 함께 사라진다.
  *
- * 우리 디코더가 모르는 바이트는 손대지 않는다 — 다만 한도를 넘으면 버린다.
- * **한도를 넘긴 원본이 봉투에 들어가는 길은 없다.**
+ * **원본을 그대로 돌려주는 경로는 없다.** 열지 못한 포맷도, 줄여도 한도를 넘는 사진도
+ * `PortraitError` 로 던진다 — 부르는 쪽은 사진을 저장하지 않고 넘어간다.
  */
 export function normalizePortrait(base64: string): string {
   if (!base64) return '';
 
-  let image: { width: number; height: number; data: Uint8Array };
-  try {
-    image = decodeJpeg(Buffer.from(base64, 'base64'), { useTArray: true, maxMemoryUsageInMB: 64 });
-  } catch {
-    return base64.length <= PORTRAIT_MAX_BASE64_BYTES ? base64 : '';
-  }
-  if (image.width < 1 || image.height < 1) return '';
+  const image = decodeToRaster(Buffer.from(base64, 'base64'));
+  if (image.width < 1 || image.height < 1) throw new PortraitError('PORTRAIT_UNSUPPORTED');
 
   // 작은 사진을 늘리지 않는다. 없는 정보를 만들어 봐야 파일만 커진다.
   const scale = Math.min(1, PORTRAIT_MAX_EDGE / Math.max(image.width, image.height));
@@ -90,5 +139,5 @@ export function normalizePortrait(base64: string): string {
     const encoded = encodeJpeg({ data, width, height }, quality).data.toString('base64');
     if (encoded.length <= PORTRAIT_MAX_BASE64_BYTES) return encoded;
   }
-  return '';
+  throw new PortraitError('PORTRAIT_TOO_LARGE');
 }

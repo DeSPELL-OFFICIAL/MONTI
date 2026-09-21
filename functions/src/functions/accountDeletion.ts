@@ -68,14 +68,37 @@ export const requestAccountDeletion = onCall(
       return next;
     });
 
-    await authAdmin.updateUser(uid, { disabled: true });
-    // `disabled` 는 새 로그인만 막는다. 이미 들고 있는 ID 토큰은 만료(1시간)까지 유효하므로
-    // 갱신 토큰까지 무효화해야 진짜로 끊긴다.
-    await authAdmin.revokeRefreshTokens(uid);
+    try {
+      await authAdmin.updateUser(uid, { disabled: true });
+      // `disabled` 는 새 로그인만 막는다. 이미 들고 있는 ID 토큰은 만료(1시간)까지 유효하므로
+      // 갱신 토큰까지 무효화해야 진짜로 끊긴다.
+      await authAdmin.revokeRefreshTokens(uid);
+    } catch (cause) {
+      // 요청은 이미 커밋됐다. 여기서 던지면 사람은 불투명한 `internal` 을 보고 "실패했구나"
+      // 하고 다시 누르는데, 파기는 이미 예약돼 있다. 약속한 것(7일 뒤 파기)은 지켜지므로
+      // 성공으로 답하고 로그만 남긴다 — 로그인 차단은 매일 도는 작업이 다시 시도한다.
+      error('deletion.disable.failed', { uid, reason: (cause as Error).message });
+    }
 
     return { scheduledFor, onChainRetained: true };
   },
 );
+
+/**
+ * Auth 사용자 삭제. **이미 없으면 성공이다.**
+ *
+ * `deleteUser` 는 없는 uid 에 `auth/user-not-found` 를 던진다. 이 줄 뒤에서 한 번이라도
+ * 실패하면(또는 누가 콘솔에서 먼저 지웠으면) 요청은 `pending` 으로 남고, 다음 날 실행은
+ * 같은 자리에서 또 던진다 — 그 요청은 영원히 `done` 이 되지 못한다. 파기의 모든 단계는
+ * 멱등이어야 하고, 여기가 유일하게 그렇지 않았다.
+ */
+async function eraseAuthUser(uid: string): Promise<void> {
+  try {
+    await authAdmin.deleteUser(uid);
+  } catch (cause) {
+    if ((cause as { code?: string }).code !== 'auth/user-not-found') throw cause;
+  }
+}
 
 /**
  * Didit 세션 파기. 실패하면 **던진다** — 부르는 쪽이 우리 DB 를 지우기 전에 멈춰야 한다.
@@ -111,10 +134,14 @@ async function erase(request: Doc): Promise<void> {
 
   const personRef = db.collection(PERSONS).doc(personId);
   const person = await personRef.get();
-  const sessionId = person.get('kyc.sessionId') as string | undefined;
   const account = person.get('account') as Hex | undefined;
 
-  if (sessionId) await eraseDiditSession(sessionId);
+  // **연 적 있는 세션을 전부** 지운다. 열린 세션 하나만 지우면, 복귀 주소가 달라 새로 연
+  // 세션에 밀려난 옛 세션의 얼굴 템플릿이 Didit 서버에 영원히 남는다(`kycSession.ts`).
+  const sessions = new Set<string>((person.get('kycSessionIds') as string[] | undefined) ?? []);
+  const current = person.get('kyc.sessionId') as string | undefined;
+  if (current) sessions.add(current);
+  for (const sessionId of sessions) await eraseDiditSession(sessionId);
 
   const user = await db.collection(USERS).doc(uid).get();
   const phoneHmac = user.get('phoneHmac') as string | undefined;
@@ -127,6 +154,8 @@ async function erase(request: Doc): Promise<void> {
   if (account) await db.collection(DEVICES).doc(account).delete();
 
   if (person.exists) {
+    // 지금은 어떤 상태에서도 `deleted` 로 갈 수 있으므로 이 줄은 던지지 않는다.
+    // 그래도 남겨 둔다 — 전이표가 언젠가 좁아지면 조용히 어긋나는 대신 여기서 크게 깨진다.
     assertStatusTransition((person.get('status') as PersonStatus | undefined) ?? 'pending', 'deleted');
     await personRef.set(
       {
@@ -136,6 +165,7 @@ async function erase(request: Doc): Promise<void> {
         enc: FieldValue.delete(),
         photoEnc: FieldValue.delete(),
         kyc: FieldValue.delete(),
+        kycSessionIds: FieldValue.delete(),
         deletedAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       },
@@ -143,7 +173,7 @@ async function erase(request: Doc): Promise<void> {
     );
   }
 
-  await authAdmin.deleteUser(uid);
+  await eraseAuthUser(uid);
   await request.ref.update({ status: 'done', completedAt: FieldValue.serverTimestamp() });
   info('deletion.done', { uid });
 }

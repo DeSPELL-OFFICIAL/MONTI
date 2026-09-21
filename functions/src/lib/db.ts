@@ -1,14 +1,12 @@
 import { getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
-import { getStorage } from 'firebase-admin/storage';
 import type { PersonStatus } from '@monti/shared';
 
 if (getApps().length === 0) initializeApp();
 
 export const db = getFirestore();
 export const authAdmin = getAuth();
-export const storage = getStorage();
 
 export const PERSONS = 'persons';
 export const USERS = 'users';

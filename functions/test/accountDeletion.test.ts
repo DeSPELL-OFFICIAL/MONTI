@@ -7,6 +7,7 @@ const PERSON_ID = `0x${'aa'.repeat(32)}`;
 const ACCOUNT = '0x9999999999999999999999999999999999999999';
 const PHONE_HMAC = 'hmac-of-+821012345678';
 const SESSION_ID = 'sess-1';
+const OLD_SESSION_ID = 'sess-0';
 const DAY = 24 * 60 * 60;
 
 /**
@@ -166,6 +167,8 @@ function seed(): void {
     kycLevel: 1,
     account: ACCOUNT,
     kyc: { provider: 'didit', sessionId: SESSION_ID, status: 'approved' },
+    // 복귀 주소가 달라 새로 연 세션에 밀려난 옛 세션. 이것도 지워져야 한다.
+    kycSessionIds: [OLD_SESSION_ID, SESSION_ID],
     enc: { name: 'enc:name', docNumber: 'enc:doc' },
     photoEnc: 'enc:photo',
     chain: { registerTx: '0xabc', block: 7 },
@@ -245,6 +248,20 @@ describe('requestAccountDeletion', () => {
     expect(snapshot(`${DELETION_REQUESTS}/uid-1`).get('status')).toBe('pending');
   });
 
+  /**
+   * 리뷰 Minor 6. 요청은 이미 커밋됐는데 로그인 차단이 실패하면, 예전에는 불투명한
+   * `internal` 이 나갔다 — 사람은 실패한 줄 알지만 파기는 7일 뒤에 실제로 일어난다.
+   */
+  it('still reports the scheduled deletion when cutting sign-in off fails', async () => {
+    updateUser.mockRejectedValueOnce(new Error('AUTH_DOWN'));
+
+    const result = await call();
+
+    expect(result.onChainRetained).toBe(true);
+    expect(result.scheduledFor).toBeGreaterThan(Math.floor(Date.now() / 1000));
+    expect(snapshot(`${DELETION_REQUESTS}/uid-1`).get('status')).toBe('pending');
+  });
+
   it('refuses an unauthenticated caller and a uid that never signed up', async () => {
     await expect(request({ data: {} } as never)).rejects.toThrow('AUTH_REQUIRED');
     await expect(call({ uid: 'uid-nobody', token: {} })).rejects.toThrow('NO_PERSON');
@@ -277,7 +294,10 @@ describe('processDeletions', () => {
     expect(snapshot(`${PASSKEYS}/cred-2`).exists).toBe(false);
     expect(snapshot(`${PASSKEYS}/other`).exists).toBe(true); // 남의 자격증명은 건드리지 않는다
 
+    // 열린 세션만이 아니라 연 적 있는 세션 전부를 지운다.
+    expect(deleteDiditSession).toHaveBeenCalledWith(OLD_SESSION_ID, 'didit-key');
     expect(deleteDiditSession).toHaveBeenCalledWith(SESSION_ID, 'didit-key');
+    expect(deleteDiditSession).toHaveBeenCalledTimes(2);
     expect(deleteUser).toHaveBeenCalledWith('uid-1');
     expect(snapshot(`${DELETION_REQUESTS}/uid-1`).get('status')).toBe('done');
   });
@@ -293,6 +313,7 @@ describe('processDeletions', () => {
     expect(person.get('enc')).toBeUndefined();
     expect(person.get('photoEnc')).toBeUndefined();
     expect(person.get('kyc')).toBeUndefined();
+    expect(person.get('kycSessionIds')).toBeUndefined();
     // 개인정보가 아닌 것은 남는다 — 계정 주소와 체인 기록은 personId 와 짝이라 지울 것이 없다.
     expect(person.get('account')).toBe(ACCOUNT);
     expect(person.get('chain.registerTx')).toBe('0xabc');
@@ -310,7 +331,7 @@ describe('processDeletions', () => {
 
     await expect(run()).resolves.toBeUndefined(); // 스케줄러 밖으로 던지지 않는다
 
-    expect(deleteDiditSession).toHaveBeenCalledTimes(2); // 한 번 더 해 본다
+    expect(deleteDiditSession).toHaveBeenCalledTimes(2); // 첫 세션에서 한 번 더 해 보고 포기한다
     // 아무것도 지우지 않았다 — 내일 실행이 같은 sessionId 로 다시 시도할 수 있어야 한다.
     expect(snapshot(`${USERS}/uid-1`).exists).toBe(true);
     expect(snapshot(`${PERSONS}/${PERSON_ID}`).get('status')).toBe('active');
@@ -347,5 +368,49 @@ describe('processDeletions', () => {
     const outcomes = ['uid-broken', 'uid-1'].map((uid) => snapshot(`${DELETION_REQUESTS}/${uid}`).get('status'));
     expect(outcomes).toContain('done'); // 하나가 터져도 다른 하나는 끝났다
     expect(outcomes).toContain('pending'); // 터진 쪽은 내일 다시 집힌다
+  });
+
+  /**
+   * 리뷰 Important 1. `deleteUser` 는 없는 uid 에 `auth/user-not-found` 를 던진다.
+   * 그 한 줄 뒤에서 한 번이라도 실패하면 요청은 영원히 `pending` 에 갇혔다 —
+   * 다음 날 실행이 같은 자리에서 또 던지기 때문이다.
+   */
+  it('finishes a request whose Auth user is already gone', async () => {
+    const gone = Object.assign(new Error('no such user'), { code: 'auth/user-not-found' });
+    deleteUser.mockRejectedValueOnce(gone);
+    await call();
+    await makeDue();
+
+    await run();
+
+    expect(snapshot(`${DELETION_REQUESTS}/uid-1`).get('status')).toBe('done');
+    expect(snapshot(`${USERS}/uid-1`).exists).toBe(false);
+    expect(snapshot(`${PERSONS}/${PERSON_ID}`).get('status')).toBe('deleted');
+  });
+
+  it('re-runs cleanly over a request that was already half erased', async () => {
+    await call();
+    await makeDue();
+    await run();
+    expect(snapshot(`${DELETION_REQUESTS}/uid-1`).get('status')).toBe('done');
+
+    // 완료 도장 직전에 죽었다면 다음 날 실행이 같은 요청을 통째로 다시 돈다.
+    // 지울 것은 이미 없고 Auth 사용자도 없다 — 그래도 끝까지 가야 한다.
+    write(`${DELETION_REQUESTS}/uid-1`, { status: 'pending', scheduledFor: 1 }, { merge: true });
+    deleteUser.mockRejectedValueOnce(Object.assign(new Error('gone'), { code: 'auth/user-not-found' }));
+
+    await run();
+
+    expect(snapshot(`${DELETION_REQUESTS}/uid-1`).get('status')).toBe('done');
+    expect(snapshot(`${PERSONS}/${PERSON_ID}`).get('status')).toBe('deleted');
+  });
+
+  it('still raises an Auth failure that is not "already gone"', async () => {
+    deleteUser.mockRejectedValueOnce(Object.assign(new Error('boom'), { code: 'auth/internal-error' }));
+    await call();
+    await makeDue();
+
+    await expect(run()).resolves.toBeUndefined();
+    expect(snapshot(`${DELETION_REQUESTS}/uid-1`).get('status')).toBe('pending');
   });
 });
