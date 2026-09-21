@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!--
+      Deliberately empty. This task adds pure-Kotlin byte models (Type4Files, ApduStatus) that
+      touch no Android API, so nothing is required yet. android.permission.NFC, the
+      android.hardware.nfc.hce feature and the <service> + apduservice metadata arrive with the
+      HostApduService in Task 3.
+    -->
+</manifest>
