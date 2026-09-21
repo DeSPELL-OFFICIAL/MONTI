@@ -113,6 +113,38 @@ contract TicketEventTest is MontiTest {
         ticket.updateEventMeta(eventId, m, _oneFreeTier());
     }
 
+    event EventMetaUpdated(uint256 indexed eventId);
+
+    /// @notice A Draft edit rewrites meta and tiers in place, so the indexer only learns about it if the
+    ///         write announces itself. The emit is the whole change: the stored state must be what it was.
+    function test_updateEventMetaEmitsEventMetaUpdated() public {
+        uint256 orgId = _org();
+        Ticket.EventMeta memory m = _draftMeta(orgId);
+        vm.prank(ORG_OWNER);
+        uint256 eventId = ticket.createEvent(m, _oneFreeTier());
+
+        m.titleHash = keccak256("Second title");
+        m.venueHash = keccak256("Busan");
+        Ticket.Tier[] memory t = _oneFreeTier();
+        t[0].supply = 42;
+
+        vm.expectEmit(true, false, false, false);
+        emit EventMetaUpdated(eventId);
+        vm.prank(ORG_OWNER);
+        ticket.updateEventMeta(eventId, m, t);
+
+        Ticket.EventMeta memory stored = ticket.eventMeta(eventId);
+        assertEq(stored.titleHash, keccak256("Second title"));
+        assertEq(stored.venueHash, keccak256("Busan"));
+        assertEq(stored.orgId, orgId, "orgId stays the one createEvent recorded");
+        assertEq(uint8(ticket.eventStatus(eventId)), uint8(Ticket.EventStatus.Draft), "still a draft");
+
+        Ticket.Tier[] memory tiers = ticket.tiers(eventId);
+        assertEq(tiers.length, 1);
+        assertEq(tiers[0].supply, 42);
+        assertEq(tiers[0].minted, 0, "a replaced tier starts unminted");
+    }
+
     function test_cancelEventAndEndedIsDerived() public {
         uint256 orgId = _org();
         uint256 eventId = _freeEvent(orgId, 2, 1, true);

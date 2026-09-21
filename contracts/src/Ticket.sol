@@ -105,6 +105,7 @@ contract Ticket is ERC721, ITicket {
 
     event EventCreated(uint256 indexed eventId, uint256 indexed orgId, address indexed creator);
     event EventStatusChanged(uint256 indexed eventId, uint8 status);
+    event EventMetaUpdated(uint256 indexed eventId);
     event Claimed(uint256 indexed tokenId, uint256 indexed eventId, address indexed to, uint8 tier);
     event CheckedIn(
         uint256 indexed tokenId, uint256 indexed eventId, uint256 indexed gateId, bytes32 nonceHash, uint64 ts
@@ -216,6 +217,8 @@ contract Ticket is ERC721, ITicket {
             t.minted = 0;
             _tiers[eventId].push(t);
         }
+
+        emit EventMetaUpdated(eventId);
     }
 
     /// @notice Ended is derived from endsAt so no transaction is needed to close an event.
