@@ -1,0 +1,39 @@
+{
+  "name": "@monti/hce-android",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MONTI gate HCE plugin (NFC Forum Type 4 Tag, writable NDEF)",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "android"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepare": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "capacitor": {
+    "android": {
+      "src": "android"
+    }
+  },
+  "peerDependencies": {
+    "@capacitor/core": "^8.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/core": "8.5.2",
+    "@monti/shared": "workspace:*",
+    "typescript": "5.9.2",
+    "vitest": "3.2.4"
+  }
+}

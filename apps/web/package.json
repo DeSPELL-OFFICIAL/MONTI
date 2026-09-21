@@ -27,6 +27,7 @@
     "@dnd-kit/sortable": "10.0.0",
     "@dnd-kit/utilities": "3.2.2",
     "@monti/device-key": "workspace:*",
+    "@monti/hce-android": "workspace:*",
     "@monti/shared": "workspace:*",
     "@noble/curves": "1.9.2",
     "@noble/hashes": "1.8.0",

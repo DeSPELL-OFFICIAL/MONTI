@@ -55,6 +55,9 @@ importers:
       '@monti/device-key':
         specifier: workspace:*
         version: link:../../plugins/device-key
+      '@monti/hce-android':
+        specifier: workspace:*
+        version: link:../../plugins/hce-android
       '@monti/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -214,6 +217,21 @@ importers:
       '@capacitor/core':
         specifier: 8.5.2
         version: 8.5.2
+      typescript:
+        specifier: 5.9.2
+        version: 5.9.2
+      vitest:
+        specifier: 3.2.4
+        version: 3.2.4(@types/node@22.20.4)(jsdom@26.1.0)(tsx@4.23.15)
+
+  plugins/hce-android:
+    devDependencies:
+      '@capacitor/core':
+        specifier: 8.5.2
+        version: 8.5.2
+      '@monti/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       typescript:
         specifier: 5.9.2
         version: 5.9.2
