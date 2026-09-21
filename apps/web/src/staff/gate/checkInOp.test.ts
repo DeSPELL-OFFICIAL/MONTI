@@ -160,6 +160,33 @@ describe('sending it', () => {
     expect((failure as Error).cause).toBeInstanceOf(Error);
   });
 
+  it('finds the revert name however viem wrapped it', async () => {
+    const wrapped = Object.assign(new Error('UserOperation reverted during simulation'), {
+      cause: Object.assign(new Error('execution reverted'), {
+        details: 'AA33 reverted: UnknownSender()',
+      }),
+    });
+    sendSponsoredOp.mockRejectedValueOnce(wrapped);
+    await expect(sendCheckIn({ code, response, orgId: 5n })).rejects.toBeInstanceOf(
+      GateNotRegisteredError,
+    );
+
+    // And on `shortMessage`, which is where viem's own errors usually put it.
+    sendSponsoredOp.mockRejectedValueOnce(
+      Object.assign(new Error('wrapped'), { shortMessage: 'reverted with UnknownSender()' }),
+    );
+    await expect(sendCheckIn({ code, response, orgId: 5n })).rejects.toBeInstanceOf(
+      GateNotRegisteredError,
+    );
+  });
+
+  it('does not hang on an error chain that points at itself', async () => {
+    const cyclic: { message: string; cause?: unknown } = { message: 'boom' };
+    cyclic.cause = cyclic;
+    sendSponsoredOp.mockRejectedValueOnce(cyclic);
+    await expect(sendCheckIn({ code, response, orgId: 5n })).rejects.toBe(cyclic);
+  });
+
   it('lets every other send failure through untouched', async () => {
     const original = new Error('AA23 reverted (or OOG)');
     sendSponsoredOp.mockRejectedValueOnce(original);

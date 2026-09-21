@@ -7,44 +7,26 @@
 // `CHECK_IN_ERRORS` belong to `Ticket.sol` and are pinned against its exported ABI by the test
 // beside this file. What this module *owns* is the two vocabularies that exist only on the
 // staff device: the DENY codes a refusal is shown as, and the states a gate moves through.
-import type { GateCodeWire, GateResponseWire, Hex, SnapshotTicket } from '@monti/shared';
+import type { GateCodeWire, GateDenyCode, GateResponseWire, Hex, SnapshotTicket } from '@monti/shared';
 
 export type { GateCodeWire, GateResponseWire, Hex, SnapshotTicket };
 
 /**
- * Spec §13's nine refusal rows, plus four the table leaves implicit and `Ticket.checkIn` reverts
- * with all the same: `EVENT_ENDED` and `EVENT_CANCELLED` (the door is normally shut by then,
- * but "행사 종료" and "취소된 공연" are not the same sentence to say to someone holding a
- * ticket), `GATE_MISMATCH` (this terminal is registered to a different gate than the code it
- * served — a setup fault wearing a refusal's clothes, and one nobody can diagnose from "게이트가
- * 닫혀 있음"), and `UNKNOWN_REVERT`.
+ * Spec §13's refusal rows — **re-exported, not restated**.
  *
- * `UNKNOWN_REVERT` is the one that is not a contract error at all: it is a revert whose selector
- * this build does not know, which means the contracts moved ahead of the app. It is still a
- * refusal — the gate cannot admit on a reason it cannot read — but it is a different thing from
- * `TX_FAILED`, which is a send that never produced a reason to begin with. Task 34 is what turns
- * an `UNKNOWN_REVERT` in the field into a mapping here.
+ * The list lives in `@monti/shared` because both apps read it: the staff phone picks the screen
+ * and the attendee phone is shown its sentence, and a code that exists on only one side is an
+ * empty screen on the other. `UNKNOWN_REVERT` is the one that is not a contract error at all —
+ * a revert whose selector this build has never seen, which means the contracts moved ahead of
+ * the app. Still a refusal (a gate that cannot read the reason cannot admit on it), and still a
+ * different thing from `TX_FAILED`, which is a send that produced no reason to begin with.
  *
- * The order is the spec table's, with the additions beside the rows they belong next to. Every
- * one of these is a screen the attendee is shown and a staff member has to be able to explain.
+ * `TIMEOUT` is deliberately absent: an operation that has not answered yet has not refused.
  */
-export const DENY_CODES = [
-  'ALREADY_USED',
-  'WRONG_EVENT',
-  'REVOKED',
-  'EXPIRED_CODE',
-  'NO_TICKET',
-  'GATE_CLOSED',
-  'GATE_MISMATCH',
-  'EVENT_ENDED',
-  'EVENT_CANCELLED',
-  'DEVICE_LOCKED',
-  'DEVICE_MISMATCH',
-  'TX_FAILED',
-  'UNKNOWN_REVERT',
-] as const;
+export { GATE_DENY_CODES as DENY_CODES, isGateDenyCode } from '@monti/shared';
 
-export type DenyCode = (typeof DENY_CODES)[number];
+/** The staff spelling of `@monti/shared`'s `GateDenyCode`. One list, two names for it. */
+export type DenyCode = GateDenyCode;
 
 /**
  * `Ticket.sol`'s custom errors on the check-in surface, frozen by the master plan so the staff

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { ticketAbi } from '@monti/shared';
+import { GATE_DENY_CODES, ticketAbi } from '@monti/shared';
 
-import { CHECK_IN_ERRORS, DENY_CODES, GATE_STATES } from './types';
+import { CHECK_IN_ERRORS, DENY_CODES, GATE_STATES, isGateDenyCode } from './types';
 
 /** Every custom error `Ticket.json` declares, by name. The ABI is 01's export, not a hand list. */
 const ABI_ERRORS = new Set(
@@ -17,14 +17,25 @@ describe('staff types mirror spec §13', () => {
       'EXPIRED_CODE',
       'NO_TICKET',
       'GATE_CLOSED',
+      'DEVICE_LOCKED',
+      'DEVICE_MISMATCH',
       'GATE_MISMATCH',
       'EVENT_ENDED',
       'EVENT_CANCELLED',
-      'DEVICE_LOCKED',
-      'DEVICE_MISMATCH',
       'TX_FAILED',
       'UNKNOWN_REVERT',
     ]);
+  });
+
+  /**
+   * One list, in the package both apps read. Two would mean the attendee phone silently
+   * dropping a code the staff phone pushed at it — an empty screen at a door, and a merge that
+   * looks clean.
+   */
+  it('does not declare the list, it re-exports @monti/shared’s', () => {
+    expect(DENY_CODES).toBe(GATE_DENY_CODES);
+    expect(isGateDenyCode('UNKNOWN_REVERT')).toBe(true);
+    expect(isGateDenyCode('TIMEOUT')).toBe(false);
   });
 
   it('lists exactly the eight gate states from the web module table', () => {

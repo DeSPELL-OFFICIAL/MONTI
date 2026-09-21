@@ -79,6 +79,27 @@ export class GateNotRegisteredError extends Error {
 /** What `MontiPaymaster` reverts with when it does not recognise the sending account. */
 const UNKNOWN_SENDER = /UnknownSender/i;
 
+/**
+ * viem and the bundler transport both wrap errors, so the revert name rarely sits on the
+ * message of the error that was thrown — it turns up on `details`, on `shortMessage`, or two
+ * `cause` levels down. Reading only the top message made this miss silently, which is
+ * fail-safe (a miss is a `TX_FAILED`, never a false setup error) and also useless.
+ *
+ * The walk is depth-limited because an error chain can be cyclic, and a gate that hung parsing
+ * its own failure would be worse than one that mislabelled it.
+ */
+function mentionsUnknownSender(error: unknown, depth = 5): boolean {
+  if (depth <= 0 || error === null || error === undefined) return false;
+  if (typeof error === 'string') return UNKNOWN_SENDER.test(error);
+  if (typeof error !== 'object') return false;
+
+  const candidate = error as { message?: unknown; shortMessage?: unknown; details?: unknown; cause?: unknown };
+  for (const field of [candidate.message, candidate.shortMessage, candidate.details]) {
+    if (typeof field === 'string' && UNKNOWN_SENDER.test(field)) return true;
+  }
+  return mentionsUnknownSender(candidate.cause, depth - 1);
+}
+
 export interface CheckInCallParams {
   code: GateCodeWire;
   response: GateResponseWire;
@@ -135,9 +156,7 @@ export async function sendCheckIn(params: SendCheckInParams): Promise<SponsoredO
       gasFloors: CHECK_IN_GAS_FLOORS,
     });
   } catch (cause) {
-    if (UNKNOWN_SENDER.test(String((cause as Error)?.message ?? cause))) {
-      throw new GateNotRegisteredError(account.address, { cause });
-    }
+    if (mentionsUnknownSender(cause)) throw new GateNotRegisteredError(account.address, { cause });
     throw cause;
   }
 }

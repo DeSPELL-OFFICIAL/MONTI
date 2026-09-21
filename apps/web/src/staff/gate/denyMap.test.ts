@@ -121,12 +121,13 @@ describe('the map is pinned to the generated ABI and covers every screen', () =>
     expect(Object.keys(DENY_LABELS).sort()).toEqual([...DENY_CODES].sort());
     expect(Object.keys(DENY_LABELS)).toHaveLength(13);
 
+    // Every code is reachable through this map alone: eleven from a contract error, plus the
+    // two fallbacks. (`EXPIRED_CODE` and `DEVICE_MISMATCH` are also raised locally by Task 19,
+    // before a transaction is paid for, but they are `CodeExpired` and `BadDeviceSignature`
+    // here too — so nothing has to be added by hand for the set to be complete.)
     const reachable = new Set<DenyCode>(Object.values(CHECK_IN_DENY));
     reachable.add(mapRevertToDenyCode('0xdeadbeef').code);
     reachable.add(mapRevertToDenyCode(undefined).code);
-    // The three the chain cannot revert with reach the screen from the tap path instead:
-    // Task 19 refuses a stale code and a signature the chain would reject before sending.
-    for (const local of ['EXPIRED_CODE', 'DEVICE_MISMATCH'] as const) reachable.add(local);
 
     expect([...DENY_CODES].filter((code) => !reachable.has(code))).toEqual([]);
   });

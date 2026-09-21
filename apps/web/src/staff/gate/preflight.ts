@@ -36,8 +36,13 @@ export function stubSnapshotStore(snapshot?: SnapshotWire): SnapshotStore {
   return { current: () => snapshot };
 }
 
-/** The 32 zero bytes a snapshot carries for a ticket whose device key has been cleared. */
+/**
+ * The 32 zero bytes a snapshot carries for a ticket whose device key has been cleared. Compared
+ * case-insensitively: the snapshot's hex casing is the attester's choice, not this module's, and
+ * an uppercase `0X00…` slipping past here would hand a locked device straight to the chain.
+ */
 const ZERO_WORD = `0x${'00'.repeat(32)}`;
+const isZeroWord = (word: string): boolean => word.toLowerCase() === ZERO_WORD;
 
 export interface PreflightParams {
   /** `SnapshotStore.current()`. `undefined` is a gate that has not synced yet, not an error. */
@@ -71,7 +76,7 @@ export function preflight({ snapshot, code, response }: PreflightParams): Prefli
   if (!ticket) return { ok: true };
 
   if (ticket.checkedIn) return { ok: false, deny: 'ALREADY_USED', ticket };
-  if (ticket.deviceX === ZERO_WORD || ticket.deviceY === ZERO_WORD) {
+  if (isZeroWord(ticket.deviceX) || isZeroWord(ticket.deviceY)) {
     return { ok: false, deny: 'DEVICE_LOCKED', ticket };
   }
 

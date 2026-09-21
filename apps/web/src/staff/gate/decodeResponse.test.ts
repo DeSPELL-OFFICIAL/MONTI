@@ -196,16 +196,33 @@ describe('matching the answer to a code this gate actually served', () => {
     );
   });
 
-  it('checks the signature shape before it looks the nonce up', () => {
-    // A malformed answer is malformed whether or not this gate served the code it names.
+  /**
+   * `DEVICE_MISMATCH` is a claim about a device. The gate has no business making it about an
+   * answer to a code it never issued — whoever tapped may simply be at the wrong gate, and
+   * "다시 대세요" is the only honest thing to say to them.
+   */
+  it('looks the nonce up before it judges the signature', () => {
+    const malformed = { ...RESPONSE, deviceSig: joinRs(toWord(1n), toWord(0n)) };
+    const run = () => matchIssuedCode({ response: malformed, codes: [], now: NOW_MS });
+    expect(refusal(run)).toBe(RESPONSE_ERROR.unknownCode);
+    expect(denyOf(run)).toBe('EXPIRED_CODE');
+
+    // Once the code is ours, the signature is worth judging — and before a transaction is paid.
+    expect(
+      refusal(() => matchIssuedCode({ response: malformed, codes: [code()], now: NOW_MS })),
+    ).toBe(RESPONSE_ERROR.badSignature);
+  });
+
+  it('still prefers the expiry over the signature for a code it served too long ago', () => {
+    const stale = code({ issuedAt: NOW_SECONDS - CODE_WINDOW_SECONDS - CLOCK_SKEW_SECONDS });
     expect(
       refusal(() =>
         matchIssuedCode({
           response: { ...RESPONSE, deviceSig: joinRs(toWord(1n), toWord(0n)) },
-          codes: [],
+          codes: [stale],
           now: NOW_MS,
         }),
       ),
-    ).toBe(RESPONSE_ERROR.badSignature);
+    ).toBe(RESPONSE_ERROR.codeExpired);
   });
 });

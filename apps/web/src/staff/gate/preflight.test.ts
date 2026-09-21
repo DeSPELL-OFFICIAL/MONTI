@@ -77,7 +77,10 @@ describe('preflight against the signed snapshot', () => {
 
   it('DEVICE_LOCKED when the snapshot carries no device key for the ticket', () => {
     const zero = `0x${'00'.repeat(32)}` as const;
-    for (const cleared of [{ deviceX: zero }, { deviceY: zero }]) {
+    // Upper case too: the snapshot's hex casing is the attester's choice, and a missed match
+    // here would hand a locked device to the chain as though nothing were wrong.
+    const upper = `0x${'00'.repeat(32)}`.toUpperCase() as `0x${string}`;
+    for (const cleared of [{ deviceX: zero }, { deviceY: zero }, { deviceX: upper }, { deviceY: upper }]) {
       const locked = { ...snapshot, tickets: [{ ...ticket, ...cleared }] };
       expect(preflight({ snapshot: locked, code, response }).deny).toBe('DEVICE_LOCKED');
     }

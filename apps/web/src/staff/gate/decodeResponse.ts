@@ -135,8 +135,10 @@ export interface MatchIssuedCodeParams {
  * would not is a real attendee turned away.
  */
 export function matchIssuedCode(params: MatchIssuedCodeParams): GateCodeWire {
-  assertSignatureShape(params.response.deviceSig);
-
+  // The nonce is looked up first, and the order is load-bearing. `DEVICE_MISMATCH` says
+  // "등록된 기기가 아님" — a claim about a device — and the gate has no business making it
+  // about an answer to a code it never issued. Whoever tapped may be at the wrong gate
+  // entirely; "다시 대세요" is the only honest thing to say to them.
   const served = params.codes.find((code) => code.nonce === params.response.nonce);
   if (!served) {
     // Another gate's code, a replay, or this gate restarted since it was served. The attendee
@@ -149,5 +151,9 @@ export function matchIssuedCode(params: MatchIssuedCodeParams): GateCodeWire {
   if (!isGateCodeFresh(served, nowSeconds)) {
     throw new ResponseDecodeError(RESPONSE_ERROR.codeExpired, 'EXPIRED_CODE');
   }
+
+  // This gate served this code, so a signature it could not have produced is now worth saying
+  // out loud — and worth saying before a transaction is paid for.
+  assertSignatureShape(params.response.deviceSig);
   return served;
 }
