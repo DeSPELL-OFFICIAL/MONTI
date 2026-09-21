@@ -39,7 +39,7 @@ import { getConfig } from '../../shared/config';
 import { getSession } from '../../shared/session';
 import type { ArmState, PhaseEnding } from './useArm';
 import { tapEnding } from './useArm';
-import { verifyGate, type GateFailure } from './verifyGate';
+import { CHAIN_READ_BUDGET_MS, verifyGate, withBudget, type GateFailure } from './verifyGate';
 
 /** Every way the hand-over can end badly. Each has its own ko+en sentence. */
 export type HandOverFailure =
@@ -123,13 +123,18 @@ export function deviceSigMessage(input: DigestInput): Hex {
  * A chain that cannot be reached is not a refusal — the chain still verifies on the way in, and
  * an attendee in a basement must not be stopped by a check that exists only to be quicker. A
  * chain that *answers* with a different key is a refusal.
+ *
+ * It runs inside the NFC session, so it carries the same ceiling as the gate registration read:
+ * Android's HCE tag is gone the moment the phones part, and a slow RPC must not be what ends the
+ * tap. Past the budget this check is skipped, exactly as an unreachable chain is — the one thing
+ * it may never do is hold the session open.
  */
 async function assertOurOwnDevice(wire: GateResponseWire, message: Hex): Promise<void> {
   const account = getSession().account;
   if (!account) return;
   let point: { x: Hex; y: Hex };
   try {
-    point = await readIdentity().activeDevice(account);
+    point = await withBudget(readIdentity().activeDevice(account), CHAIN_READ_BUDGET_MS);
   } catch {
     return;
   }

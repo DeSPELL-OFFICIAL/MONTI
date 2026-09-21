@@ -53,6 +53,38 @@ export interface SnapshotWire {
   attesterSig: Hex;
 }
 
+/**
+ * 스태프 화면이 입장을 거절할 때 말하는 코드(스펙 §13 DENY 행). 스태프 앱(04)과 관객 앱(03)이
+ * 같은 값을 쓰게 하려고 여기 한 번만 적는다 — 한쪽에만 있는 코드는 반대쪽에서 빈 문장이 된다.
+ *
+ * 01 의 T20/T21 이후 `Ticket` 커스텀 에러 이름이 `GateMismatch → GATE_MISMATCH`,
+ * `EventCancelled → EVENT_CANCELLED` 로 정리됐고, 이 목록이 그 셀렉터 맵의 키다.
+ *
+ * `TIMEOUT` 은 **여기 없다.** 쓰기가 시간 안에 답을 못 받은 것은 "아직 확인 중"이지 거절이
+ * 아니다. 관객 화면은 그것을 기다림으로 다루고, 거절 문장으로 번역하지 않는다.
+ */
+export const GATE_DENY_CODES = [
+  'ALREADY_USED',
+  'WRONG_EVENT',
+  'REVOKED',
+  'EXPIRED_CODE',
+  'NO_TICKET',
+  'GATE_CLOSED',
+  'DEVICE_LOCKED',
+  'DEVICE_MISMATCH',
+  'GATE_MISMATCH',
+  'EVENT_ENDED',
+  'EVENT_CANCELLED',
+  'TX_FAILED',
+] as const;
+
+export type GateDenyCode = (typeof GATE_DENY_CODES)[number];
+
+/** 푸시 페이로드처럼 밖에서 들어온 문자열을 DENY 코드로 좁힌다. */
+export function isGateDenyCode(value: unknown): value is GateDenyCode {
+  return typeof value === 'string' && (GATE_DENY_CODES as readonly string[]).includes(value);
+}
+
 /** Ticket.EventStatusChanged 의 uint8 코드 순서. 인덱스가 곧 체인의 코드다. */
 export const EVENT_STATUS_BY_CODE = ['Draft', 'Published', 'Cancelled', 'Ended'] as const;
 export type EventStatus = (typeof EVENT_STATUS_BY_CODE)[number];

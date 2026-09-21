@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   EVENT_STATUS_BY_CODE,
+  GATE_DENY_CODES,
   SUPPORTED_LOCALES,
   isGateCodeWire,
+  isGateDenyCode,
   isGateResponseWire,
   isHex32,
   isHex64,
@@ -76,5 +78,30 @@ describe('enumerations', () => {
 
   it('supports exactly the two locales the app ships', () => {
     expect([...SUPPORTED_LOCALES]).toEqual(['en', 'ko']);
+  });
+});
+
+describe('gate DENY codes', () => {
+  it('freezes the spec §13 list, in the order the spec prints it', () => {
+    // 스태프 화면과 관객 화면이 같은 코드를 말해야 한다. 한쪽에만 있는 코드는 관객에게
+    // 빈 문장이 되고, 순서가 아니라 값이 계약이므로 목록 전체를 그대로 못 박는다.
+    expect([...GATE_DENY_CODES]).toEqual([
+      'ALREADY_USED', 'WRONG_EVENT', 'REVOKED', 'EXPIRED_CODE', 'NO_TICKET', 'GATE_CLOSED',
+      'DEVICE_LOCKED', 'DEVICE_MISMATCH', 'GATE_MISMATCH', 'EVENT_ENDED', 'EVENT_CANCELLED',
+      'TX_FAILED',
+    ]);
+  });
+
+  it('isGateDenyCode accepts every frozen code and nothing else', () => {
+    for (const code of GATE_DENY_CODES) expect(isGateDenyCode(code)).toBe(true);
+    expect(isGateDenyCode('already_used')).toBe(false);
+    expect(isGateDenyCode('')).toBe(false);
+    expect(isGateDenyCode(undefined)).toBe(false);
+  });
+
+  it('does not count TIMEOUT as a refusal', () => {
+    // 스펙 §13 의 DENY 표에 TIMEOUT 은 없다. 쓰기 결과의 'TIMEOUT' 은 "아직 확인 중"이지
+    // 거절이 아니므로, 관객 화면이 이것을 거절 문장으로 번역하면 안 된다.
+    expect(isGateDenyCode('TIMEOUT')).toBe(false);
   });
 });

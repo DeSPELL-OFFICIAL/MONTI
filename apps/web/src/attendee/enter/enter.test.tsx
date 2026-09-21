@@ -34,6 +34,16 @@ vi.mock('../../shared/nfc', async (orig) => ({
   readThenWrite,
 }));
 
+// `waiting` mounts <Result />, which opens a log subscription, reads `checkInOf` once and
+// registers for push. None of that is this file's subject, and the real subscription would put
+// a 400 ms poll and a WebSocket client behind the fake timers several tests here drive.
+vi.mock('../../shared/chain/subscribeLogs', () => ({ subscribeLogs: () => () => undefined }));
+vi.mock('../../shared/chain/reads', async (orig) => ({
+  ...(await orig<typeof import('../../shared/chain/reads')>()),
+  readTicket: () => ({ checkInOf: async () => ({ ts: 0n }) }),
+}));
+vi.mock('../../shared/push', () => ({ registerPush: async () => ({ status: 'unavailable', reason: 'x' }) }));
+
 const verifyGate = vi.fn();
 vi.mock('./verifyGate', async (orig) => ({
   ...(await orig<typeof import('./verifyGate')>()),
@@ -191,7 +201,10 @@ describe('<Enter /> one session', () => {
     expect(written?.deviceSig).toHaveLength(2 + 128);
     // What the primitive hands the tag is the shared encoding of exactly that wire.
     expect(encodeGateResponse(written as GateResponseWire).byteLength).toBeGreaterThan(0);
+    // The waiting screen is <Result />, which is now watching the chain and the push for the
+    // answer; this machine has nothing left to decide.
     expect(screen.getByText(ko.enter.resultWaiting)).toBeInTheDocument();
+    expect(screen.queryByTestId('entry-result')).not.toBeInTheDocument();
   });
 
   it('verifies the code it read before signing anything, for this ticket', async () => {

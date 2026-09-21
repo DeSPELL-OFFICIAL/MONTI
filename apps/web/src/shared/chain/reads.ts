@@ -162,6 +162,10 @@ const TIER_FIELDS = [
   'name', 'priceUsdCents', 'supply', 'minted', 'maxPerWallet', 'seated',
 ] as const satisfies readonly (keyof TierStruct)[];
 
+// 01b: (gateId, nonceHash, ts, manual, late) — the redeploy reorders `ts` and `nonceHash` and
+// adds `late: bool` for a tap recorded outside the code window. The CURRENT order is pinned
+// below on purpose: the day the regenerated ABI lands, the test above fails rather than
+// decoding `ts` out of `nonceHash`'s slot, and this list and `CheckInStruct` move together.
 const CHECK_IN_FIELDS = [
   'gateId', 'ts', 'nonceHash', 'manual',
 ] as const satisfies readonly (keyof CheckInStruct)[];

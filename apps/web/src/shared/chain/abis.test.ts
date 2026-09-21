@@ -1,7 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import type { AbiFunction } from 'viem';
+import type { AbiEvent, AbiFunction } from 'viem';
 import * as shared from '@monti/shared';
-import { ABI_BY_CONTRACT, USED_ABI, identityAbi, organizersAbi, ticketAbi, type UsedContract } from './abis';
+import {
+  ABI_BY_CONTRACT,
+  PENDING_EVENTS,
+  USED_ABI,
+  USED_EVENTS,
+  eventTopic,
+  identityAbi,
+  organizersAbi,
+  ticketAbi,
+  type UsedContract,
+} from './abis';
 import { STRUCT_SHAPES } from './reads';
 
 /**
@@ -22,6 +32,41 @@ describe('the generated ABI covers everything this app calls', () => {
     expect(events).toContain('CheckedIn');
     expect(events).toContain('Transfer');
   });
+});
+
+/**
+ * The same guard as `USED_ABI`, for the logs this app subscribes to. `checkedInTopics` builds
+ * `topic0` out of `USED_EVENTS.Ticket`, so an event renamed in sub-plan 01 would otherwise
+ * become a subscription that silently never fires — the worst failure this screen has, because
+ * it looks exactly like a gate that never confirmed.
+ */
+describe('the events this app subscribes to', () => {
+  for (const contract of Object.keys(USED_EVENTS) as UsedContract[]) {
+    const abi = ABI_BY_CONTRACT[contract];
+    const pending: readonly string[] = PENDING_EVENTS[contract];
+
+    for (const [name, arity] of Object.entries(USED_EVENTS[contract]) as Array<[string, number]>) {
+      if (pending.includes(name)) continue;
+      it(`${contract}.${name} is an event of ${arity} parameter(s) in the generated ABI`, () => {
+        const events = abi.filter(
+          (entry): entry is AbiEvent => entry.type === 'event' && entry.name === name,
+        );
+        expect(events.length, `${contract}.${name} is missing from the generated ABI`).toBe(1);
+        expect(events[0]?.inputs.length).toBe(arity);
+        expect(eventTopic(contract, name)).toMatch(/^0x[0-9a-f]{64}$/);
+      });
+    }
+
+    for (const name of pending) {
+      // The forcing function for the 01b redeploy: the day the ABI gains the event, this test
+      // fails and whoever regenerates the ABI has to take the name out of `PENDING_EVENTS`,
+      // which is what turns the subscription on.
+      it(`${contract}.${name} is still absent, so it is declared pending and not subscribed`, () => {
+        expect(abi.some((entry) => entry.type === 'event' && entry.name === name)).toBe(false);
+        expect(eventTopic(contract, name)).toBeNull();
+      });
+    }
+  }
 
   for (const contract of Object.keys(USED_ABI) as UsedContract[]) {
     const abi = ABI_BY_CONTRACT[contract];

@@ -191,8 +191,12 @@ function isTransportFailure(cause: unknown): boolean {
  */
 export const CHAIN_READ_BUDGET_MS = 1_500;
 
-/** Rejects with the same shape a dead transport does, so the cache path below picks it up. */
-function withBudget<T>(work: Promise<T>, budgetMs: number): Promise<T> {
+/**
+ * Rejects with the same shape a dead transport does, so the cache path below picks it up.
+ * Exported because every chain read taken inside the NFC session needs the same ceiling —
+ * `buildResponse.ts`'s local device-key verify is the other one.
+ */
+export function withBudget<T>(work: Promise<T>, budgetMs: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
   const deadline = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new TimeoutError({ body: {}, url: 'gateInfo' })), budgetMs);

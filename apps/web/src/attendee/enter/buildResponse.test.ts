@@ -40,6 +40,7 @@ const { GateRefused, buildGateResponse, deviceSigDigest, deviceSigMessage, tapFa
   './buildResponse'
 );
 const { ATTENDEE_KEY_ALIAS, DeviceKeyUnavailable, DEVICE_KEY_ERROR } = await import('../../shared/deviceKey');
+const { CHAIN_READ_BUDGET_MS } = await import('./verifyGate');
 const { NFC_ERROR, NfcError } = await import('../../shared/nfc');
 
 /**
@@ -181,6 +182,25 @@ describe('buildGateResponse', () => {
   it('still answers when the chain cannot be reached — the chain is the real check', async () => {
     activeDevice.mockRejectedValue(new Error('offline'));
     await expect(buildGateResponse(TOKEN_ID, GATE_CODE)).resolves.toMatchObject({ tokenId: TOKEN_ID });
+  });
+
+  it('does not let a chain that never answers hold the NFC session open', async () => {
+    // The local verify runs between the two phones touching and the write. A registration read
+    // that hangs would keep the tag session open until iOS kills it, and the attendee would be
+    // standing at the door watching a spinner for a check that exists only to be *quicker*.
+    // The signature is taken up front and replayed, so nothing inside the fake-timer window
+    // needs the real WebCrypto thread — only the hanging read and its budget are left.
+    const signature = await device.sign(deviceSigMessage({ tokenId: TOKEN_ID, gateCode: GATE_CODE }));
+    signWithDeviceKey.mockResolvedValue(signature);
+    activeDevice.mockReturnValue(new Promise(() => undefined));
+    vi.useFakeTimers();
+    try {
+      const answer = buildGateResponse(TOKEN_ID, GATE_CODE);
+      await vi.advanceTimersByTimeAsync(CHAIN_READ_BUDGET_MS + 1);
+      await expect(answer).resolves.toMatchObject({ tokenId: TOKEN_ID });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

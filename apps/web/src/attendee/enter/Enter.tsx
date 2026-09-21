@@ -7,7 +7,9 @@
 // `readThenWrite` reads the gate's record, hands it to the signer, and writes the answer back
 // to the same tag before the session ends, all while the two phones are still touching.
 //
-// Everything past the write — the green, the chain subscription — is Task 26.
+// Everything past the write belongs to <Result />: the phase machine here ends at `waiting`,
+// and the green, the refusal and the waiting deadline are reconciled there from the chain and
+// the push.
 import { useCallback, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import type { GateCodeWire, GateResponseWire } from '@monti/shared';
@@ -17,6 +19,7 @@ import { nfcCapability, readThenWrite } from '../../shared/nfc';
 import { IDLE, failureText, useArm, type EnterPhase } from './useArm';
 import { tapFailure, tapSigner } from './buildResponse';
 import { Qr } from './Qr';
+import { Result } from './Result';
 
 /** The phases that hold the armed window open, and so show the countdown. */
 const ARMED_PHASES: readonly EnterPhase[] = ['armed', 'reading', 'verifying', 'signing', 'writing'];
@@ -89,7 +92,7 @@ export function Enter() {
     if (!isCurrent(armedAt)) return;
 
     // The session ended AFTER the write landed, which is the success: spec §7.2 step 4 wants one
-    // buzz here and nothing more. Whether the entry was granted comes from the chain (Task 26).
+    // buzz here and nothing more. Whether the entry was granted comes from <Result />.
     if (navigator.vibrate) navigator.vibrate(60);
     setState((prev) => ({ ...prev, phase: 'waiting', error: '' }));
   }
@@ -133,9 +136,8 @@ export function Enter() {
         </>
       ) : null}
 
-      {/* Task 26 owns these; they are here so no phase renders an empty screen. */}
-      {state.phase === 'waiting' ? <p>{copy.enter.resultWaiting}</p> : null}
-      {state.phase === 'done' ? <p>{copy.enter.done}</p> : null}
+      {/* The tap is over; <Result /> owns everything after it, deadline included. */}
+      {state.phase === 'waiting' ? <Result tokenId={tokenId} /> : null}
 
       {state.phase === 'failed' ? (
         <>

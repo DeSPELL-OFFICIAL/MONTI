@@ -20,8 +20,8 @@ export type EnterPhase =
   | 'signing'
   | 'writing'
   | 'qr'
+  /** The answer is on the tag. From here <Result /> decides, not this machine. */
   | 'waiting'
-  | 'done'
   | 'failed';
 
 export interface ArmState {
