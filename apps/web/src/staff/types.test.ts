@@ -9,7 +9,7 @@ const ABI_ERRORS = new Set(
 );
 
 describe('staff types mirror spec §13', () => {
-  it('lists the nine spec §13 DENY codes plus EVENT_ENDED', () => {
+  it('lists the nine spec §13 DENY codes plus the four the table leaves implicit', () => {
     expect([...DENY_CODES]).toEqual([
       'ALREADY_USED',
       'WRONG_EVENT',
@@ -17,10 +17,13 @@ describe('staff types mirror spec §13', () => {
       'EXPIRED_CODE',
       'NO_TICKET',
       'GATE_CLOSED',
+      'GATE_MISMATCH',
       'EVENT_ENDED',
+      'EVENT_CANCELLED',
       'DEVICE_LOCKED',
       'DEVICE_MISMATCH',
       'TX_FAILED',
+      'UNKNOWN_REVERT',
     ]);
   });
 
