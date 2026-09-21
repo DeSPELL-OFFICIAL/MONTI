@@ -106,4 +106,128 @@ contract TicketCheckInTest is MontiTest {
         );
         assertEq(expected, P256Vectors.GATE1_DIGEST, "generator and contract must hash the same bytes");
     }
+
+    function test_T14_fakeGateRejected() public {
+        vm.prank(address(0xFA4E));
+        vm.expectRevert(Ticket.GateNotOpen.selector);
+        ticket.checkIn(tokenId, _code(gateAId), _sigA());
+    }
+
+    function test_closedGateRejected() public {
+        vm.prank(ORG_OWNER);
+        organizers.closeGate(gateAId);
+        vm.prank(GATE_A);
+        vm.expectRevert(Ticket.GateNotOpen.selector);
+        ticket.checkIn(tokenId, _code(gateAId), _sigA());
+    }
+
+    function test_revokedGateRejected() public {
+        vm.prank(ORG_OWNER);
+        organizers.revokeGate(gateAId);
+        vm.prank(GATE_A);
+        vm.expectRevert(Ticket.GateNotOpen.selector);
+        ticket.checkIn(tokenId, _code(gateAId), _sigA());
+    }
+
+    function test_gateCannotUseAnotherGatesId() public {
+        vm.prank(GATE_A);
+        vm.expectRevert(Ticket.GateMismatch.selector);
+        ticket.checkIn(tokenId, _code(gateBId), _sigB());
+    }
+
+    function test_T2_staleCodeRejectedAfterSixtySeconds() public {
+        vm.warp(P256Vectors.ISSUED_AT + 61);
+        vm.prank(GATE_A);
+        vm.expectRevert(Ticket.CodeExpired.selector);
+        ticket.checkIn(tokenId, _code(gateAId), _sigA());
+    }
+
+    function test_codeAtExactlySixtySecondsStillWorks() public {
+        vm.warp(P256Vectors.ISSUED_AT + 60);
+        vm.prank(GATE_A);
+        ticket.checkIn(tokenId, _code(gateAId), _sigA());
+        assertEq(ticket.checkInOf(tokenId).gateId, gateAId);
+    }
+
+    /// @dev A gate phone whose clock runs ahead of the chain still admits: the code may be stamped up
+    ///      to CLOCK_SKEW seconds in the future before it is treated as a fake.
+    function test_codeFiveSecondsAheadOfTheChainStillWorks() public {
+        vm.warp(P256Vectors.ISSUED_AT - 5);
+        vm.prank(GATE_A);
+        ticket.checkIn(tokenId, _code(gateAId), _sigA());
+        assertEq(ticket.checkInOf(tokenId).gateId, gateAId);
+    }
+
+    function test_futureCodeBeyondTheSkewGraceRejected() public {
+        vm.warp(P256Vectors.ISSUED_AT - 6);
+        vm.prank(GATE_A);
+        vm.expectRevert(Ticket.CodeExpired.selector);
+        ticket.checkIn(tokenId, _code(gateAId), _sigA());
+    }
+
+    function test_T6_wrongDeviceKeyRejected() public {
+        vm.prank(GATE_A);
+        vm.expectRevert(Ticket.BadDeviceSignature.selector);
+        ticket.checkIn(tokenId, _code(gateAId), abi.encode(P256Vectors.OTHER_R, P256Vectors.OTHER_S));
+    }
+
+    /// @dev A malformed blob is a DENY with a name, not a decoder panic the staff screen cannot map.
+    function test_malformedDeviceSignatureRejected() public {
+        vm.prank(GATE_A);
+        vm.expectRevert(Ticket.BadDeviceSignature.selector);
+        ticket.checkIn(tokenId, _code(gateAId), new bytes(63));
+    }
+
+    function test_T12_doubleCheckInRejected() public {
+        vm.prank(GATE_A);
+        ticket.checkIn(tokenId, _code(gateAId), _sigA());
+        vm.prank(GATE_A);
+        vm.expectRevert(Ticket.AlreadyCheckedIn.selector);
+        ticket.checkIn(tokenId, _code(gateAId), _sigA());
+    }
+
+    function test_T13_secondGateRevertsForTheSameTicket() public {
+        vm.prank(GATE_A);
+        ticket.checkIn(tokenId, _code(gateAId), _sigA());
+        vm.prank(GATE_B);
+        vm.expectRevert(Ticket.AlreadyCheckedIn.selector);
+        ticket.checkIn(tokenId, _code(gateBId), _sigB());
+    }
+
+    function test_T7_lockedDeviceRejected() public {
+        vm.prank(ALICE);
+        identity.lockDevice(ALICE);
+        vm.prank(GATE_A);
+        vm.expectRevert(Ticket.DeviceLocked.selector);
+        ticket.checkIn(tokenId, _code(gateAId), _sigA());
+    }
+
+    function test_wrongEventRejected() public {
+        Ticket.GateCode memory bad = _code(gateAId);
+        bad.eventId = 99;
+        vm.prank(GATE_A);
+        vm.expectRevert(Ticket.WrongEvent.selector);
+        ticket.checkIn(tokenId, bad, _sigA());
+    }
+
+    function test_unknownTicketRejected() public {
+        vm.prank(GATE_A);
+        vm.expectRevert(Ticket.NoSuchTicket.selector);
+        ticket.checkIn(4242, _code(gateAId), _sigA());
+    }
+
+    function test_endedEventRejected() public {
+        vm.warp(T0 + 2 days + 1);
+        vm.prank(GATE_A);
+        vm.expectRevert(Ticket.EventEnded.selector);
+        ticket.checkIn(tokenId, _code(gateAId), _sigA());
+    }
+
+    function test_cancelledEventRejected() public {
+        vm.prank(ORG_OWNER);
+        ticket.cancelEvent(eventId);
+        vm.prank(GATE_A);
+        vm.expectRevert(Ticket.EventCancelled.selector);
+        ticket.checkIn(tokenId, _code(gateAId), _sigA());
+    }
 }

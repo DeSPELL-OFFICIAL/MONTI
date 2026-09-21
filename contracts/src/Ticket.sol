@@ -68,6 +68,7 @@ contract Ticket is ERC721, ITicket {
     }
 
     uint256 public constant CODE_WINDOW = 60;
+    uint256 public constant CLOCK_SKEW = 5;
 
     uint32 private constant PERM_CREATE_EVENT = 1;
     uint32 private constant PERM_MANAGE_GATES = 2;
@@ -116,6 +117,7 @@ contract Ticket is ERC721, ITicket {
     error NotDraft();
     error EventNotPublished();
     error EventEnded();
+    error EventCancelled();
     error EventAlreadyClosed();
     error SaleClosed();
     error SoldOut();
@@ -134,7 +136,6 @@ contract Ticket is ERC721, ITicket {
     error WrongEvent();
     error CodeExpired();
     error DeviceLocked();
-    error NoActiveDevice();
     error BadDeviceSignature();
     error NoOffer();
     error OfferExpired();
@@ -302,27 +303,34 @@ contract Ticket is ERC721, ITicket {
         emit OfferAccepted(tokenId, o.from, msg.sender);
     }
 
-    /// @notice Spec 7.2 step 6, checks in order: gate authority, ticket state, code freshness, device
-    ///         signature. Only an open gate of this event may call it. The staff device maps each of
-    ///         these errors to a DENY code on screen (sub-plan 04), so the names are part of the ABI.
+    /// @notice Spec 7.2 step 6, checks in order: the ticket exists, it belongs to this event, the event
+    ///         is still running, the ticket is spendable, the caller is this event's open gate, the code
+    ///         is fresh, the device signature holds. Only an open gate of this event may call it. The
+    ///         staff device maps each of these errors to a DENY code on screen (sub-plan 04), so the
+    ///         names are part of the ABI.
     function checkIn(uint256 tokenId, GateCode calldata g, bytes calldata deviceSig) external {
         address holder = _ownerOf(tokenId);
         if (holder == address(0)) revert NoSuchTicket();
 
         uint256 eventId = _eventOf[tokenId];
         if (g.eventId != eventId) revert WrongEvent();
-        if (eventStatus(eventId) == EventStatus.Ended) revert EventEnded();
+        EventStatus status = eventStatus(eventId);
+        if (status == EventStatus.Ended) revert EventEnded();
+        if (status == EventStatus.Cancelled) revert EventCancelled();
         if (_revoked[tokenId]) revert TicketRevoked();
         if (_checkIns[tokenId].ts != 0) revert AlreadyCheckedIn();
 
         if (!organizers.isOpenGate(eventId, msg.sender)) revert GateNotOpen();
         if (organizers.gateOf(msg.sender) != g.gateId) revert GateMismatch();
-        if (block.timestamp < g.issuedAt || block.timestamp - g.issuedAt > CODE_WINDOW) revert CodeExpired();
+        // The gate phone's clock may run up to CLOCK_SKEW seconds ahead of the chain; past that the
+        // stamp is a forgery, and CODE_WINDOW seconds behind it is a replay.
+        if (g.issuedAt > block.timestamp + CLOCK_SKEW) revert CodeExpired();
+        if (uint256(g.issuedAt) + CODE_WINDOW < block.timestamp) revert CodeExpired();
 
         if (identity.isLocked(holder)) revert DeviceLocked();
         (bytes32 x, bytes32 y) = identity.activeDevice(holder);
-        if (x == bytes32(0) && y == bytes32(0)) revert NoActiveDevice();
 
+        if (deviceSig.length != 64) revert BadDeviceSignature();
         bytes32 h = sha256(abi.encode(tokenId, g.gateId, g.eventId, g.nonce, g.issuedAt));
         (bytes32 r, bytes32 s) = abi.decode(deviceSig, (bytes32, bytes32));
         if (!P256.verifySignature(h, r, s, x, y)) revert BadDeviceSignature();
