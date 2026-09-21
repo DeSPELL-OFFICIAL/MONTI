@@ -170,9 +170,50 @@ const cbor = new Encoder({
   useFloat32: 0,
 });
 
+/**
+ * 와이어에 표준 순서 바깥의 키가 붙어 있으면 거절한다. 조용히 버리면 보낸 쪽은 자기가 넣은
+ * 필드가 건너갔다고 믿고 받는 쪽은 그런 필드를 본 적이 없다 — 어느 쪽도 틀린 줄 모른다.
+ */
+export class UnknownWireKeyError extends Error {
+  /** 어느 와이어인지 — 'GateCodeWire' | 'GateResponseWire' */
+  readonly wire: string;
+  /** 표준 순서에 없는 키들 */
+  readonly keys: readonly string[];
+
+  constructor(wire: string, keys: readonly string[]) {
+    super('UNKNOWN_WIRE_KEY');
+    this.name = 'UnknownWireKeyError';
+    this.wire = wire;
+    this.keys = keys;
+  }
+}
+
+/** 표준 순서 맵이 곧 아는 키의 전부다. 목록을 따로 두면 언젠가 literal 과 어긋난다. */
+function assertOnlyCanonicalKeys(source: object, canonical: Record<string, unknown>, wire: string): void {
+  const known = new Set(Object.keys(canonical));
+  const extra = Object.keys(source).filter((key) => !known.has(key));
+  if (extra.length > 0) throw new UnknownWireKeyError(wire, extra);
+}
+
+/**
+ * 키 순서는 **호출부의 객체가 아니라 아래 literal** 이 정한다. 두 브랜치가 같은 값을 다른
+ * 순서로 담아도 바이트열은 하나다 — `cbor.encode(wire)` 였을 때는 아니었다.
+ * 순서: v, gateId, eventId, issuedAt, nonce, kx, ky, sig.
+ */
 export function encodeGateCode(wire: GateCodeWire): Uint8Array {
   if (!isGateCodeWire(wire)) throw new Error('BAD_GATE_CODE');
-  return new Uint8Array(cbor.encode(wire));
+  const map = {
+    v: wire.v,
+    gateId: wire.gateId,
+    eventId: wire.eventId,
+    issuedAt: wire.issuedAt,
+    nonce: wire.nonce,
+    kx: wire.kx,
+    ky: wire.ky,
+    sig: wire.sig,
+  };
+  assertOnlyCanonicalKeys(wire, map, 'GateCodeWire');
+  return new Uint8Array(cbor.encode(map));
 }
 
 export function decodeGateCode(bytes: Uint8Array): GateCodeWire {
@@ -202,12 +243,15 @@ export class GateResponseVersionError extends Error {
 }
 
 /**
- * 필드 순서는 {@link GateResponseWire} 선언 순서 그대로 나간다(v, tokenId, nonce, deviceSig).
- * 고정 벡터가 그 순서를 못 박고 있으니, 순서를 바꾸려면 벡터부터 바꿔야 한다.
+ * 키 순서는 **호출부의 객체가 아니라 아래 literal** 이 정한다: v, tokenId, nonce, deviceSig.
+ * 고정 벡터가 그 순서를 못 박고 있으니, 순서를 바꾸려면 벡터부터 바꿔야 한다. 호출부가 같은
+ * 값을 다른 순서로 적어도 나가는 바이트열은 하나다.
  */
 export function encodeGateResponse(wire: GateResponseWire): Uint8Array {
   if (!isGateResponseWire(wire)) throw new Error('BAD_GATE_RESPONSE');
-  return new Uint8Array(cbor.encode(wire));
+  const map = { v: wire.v, tokenId: wire.tokenId, nonce: wire.nonce, deviceSig: wire.deviceSig };
+  assertOnlyCanonicalKeys(wire, map, 'GateResponseWire');
+  return new Uint8Array(cbor.encode(map));
 }
 
 export function decodeGateResponse(bytes: Uint8Array): GateResponseWire {

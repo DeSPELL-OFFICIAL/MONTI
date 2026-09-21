@@ -22,8 +22,10 @@ export interface GateCodeWire {
 export const GATE_RESPONSE_VERSION = 2;
 
 /**
- * 관객 기기가 게이트에 돌려주는 답. **필드 순서가 계약이다** — CBOR 맵은 이 순서 그대로
- * 인코딩되고, 스태프 앱(04)이 같은 바이트열을 재현한다. 순서를 바꾸면 고정 벡터가 깨진다.
+ * 관객 기기가 게이트에 돌려주는 답. **키 순서가 계약이다** — 스태프 앱(04)이 같은 바이트열을
+ * 재현한다. 다만 그 순서를 실제로 정하는 곳은 이 선언이 아니라 `encodeGateResponse` 안의
+ * 표준 순서 literal 이다(이 선언과 같은 순서로 적혀 있다). 순서를 바꾸려면 그 literal 과
+ * 고정 벡터를 함께 바꿔야 한다.
  */
 export interface GateResponseWire {
   v: typeof GATE_RESPONSE_VERSION;
