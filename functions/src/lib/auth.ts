@@ -31,6 +31,7 @@ export async function resolveCallerAccount(request: CallableRequest): Promise<He
 
 export const PERM_MANAGE_GATES = 2;
 export const PERM_APPROVE_OVERRIDE = 4;
+export const PERM_MANAGE_MANAGERS = 8;
 
 /** `Organizers.gateInfo` 의 반환 튜플. ABI 가 JSON import 라 리터럴 타입이 없어 여기서 붙인다. */
 type GateInfo = readonly [bigint, Hex, Hex, Hex, boolean, boolean];

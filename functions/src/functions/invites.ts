@@ -1,0 +1,219 @@
+import { randomUUID } from 'node:crypto';
+import { FieldValue, Timestamp } from 'firebase-admin/firestore';
+import { HttpsError, onCall } from 'firebase-functions/v2/https';
+import { encodeFunctionData } from 'viem';
+import { organizersAbi, type Hex } from '@monti/shared';
+import { PHONE_INDEX_KEY, RP_ID } from '../config.js';
+import { PERM_MANAGE_MANAGERS, resolveCallerAccount } from '../lib/auth.js';
+import { deployment, publicClient } from '../lib/chain.js';
+import { INVITES, USERS, db } from '../lib/db.js';
+import { hmacPhone } from '../lib/phoneIndex.js';
+
+const ORG_ID_RE = /^[0-9]{1,78}$/;
+const PHONE_RE = /^\+[0-9]{7,15}$/;
+/** `randomUUID()` 가 내는 모양 그대로. 문서 id 자리에 경로가 들어오는 것을 막는다. */
+const INVITE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+type Role = 'admin' | 'manager';
+
+/** `Organizers.sol` 이 선언한 비트의 합(1|2|4|8|16). 이 밖의 비트는 컨트랙트가 모른다. */
+const ALL_PERMISSION_BITS = 31;
+/** 초대장 수명. 지나면 아무도 못 받는다. */
+const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+export interface InviteCalldata {
+  to: Hex;
+  data: Hex;
+  orgId: string;
+  role: Role;
+}
+
+/**
+ * 초대장을 만든다. **전화번호는 저장하지 않는다** — `startSignup` 과 똑같은 HMAC 색인
+ * 값(`phoneHmac`)만 남기고 평문은 이 함수 밖으로 나가지 않는다. 받는 사람은 나중에
+ * 자기 `users/{uid}.phoneHmac` 이 같을 때만 이 초대장을 쓸 수 있다.
+ *
+ * 인가는 컨트랙트 규칙을 그대로 옮긴다(`Organizers.sol`).
+ *  - `manager` 초대 → 수락 calldata 가 `setManager` 이고, 그건 `PERM_MANAGE_MANAGERS(8)` 를
+ *    가진 사람이 보낼 수 있다. 오너는 `hasPermission` 이 모든 비트를 참으로 돌려준다.
+ *  - `admin` 초대 → 수락 calldata 가 `setAdmin` 이고, 그건 **오너만** 보낼 수 있다
+ *    (`if (msg.sender != _owners[orgId]) revert NotOwner()`). 그래서 만드는 것도 오너만이다 —
+ *    관리자가 만들면 아무도 실행할 수 없는 초대장이 된다.
+ */
+export const createInvite = onCall(
+  { secrets: [PHONE_INDEX_KEY] },
+  async (request): Promise<{ inviteId: string; link: string }> => {
+    const { orgId, role, phoneE164, permissionBits, canApprove } = (request.data ?? {}) as {
+      orgId?: string;
+      role?: string;
+      phoneE164?: string;
+      permissionBits?: number;
+      canApprove?: boolean;
+    };
+    if (typeof orgId !== 'string' || !ORG_ID_RE.test(orgId)) {
+      throw new HttpsError('invalid-argument', 'BAD_ORG_ID');
+    }
+    if (role !== 'admin' && role !== 'manager') throw new HttpsError('invalid-argument', 'BAD_ROLE');
+    if (typeof phoneE164 !== 'string' || !PHONE_RE.test(phoneE164)) {
+      throw new HttpsError('invalid-argument', 'BAD_PHONE');
+    }
+
+    let bits = 0;
+    if (role === 'admin') {
+      if (
+        !Number.isInteger(permissionBits) ||
+        (permissionBits as number) < 1 ||
+        (permissionBits as number) > ALL_PERMISSION_BITS
+      ) {
+        throw new HttpsError('invalid-argument', 'BAD_PERMISSION_BITS');
+      }
+      bits = permissionBits as number;
+    }
+    // 매니저에게는 비트가 없다. 승인 권한 하나뿐이다(스펙 §9.4).
+    const grantCanApprove = role === 'manager' && canApprove === true;
+
+    // 호출자는 언제나 세션 클레임에서 나온다. 요청 본문의 주소는 읽지 않는다.
+    const caller = await resolveCallerAccount(request);
+    const contracts = deployment();
+    const pc = publicClient();
+
+    if (role === 'admin') {
+      const owner = (await pc.readContract({
+        address: contracts.organizers,
+        abi: organizersAbi,
+        functionName: 'ownerOf',
+        args: [BigInt(orgId)],
+      })) as Hex;
+      if (owner.toLowerCase() !== caller.toLowerCase()) {
+        throw new HttpsError('permission-denied', 'NOT_ORG_OWNER');
+      }
+    } else {
+      const allowed = (await pc.readContract({
+        address: contracts.organizers,
+        abi: organizersAbi,
+        functionName: 'hasPermission',
+        args: [BigInt(orgId), caller, PERM_MANAGE_MANAGERS],
+      })) as boolean;
+      if (!allowed) throw new HttpsError('permission-denied', 'NOT_ALLOWED_TO_INVITE');
+    }
+
+    const inviteId = randomUUID();
+    const inviteRef = db.collection(INVITES).doc(inviteId);
+    const phoneHmac = hmacPhone(phoneE164, PHONE_INDEX_KEY.value());
+
+    await db.runTransaction(async (tx) => {
+      // 읽고 나서 쓴다. 같은 id 위에 덮어쓰는 경로를 아예 만들지 않는다.
+      if ((await tx.get(inviteRef)).exists) throw new HttpsError('aborted', 'INVITE_ID_TAKEN');
+      tx.set(inviteRef, {
+        orgId,
+        role,
+        phoneHmac,
+        permissionBits: bits,
+        canApprove: grantCanApprove,
+        status: 'sent',
+        createdBy: caller,
+        createdAt: FieldValue.serverTimestamp(),
+        expiresAt: Timestamp.fromMillis(Date.now() + INVITE_TTL_MS),
+      });
+    });
+
+    // 링크에는 초대 id 말고 아무것도 없다. 번호도 조직 정보도 들어가지 않는다.
+    return { inviteId, link: `https://${RP_ID.value()}/org/invite/${inviteId}` };
+  },
+);
+
+/**
+ * 초대를 받는다. **서버는 권한을 체인에 쓰지 않는다.**
+ * `Organizers.setAdmin` 은 오너만, `setManager` 는 `PERM_MANAGE_MANAGERS` 를 가진 사람만
+ * 보낼 수 있고 어테스터는 둘 다 아니다. 그래서 여기서는 그 계정이 웹에서 서명해 보낼
+ * **calldata** 만 만들어 준다.
+ *
+ * 묶는 방법: 초대장의 `phoneHmac` 과 호출자의 `users/{uid}.phoneHmac`(Task 20 `startSignup`
+ * 이 써 둔 값)이 같아야 한다. 역할이 붙는 주소는 세션 클레임의 계정이고 요청 본문이 아니다.
+ * 한 번 수락되면 그 계정 말고는 아무도 못 쓴다. 같은 계정이 다시 부르면 역할이 체인에
+ * 올라갈 때까지 같은 calldata 를 그대로 돌려준다(멱등).
+ */
+export const acceptInvite = onCall(
+  { secrets: [PHONE_INDEX_KEY] },
+  async (request): Promise<InviteCalldata> => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError('unauthenticated', 'AUTH_REQUIRED');
+    const { inviteId } = (request.data ?? {}) as { inviteId?: string };
+    if (typeof inviteId !== 'string' || !INVITE_ID_RE.test(inviteId)) {
+      throw new HttpsError('invalid-argument', 'BAD_INVITE_ID');
+    }
+
+    const account = await resolveCallerAccount(request);
+    const inviteRef = db.collection(INVITES).doc(inviteId);
+    const userRef = db.collection(USERS).doc(uid);
+
+    const spec = await db.runTransaction(async (tx) => {
+      // 읽기를 전부 먼저 한다. 아래 `tx.set` 뒤에는 실제 Firestore 가 읽기를 거부한다.
+      const user = await tx.get(userRef);
+      const invite = await tx.get(inviteRef);
+
+      const phoneHmac = user.get('phoneHmac') as string | undefined;
+      if (!phoneHmac) throw new HttpsError('failed-precondition', 'PHONE_INDEX_MISSING');
+      if (!invite.exists) throw new HttpsError('not-found', 'INVITE_NOT_FOUND');
+      if (invite.get('phoneHmac') !== phoneHmac) {
+        throw new HttpsError('permission-denied', 'INVITE_NOT_FOR_YOU');
+      }
+
+      const acceptedBy = invite.get('acceptedBy') as Hex | undefined;
+      const accepted = invite.get('status') === 'accepted';
+      const mine = accepted && acceptedBy?.toLowerCase() === account.toLowerCase();
+      if (accepted && !mine) throw new HttpsError('failed-precondition', 'INVITE_ALREADY_USED');
+      if (!accepted && invite.get('status') !== 'sent') {
+        throw new HttpsError('failed-precondition', 'INVITE_NOT_OPEN');
+      }
+      // 만료는 아직 안 받은 초대장에만 건다. 이미 내가 받은 초대장은 역할이 체인에 올라갈
+      // 때까지 같은 calldata 를 다시 받을 수 있어야 한다.
+      if (!mine) {
+        const expiresAt = invite.get('expiresAt') as Timestamp | undefined;
+        if (!expiresAt || expiresAt.toMillis() <= Date.now()) {
+          throw new HttpsError('failed-precondition', 'INVITE_EXPIRED');
+        }
+      }
+
+      const role = invite.get('role');
+      if (role !== 'admin' && role !== 'manager') {
+        throw new HttpsError('failed-precondition', 'BAD_ROLE');
+      }
+
+      if (!mine) {
+        tx.set(
+          inviteRef,
+          {
+            status: 'accepted',
+            acceptedBy: account,
+            acceptedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        );
+      }
+
+      return {
+        orgId: invite.get('orgId') as string,
+        role: role as Role,
+        permissionBits: (invite.get('permissionBits') as number | undefined) ?? 0,
+        canApprove: invite.get('canApprove') === true,
+      };
+    });
+
+    const data =
+      spec.role === 'admin'
+        ? encodeFunctionData({
+            abi: organizersAbi,
+            functionName: 'setAdmin',
+            args: [BigInt(spec.orgId), account, spec.permissionBits],
+          })
+        : encodeFunctionData({
+            abi: organizersAbi,
+            functionName: 'setManager',
+            args: [BigInt(spec.orgId), account, true, spec.canApprove],
+          });
+
+    // 초대장의 나머지(누가 만들었는지, 번호 색인, 조직의 다른 사람)는 나가지 않는다.
+    return { to: deployment().organizers, data, orgId: spec.orgId, role: spec.role };
+  },
+);

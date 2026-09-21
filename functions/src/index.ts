@@ -1,3 +1,4 @@
+export { acceptInvite, createInvite } from './functions/invites.js';
 export { diditWebhook } from './functions/diditWebhook.js';
 export { getPhotoForGate, issueSnapshot } from './functions/snapshot.js';
 export { lockDevice, startDeviceChange } from './functions/device.js';
