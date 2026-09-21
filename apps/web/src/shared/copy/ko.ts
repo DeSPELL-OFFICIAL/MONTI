@@ -96,6 +96,11 @@ export const ko = {
     alertAlreadyEntered: '이미 입장한 티켓이에요.',
     alertSelf: '본인에게는 양도할 수 없어요.',
     alertLocked: '받는 분의 휴대폰이 잠겨 있어요.',
+    alertRevoked: '취소된 티켓이라 양도할 수 없어요.',
+    alertEventCancelled: '이미 끝났거나 취소된 행사예요.',
+    badInput: '입력한 내용을 다시 확인해 주세요.',
+    confirming: '아직 확인 중이에요. 잠시 뒤 내 티켓에서 확인해 주세요.',
+    failed: '양도하지 못했어요. 잠시 뒤 다시 시도해 주세요.',
   },
   enter: {
     cta: '입장하기', arming: '얼굴을 확인하고 있어요',

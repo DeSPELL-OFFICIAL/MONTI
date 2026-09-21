@@ -37,6 +37,7 @@ import { Claim } from './attendee/claim/Claim';
 import { TicketList } from './attendee/tickets/List';
 import { TicketDetail } from './attendee/tickets/Detail';
 import { TransferRecipient } from './attendee/transfer/Recipient';
+import { TransferConfirm } from './attendee/transfer/Confirm';
 import { Enter } from './attendee/enter/Enter';
 import { ChatList } from './attendee/chats/ChatList';
 import { ChatRoom } from './attendee/chats/ChatRoom';
@@ -63,6 +64,7 @@ export const routes: RouteObject[] = [
           { path: '/tickets', element: <TicketList /> },
           { path: '/tickets/:tokenId', element: <TicketDetail /> },
           { path: '/tickets/:tokenId/transfer', element: <TransferRecipient /> },
+          { path: '/tickets/:tokenId/transfer/confirm', element: <TransferConfirm /> },
           { path: '/tickets/:tokenId/enter', element: <Enter /> },
           { path: '/chats', element: <ChatList /> },
           { path: '/chats/:eventId', element: <ChatRoom /> },

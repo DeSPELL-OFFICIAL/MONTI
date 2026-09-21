@@ -98,6 +98,11 @@ export const en: typeof ko = {
     alertAlreadyEntered: 'This ticket has already been used.',
     alertSelf: 'You cannot hand it to yourself.',
     alertLocked: 'Their phone is locked.',
+    alertRevoked: 'This ticket was voided, so it cannot be handed over.',
+    alertEventCancelled: 'This event is already over or was called off.',
+    badInput: 'Please check what you entered.',
+    confirming: 'Still confirming. Please check My tickets in a moment.',
+    failed: 'The handover did not go through. Please try again in a moment.',
   },
   enter: {
     cta: 'Enter', arming: 'Checking your face',

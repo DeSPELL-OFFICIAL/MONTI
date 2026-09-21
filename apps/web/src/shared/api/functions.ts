@@ -1,7 +1,7 @@
 import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
 import type { FunctionsErrorCodeCore } from 'firebase/functions';
-import type { Hex, SnapshotWire } from '@monti/shared';
+import type { Hex, ResolveRecipientResult, SnapshotWire } from '@monti/shared';
 import { getFirebaseFunctions } from './firebase';
 
 /** The gRPC status the server chose, with Firebase's `functions/` prefix stripped. */
@@ -123,9 +123,11 @@ export const api = {
   loginVerify: call<{ assertion: unknown }, { token: string; personId: Hex; account: Hex }>('loginVerify'),
   lockDevice: call<void, { txHash: Hex }>('lockDevice'),
   startDeviceChange: call<{ method: 'sms' | 'kyc' }, { allowedAt: number; kycUrl?: string }>('startDeviceChange'),
+  // The result type is the server's own (packages/shared), so a change there breaks this
+  // call site rather than silently disagreeing with it.
   resolveRecipient: call<
     { type: 'phone' | 'nickname' | 'address'; value: string },
-    { member: boolean; account?: Hex; nickname?: string; commitment?: Hex }
+    ResolveRecipientResult
   >('resolveRecipient'),
   createTransferInvite: call<
     { tokenId: string; phoneE164: string },
