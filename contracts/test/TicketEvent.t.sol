@@ -136,7 +136,24 @@ contract TicketEventTest is MontiTest {
         ticket.cancelEvent(eventId);
     }
 
-    function _draftMeta(uint256 orgId) internal view returns (Ticket.EventMeta memory m) {
+    function test_cancelEventRejectedWhenAlreadyClosed() public {
+        uint256 orgId = _org();
+        uint256 eventId = _freeEvent(orgId, 2, 1, true);
+
+        vm.prank(ORG_OWNER);
+        ticket.cancelEvent(eventId);
+        vm.prank(ORG_OWNER);
+        vm.expectRevert(Ticket.EventAlreadyClosed.selector);
+        ticket.cancelEvent(eventId);
+
+        uint256 endedId = _freeEvent(orgId, 2, 1, true);
+        vm.warp(T0 + 3 days);
+        vm.prank(ORG_OWNER);
+        vm.expectRevert(Ticket.EventAlreadyClosed.selector);
+        ticket.cancelEvent(endedId);
+    }
+
+    function _draftMeta(uint256 orgId) internal pure returns (Ticket.EventMeta memory m) {
         m = Ticket.EventMeta({
             orgId: orgId,
             titleHash: keccak256("MONTI Night"),

@@ -114,6 +114,7 @@ contract Ticket is ERC721, ITicket {
     error NotDraft();
     error EventNotPublished();
     error EventEnded();
+    error EventAlreadyClosed();
     error SaleClosed();
     error SoldOut();
     error MaxPerWalletExceeded();
@@ -179,6 +180,8 @@ contract Ticket is ERC721, ITicket {
 
     function cancelEvent(uint256 eventId) external {
         _requireEventPermission(eventId, PERM_CREATE_EVENT);
+        EventStatus s = eventStatus(eventId);
+        if (s == EventStatus.Cancelled || s == EventStatus.Ended) revert EventAlreadyClosed();
         _status[eventId] = EventStatus.Cancelled;
         emit EventStatusChanged(eventId, uint8(EventStatus.Cancelled));
     }
@@ -208,6 +211,58 @@ contract Ticket is ERC721, ITicket {
         return s;
     }
 
+    /// @notice Free tiers only in the MVP (spec 5.2). A paid tier needs an attester voucher, which is
+    ///         post-hackathon; passing a voucher today is an explicit error rather than a silent pass.
+    function claim(uint256 eventId, uint8 tier, bytes calldata voucher) external returns (uint256 tokenId) {
+        EventStatus s = eventStatus(eventId);
+        if (s == EventStatus.Ended) revert EventEnded();
+        if (s != EventStatus.Published) revert EventNotPublished();
+        if (!identity.isMember(msg.sender)) revert NotMember();
+
+        EventMeta storage m = _events[eventId];
+        if (m.approvalRequired) revert ApprovalRequiredNotSupported();
+        if (m.requireKyc && identity.kycLevelOf(msg.sender) < 1) revert KycRequired();
+        if (block.timestamp < m.saleStart || block.timestamp > m.saleEnd) revert SaleClosed();
+        if (tier >= _tiers[eventId].length) revert UnknownTier();
+
+        Tier storage t = _tiers[eventId][tier];
+        if (t.priceUsdCents != 0 || voucher.length != 0) revert PaidTiersNotEnabled();
+        if (t.minted >= t.supply) revert SoldOut();
+        if (_balanceOfEvent[msg.sender][eventId] >= t.maxPerWallet) revert MaxPerWalletExceeded();
+
+        t.minted += 1;
+        tokenId = _nextTokenId++;
+        _eventOf[tokenId] = eventId;
+        _tierOf[tokenId] = tier;
+        _safeMint(msg.sender, tokenId);
+
+        emit Claimed(tokenId, eventId, msg.sender, tier);
+    }
+
+    function eventOf(uint256 tokenId) external view returns (uint256) {
+        return _eventOf[tokenId];
+    }
+
+    function tierOf(uint256 tokenId) external view returns (uint8) {
+        return _tierOf[tokenId];
+    }
+
+    function balanceOfEvent(address account, uint256 eventId) external view returns (uint256) {
+        return _balanceOfEvent[account][eventId];
+    }
+
+    function transfersOf(uint256 tokenId) external view returns (uint8) {
+        return _transfers[tokenId];
+    }
+
+    function checkInOf(uint256 tokenId) external view returns (CheckIn memory) {
+        return _checkIns[tokenId];
+    }
+
+    function offerOf(uint256 tokenId) external view returns (Offer memory) {
+        return _offers[tokenId];
+    }
+
     function _requireEventPermission(uint256 eventId, uint32 bit) private view {
         uint256 orgId = _events[eventId].orgId;
         if (orgId == 0) revert UnknownEvent();
@@ -216,5 +271,14 @@ contract Ticket is ERC721, ITicket {
 
     function eventOrg(uint256 eventId) external view returns (uint256) {
         return _events[eventId].orgId;
+    }
+
+    function _update(address to, uint256 tokenId, address auth) internal override returns (address) {
+        address from = _ownerOf(tokenId);
+        uint256 eventId = _eventOf[tokenId];
+        address previous = super._update(to, tokenId, auth);
+        if (from != address(0)) _balanceOfEvent[from][eventId] -= 1;
+        if (to != address(0)) _balanceOfEvent[to][eventId] += 1;
+        return previous;
     }
 }
