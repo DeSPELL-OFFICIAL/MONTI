@@ -31,10 +31,14 @@ evm_version = "osaka"
 optimizer = true
 optimizer_runs = 200
 bytecode_hash = "none"
-# Monad 는 런타임 128 KB 를 받는다. EIP-170 의 24,576 B 는 체인의 한도가 아니라 revm 기본값이고,
-# forge build --sizes 의 여유 계산과 forge test/script 의 배포 검사, 그리고 거기서 유도되는
-# EIP-3860 이니트코드 상한까지 그 하나의 값이 지배한다. 여기서 한 번 올려 셋을 같이 푼다.
-# 이 값을 올린 대가로 Ticket 은 EIP-170 체인에는 배포할 수 없게 될 수 있다 — 의도한 선택이다.
+# Monad 는 런타임 128 KB 를 받는다. EIP-170 의 24,576 B 는 이 체인의 한도가 아니다.
+# 다만 forge 1.5.1 에서 이 키가 실제로 지배하는 것은 아무것도 없다(실측):
+#   - `forge build --sizes` 는 이 값을 무시하고 24,576 / 49,152 를 하드코딩해 초과 시 종료 코드 1
+#   - `forge test` / `forge script` 는 런타임 크기를 애초에 강제하지 않는다
+#   - 따라서 EIP-3860 이니트코드 상한도 이 값에서 유도되지 않는다
+# 그래서 .github-checks.sh 는 `--sizes` 를 돌리지 않고, 진짜 게이트는 test/ContractSize.t.sol 이
+# 들고 있다(네 컨트랙트의 런타임·이니트코드를 131,072 와 직접 비교한다). 이 줄은 값이 맞게 적힌
+# 전방 호환 선언이다 — --sizes 가 code_size_limit 을 존중하는 Foundry 가 나오면 그때부터 먹는다.
 code_size_limit = 131072
 ffi = false
 fs_permissions = [{ access = "read-write", path = "./deployments" }]

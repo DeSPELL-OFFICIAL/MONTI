@@ -159,4 +159,51 @@ contract TicketTransferTest is MontiTest {
         vm.expectRevert(Ticket.TransferCutoffPassed.selector);
         ticket.transferFrom(ALICE, BOB, tokenId);
     }
+
+    /// @dev 잠금은 양쪽 끝을 다 얼린다. 잠긴 계정으로 받은 티켓은 문에서 DeviceLocked 로 막히므로
+    ///      (checkIn), 받는 것 자체를 여기서 거절하는 편이 "왜 내 티켓이 안 먹히지"를 없앤다.
+    function test_lockedRecipientCannotReceive() public {
+        vm.prank(BOB);
+        identity.lockDevice(BOB);
+
+        vm.prank(ALICE);
+        vm.expectRevert(Ticket.DeviceLocked.selector);
+        ticket.transferFrom(ALICE, BOB, tokenId);
+        assertEq(ticket.ownerOf(tokenId), ALICE);
+    }
+
+    /// @dev 받는 쪽 잠금이 풀리면 전송은 정상적으로 끝난다 — 위 거절이 잠금 때문이지 다른
+    ///      이유가 아니었음을 같은 픽스처로 증명한다.
+    function test_transferSucceedsOnceTheRecipientsLockIsCleared() public {
+        vm.prank(BOB);
+        identity.lockDevice(BOB);
+        vm.warp(T0 + 7 days);
+        vm.prank(BOB);
+        identity.setActiveDevice(DEV_X, DEV_Y);
+        assertFalse(identity.isLocked(BOB));
+
+        // 이 시점엔 양도 마감이 지났으므로 시계를 픽스처의 창 안으로 되돌린다.
+        vm.warp(T0 + 1 hours);
+        vm.prank(ALICE);
+        ticket.transferFrom(ALICE, BOB, tokenId);
+        assertEq(ticket.ownerOf(tokenId), BOB);
+    }
+
+    /// @dev migrate 는 _internalMove 라 양쪽 가드를 모두 건너뛴다. 회전은 옛 계정을 잠그므로
+    ///      (I2) 보내는 쪽은 언제나 잠겨 있고, 받는 쪽도 잠겨 있을 수 있다 — 그런데도 복구는
+    ///      끝까지 간다. 받는 쪽 가드가 분기 '안'에 있다는 사실이 이 테스트다.
+    function test_migrateIsExemptFromBothLockGuards() public {
+        vm.warp(T0 + 7 days);
+        vm.prank(attester);
+        identity.rotateAccount(bytes32(uint256(0xA1A1)), CAROL);
+        vm.prank(CAROL);
+        identity.lockDevice(CAROL);
+        assertTrue(identity.isLocked(ALICE), "the rotation locked the old account");
+        assertTrue(identity.isLocked(CAROL), "and the new one locked itself too");
+
+        vm.warp(block.timestamp + ticket.MIGRATE_DELAY());
+        vm.prank(CAROL);
+        ticket.migrate(tokenId);
+        assertEq(ticket.ownerOf(tokenId), CAROL);
+    }
 }

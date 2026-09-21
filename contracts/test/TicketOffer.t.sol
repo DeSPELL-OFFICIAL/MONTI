@@ -173,4 +173,35 @@ contract TicketOfferTest is MontiTest {
         vm.expectRevert(Ticket.NoOffer.selector);
         ticket.acceptOffer(tokenId, _sig(tokenId, COMMITMENT, BOB));
     }
+
+    /// @dev acceptOffer 도 _update 를 타므로 I1 의 보내는 쪽 가드를 그대로 받는다. 오퍼를 낸 뒤
+    ///      폰을 잃어버려 잠갔다면, 받는 쪽이 이미 서명을 들고 있어도 티켓은 움직이지 않는다.
+    function test_acceptOfferRefusesALockedSeller() public {
+        vm.prank(ALICE);
+        ticket.createOffer(tokenId, COMMITMENT, T0 + 1 hours);
+
+        vm.prank(ALICE);
+        identity.lockDevice(ALICE);
+
+        vm.prank(BOB);
+        vm.expectRevert(Ticket.DeviceLocked.selector);
+        ticket.acceptOffer(tokenId, _sig(tokenId, COMMITMENT, BOB));
+        assertEq(ticket.ownerOf(tokenId), ALICE);
+        assertEq(ticket.offerOf(tokenId).from, ALICE, "a refused accept leaves the offer standing");
+    }
+
+    /// @dev 받는 쪽 잠금도 같은 문에서 막힌다. 쓸 수 없는 계정으로 티켓을 밀어 넣으면 그 티켓은
+    ///      잠금이 풀릴 때까지 아무 데도 못 가고 문도 통과하지 못한다.
+    function test_acceptOfferRefusesALockedRecipient() public {
+        vm.prank(ALICE);
+        ticket.createOffer(tokenId, COMMITMENT, T0 + 1 hours);
+
+        vm.prank(BOB);
+        identity.lockDevice(BOB);
+
+        vm.prank(BOB);
+        vm.expectRevert(Ticket.DeviceLocked.selector);
+        ticket.acceptOffer(tokenId, _sig(tokenId, COMMITMENT, BOB));
+        assertEq(ticket.ownerOf(tokenId), ALICE);
+    }
 }

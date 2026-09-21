@@ -567,6 +567,10 @@ contract Ticket is ERC721, ITicket {
                 if (_checkIns[tokenId].ts != 0) revert AlreadyCheckedIn();
                 if (block.timestamp + m.transferCutoffSeconds >= m.startsAt) revert TransferCutoffPassed();
                 if (!identity.isMember(to)) revert NotMember();
+                // 받는 쪽도 같은 기준으로 얼린다. 잠긴 계정은 그 티켓으로 문을 통과할 수 없으므로
+                // (checkIn 의 DeviceLocked), 거기로 밀어 넣는 것은 티켓을 잠금이 풀릴 때까지
+                // 묶어두는 일일 뿐이다. 순서는 보내는 쪽과 같다 — 먼저 멤버인지, 다음에 잠겼는지.
+                if (identity.isLocked(to)) revert DeviceLocked();
                 if (m.requireKyc && identity.kycLevelOf(to) < 1) revert KycRequired();
 
                 uint8 done = _transfers[tokenId];
