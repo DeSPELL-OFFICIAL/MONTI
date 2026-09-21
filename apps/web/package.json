@@ -6,6 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:staff": "vite build --config vite.staff.config.ts",
+    "sync:staff": "MONTI_APP_FLAVOR=staff pnpm build:staff && MONTI_APP_FLAVOR=staff cap sync android",
+    "run:staff": "pnpm sync:staff && MONTI_APP_FLAVOR=staff cap run android",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

@@ -46,7 +46,7 @@ import { ChatList } from './attendee/chats/ChatList';
 import { ChatRoom } from './attendee/chats/ChatRoom';
 import { Profile } from './attendee/me/Profile';
 import { OrganizerRoutes } from './organizer/Layout';
-import { StaffRoutes } from './staff/Console';
+import { StaffRoutes } from './staff/StaffRoutes';
 
 export const routes: RouteObject[] = [
   {
