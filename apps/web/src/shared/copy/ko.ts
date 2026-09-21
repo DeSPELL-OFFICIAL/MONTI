@@ -28,6 +28,7 @@ export const ko = {
     cta: '본인인증 하기', waiting: '확인하고 있어요. 잠시만 기다려 주세요.',
     duplicate: '이미 계정이 있습니다. 기존 계정으로 로그인해 주세요.',
     rejected: '본인 확인에 실패했어요. 다시 시도해 주세요.',
+    timeout: '아직 확인 결과가 오지 않았어요. 잠시 뒤 다시 확인해 주세요.',
     requiredBadge: 'KYC 필요', requiredTitle: '이 행사는 본인인증이 필요해요',
     requiredBody: '신분증과 얼굴을 한 번 확인하면 이 행사와 앞으로의 행사에서 다시 하지 않아도 돼요.',
     status: '인증 상태', verified: '인증 완료', unverified: '미인증',

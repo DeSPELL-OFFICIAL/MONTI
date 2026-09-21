@@ -30,6 +30,7 @@ export const en: typeof ko = {
     cta: 'Verify my identity', waiting: 'Checking. Please wait a moment.',
     duplicate: 'You already have an account. Please sign in instead.',
     rejected: 'Verification failed. Please try again.',
+    timeout: 'The result has not come back yet. Please check again in a moment.',
     requiredBadge: 'KYC required', requiredTitle: 'This event requires identity verification',
     requiredBody: 'Verify your ID and face once and you will not have to do it again for future events.',
     status: 'Verification', verified: 'Verified', unverified: 'Not verified',
