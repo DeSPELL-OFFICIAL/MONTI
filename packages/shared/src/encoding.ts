@@ -7,6 +7,7 @@ import {
   type GateCodeWire,
   type GateResponseWire,
   type Hex,
+  type SnapshotWire,
 } from './types.js';
 
 function assertBytes32(value: Hex, label: string): void {
@@ -225,4 +226,35 @@ export function derToRs(der: Hex): Hex {
   const s = readDerInteger(bytes, r.next);
   if (s.next !== bytes.length) throw new Error('BAD_DER');
   return joinRs(bytesToHex(r.value), bytesToHex(s.value));
+}
+
+const HEX_STRING_RE = /^0x[0-9a-fA-F]+$/;
+
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value !== null && typeof value === 'object') {
+    const source = value as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(source).sort()) out[key] = canonicalize(source[key]);
+    return out;
+  }
+  if (typeof value === 'number' && !Number.isSafeInteger(value)) throw new Error('NON_INTEGER_NUMBER');
+  if (typeof value === 'string' && HEX_STRING_RE.test(value)) return value.toLowerCase();
+  return value;
+}
+
+/**
+ * 키 재귀 사전순, 공백 없음, 숫자는 안전 정수만, 0x 문자열은 소문자.
+ * 02(서명)와 04(검증)가 같은 바이트열을 만들기 위한 유일한 정의다.
+ */
+export function canonicalJson(value: unknown): string {
+  return JSON.stringify(canonicalize(value));
+}
+
+export type UnsignedSnapshot = Omit<SnapshotWire, 'attesterSig'>;
+
+/** attesterSig 가 서명하는 대상. raw secp256k1 65바이트 r||s||v, EIP-191 접두사 없음. */
+export function snapshotDigest(snapshot: UnsignedSnapshot): Hex {
+  if ('attesterSig' in (snapshot as Record<string, unknown>)) throw new Error('SNAPSHOT_ALREADY_SIGNED');
+  return keccak256(stringToBytes(canonicalJson(snapshot)));
 }
