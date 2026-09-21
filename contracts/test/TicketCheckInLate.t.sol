@@ -16,6 +16,11 @@ abstract contract CheckInLateBase is MontiTest {
 
     uint64 internal constant ISSUED = uint64(P256Vectors.ISSUED_AT);
 
+    /// @dev TicketCheckIn.t.sol 과 같은 이유로 setUp 에서 한 번 만들어 들고 있는다: _deviceSig 는
+    ///      치트코드를 부르므로 prank/expectRevert 뒤에 두면 그것을 먹는다.
+    bytes internal deviceSig;
+    bytes internal foreignSig;
+
     event CheckedIn(
         uint256 indexed tokenId, uint256 indexed eventId, uint256 indexed gateId, bytes32 nonceHash, uint64 ts
     );
@@ -65,6 +70,9 @@ abstract contract CheckInLateBase is MontiTest {
         assertEq(eventId, P256Vectors.EVENT_ID, "vectors were generated for event 1");
         assertEq(tokenId, P256Vectors.TOKEN_ID, "vectors were generated for token 1");
         assertEq(gateId, P256Vectors.GATE1_ID, "vectors were generated for gate 1");
+
+        deviceSig = _deviceSig(tokenId, _code());
+        foreignSig = _foreignDeviceSig(tokenId, _code());
     }
 
     function _code() internal pure returns (Ticket.GateCode memory) {
@@ -76,8 +84,8 @@ abstract contract CheckInLateBase is MontiTest {
         });
     }
 
-    function _sig() internal pure returns (bytes memory) {
-        return abi.encode(P256Vectors.GATE1_R, P256Vectors.GATE1_S);
+    function _sig() internal view returns (bytes memory) {
+        return deviceSig;
     }
 }
 
@@ -196,17 +204,51 @@ contract TicketCheckInLateTest is CheckInLateBase {
         vm.warp(ISSUED + 2 hours);
         vm.prank(GATE_A);
         vm.expectRevert(Ticket.BadDeviceSignature.selector);
-        ticket.checkInLate(tokenId, _code(), abi.encode(P256Vectors.OTHER_R, P256Vectors.OTHER_S));
+        ticket.checkInLate(tokenId, _code(), foreignSig);
+    }
+
+    /// @dev Gap 2. 늦은 경로가 payload 의 수명을 60초에서 행사 창 전체로 늘리므로, 도메인
+    ///      묶음이 실제로 필요해지는 곳이 바로 여기다. 옛 5필드 다이제스트로는 못 들어온다.
+    function test_aSignatureOverTheOldFiveFieldDigestIsRefusedOnTheLatePath() public {
+        vm.warp(ISSUED + 2 hours);
+        Ticket.GateCode memory g = _code();
+        bytes32 old5 = sha256(abi.encode(tokenId, g.gateId, g.eventId, g.nonce, g.issuedAt));
+        (bytes32 r, bytes32 s) = vm.signP256(P256Vectors.DEVICE_PRIV, old5);
+
+        vm.prank(GATE_A);
+        vm.expectRevert(Ticket.BadDeviceSignature.selector);
+        ticket.checkInLate(tokenId, g, abi.encode(r, s));
+    }
+
+    /// @dev 다른 체인 / 다른 배포본을 위한 서명도 마찬가지다.
+    function test_aSignatureForAnotherChainOrAnotherTicketIsRefusedOnTheLatePath() public {
+        vm.warp(ISSUED + 2 hours);
+        Ticket.GateCode memory g = _code();
+
+        bytes32 otherChain =
+            sha256(abi.encode(uint256(1), address(ticket), tokenId, g.gateId, g.eventId, g.nonce, g.issuedAt));
+        (bytes32 r, bytes32 s) = vm.signP256(P256Vectors.DEVICE_PRIV, otherChain);
+        vm.prank(GATE_A);
+        vm.expectRevert(Ticket.BadDeviceSignature.selector);
+        ticket.checkInLate(tokenId, g, abi.encode(r, s));
+
+        bytes32 otherTicket =
+            sha256(abi.encode(block.chainid, address(0xDEAD), tokenId, g.gateId, g.eventId, g.nonce, g.issuedAt));
+        (r, s) = vm.signP256(P256Vectors.DEVICE_PRIV, otherTicket);
+        vm.prank(GATE_A);
+        vm.expectRevert(Ticket.BadDeviceSignature.selector);
+        ticket.checkInLate(tokenId, g, abi.encode(r, s));
     }
 
     /// @dev C2 의 요구는 늦은 경로에도 그대로 붙는다.
     function test_C2_highSRejectedOnTheLatePathToo() public {
         vm.warp(ISSUED + 2 hours);
+        // 치트코드를 쓰는 줄이 먼저다.
+        (bytes32 r, bytes32 s) = _deviceRS(P256Vectors.DEVICE_PRIV, tokenId, _code());
+
         vm.prank(GATE_A);
         vm.expectRevert(Ticket.BadDeviceSignature.selector);
-        ticket.checkInLate(
-            tokenId, _code(), abi.encode(P256Vectors.GATE1_R, bytes32(P256.N - uint256(P256Vectors.GATE1_S)))
-        );
+        ticket.checkInLate(tokenId, _code(), abi.encode(r, bytes32(P256.N - uint256(s))));
     }
 
     function test_aCancelledEventRejectsTheQueueToo() public {

@@ -13,6 +13,14 @@ contract TicketCheckInTest is MontiTest {
     uint256 internal gateAId;
     uint256 internal gateBId;
 
+    /// @dev 서명은 setUp 에서 한 번 만들어 들고 있는다. _deviceSig 는 sha256 프리컴파일과
+    ///      vm.signP256 을 부르므로, 테스트 본문에서 prank/expectRevert 뒤에 부르면 그 치트코드를
+    ///      먹어 치운다. 캐시는 그 함정을 통째로 없앤다 — 그리고 다이제스트가 이 배포본에 묶여
+    ///      있으므로 setUp 이 배포를 마친 뒤에 만들어야 한다.
+    bytes internal sigA;
+    bytes internal sigB;
+    bytes internal foreignSigA;
+
     event CheckedIn(
         uint256 indexed tokenId, uint256 indexed eventId, uint256 indexed gateId, bytes32 nonceHash, uint64 ts
     );
@@ -38,6 +46,10 @@ contract TicketCheckInTest is MontiTest {
         assertEq(gateBId, P256Vectors.GATE2_ID, "vectors were generated for gate 2");
 
         vm.warp(P256Vectors.ISSUED_AT + 5);
+
+        sigA = _deviceSig(tokenId, _code(gateAId));
+        sigB = _deviceSig(tokenId, _code(gateBId));
+        foreignSigA = _foreignDeviceSig(tokenId, _code(gateAId));
     }
 
     function _code(uint256 gateId) internal pure returns (Ticket.GateCode memory) {
@@ -46,12 +58,12 @@ contract TicketCheckInTest is MontiTest {
         });
     }
 
-    function _sigA() internal pure returns (bytes memory) {
-        return abi.encode(P256Vectors.GATE1_R, P256Vectors.GATE1_S);
+    function _sigA() internal view returns (bytes memory) {
+        return sigA;
     }
 
-    function _sigB() internal pure returns (bytes memory) {
-        return abi.encode(P256Vectors.GATE2_R, P256Vectors.GATE2_S);
+    function _sigB() internal view returns (bytes memory) {
+        return sigB;
     }
 
     function test_openGateChecksInWithTheDeviceSignature() public {
@@ -95,17 +107,49 @@ contract TicketCheckInTest is MontiTest {
         assertEq(ticket.offerOf(tokenId).from, address(0));
     }
 
-    function test_digestMatchesTheSpecFormula() public pure {
-        bytes32 expected = sha256(
-            abi.encode(
-                P256Vectors.TOKEN_ID,
-                P256Vectors.GATE1_ID,
-                P256Vectors.EVENT_ID,
-                P256Vectors.NONCE,
-                P256Vectors.ISSUED_AT
-            )
-        );
-        assertEq(expected, P256Vectors.GATE1_DIGEST, "generator and contract must hash the same bytes");
+    /// @dev 다이제스트 정의가 컨트랙트 안(_deviceDigest)과 테스트 헬퍼 안 두 곳에 있으므로,
+    ///      둘이 같은 바이트를 만든다는 것을 여기서 증명한다. 증명 방법은 우회로가 없다: 컨트랙트
+    ///      쪽 정의로 만든 서명이 실제로 문을 통과하는지 본다. 어긋나면 이 한 줄이 빨개진다.
+    function test_theDigestIsBoundToThisChainAndThisTicket() public {
+        Ticket.GateCode memory g = _code(gateAId);
+        bytes32 expected =
+            sha256(abi.encode(block.chainid, address(ticket), tokenId, g.gateId, g.eventId, g.nonce, g.issuedAt));
+        assertEq(_deviceDigest(tokenId, g), expected, "the helper must hash what the spec says");
+
+        vm.prank(GATE_A);
+        ticket.checkIn(tokenId, g, sigA);
+        assertEq(ticket.checkInOf(tokenId).gateId, gateAId, "and the contract must hash the same bytes");
+    }
+
+    /// @dev Gap 2 의 본론. 도메인 두 워드가 없던 시절의 다이제스트로 서명하면 들어올 수 없다.
+    function test_aSignatureOverTheOldFiveFieldDigestIsRefused() public {
+        Ticket.GateCode memory g = _code(gateAId);
+        bytes32 old5 = sha256(abi.encode(tokenId, g.gateId, g.eventId, g.nonce, g.issuedAt));
+        (bytes32 r, bytes32 s) = vm.signP256(P256Vectors.DEVICE_PRIV, old5);
+
+        vm.prank(GATE_A);
+        vm.expectRevert(Ticket.BadDeviceSignature.selector);
+        ticket.checkIn(tokenId, g, abi.encode(r, s));
+    }
+
+    /// @dev 다른 체인이나 다른 배포본을 위해 만든 서명도 마찬가지다. 그것이 이 변경의 목적이다:
+    ///      붙잡아 둔 탭 하나를 재배포본이나 다른 체인에 되풀어 넣을 수 없다.
+    function test_aSignatureForAnotherChainOrAnotherTicketIsRefused() public {
+        Ticket.GateCode memory g = _code(gateAId);
+
+        bytes32 otherChain =
+            sha256(abi.encode(uint256(1), address(ticket), tokenId, g.gateId, g.eventId, g.nonce, g.issuedAt));
+        (bytes32 r, bytes32 s) = vm.signP256(P256Vectors.DEVICE_PRIV, otherChain);
+        vm.prank(GATE_A);
+        vm.expectRevert(Ticket.BadDeviceSignature.selector);
+        ticket.checkIn(tokenId, g, abi.encode(r, s));
+
+        bytes32 otherTicket =
+            sha256(abi.encode(block.chainid, address(0xDEAD), tokenId, g.gateId, g.eventId, g.nonce, g.issuedAt));
+        (r, s) = vm.signP256(P256Vectors.DEVICE_PRIV, otherTicket);
+        vm.prank(GATE_A);
+        vm.expectRevert(Ticket.BadDeviceSignature.selector);
+        ticket.checkIn(tokenId, g, abi.encode(r, s));
     }
 
     function test_T14_fakeGateRejected() public {
@@ -185,18 +229,21 @@ contract TicketCheckInTest is MontiTest {
     ///      이 요구는 클라이언트에도 그대로 간다: 03/04 는 서명 직후 s > N/2 면 s = N - s 로
     ///      정규화해야 한다. 안 하면 정상 탭의 절반이 DENY DEVICE_MISMATCH 로 떨어진다.
     function test_C2_highSSignatureRejected() public {
-        uint256 highS = P256.N - uint256(P256Vectors.GATE1_S);
+        (bytes32 r, bytes32 s) = _deviceRS(P256Vectors.DEVICE_PRIV, tokenId, _code(gateAId));
+        uint256 highS = P256.N - uint256(s);
+        // 위 두 줄은 치트코드를 쓰므로 아래 prank 보다 반드시 먼저 와야 한다.
         assertGt(highS, P256.N / 2, "the counterpart of a low-s signature is high-s");
 
         vm.prank(GATE_A);
         vm.expectRevert(Ticket.BadDeviceSignature.selector);
-        ticket.checkIn(tokenId, _code(gateAId), abi.encode(P256Vectors.GATE1_R, bytes32(highS)));
+        ticket.checkIn(tokenId, _code(gateAId), abi.encode(r, bytes32(highS)));
     }
 
     /// @dev 같은 벡터의 low-s 쪽은 통과한다. 위 테스트가 '서명이 틀려서'가 아니라 '고-s 라서'
     ///      거절됐음을 이 한 쌍이 함께 증명한다.
     function test_C2_theLowSCounterpartOfTheSameSignatureIsAccepted() public {
-        assertLt(uint256(P256Vectors.GATE1_S), P256.N / 2, "the generated vectors are low-s by construction");
+        (, bytes32 s) = _deviceRS(P256Vectors.DEVICE_PRIV, tokenId, _code(gateAId));
+        assertLt(uint256(s), P256.N / 2, "vm.signP256 normalises to low-s, as 03/04 must");
         vm.prank(GATE_A);
         ticket.checkIn(tokenId, _code(gateAId), _sigA());
         assertEq(ticket.checkInOf(tokenId).gateId, gateAId);
@@ -205,7 +252,7 @@ contract TicketCheckInTest is MontiTest {
     function test_T6_wrongDeviceKeyRejected() public {
         vm.prank(GATE_A);
         vm.expectRevert(Ticket.BadDeviceSignature.selector);
-        ticket.checkIn(tokenId, _code(gateAId), abi.encode(P256Vectors.OTHER_R, P256Vectors.OTHER_S));
+        ticket.checkIn(tokenId, _code(gateAId), foreignSigA);
     }
 
     /// @dev A malformed blob is a DENY with a name, not a decoder panic the staff screen cannot map.

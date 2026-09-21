@@ -387,6 +387,23 @@ contract Ticket is ERC721, EIP712, ITicket {
 
     /// @dev 두 입장 경로의 공통 본문. 복사본을 두지 않는 이유는 크기가 아니라 안전이다:
     ///      두 경로의 검사 순서가 한 글자라도 갈라지면 한쪽에만 있는 구멍이 생긴다.
+    ///
+    ///      관객 기기가 서명하는 다이제스트는 이 체인과 이 Ticket 에 묶여 있다:
+    ///
+    ///          sha256(abi.encode(
+    ///              uint256  block.chainid,
+    ///              address  address(this),   // 이 Ticket
+    ///              uint256  tokenId,
+    ///              uint256  gateId,
+    ///              uint256  eventId,
+    ///              bytes32  nonce,
+    ///              uint64   issuedAt))
+    ///
+    ///      7워드 224바이트이며 address 와 uint64 는 32바이트로 좌측 0패딩된다. 도메인 두 워드가
+    ///      없던 시절에는 탭 하나를 붙잡아 두면 같은 티켓 id 가 존재하는 **다른 배포본**이나 다른
+    ///      체인에서 그대로 다시 쓸 수 있었다. checkInLate 가 payload 의 수명을 60초에서 행사
+    ///      창 전체로 늘리면서(C1) 그 창이 실제로 붙잡을 만한 크기가 됐으므로 여기서 닫는다.
+    ///      03 T25 가 클라이언트 쪽을 이 정의에서 구현한다 — 한 워드라도 어긋나면 문이 닫힌다.
     function _admit(uint256 tokenId, GateCode calldata g, bytes calldata deviceSig, bool late) private {
         address holder = _ownerOf(tokenId);
         if (holder == address(0)) revert NoSuchTicket();
@@ -432,7 +449,9 @@ contract Ticket is ERC721, EIP712, ITicket {
             (bytes32 x, bytes32 y) = identity.activeDevice(holder);
 
             if (deviceSig.length != 64) revert BadDeviceSignature();
-            bytes32 h = sha256(abi.encode(tokenId, g.gateId, g.eventId, g.nonce, g.issuedAt));
+            // 인코딩은 _deviceDigest 에 모아 둔다 — 여기에 펼쳐 놓으면 legacy 코드젠이 stack too
+            // deep 으로 죽고, 두 경로가 같은 한 곳을 보게 만드는 편이 애초에 옳다.
+            bytes32 h = _deviceDigest(tokenId, g);
             (bytes32 r, bytes32 s) = abi.decode(deviceSig, (bytes32, bytes32));
             if (!P256.verifySignature(h, r, s, x, y)) revert BadDeviceSignature();
         }
@@ -447,6 +466,13 @@ contract Ticket is ERC721, EIP712, ITicket {
 
         if (late) emit CheckedInLate(tokenId, g.gateId, g.issuedAt, uint64(block.timestamp));
         emit CheckedIn(tokenId, eventId, g.gateId, nonceHash, uint64(block.timestamp));
+    }
+
+    /// @notice 관객 기기가 서명하는 그 32바이트. 두 입장 경로가 모두 이것을 부르므로 정의는
+    ///         한 곳뿐이다. 인코딩은 `_admit` 의 natspec 이 바이트 단위로 적어 두었다.
+    /// @dev    `view` 인 이유는 `address(this)` 와 `block.chainid` 뿐이고 상태는 읽지 않는다.
+    function _deviceDigest(uint256 tokenId, GateCode calldata g) private view returns (bytes32) {
+        return sha256(abi.encode(block.chainid, address(this), tokenId, g.gateId, g.eventId, g.nonce, g.issuedAt));
     }
 
     /// @notice Spec 13: a manager without approval rights files a request; someone with rights admits.

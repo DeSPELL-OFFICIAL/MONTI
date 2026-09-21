@@ -52,6 +52,37 @@ abstract contract MontiTest is Test {
         identity.register(bytes32(personSeed), account, DEV_X, DEV_Y, level);
     }
 
+    // --- device signatures ---------------------------------------------------------------------
+
+    /// @dev Ticket._deviceDigest 와 **바이트가 같아야 한다**. 그 등식이 깨지면 문이 통째로 닫히
+    ///      므로, 여기 한 곳에 두고 TicketCheckIn.t.sol 이 컨트랙트 쪽과 맞는지 못박는다.
+    function _deviceDigest(uint256 tokenId_, Ticket.GateCode memory g) internal view returns (bytes32) {
+        return sha256(abi.encode(block.chainid, address(ticket), tokenId_, g.gateId, g.eventId, g.nonce, g.issuedAt));
+    }
+
+    /// @dev 다이제스트가 이 체인과 이 배포본에 묶여 있으므로(Gap 2) 서명을 상수로 들고 있을 수
+    ///      없다 -- 테스트 배포마다 Ticket 주소가 다르다. vm.signP256 은 RFC 6979 결정적 서명에
+    ///      low-s 까지 정규화해 주고, P256Vectors.t.sol 이 그것을 noble 벡터와 맞춰 둔다.
+    function _deviceRS(uint256 privKey, uint256 tokenId_, Ticket.GateCode memory g)
+        internal
+        view
+        returns (bytes32 r, bytes32 s)
+    {
+        return vm.signP256(privKey, _deviceDigest(tokenId_, g));
+    }
+
+    /// @dev 관객의 진짜 기기 키로 그 탭에 서명한다.
+    function _deviceSig(uint256 tokenId_, Ticket.GateCode memory g) internal view returns (bytes memory) {
+        (bytes32 r, bytes32 s) = _deviceRS(P256Vectors.DEVICE_PRIV, tokenId_, g);
+        return abi.encode(r, s);
+    }
+
+    /// @dev 통과해서는 안 되는 키로 같은 탭에 서명한다.
+    function _foreignDeviceSig(uint256 tokenId_, Ticket.GateCode memory g) internal view returns (bytes memory) {
+        (bytes32 r, bytes32 s) = _deviceRS(P256Vectors.OTHER_PRIV, tokenId_, g);
+        return abi.encode(r, s);
+    }
+
     function _org() internal returns (uint256 orgId) {
         orgId = organizers.createOrganizer(ORG_OWNER);
     }

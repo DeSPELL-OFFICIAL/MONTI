@@ -168,14 +168,14 @@ contract TicketOfferTest is MontiTest {
         vm.stopPrank();
 
         vm.warp(P256Vectors.ISSUED_AT + 5);
+        Ticket.GateCode memory code = Ticket.GateCode({
+            gateId: gateId, eventId: P256Vectors.EVENT_ID, issuedAt: P256Vectors.ISSUED_AT, nonce: P256Vectors.NONCE
+        });
+        // 서명을 먼저 만든다. _deviceSig 는 sha256 프리컴파일과 치트코드를 부르므로 prank 뒤에
+        // 두면 그 prank 를 먹어 치운다(Task 9 가 _sig 에서 겪은 것과 같은 함정이다).
+        bytes memory deviceSig = _deviceSig(tokenId, code);
         vm.prank(GATE_A);
-        ticket.checkIn(
-            tokenId,
-            Ticket.GateCode({
-                gateId: gateId, eventId: P256Vectors.EVENT_ID, issuedAt: P256Vectors.ISSUED_AT, nonce: P256Vectors.NONCE
-            }),
-            abi.encode(P256Vectors.GATE1_R, P256Vectors.GATE1_S)
-        );
+        ticket.checkIn(tokenId, code, deviceSig);
 
         assertEq(ticket.offerOf(tokenId).from, address(0));
         bytes memory sig = _sig(tokenId, COMMITMENT, BOB);
