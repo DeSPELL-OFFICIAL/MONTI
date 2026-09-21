@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { FieldValue } from 'firebase-admin/firestore';
+import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 
 process.env.GCP_PROJECT_ID = 'monti-dev';
 
@@ -21,6 +21,8 @@ const auth = { uid: 'uid-1', token: {} };
 const docs = new Map<string, Record<string, unknown>>();
 /** 체인 호출이 트랜잭션 안에서 일어나면 실제 Firestore 는 재시도로 중복 전송을 만든다. */
 let inTransaction = false;
+/** 리스 반납(`holder: null` 쓰기)만 골라 실패시킨다. 반납이 결과를 덮어쓰는지 보는 용도다. */
+let failLeaseRelease = false;
 
 const DELETE = FieldValue.delete();
 const SERVER_TIMESTAMP = FieldValue.serverTimestamp();
@@ -28,6 +30,15 @@ const SERVER_TIMESTAMP = FieldValue.serverTimestamp();
 function isSentinel(value: unknown, sentinel: FieldValue): boolean {
   const candidate = value as FieldValue | undefined;
   return typeof candidate?.isEqual === 'function' && candidate.isEqual(sentinel);
+}
+
+/** 중첩 맵만 깊게 합친다. Timestamp 같은 클래스 인스턴스는 통째로 갈아 끼운다. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)
+  );
 }
 
 function deepMerge(
@@ -39,8 +50,8 @@ function deepMerge(
     if (isSentinel(value, DELETE)) {
       delete out[key];
     } else if (isSentinel(value, SERVER_TIMESTAMP)) {
-      out[key] = new Date();
-    } else if (value && typeof value === 'object' && !Array.isArray(value)) {
+      out[key] = Timestamp.now();
+    } else if (isPlainObject(value)) {
       const previous = out[key];
       out[key] = deepMerge(
         previous && typeof previous === 'object' ? (previous as Record<string, unknown>) : {},
@@ -89,6 +100,7 @@ vi.mock('../src/lib/db.js', async () => {
   const real = await vi.importActual<typeof import('../src/lib/db.js')>('../src/lib/db.js');
   return {
     PERSONS: 'persons',
+    USERS: 'users',
     DEVICES: 'devices',
     SYSTEM: 'system',
     assertStatusTransition: real.assertStatusTransition,
@@ -105,6 +117,7 @@ vi.mock('../src/lib/db.js', async () => {
           },
           set: (ref: { path: string }, data: Record<string, unknown>, options?: { merge?: boolean }) => {
             reading = false;
+            if (failLeaseRelease && data.holder === null) throw new Error('FIRESTORE_UNAVAILABLE');
             pending.push(() => write(ref.path, data, options));
           },
         };
@@ -146,14 +159,26 @@ function call(data: Record<string, unknown> = { personId: PERSON_ID, deviceX: X,
   return wrapped({ data, auth } as never) as Promise<{ txHash: string }>;
 }
 
+/** 호출자와 사람을 묶는 문서. 이 묶음이 없으면 어떤 경로도 통과하지 못한다. */
+function seedCaller(personId: string = PERSON_ID): void {
+  write(`users/${auth.uid}`, { personId });
+}
+
+/** 가입 직전의 사람. `docs.clear()` 한 테스트가 다시 세운다. */
+function seedPerson(extra: Record<string, unknown> = {}): void {
+  write(`persons/${PERSON_ID}`, { status: 'pending', kycLevel: 0, account: ACCOUNT, ...extra });
+}
+
 beforeEach(() => {
   docs.clear();
   inTransaction = false;
+  failLeaseRelease = false;
   sendAttesterTx.mockClear();
   readContract.mockClear();
   waitForTransactionReceipt.mockClear();
   awaitFinalized.mockClear();
-  write(`persons/${PERSON_ID}`, { status: 'pending', kycLevel: 0, account: ACCOUNT });
+  seedCaller();
+  seedPerson();
 });
 
 describe('registerIdentity — the happy path', () => {
@@ -195,7 +220,8 @@ describe('registerIdentity — the happy path', () => {
     await call();
     expect(snapshot(`devices/${ACCOUNT}`).get('platform')).toBe('web');
     docs.clear();
-    write(`persons/${PERSON_ID}`, { status: 'pending', kycLevel: 0, account: ACCOUNT });
+    seedCaller();
+    seedPerson();
     await expect(
       call({ personId: PERSON_ID, deviceX: X, deviceY: Y, platform: 'watch' }),
     ).rejects.toThrow('BAD_PLATFORM');
@@ -240,9 +266,11 @@ describe('registerIdentity — idempotency (spec §10.4 rule 3)', () => {
     expect(readContract).not.toHaveBeenCalled();
   });
 
-  it('reconciles the database and sends nothing when the account is already a member', async () => {
+  it('reconciles the database and reports success when the account is already a member', async () => {
     readContract.mockResolvedValueOnce(true as never);
-    await expect(call()).rejects.toThrow('ALREADY_REGISTERED_ON_CHAIN');
+    // 이미 끝난 등록은 성공이다. 오류로 올리면 일반적인 콜러블 래퍼가
+    // 멀쩡히 가입된 사람에게 실패 화면을 보여 준다.
+    await expect(call()).resolves.toEqual({ alreadyRegistered: true });
     expect(sendAttesterTx).not.toHaveBeenCalled();
     expect(readContract.mock.calls[0]![0]).toMatchObject({
       address: IDENTITY,
@@ -253,9 +281,34 @@ describe('registerIdentity — idempotency (spec §10.4 rule 3)', () => {
   });
 
   it('refuses a second concurrent call while the first is still sending', async () => {
-    write(`persons/${PERSON_ID}`, { chain: { registerPending: true } }, { merge: true });
+    write(
+      `persons/${PERSON_ID}`,
+      { chain: { registerPending: true, registerPendingAt: Timestamp.now() } },
+      { merge: true },
+    );
     await expect(call()).rejects.toThrow('REGISTER_IN_FLIGHT');
     expect(sendAttesterTx).not.toHaveBeenCalled();
+  });
+
+  it('steps over a pending flag left behind by an instance that died mid-send', async () => {
+    // 딱지만 있고 해시가 없는 상태는 전송 도중 죽은 인스턴스가 남긴 것이다.
+    // 만료가 없으면 이 사람은 영영 가입을 못 하고, Task 23 이 쓸 해시도 없다.
+    write(
+      `persons/${PERSON_ID}`,
+      { chain: { registerPending: true, registerPendingAt: Timestamp.fromMillis(Date.now() - 6 * 60_000) } },
+      { merge: true },
+    );
+    await expect(call()).resolves.toEqual({ txHash: TX });
+    expect(sendAttesterTx).toHaveBeenCalledTimes(1);
+    const person = snapshot(`persons/${PERSON_ID}`);
+    expect(person.get('status')).toBe('active');
+    expect(person.get('chain.registerPending')).toBeUndefined();
+    expect(person.get('chain.registerPendingAt')).toBeUndefined();
+  });
+
+  it('treats a pending flag with no timestamp as stale', async () => {
+    write(`persons/${PERSON_ID}`, { chain: { registerPending: true } }, { merge: true });
+    await expect(call()).resolves.toEqual({ txHash: TX });
   });
 });
 
@@ -278,6 +331,26 @@ describe('registerIdentity — the attester is a single key', () => {
     sendAttesterTx.mockRejectedValueOnce(new Error('nonce too low'));
     await expect(call()).resolves.toEqual({ txHash: TX });
     expect(sendAttesterTx).toHaveBeenCalledTimes(2);
+    expect(snapshot(`persons/${PERSON_ID}`).get('status')).toBe('active');
+  });
+
+  it.each(['already known', 'replacement transaction underpriced'])(
+    'never retries "%s" — that nonce is already in the pool, so a retry sends a second register',
+    async (message) => {
+      sendAttesterTx.mockRejectedValueOnce(new Error(message));
+      await expect(call()).rejects.toThrow(`REGISTER_SEND_FAILED:${message}`);
+      expect(sendAttesterTx).toHaveBeenCalledTimes(1);
+      expect(snapshot(`persons/${PERSON_ID}`).get('chain.registerTx')).toBeUndefined();
+      expect(snapshot(`persons/${PERSON_ID}`).get('chain.registerPending')).toBeUndefined();
+    },
+  );
+
+  it('still returns the hash when giving the lease back fails', async () => {
+    // 반납 실패가 결과를 덮어쓰면 보내 놓고 기록하지 못한 트랜잭션이 남는다 —
+    // 세 겹 멱등 장치 중 어느 것도 복구하지 못하는 유일한 상태다.
+    failLeaseRelease = true;
+    await expect(call()).resolves.toEqual({ txHash: TX });
+    expect(snapshot(`persons/${PERSON_ID}`).get('chain.registerTx')).toBe(TX);
     expect(snapshot(`persons/${PERSON_ID}`).get('status')).toBe('active');
   });
 
@@ -316,6 +389,7 @@ describe('registerIdentity — failures leave the person repairable', () => {
 
   it('refuses a person that has no passkey account yet', async () => {
     docs.clear();
+    seedCaller();
     write(`persons/${PERSON_ID}`, { status: 'pending', kycLevel: 0 });
     await expect(call()).rejects.toThrow('PASSKEY_REQUIRED');
     expect(sendAttesterTx).not.toHaveBeenCalled();
@@ -323,7 +397,30 @@ describe('registerIdentity — failures leave the person repairable', () => {
 
   it('refuses an unknown person', async () => {
     docs.clear();
+    seedCaller();
     await expect(call()).rejects.toThrow('PERSON_NOT_FOUND');
+  });
+});
+
+describe('registerIdentity — the caller may only register themselves', () => {
+  it("refuses a personId that is not the caller's own", async () => {
+    // 이 함수는 호출자가 준 기기 키를 그대로 체인에 박는다(Identity.sol `_devices[account]`).
+    // 묶음이 틀리면 체인은커녕 조회도 한 번 나가면 안 된다.
+    const victim = `0x${'bb'.repeat(32)}`;
+    write(`persons/${victim}`, { status: 'pending', kycLevel: 0, account: ACCOUNT });
+    await expect(call({ personId: victim, deviceX: X, deviceY: Y })).rejects.toThrow(
+      'PERSON_MISMATCH',
+    );
+    expect(sendAttesterTx).not.toHaveBeenCalled();
+    expect(readContract).not.toHaveBeenCalled();
+  });
+
+  it('refuses a signed-in user with no person of their own', async () => {
+    docs.clear();
+    seedPerson();
+    await expect(call()).rejects.toThrow('PERSON_MISMATCH');
+    expect(sendAttesterTx).not.toHaveBeenCalled();
+    expect(snapshot(`devices/${ACCOUNT}`).exists).toBe(false);
   });
 });
 

@@ -4,12 +4,19 @@ import { identityAbi, type Hex, type PersonStatus } from '@monti/shared';
 import { ATTESTER_PK } from '../config.js';
 import { sendSerialized } from '../lib/attesterLock.js';
 import { awaitFinalized, deployment, publicClient, sendAttesterTx } from '../lib/chain.js';
-import { DEVICES, PERSONS, assertStatusTransition, db } from '../lib/db.js';
+import { DEVICES, PERSONS, USERS, assertStatusTransition, db } from '../lib/db.js';
 
 const B32_RE = /^0x[0-9a-fA-F]{64}$/;
 const PLATFORMS = ['ios', 'android', 'web'] as const;
 type Platform = (typeof PLATFORMS)[number];
 const RECEIPT_TIMEOUT_MS = 30_000;
+/**
+ * `registerPending` 딱지의 수명. 전송 도중 인스턴스가 죽으면(OOM·타임아웃·배포 교체)
+ * 딱지만 남고 해시는 없어서, 만료가 없으면 그 사람은 영영 가입을 못 한다.
+ * 함수 자체의 최대 수명이 60초(config.ts `timeoutSeconds`)이므로 이보다 오래된 딱지는
+ * 살아 있는 인스턴스의 것일 수 없다.
+ */
+const PENDING_TTL_MS = 60_000;
 
 /** 체인에 올라간 뒤의 마무리. 성공 경로와 "이미 보낸 트랜잭션" 경로가 같이 쓴다. */
 async function settle(input: {
@@ -60,12 +67,16 @@ async function settle(input: {
  * **같은 `personId` 로 두 번 불러도 체인 쓰기는 한 번**이다(스펙 §10.4 규칙 3).
  * 세 겹으로 막는다. ① 이미 기록된 트랜잭션이 있으면 그 해시를 쓰고, 아직 확정 전이면
  * **다시 보내지 않고 기다린다**. ② 체인이 이미 그 계정을 알고 있으면 DB 만 맞춘다.
- * ③ 전송 직전 Firestore 트랜잭션으로 `registerPending` 딱지를 붙여 동시 호출을 막는다.
+ * ③ 전송 직전 Firestore 트랜잭션으로 `registerPending` 딱지를 붙여 동시 호출을 막고,
+ * 그 딱지는 `PENDING_TTL_MS` 가 지나면 죽은 인스턴스가 남긴 것으로 보고 무시한다.
+ *
+ * 호출자는 언제나 자기 자신만 등록한다 — `users/{uid}.personId` 와 인자가 같아야 한다.
  */
 export const registerIdentity = onCall(
   { secrets: [ATTESTER_PK] },
   async (request): Promise<{ txHash: Hex }> => {
-    if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'AUTH_REQUIRED');
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError('unauthenticated', 'AUTH_REQUIRED');
     const { personId, deviceX, deviceY, platform } = (request.data ?? {}) as {
       personId?: Hex;
       deviceX?: Hex;
@@ -87,6 +98,13 @@ export const registerIdentity = onCall(
       deviceY: deviceY as Hex,
       platform: (platform ?? 'web') as Platform,
     };
+
+    // 남의 personId 로 자기 기기 키를 체인에 박지 못하게 호출자와 사람을 묶는다
+    // (registerPasskey 와 같은 규칙). 이 함수는 공격자가 준 키를 체인 쓰기에 그대로 넘긴다.
+    const user = await db.collection(USERS).doc(uid).get();
+    if (user.get('personId') !== personId) {
+      throw new HttpsError('permission-denied', 'PERSON_MISMATCH');
+    }
 
     const personRef = db.collection(PERSONS).doc(personId as Hex);
     const person = await personRef.get();
@@ -128,12 +146,17 @@ export const registerIdentity = onCall(
     await db.runTransaction(async (tx) => {
       const current = await tx.get(personRef);
       if (current.get('chain.registerTx')) throw new HttpsError('aborted', 'ALREADY_SENT');
-      if (current.get('chain.registerPending')) {
+      // 살아 있는 딱지만 막는다. 전송 중 죽은 인스턴스가 남긴 딱지는 없는 것으로 본다.
+      const pendingSince = (current.get('chain.registerPendingAt') as number | undefined) ?? 0;
+      if (current.get('chain.registerPending') && Date.now() - pendingSince < PENDING_TTL_MS) {
         throw new HttpsError('aborted', 'REGISTER_IN_FLIGHT');
       }
       tx.set(
         personRef,
-        { chain: { registerPending: true }, updatedAt: FieldValue.serverTimestamp() },
+        {
+          chain: { registerPending: true, registerPendingAt: Date.now() },
+          updatedAt: FieldValue.serverTimestamp(),
+        },
         { merge: true },
       );
     });
@@ -151,14 +174,21 @@ export const registerIdentity = onCall(
       );
     } catch (error) {
       // 딱지를 남기면 이 사람은 영원히 가입을 못 한다. 어떤 실패든 반드시 지운다.
-      await personRef.set({ chain: { registerPending: FieldValue.delete() } }, { merge: true });
+      await personRef.set(
+        { chain: { registerPending: FieldValue.delete(), registerPendingAt: FieldValue.delete() } },
+        { merge: true },
+      );
       if (error instanceof HttpsError) throw error;
       throw new HttpsError('internal', `REGISTER_SEND_FAILED:${(error as Error).message}`);
     }
 
     await personRef.set(
       {
-        chain: { registerTx: txHash, registerPending: FieldValue.delete() },
+        chain: {
+          registerTx: txHash,
+          registerPending: FieldValue.delete(),
+          registerPendingAt: FieldValue.delete(),
+        },
         updatedAt: FieldValue.serverTimestamp(),
       },
       { merge: true },

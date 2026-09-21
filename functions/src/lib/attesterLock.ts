@@ -6,8 +6,14 @@ import { SYSTEM, db } from './db.js';
 const LEASE_DOC = 'attester';
 /** 인스턴스가 죽어도 이 시간 뒤에는 다음 호출이 리스를 가져간다. 최대 전송 시간보다 넉넉하다. */
 const LEASE_TTL_MS = 30_000;
-/** 같은 nonce 가 이미 풀에 있을 때 노드가 내는 말. 클라이언트마다 문구가 달라 넓게 잡는다. */
-const NONCE_CONFLICT = /nonce too low|nonce is too low|already known|replacement transaction underpriced/i;
+/**
+ * 재전송해도 안전한 **유일한** 거절 문구. `nonce too low` 는 우리 트랜잭션이 아예
+ * 거절됐다는 뜻이라 다시 보내도 쓰기는 한 번이다.
+ * `already known` / `replacement transaction underpriced` 는 정반대 — 그 nonce 의
+ * 트랜잭션이 **이미 풀에 있다**. `sendAttesterTx` 는 nonce 를 명시하지 않으므로
+ * 재전송하면 viem 이 다음 nonce 를 읽어 `register` 가 두 번 나간다. 그쪽은 그대로 올린다.
+ */
+const NONCE_TOO_LOW = /nonce (is )?too low/i;
 const NONCE_RETRY_DELAY_MS = 300;
 
 /**
@@ -34,12 +40,19 @@ export async function withAttesterLease<T>(run: () => Promise<T>): Promise<T> {
   try {
     return await run();
   } finally {
-    // 리스가 만료돼 이미 남이 가져갔다면 남의 리스를 풀어 주면 안 된다.
-    await db.runTransaction(async (tx) => {
-      const current = await tx.get(ref);
-      if (current.get('holder') !== holder) return;
-      tx.set(ref, { holder: null, lockedUntil: 0 }, { merge: true });
-    });
+    // 반납이 실패해도 원래 결과·오류를 덮어쓰면 안 된다. 보낸 트랜잭션 해시를
+    // 이 자리에서 잃으면 세 겹 멱등 장치 중 어느 것도 복구하지 못한다.
+    // 반납이 끝내 안 되면 `LEASE_TTL_MS` 뒤 다음 호출이 가져간다.
+    try {
+      // 리스가 만료돼 이미 남이 가져갔다면 남의 리스를 풀어 주면 안 된다.
+      await db.runTransaction(async (tx) => {
+        const current = await tx.get(ref);
+        if (current.get('holder') !== holder) return;
+        tx.set(ref, { holder: null, lockedUntil: 0 }, { merge: true });
+      });
+    } catch {
+      /* 리스는 TTL 로 스스로 풀린다. */
+    }
   }
 }
 
@@ -53,7 +66,7 @@ export async function sendSerialized<T>(send: () => Promise<T>): Promise<T> {
     try {
       return await send();
     } catch (error) {
-      if (!NONCE_CONFLICT.test((error as Error)?.message ?? '')) throw error;
+      if (!NONCE_TOO_LOW.test((error as Error)?.message ?? '')) throw error;
       await new Promise((resolve) => setTimeout(resolve, NONCE_RETRY_DELAY_MS));
       return send();
     }
