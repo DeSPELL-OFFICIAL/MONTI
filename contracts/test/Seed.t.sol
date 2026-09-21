@@ -3,7 +3,7 @@ pragma solidity 0.8.31;
 
 import {Test} from "forge-std/Test.sol";
 import {EntryPoint} from "account-abstraction/core/EntryPoint.sol";
-import {Deploy} from "../script/Deploy.s.sol";
+import {DeployHarness} from "./Deploy.t.sol";
 import {Seed} from "../script/Seed.s.sol";
 import {Identity} from "../src/Identity.sol";
 import {Organizers} from "../src/Organizers.sol";
@@ -30,7 +30,7 @@ contract SeedHarness is Seed {
 ///         gitignored local ones and never the tracked 10143 pair.
 contract SeedTest is Test {
     EntryPoint internal entryPoint;
-    Deploy internal deployScript;
+    DeployHarness internal deployScript;
     SeedHarness internal seedScript;
 
     Identity internal identity;
@@ -63,7 +63,7 @@ contract SeedTest is Test {
         vm.chainId(31340);
 
         entryPoint = new EntryPoint();
-        deployScript = new Deploy();
+        deployScript = new DeployHarness();
         seedScript = new SeedHarness();
 
         deployer = vm.addr(DEPLOYER_PK);
@@ -171,7 +171,7 @@ contract SeedTest is Test {
     ///         seed file carries every id sub-plans 03 and 04 read.
     function test_runReadsTheDeploymentAndRecordsWhatTheAppsRead() public {
         if (vm.exists(SEED_PATH)) vm.removeFile(SEED_PATH);
-        deployScript.record();
+        deployScript.recordAt(DEPLOY_PATH);
 
         vm.setEnv("DEPLOYER_PK", vm.toString(DEPLOYER_PK));
         vm.setEnv("ATTESTER_PK", vm.toString(ATTESTER_PK));
@@ -180,6 +180,16 @@ contract SeedTest is Test {
         vm.setEnv("SEED_GATE_KY", vm.toString(GATE_KY));
         vm.setEnv("MEMBER_FUND_WEI", vm.toString(FUND));
         vm.setEnv("SEED_IMAGE_CID", CID);
+
+        // `vm.setEnv` is process-global and forge runs this contract's test functions in parallel, so
+        // the unset-variable case lives here rather than in a test of its own: an unset SEED_GATE_KX
+        // reaches the script as a zero word, and the founder is told which variable is empty instead of
+        // being handed an InvalidGateKey from eight calls deep, after the organizer and the event are
+        // already on chain.
+        vm.setEnv("SEED_GATE_KX", vm.toString(bytes32(0)));
+        vm.expectRevert(bytes("SEED_GATE_KX and SEED_GATE_KY must be the gate device's P-256 public key"));
+        seedScript.run();
+        vm.setEnv("SEED_GATE_KX", vm.toString(GATE_KX));
 
         seedScript.run();
 
@@ -305,22 +315,6 @@ contract SeedTest is Test {
 
         vm.expectRevert(bytes("SEED_GATE_KX and SEED_GATE_KY must be the gate device's P-256 public key"));
         _seedWithGateKey(GATE, GATE_KX, bytes32(0));
-    }
-
-    /// @notice The same message reaches a founder who runs the script with the variables unset, rather
-    ///         than an InvalidGateKey from inside Organizers.
-    function test_runRefusesAGateKeyThatIsMissing() public {
-        vm.setEnv("DEPLOYER_PK", vm.toString(DEPLOYER_PK));
-        vm.setEnv("ATTESTER_PK", vm.toString(ATTESTER_PK));
-        vm.setEnv("GATE_ACCOUNT", vm.toString(GATE));
-        vm.setEnv("SEED_GATE_KX", vm.toString(bytes32(0)));
-        vm.setEnv("SEED_GATE_KY", vm.toString(GATE_KY));
-        vm.setEnv("MEMBER_FUND_WEI", vm.toString(FUND));
-        vm.setEnv("SEED_IMAGE_CID", CID);
-        deployScript.record();
-
-        vm.expectRevert(bytes("SEED_GATE_KX and SEED_GATE_KY must be the gate device's P-256 public key"));
-        seedScript.run();
     }
 
     /// @notice Monad charges on `gas_limit x 100 gwei`, not on gas used, so a demo member funded with

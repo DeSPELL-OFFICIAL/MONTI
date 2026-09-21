@@ -73,10 +73,7 @@ contract Deploy is Script {
         console2.log("stake (wei)    ", stakeWei);
         console2.log("deposit (wei)  ", depositWei);
 
-        // A dry run simulates the whole deployment but leaves nothing on chain, so recording its
-        // addresses would replace the tracked record with contracts that do not exist. Only a real
-        // broadcast earns the write; the tests call `record()` themselves.
-        if (vm.isContext(VmSafe.ForgeContext.ScriptBroadcast)) record();
+        record();
     }
 
     /// @notice Deploys and wires the four contracts, then stakes and funds the paymaster.
@@ -108,17 +105,32 @@ contract Deploy is Script {
     }
 
     /// @notice Records the deployment where sub-plans 02, 03 and 04 look for it.
-    /// @dev    Task 31's `DeployCoinbaseFactory` writes `coinbaseFactory` into this same file, so an
-    ///         existing value is read back and carried over instead of being overwritten with a zero.
-    ///         Public, and called by `run` only under a broadcast, so the tests can write the file on
-    ///         their own chain id without a dry run ever reaching the tracked one.
-    ///         `block` is `block.number` as the *simulation* saw it, which under `--broadcast` is the
-    ///         latest block at simulation time, a few blocks before the transactions land. Indexers
-    ///         should treat it as a safe lower bound to start from, not as the deployment block; the
-    ///         exact number is in the broadcast receipt if anyone needs it.
+    /// @dev    A dry run simulates the whole deployment but leaves nothing on chain, so recording its
+    ///         addresses would replace the tracked record with contracts that do not exist. The guard
+    ///         is inside this function rather than at its call site because
+    ///         `forge script --sig 'record()'` reaches it directly -- the same hazard the Seed's
+    ///         `record` already guards against. Only a real broadcast earns the write; the tests reach
+    ///         the writing half through a harness, so no public entry point can be pointed at an
+    ///         arbitrary path.
     function record() public {
-        string memory path = string.concat("deployments/", vm.toString(block.chainid), ".json");
+        if (!vm.isContext(VmSafe.ForgeContext.ScriptBroadcast)) {
+            console2.log("not a broadcast: nothing was recorded");
+            return;
+        }
+        _record(string.concat("deployments/", vm.toString(block.chainid), ".json"));
+    }
 
+    /// @dev Task 31's `DeployCoinbaseFactory` writes `coinbaseFactory` into this same file, so an
+    ///      existing value is read back and carried over instead of being overwritten with a zero.
+    ///
+    ///      `block` is `block.number` as the *simulation* saw it, which under `--broadcast` is the
+    ///      latest block at simulation time, a few blocks before the transactions land. Indexers
+    ///      should treat it as a safe lower bound to start from, not as the deployment block; the
+    ///      exact number is in the broadcast receipt if anyone needs it. **This is the key sub-plan
+    ///      02's config generator turns into the indexer's `start_block`** -- it is named `block`, not
+    ///      `startBlock`, and `packages/shared`'s `Deployment` interface spells it that way too.
+    ///      Renaming it silently restarts the indexer from block 0.
+    function _record(string memory path) internal {
         address coinbaseFactory;
         if (vm.exists(path)) {
             string memory existing = vm.readFile(path);
