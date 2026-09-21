@@ -23,13 +23,15 @@ export interface AppConfig {
 
 let cached: AppConfig | null = null;
 
-function readEnv(name: string): string | undefined {
+/** Reads a `VITE_*` variable, treating an empty string as absent. */
+export function optionalEnv(name: string): string | undefined {
   const value = import.meta.env[name] as string | undefined;
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
-function required(name: string): string {
-  const value = readEnv(name);
+/** Fail-fast read: every module that needs a `VITE_*` variable names it the same way. */
+export function requiredEnv(name: string): string {
+  const value = optionalEnv(name);
   if (value === undefined) {
     throw new Error(`Missing environment variable ${name}. See apps/web/.env.example`);
   }
@@ -42,27 +44,27 @@ export function resetConfig(): void {
 
 export function getConfig(): AppConfig {
   if (cached) return cached;
-  const rawChainId = readEnv('VITE_CHAIN_ID');
+  const rawChainId = optionalEnv('VITE_CHAIN_ID');
   const chainId = rawChainId === undefined ? DEFAULT_CHAIN_ID : Number.parseInt(rawChainId, 10);
   cached = {
     chainId,
-    rpcUrls: required('VITE_RPC_URLS')
+    rpcUrls: requiredEnv('VITE_RPC_URLS')
       .split(',')
       .map((url) => url.trim())
       .filter(Boolean),
-    wsUrl: required('VITE_WS_URL'),
-    bundlerUrl: required('VITE_BUNDLER_URL'),
+    wsUrl: requiredEnv('VITE_WS_URL'),
+    bundlerUrl: requiredEnv('VITE_BUNDLER_URL'),
     entryPoint: ENTRY_POINT_V06_ADDRESS,
     addresses: {
-      identity: required('VITE_ADDR_IDENTITY') as Hex,
-      organizers: required('VITE_ADDR_ORGANIZERS') as Hex,
-      ticket: required('VITE_ADDR_TICKET') as Hex,
-      paymaster: required('VITE_ADDR_PAYMASTER') as Hex,
+      identity: requiredEnv('VITE_ADDR_IDENTITY') as Hex,
+      organizers: requiredEnv('VITE_ADDR_ORGANIZERS') as Hex,
+      ticket: requiredEnv('VITE_ADDR_TICKET') as Hex,
+      paymaster: requiredEnv('VITE_ADDR_PAYMASTER') as Hex,
     },
-    envioUrl: required('VITE_ENVIO_URL'),
-    rpId: required('VITE_RP_ID'),
-    ipfsGateway: required('VITE_IPFS_GATEWAY'),
-    pinataJwt: required('VITE_PINATA_JWT'),
+    envioUrl: requiredEnv('VITE_ENVIO_URL'),
+    rpId: requiredEnv('VITE_RP_ID'),
+    ipfsGateway: requiredEnv('VITE_IPFS_GATEWAY'),
+    pinataJwt: requiredEnv('VITE_PINATA_JWT'),
     explorerUrl: explorerUrlFor(chainId),
   };
   return cached;
