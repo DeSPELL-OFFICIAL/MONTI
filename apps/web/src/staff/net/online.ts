@@ -19,9 +19,22 @@
 //
 // The probe is `eth_chainId`: no block to fetch, no state to read, no gas, and it goes out over
 // the same fallback transport as every other read (`shared/chain/client`), so it exercises the
-// URLs the gate actually uses instead of a second list that could drift out of sync. It is
-// capped by a deadline of its own, because the failure this module exists to catch is a socket
-// that accepts the request and never answers.
+// URLs the gate actually uses instead of a second list that could drift out of sync.
+//
+// ## One request at a time
+//
+// The probe cannot be cancelled. viem's `buildRequest` would pass a `signal` down to `fetch`,
+// but the **fallback** transport's request function takes only `{ method, params }` and drops
+// the per-call options entirely — and the fallback is exactly what the no-second-URL-list rule
+// requires. So an abandoned probe keeps running: worst case `3 URLs × 2 attempts × 8 s = 48 s`
+// against a hung endpoint, which at the 5 s cadence would put ten dead sockets in flight and
+// eat the browser's six-per-host budget out from under the snapshot and the check-in reads.
+//
+// The rule that fixes it without a second URL list: **never open a second request while the
+// first is still out.** A tick that finds the previous probe unanswered *is* the evidence — it
+// counts as a failure and opens nothing. A hung endpoint therefore still reaches offline on
+// schedule (fire at 30 s → deadline at 32 s is failure one → the 60 s tick is failure two) with
+// exactly one socket ever outstanding.
 import { getPublicClient } from '../../shared/chain/client';
 
 /** Probe cadence while a tap is waiting on the chain. A staff member is watching the screen. */
@@ -39,16 +52,23 @@ export interface OnlineWatcher {
   online(): boolean;
   /**
    * Fires on **changes only**, which is what `useSyncExternalStore` wants: the badge pairs this
-   * with `online` and re-renders exactly when the answer moves.
+   * with `online` and re-renders exactly when the answer moves. It does not replay the current
+   * value, so a consumer that needs a starting point reads `online()` once on mount.
    */
   subscribe(listener: (online: boolean) => void): () => void;
   /**
-   * The gate machine's hint that a tap is in flight, which tightens the cadence to 5 s. Calling
-   * it with the value it already holds is a no-op, so a busy door cannot starve its own probe by
-   * restarting the clock on every tap.
+   * The gate machine's hint that a tap is in flight, which tightens the cadence to 5 s.
+   *
+   * **It can pull a probe earlier; it can never push one out.** The machine toggles this on
+   * every single tap — `onSent` to true, the verdict back to false — and a handler that
+   * restarted the interval would make a busy door probe *less* than an idle one: at a tap every
+   * 4 s with a 1.5 s verdict the clock never survives to its own deadline and the gate goes
+   * blind for exactly as long as the queue lasts. So a change only ever takes the earlier of
+   * the probe already due and one cadence from the last probe. Relaxing back to idle therefore
+   * lets the armed 5 s probe fire first, and the 30 s rhythm starts from that probe.
    */
   setTapPending(pending: boolean): void;
-  /** Releases the timer and the two window listeners. Nothing restarts after this. */
+  /** Releases every timer and listener this watcher owns. Nothing restarts after this. */
   stop(): void;
 }
 
@@ -66,24 +86,6 @@ class ProbeTimeout extends Error {
   }
 }
 
-/**
- * Rejects at `ms` whether or not `work` ever settles. The abandoned request keeps running — we
- * cannot cancel an in-flight EIP-1193 call — but it can no longer hold the verdict hostage, and
- * the next probe is already scheduled, so nothing piles up: at most one probe is outstanding
- * from this module's point of view, because this deadline is shorter than the shortest cadence.
- */
-async function withDeadline<T>(work: Promise<T>, ms: number): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const deadline = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => reject(new ProbeTimeout()), ms);
-  });
-  try {
-    return await Promise.race([work, deadline]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 export function createOnlineWatcher(params: OnlineWatcherParams = {}): OnlineWatcher {
   const activeProbeMs = params.activeProbeMs ?? PROBE_ACTIVE_MS;
   const idleProbeMs = params.idleProbeMs ?? PROBE_IDLE_MS;
@@ -91,12 +93,28 @@ export function createOnlineWatcher(params: OnlineWatcherParams = {}): OnlineWat
 
   const listeners = new Set<(online: boolean) => void>();
   let timer: ReturnType<typeof setTimeout> | undefined;
+  /** The current probe's deadline, held here so `stop()` can clear it mid-flight. At most one
+   *  probe is ever outstanding, so one slot is enough. */
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  /** The request on the wire, cleared whenever it finally answers — which can be long after its
+   *  own deadline passed. Non-undefined means: do not open another one. */
+  let pending: Promise<unknown> | undefined;
+  let lastProbeAt = Date.now();
+  /** When the next probe is owed, as a clock time rather than a delay — a cadence change has to
+   *  compare against it, and a delay left in a `setTimeout` cannot be read back. */
+  let dueAt = lastProbeAt;
   let stopped = false;
   let tapPending = false;
   let failures = 0;
 
+  // The staff build only ever runs in a WebView, but a module that throws at import time takes a
+  // whole screen with it, so the DOM is reached for defensively rather than assumed.
+  const dom = typeof window !== 'undefined' ? window : undefined;
+  const doc = typeof document !== 'undefined' ? document : undefined;
+  const radioDown = (): boolean => typeof navigator !== 'undefined' && navigator.onLine === false;
+
   // The two halves of the answer, kept apart so neither can silently overwrite the other.
-  let radioUp = navigator.onLine !== false;
+  let radioUp = !radioDown();
   let rpcUp = true;
   let published = radioUp && rpcUp;
 
@@ -108,34 +126,88 @@ export function createOnlineWatcher(params: OnlineWatcherParams = {}): OnlineWat
     for (const listener of [...listeners]) listener(published);
   };
 
-  const schedule = (): void => {
-    if (stopped) return;
-    if (timer !== undefined) clearTimeout(timer);
-    timer = setTimeout(tick, tapPending ? activeProbeMs : idleProbeMs);
+  const succeed = (): void => {
+    failures = 0;
+    rpcUp = true;
+    publish();
   };
+
+  const fail = (): void => {
+    failures += 1;
+    if (failures >= OFFLINE_AFTER_FAILURES) rpcUp = false;
+    publish();
+  };
+
+  const cadenceMs = (): number => (tapPending ? activeProbeMs : idleProbeMs);
+
+  const armAt = (at: number): void => {
+    if (stopped) return;
+    dueAt = at;
+    if (timer !== undefined) clearTimeout(timer);
+    // A due time already in the past fires on the next turn of the loop rather than never.
+    timer = setTimeout(tick, Math.max(0, at - Date.now()));
+  };
+
+  /** After a probe the next one is a full cadence away, measured from the probe that just ran. */
+  const armNext = (): void => armAt(lastProbeAt + cadenceMs());
+
+  /**
+   * A cadence change takes the **earlier** of what is already due and one new cadence from the
+   * last probe. The `min` is the whole fix: without it, a hint that flips on every tap resets
+   * the clock forever and the gate never probes at all.
+   */
+  const rearm = (): void => armAt(Math.min(dueAt, lastProbeAt + cadenceMs()));
 
   // The next probe is scheduled *before* this one runs, so a slow answer shifts nothing: the
   // cadence is a metronome, not a chain of retries.
   function tick(): void {
-    schedule();
+    lastProbeAt = Date.now();
+    armNext();
     void probe();
   }
 
-  const probe = async (): Promise<void> => {
+  /** Rejects at `probeTimeoutMs` whether or not the wire ever answers. */
+  const withDeadline = async <T>(work: Promise<T>): Promise<T> => {
+    const expiry = new Promise<never>((_resolve, reject) => {
+      deadline = setTimeout(() => reject(new ProbeTimeout()), probeTimeoutMs);
+    });
     try {
-      await withDeadline(
-        getPublicClient().request({ method: 'eth_chainId' }, { retryCount: 0 }),
-        probeTimeoutMs,
-      );
-      if (stopped) return;
-      failures = 0;
-      rpcUp = true;
-    } catch {
-      if (stopped) return;
-      failures += 1;
-      if (failures >= OFFLINE_AFTER_FAILURES) rpcUp = false;
+      return await Promise.race([work, expiry]);
+    } finally {
+      if (deadline !== undefined) {
+        clearTimeout(deadline);
+        deadline = undefined;
+      }
     }
-    publish();
+  };
+
+  const probe = async (): Promise<void> => {
+    if (stopped) return;
+    if (pending !== undefined) {
+      // Last tick's request is still out there. Opening another would stack sockets on an
+      // endpoint that has already shown it cannot answer, and nothing downstream can be
+      // aborted. The silence is the reading.
+      fail();
+      return;
+    }
+    // No per-call options: the fallback transport drops them, so `retryCount` and `signal` here
+    // would be decoration. The probe inherits the shared transport's retry policy; the deadline
+    // below is what actually bounds it.
+    const inflight = getPublicClient().request({ method: 'eth_chainId' });
+    pending = inflight;
+    const release = (): void => {
+      if (pending === inflight) pending = undefined;
+    };
+    // Both arms, so a late rejection is handled here rather than surfacing as unhandled.
+    inflight.then(release, release);
+
+    try {
+      await withDeadline(inflight);
+    } catch {
+      if (!stopped) fail();
+      return;
+    }
+    if (!stopped) succeed();
   };
 
   const onOffline = (): void => {
@@ -151,9 +223,19 @@ export function createOnlineWatcher(params: OnlineWatcherParams = {}): OnlineWat
     if (failures > 0) tick();
   };
 
-  window.addEventListener('offline', onOffline);
-  window.addEventListener('online', onOnline);
-  schedule();
+  const onVisibility = (): void => {
+    if (stopped || doc?.visibilityState !== 'visible') return;
+    // Android throttles background timers to once a minute and then freezes them outright, so
+    // the cadence above is a promise the OS only keeps while the screen is on. Whatever the
+    // badge is showing when the staff member looks back at it was decided before the screen
+    // went dark; ask again now instead of letting a stale `online: true` stand for 30 s.
+    tick();
+  };
+
+  dom?.addEventListener('offline', onOffline);
+  dom?.addEventListener('online', onOnline);
+  doc?.addEventListener('visibilitychange', onVisibility);
+  armNext();
 
   return {
     online: () => published,
@@ -165,18 +247,21 @@ export function createOnlineWatcher(params: OnlineWatcherParams = {}): OnlineWat
       };
     },
 
-    setTapPending(pending: boolean) {
-      if (stopped || pending === tapPending) return;
-      tapPending = pending;
-      schedule();
+    setTapPending(pending_) {
+      if (stopped || pending_ === tapPending) return;
+      tapPending = pending_;
+      rearm();
     },
 
     stop() {
       stopped = true;
       if (timer !== undefined) clearTimeout(timer);
+      if (deadline !== undefined) clearTimeout(deadline);
       timer = undefined;
-      window.removeEventListener('offline', onOffline);
-      window.removeEventListener('online', onOnline);
+      deadline = undefined;
+      dom?.removeEventListener('offline', onOffline);
+      dom?.removeEventListener('online', onOnline);
+      doc?.removeEventListener('visibilitychange', onVisibility);
       listeners.clear();
     },
   };

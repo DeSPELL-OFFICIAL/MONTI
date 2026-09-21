@@ -16,12 +16,33 @@ import {
   PROBE_ACTIVE_MS,
   PROBE_IDLE_MS,
   PROBE_TIMEOUT_MS,
+  type OnlineWatcher,
+  type OnlineWatcherParams,
 } from './online';
 
-/** jsdom puts `onLine` on `Navigator.prototype`; an own property shadows it and deletes clean. */
+/**
+ * Every watcher goes through here so `afterEach` can stop it. A watcher owns `window` and
+ * `document` listeners, so one left running by a failed assertion answers the *next* test's
+ * events too — which turns a single red test into a cascade that reads like a real bug.
+ */
+const running: OnlineWatcher[] = [];
+function watch(params?: OnlineWatcherParams): OnlineWatcher {
+  const watcher = createOnlineWatcher(params);
+  running.push(watcher);
+  return watcher;
+}
+
+/** jsdom puts these on the prototype; an own property shadows one and deletes clean. */
 function stubNavigatorOnLine(value: boolean): void {
   Object.defineProperty(window.navigator, 'onLine', { configurable: true, get: () => value });
 }
+
+function stubVisibility(value: DocumentVisibilityState): void {
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => value });
+}
+
+/** A probe that is accepted and never answered — the venue-Wi-Fi failure this module exists for. */
+const hang = (): Promise<never> => new Promise<never>(() => {});
 
 describe('online watcher', () => {
   beforeEach(() => {
@@ -30,21 +51,26 @@ describe('online watcher', () => {
   });
 
   afterEach(() => {
+    for (const watcher of running.splice(0)) watcher.stop();
     Reflect.deleteProperty(window.navigator, 'onLine');
+    Reflect.deleteProperty(document, 'visibilityState');
     vi.useRealTimers();
   });
 
   describe('the RPC health probe', () => {
     it('asks for eth_chainId and nothing more expensive', async () => {
-      const watcher = createOnlineWatcher();
+      const watcher = watch();
       await vi.advanceTimersByTimeAsync(PROBE_IDLE_MS);
       expect(request).toHaveBeenCalledTimes(1);
       expect(request.mock.calls[0]?.[0]).toEqual({ method: 'eth_chainId' });
+      // No per-call options: the fallback transport drops them, so passing any would be a lie
+      // told to the next reader of this file.
+      expect(request.mock.calls[0]?.[1]).toBeUndefined();
       watcher.stop();
     });
 
     it('stays online after a single failure and goes offline on the second in a row', async () => {
-      const watcher = createOnlineWatcher();
+      const watcher = watch();
       const seen: boolean[] = [];
       watcher.subscribe((online) => seen.push(online));
 
@@ -65,7 +91,7 @@ describe('online watcher', () => {
     });
 
     it('needs the failures consecutive, not merely frequent', async () => {
-      const watcher = createOnlineWatcher();
+      const watcher = watch();
       for (let i = 0; i < 3; i += 1) {
         request.mockRejectedValueOnce(new Error('flaky'));
         await vi.advanceTimersByTimeAsync(PROBE_IDLE_MS);
@@ -76,19 +102,45 @@ describe('online watcher', () => {
       watcher.stop();
     });
 
-    it('counts a probe that never answers as a failure once the timeout expires', async () => {
-      // A hung socket is the venue-Wi-Fi failure mode: the request is accepted and never
-      // answered, so without a deadline of our own the watcher would report online forever.
-      request.mockReturnValue(new Promise<never>(() => {}));
-      const watcher = createOnlineWatcher();
+    it('counts a probe that never answers as a failure once the deadline expires', async () => {
+      request.mockReturnValue(hang());
+      const watcher = watch();
 
       await vi.advanceTimersByTimeAsync(PROBE_IDLE_MS + PROBE_TIMEOUT_MS);
       expect(request).toHaveBeenCalledTimes(1);
       expect(watcher.online()).toBe(true);
+      watcher.stop();
+    });
+
+    it('never opens a second request while the first is still out, and counts that tick as a failure', async () => {
+      // Nothing downstream can be aborted — the fallback transport drops the `signal` — so an
+      // abandoned probe can live 48 s against a hung endpoint. Opening one per tick would put
+      // ten dead sockets in flight and starve the snapshot reads of the browser's six per host.
+      request.mockReturnValue(hang());
+      const watcher = watch();
+
+      await vi.advanceTimersByTimeAsync(PROBE_IDLE_MS + PROBE_TIMEOUT_MS);
+      expect(watcher.online()).toBe(true);
 
       await vi.advanceTimersByTimeAsync(PROBE_IDLE_MS);
-      expect(request).toHaveBeenCalledTimes(2);
+      // Offline on schedule, with exactly one socket ever outstanding.
       expect(watcher.online()).toBe(false);
+      expect(request).toHaveBeenCalledTimes(1);
+      watcher.stop();
+    });
+
+    it('opens a fresh request once the hung one finally answers', async () => {
+      let answer: ((value: unknown) => void) | undefined;
+      request.mockReturnValueOnce(new Promise((resolve) => (answer = resolve)));
+      const watcher = watch();
+
+      await vi.advanceTimersByTimeAsync(PROBE_IDLE_MS + PROBE_TIMEOUT_MS);
+      expect(request).toHaveBeenCalledTimes(1);
+
+      answer?.('0x279f');
+      await vi.advanceTimersByTimeAsync(PROBE_IDLE_MS);
+      expect(request).toHaveBeenCalledTimes(2);
+      expect(watcher.online()).toBe(true);
       watcher.stop();
     });
 
@@ -99,7 +151,7 @@ describe('online watcher', () => {
 
   describe('cadence', () => {
     it('probes every 30 s while no tap is pending', async () => {
-      const watcher = createOnlineWatcher();
+      const watcher = watch();
       await vi.advanceTimersByTimeAsync(PROBE_IDLE_MS - 1);
       expect(request).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(1);
@@ -109,37 +161,50 @@ describe('online watcher', () => {
       watcher.stop();
     });
 
-    it('tightens to 5 s the moment a tap goes pending, without waiting out the idle interval', async () => {
-      const watcher = createOnlineWatcher();
+    it('tightens to 5 s from the last probe, not from the hint', async () => {
+      const watcher = watch();
+      await vi.advanceTimersByTimeAsync(3_000);
+      watcher.setTapPending(true);
+
+      await vi.advanceTimersByTimeAsync(PROBE_ACTIVE_MS - 3_000 - 1);
+      expect(request).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(request).toHaveBeenCalledTimes(1);
+      watcher.stop();
+    });
+
+    it('fires at once when the tap arrives and the probe is already overdue', async () => {
+      const watcher = watch();
       await vi.advanceTimersByTimeAsync(20_000);
       expect(request).not.toHaveBeenCalled();
 
       watcher.setTapPending(true);
-      await vi.advanceTimersByTimeAsync(PROBE_ACTIVE_MS);
+      await vi.advanceTimersByTimeAsync(0);
       expect(request).toHaveBeenCalledTimes(1);
-      await vi.advanceTimersByTimeAsync(PROBE_ACTIVE_MS);
-      expect(request).toHaveBeenCalledTimes(2);
       watcher.stop();
     });
 
-    it('relaxes back to 30 s when the tap settles', async () => {
-      const watcher = createOnlineWatcher();
+    it('lets the armed probe fire before the idle rhythm resumes', async () => {
+      const watcher = watch();
       watcher.setTapPending(true);
       await vi.advanceTimersByTimeAsync(PROBE_ACTIVE_MS);
       expect(request).toHaveBeenCalledTimes(1);
 
+      // Relaxing must not push out the probe already due at 10 s...
       watcher.setTapPending(false);
       await vi.advanceTimersByTimeAsync(PROBE_ACTIVE_MS);
-      expect(request).toHaveBeenCalledTimes(1);
-      await vi.advanceTimersByTimeAsync(PROBE_IDLE_MS - PROBE_ACTIVE_MS);
       expect(request).toHaveBeenCalledTimes(2);
+
+      // ...and the 30 s rhythm then runs from that probe.
+      await vi.advanceTimersByTimeAsync(PROBE_IDLE_MS - 1);
+      expect(request).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(request).toHaveBeenCalledTimes(3);
       watcher.stop();
     });
 
     it('does not restart the clock when the hint repeats the value it already holds', async () => {
-      // The machine calls this per tap. If every call rescheduled, a busy gate would push the
-      // probe past its own deadline forever and never notice the chain had gone away.
-      const watcher = createOnlineWatcher();
+      const watcher = watch();
       watcher.setTapPending(true);
       await vi.advanceTimersByTimeAsync(PROBE_ACTIVE_MS - 1);
       watcher.setTapPending(true);
@@ -147,11 +212,36 @@ describe('online watcher', () => {
       expect(request).toHaveBeenCalledTimes(1);
       watcher.stop();
     });
+
+    it('holds the 5 s rhythm through 200 s of a gate toggling the hint on every tap', async () => {
+      // The regression. The machine calls `setTapPending(true)` on `onSent` and `false` on the
+      // verdict, so a moving queue flips it constantly — and a handler that restarted the
+      // interval on each flip measured **zero** probes across this exact stretch: the gate went
+      // blind for as long as people kept tapping, which is when it can least afford to.
+      const at: number[] = [];
+      request.mockImplementation(() => {
+        at.push(Date.now());
+        return Promise.resolve('0x279f');
+      });
+
+      const watcher = watch();
+      for (let tap = 0; tap < 50; tap += 1) {
+        watcher.setTapPending(true);
+        await vi.advanceTimersByTimeAsync(1_500);
+        watcher.setTapPending(false);
+        await vi.advanceTimersByTimeAsync(2_500);
+      }
+
+      expect(at.length).toBeGreaterThanOrEqual(38);
+      const gaps = at.slice(1).map((time, i) => time - (at[i] ?? 0));
+      expect(Math.max(...gaps)).toBeLessThanOrEqual(PROBE_ACTIVE_MS);
+      watcher.stop();
+    });
   });
 
   describe('navigator.onLine', () => {
     it('goes offline on the browser event without waiting for a probe', () => {
-      const watcher = createOnlineWatcher();
+      const watcher = watch();
       const seen: boolean[] = [];
       watcher.subscribe((online) => seen.push(online));
 
@@ -167,14 +257,14 @@ describe('online watcher', () => {
 
     it('starts offline when the radio is already down', () => {
       stubNavigatorOnLine(false);
-      const watcher = createOnlineWatcher();
+      const watcher = watch();
       expect(watcher.online()).toBe(false);
       watcher.stop();
     });
 
     it('does not let the radio coming back overrule an RPC that is still dead', async () => {
       request.mockRejectedValue(new Error('ECONNREFUSED'));
-      const watcher = createOnlineWatcher();
+      const watcher = watch();
       await vi.advanceTimersByTimeAsync(PROBE_IDLE_MS * OFFLINE_AFTER_FAILURES);
       expect(watcher.online()).toBe(false);
 
@@ -185,7 +275,7 @@ describe('online watcher', () => {
 
     it('probes immediately when the radio returns, instead of sitting out the interval', async () => {
       request.mockRejectedValue(new Error('ECONNREFUSED'));
-      const watcher = createOnlineWatcher();
+      const watcher = watch();
       await vi.advanceTimersByTimeAsync(PROBE_IDLE_MS * OFFLINE_AFTER_FAILURES);
       expect(watcher.online()).toBe(false);
       expect(request).toHaveBeenCalledTimes(2);
@@ -199,9 +289,49 @@ describe('online watcher', () => {
     });
   });
 
+  describe('visibility', () => {
+    it('probes as soon as the screen comes back', async () => {
+      // Android throttles background timers to once a minute and then freezes them, so the
+      // cadence is a promise the OS keeps only while the screen is on.
+      const watcher = watch();
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(request).not.toHaveBeenCalled();
+
+      stubVisibility('visible');
+      document.dispatchEvent(new Event('visibilitychange'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(request).toHaveBeenCalledTimes(1);
+      watcher.stop();
+    });
+
+    it('ignores the event when the screen is going the other way', async () => {
+      const watcher = watch();
+      stubVisibility('hidden');
+      document.dispatchEvent(new Event('visibilitychange'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(request).not.toHaveBeenCalled();
+      watcher.stop();
+    });
+
+    it('restarts the 30 s rhythm from the probe the screen triggered', async () => {
+      const watcher = watch();
+      await vi.advanceTimersByTimeAsync(10_000);
+      stubVisibility('visible');
+      document.dispatchEvent(new Event('visibilitychange'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(request).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(PROBE_IDLE_MS - 1);
+      expect(request).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(request).toHaveBeenCalledTimes(2);
+      watcher.stop();
+    });
+  });
+
   describe('subscription and stop', () => {
     it('publishes only changes, so a badge can bind straight to it', async () => {
-      const watcher = createOnlineWatcher();
+      const watcher = watch();
       const seen: boolean[] = [];
       watcher.subscribe((online) => seen.push(online));
       await vi.advanceTimersByTimeAsync(PROBE_IDLE_MS * 3);
@@ -211,7 +341,7 @@ describe('online watcher', () => {
     });
 
     it('stops delivering to an unsubscribed listener but keeps the state current', () => {
-      const watcher = createOnlineWatcher();
+      const watcher = watch();
       const seen: boolean[] = [];
       const unsubscribe = watcher.subscribe((online) => seen.push(online));
       unsubscribe();
@@ -221,8 +351,8 @@ describe('online watcher', () => {
       watcher.stop();
     });
 
-    it('clears its timer and its window listeners on stop', async () => {
-      const watcher = createOnlineWatcher();
+    it('clears the cadence timer and every window listener on stop', async () => {
+      const watcher = watch();
       const seen: boolean[] = [];
       watcher.subscribe((online) => seen.push(online));
 
@@ -232,8 +362,21 @@ describe('online watcher', () => {
       expect(request).not.toHaveBeenCalled();
 
       window.dispatchEvent(new Event('offline'));
+      stubVisibility('visible');
+      document.dispatchEvent(new Event('visibilitychange'));
       expect(seen).toEqual([]);
       expect(watcher.online()).toBe(true);
+    });
+
+    it('clears an in-flight probe deadline too, not just the cadence timer', async () => {
+      request.mockReturnValue(hang());
+      const watcher = watch();
+      await vi.advanceTimersByTimeAsync(PROBE_IDLE_MS);
+      // Cadence timer plus the 2 s deadline of the probe now on the wire.
+      expect(vi.getTimerCount()).toBeGreaterThan(1);
+
+      watcher.stop();
+      expect(vi.getTimerCount()).toBe(0);
     });
   });
 });
