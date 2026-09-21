@@ -18,7 +18,9 @@ import {ITicket} from "./interfaces/ITicket.sol";
 ///         project's budget or push its own costs onto MONTI.
 ///
 /// @dev    The paymaster must be staked on the EntryPoint (ERC-7562): validation reads storage owned by
-///         Identity, Organizers and Ticket, and it writes this contract's own. Task 28 adds `addStake`.
+///         Identity, Organizers and Ticket, and it writes this contract's own. The Deploy script must
+///         therefore call `addStake` before the first sponsored operation: an unstaked paymaster has its
+///         operations dropped by the bundler, which never reaches the chain to be diagnosed.
 ///         Validation must never call the EntryPoint (OP-054 — bundlers drop such operations), so the
 ///         platform slot is not checked here at all: it *is* this paymaster's deposit, and the EntryPoint
 ///         already refuses an operation the deposit cannot cover (AA31). A project slot is reserved at
@@ -68,6 +70,9 @@ contract MontiPaymaster is IPaymaster {
     event Deposited(uint256 indexed orgId, uint256 amount);
     event BudgetDebited(uint256 indexed orgId, uint256 amount);
     event SponsorModeSet(uint256 indexed orgId, bool selfSponsored);
+    event StakeAdded(uint256 amount, uint32 unstakeDelaySec);
+    event StakeUnlocked();
+    event StakeWithdrawn(address indexed to);
 
     error Unauthorized();
     error ZeroAddress();
@@ -143,6 +148,37 @@ contract MontiPaymaster is IPaymaster {
         if (!organizers.hasPermission(orgId, msg.sender, PERM_MANAGE_BUDGET)) revert Unauthorized();
         selfSponsored[orgId] = on;
         emit SponsorModeSet(orgId, on);
+    }
+
+    // --- Stake ---------------------------------------------------------------------------------------
+
+    /// @notice Stakes this paymaster on the EntryPoint, which spec 8.4 requires before it sponsors
+    ///         anything: validation reads other contracts' storage and writes this one's, and ERC-7562
+    ///         only lets a staked entity do either. Testnet: 1 MON at `unstakeDelaySec` 86400 (one day).
+    /// @dev    Stake is not deposit. This money pays for no operation — it only buys the bundler's
+    ///         acceptance; gas comes out of the deposit that `depositPlatform` and `deposit` fill.
+    function addStake(uint32 unstakeDelaySec) external payable {
+        if (msg.sender != deployer) revert Unauthorized();
+        entryPoint.addStake{value: msg.value}(unstakeDelaySec);
+        emit StakeAdded(msg.value, unstakeDelaySec);
+    }
+
+    /// @notice Starts the unstake delay. Bundlers drop an unstaking paymaster's operations, so this is the
+    ///         first half of retiring the deployment rather than an operational knob.
+    function unlockStake() external {
+        if (msg.sender != deployer) revert Unauthorized();
+        entryPoint.unlockStake();
+        emit StakeUnlocked();
+    }
+
+    /// @notice Takes the stake back once the delay has passed; the EntryPoint reverts while it has not.
+    ///         Stake is MONTI's own money, so it goes wherever the deployer names — unlike the deposit,
+    ///         which `withdrawPlatform` keeps capped at what no project slot is backing.
+    function withdrawStake(address payable to) external {
+        if (msg.sender != deployer) revert Unauthorized();
+        if (to == address(0)) revert ZeroAddress();
+        entryPoint.withdrawStake(to);
+        emit StakeWithdrawn(to);
     }
 
     // --- Sponsorship ---------------------------------------------------------------------------------
