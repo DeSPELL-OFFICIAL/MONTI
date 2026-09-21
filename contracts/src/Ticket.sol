@@ -619,6 +619,27 @@ contract Ticket is ERC721, EIP712, ITicket {
         address from = _ownerOf(tokenId);
         uint256 eventId = _eventOf[tokenId];
 
+        // Gap B. cancelRotation 은 밀려난 계정을 되살리면서 _personOf[새 계정] 을 지운다. 그래서
+        // 되돌리기 창이 열려 있는 동안 새 계정이 받아 둔 티켓은 취소 한 번에 벽돌이 된다 — 그
+        // 계정은 더 이상 멤버가 아니므로 _update(NotMember) 로도, checkIn(NotMember) 으로도,
+        // migrate(NotRotatedAccount) 로도 구할 수 없다. 그래서 창이 닫힐 때까지 아무것도 받지
+        // 않는다. 잃는 것은 없고 밀리는 것은 24시간, 즉 migrate 가 이미 기다리는 그 시간이다.
+        //
+        // 판정은 rotatedAt 하나로 하지 않는다. register 도 그 스탬프를 찍고(Identity:77),
+        // cancelRotation 은 그것을 일부러 되감지 않으므로(어테스터에게 7일 쿨다운을 그대로
+        // 물리기 위해서다), 스탬프만 보면 갓 등록한 사람과 이미 되돌린 사람까지 묶인다.
+        // "지금 되돌릴 수 있는 회전" 은 rotatedFrom 한 칸이 들고 있고 취소가 그것을 비운다.
+        //
+        // _internalMove(migrate) 는 면제다 — migrate 자신이 MIGRATE_DELAY 로 같은 창을 기다리고,
+        // 창이 닫힌 뒤에만 통한다. 소각(to == 0)도 받는 계정이 없으므로 해당 없다.
+        if (to != address(0) && !_internalMove) {
+            bytes32 personId = identity.personOf(to);
+            if (personId != bytes32(0) && identity.rotatedFrom(personId) != address(0)) {
+                uint256 opened = uint256(identity.rotatedAt(personId));
+                if (block.timestamp < opened + identity.ROTATION_UNDO_WINDOW()) revert RotationPending();
+            }
+        }
+
         if (from != address(0) && to != address(0)) {
             if (_offers[tokenId].from != address(0)) {
                 delete _offers[tokenId];

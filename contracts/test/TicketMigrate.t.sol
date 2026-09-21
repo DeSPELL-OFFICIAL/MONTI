@@ -354,3 +354,143 @@ contract TicketMigrateTest is MontiTest {
         assertEq(ticket.transfersOf(tokenId), 0, "migrate is not a transfer");
     }
 }
+
+/// @notice Gap B(Tasks 4–7 리뷰). `cancelRotation` 은 밀려난 계정을 되살리면서 `_personOf[새 계정]`
+///         을 지운다. 그래서 되돌리기 창(24h)이 열려 있는 동안 새 계정이 받아 둔 티켓은 취소 한
+///         번에 벽돌이 된다 — 그 계정은 더 이상 멤버가 아니므로 `_update`(NotMember)로 옮길 수도,
+///         `checkIn`(NotMember)으로 문을 통과할 수도, `migrate`(NotRotatedAccount)로 구할 수도 없다.
+///         해법은 창이 닫힐 때까지 새 계정이 아무것도 받지 않는 것이다. 잃는 것은 없고 밀리는 것은
+///         24시간뿐이며, 그 24시간은 이미 `migrate` 가 기다리는 바로 그 24시간이다.
+///
+///         회전 쿨다운이 7일이라 이 시나리오의 시계는 전부 `T0 + 7 days` 근처에 있다. Base 의
+///         `_event` 는 T0 에 고정된 일정을 만들어 그때는 판매가 이미 끝나 있으므로, 여기서만 쓰는
+///         늦은 일정의 행사를 따로 만든다.
+contract TicketRotationQuarantineTest is MontiTest {
+    bytes32 internal constant ALICE_PERSON = bytes32(uint256(0xA1A1));
+    uint64 internal constant ROTATED = T0 + 7 days;
+
+    uint256 internal orgId;
+    uint256 internal eventId;
+    uint256 internal carolToken;
+
+    function setUp() public {
+        _deployMonti();
+        _memberWithDeviceKey(ALICE, uint256(ALICE_PERSON));
+        _member(CAROL, 0xCA401);
+        orgId = _org();
+        eventId = _lateEvent();
+
+        vm.warp(ROTATED);
+        vm.prank(CAROL);
+        carolToken = ticket.claim(eventId, 0, "");
+    }
+
+    function _lateEvent() internal returns (uint256 id) {
+        Ticket.EventMeta memory m = Ticket.EventMeta({
+            orgId: orgId,
+            titleHash: keccak256("MONTI Recovery"),
+            descHash: keccak256("an event still on sale once the rotation cooldown has passed"),
+            imageCid: "bafyTestCid",
+            startsAt: ROTATED + 30 days,
+            endsAt: ROTATED + 31 days,
+            venueHash: keccak256("Seoul"),
+            saleStart: T0,
+            saleEnd: ROTATED + 20 days,
+            transferable: true,
+            transferCutoffSeconds: 2 hours,
+            maxTransfers: 3,
+            approvalRequired: false,
+            category: 0,
+            regionCode: keccak256("KR-11"),
+            requireKyc: false
+        });
+        Ticket.Tier[] memory t = new Ticket.Tier[](1);
+        t[0] = Ticket.Tier({name: "General", priceUsdCents: 0, supply: 100, minted: 0, maxPerWallet: 3, seated: false});
+        vm.startPrank(ORG_OWNER);
+        id = ticket.createEvent(m, t);
+        ticket.publishEvent(id);
+        vm.stopPrank();
+    }
+
+    function _rotateAliceTo(address newAccount) internal {
+        vm.prank(attester);
+        identity.rotateAccount(ALICE_PERSON, newAccount);
+    }
+
+    /// @dev 민트도 양도도 같은 문에서 막힌다. BOB 은 지금 이 personId 의 계정이지만(isMember 가
+    ///      참이다) 아직 확정된 계정이 아니다.
+    function test_theNewAccountTakesNoTicketWhileTheUndoWindowIsOpen() public {
+        _rotateAliceTo(BOB);
+
+        vm.prank(BOB);
+        vm.expectRevert(Ticket.RotationPending.selector);
+        ticket.claim(eventId, 0, "");
+
+        vm.prank(CAROL);
+        vm.expectRevert(Ticket.RotationPending.selector);
+        ticket.transferFrom(CAROL, BOB, carolToken);
+
+        assertEq(ticket.ownerOf(carolToken), CAROL, "nothing moved");
+        assertEq(ticket.balanceOf(BOB), 0, "and nothing was minted");
+    }
+
+    /// @dev 경계는 양끝을 다 못박는다. 창이 닫히는 그 순간부터 새 계정은 평범한 계정이다.
+    function test_theQuarantineLiftsExactlyWhenTheWindowCloses() public {
+        _rotateAliceTo(BOB);
+        uint256 opened = uint256(identity.rotatedAt(ALICE_PERSON));
+        uint256 closes = opened + identity.ROTATION_UNDO_WINDOW();
+
+        vm.warp(closes - 1);
+        vm.prank(BOB);
+        vm.expectRevert(Ticket.RotationPending.selector);
+        ticket.claim(eventId, 0, "");
+
+        vm.warp(closes);
+        vm.prank(BOB);
+        uint256 fresh = ticket.claim(eventId, 0, "");
+        assertEq(ticket.ownerOf(fresh), BOB, "the window is closed; the new account is just an account");
+
+        vm.prank(CAROL);
+        ticket.transferFrom(CAROL, BOB, carolToken);
+        assertEq(ticket.ownerOf(carolToken), BOB);
+    }
+
+    /// @dev 취소 뒤에는 검사가 무력해야 한다. Identity 는 `rotatedAt` 을 **일부러 되감지 않으므로**
+    ///      (어테스터에게 7일 쿨다운을 그대로 물린다) 그 스탬프 하나로는 판정할 수 없다.
+    ///      "지금 되돌릴 수 있는 회전"이 있는지는 `rotatedFrom` 이 들고 있고, 취소가 그것을 비운다.
+    function test_cancelRotationLeavesTheQuarantineInert() public {
+        _rotateAliceTo(BOB);
+        vm.prank(ALICE);
+        identity.cancelRotation();
+
+        assertGt(identity.rotatedAt(ALICE_PERSON), 0, "the cooldown stamp deliberately survives the undo");
+        assertEq(identity.rotatedFrom(ALICE_PERSON), address(0), "but there is no rotation left to undo");
+
+        vm.prank(ALICE);
+        uint256 fresh = ticket.claim(eventId, 0, "");
+        assertEq(ticket.ownerOf(fresh), ALICE, "the restored account is not quarantined by its own stamp");
+
+        // 쫓겨난 새 계정은 격리가 아니라 멤버십으로 막힌다 — 그게 취소의 의미다.
+        vm.prank(BOB);
+        vm.expectRevert(Ticket.NotMember.selector);
+        ticket.claim(eventId, 0, "");
+    }
+
+    /// @dev 남의 회전은 남의 일이다. 그리고 `register` 도 `rotatedAt` 을 찍으므로(Identity:77),
+    ///      갓 등록한 사람이 24시간 묶이지 않는다는 것까지 여기서 못박는다.
+    function test_anUnrelatedMemberIsUntouchedByAnotherPersonsRotation() public {
+        _rotateAliceTo(BOB);
+
+        assertGt(identity.rotatedAt(bytes32(uint256(0xCA401))), 0, "register stamps rotatedAt too");
+        assertEq(identity.rotatedFrom(bytes32(uint256(0xCA401))), address(0), "but CAROL rotated nothing");
+
+        vm.prank(CAROL);
+        uint256 fresh = ticket.claim(eventId, 0, "");
+        assertEq(ticket.ownerOf(fresh), CAROL);
+
+        _member(address(0xD00D), 0xD00D);
+        vm.prank(CAROL);
+        ticket.transferFrom(CAROL, address(0xD00D), carolToken);
+        assertEq(ticket.ownerOf(carolToken), address(0xD00D), "a member registered this very second can receive");
+    }
+}

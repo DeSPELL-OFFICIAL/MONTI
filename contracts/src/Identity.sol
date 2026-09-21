@@ -22,7 +22,7 @@ contract Identity is IIdentity, AttesterRole {
     /// @notice 회전을 되돌릴 수 있는 시간(6.3 T11). Ticket.MIGRATE_DELAY 와 같은 값이어야 한다 —
     ///         두 창이 어긋나면 되돌릴 수도 없는데 티켓은 아직 안 넘어간 구간이 생기거나, 반대로
     ///         티켓이 넘어간 뒤에도 되돌릴 수 있는 구간이 생긴다. TicketMigrate.t.sol 이 단언한다.
-    uint256 public constant ROTATION_UNDO_WINDOW = 1 days;
+    uint256 public constant override ROTATION_UNDO_WINDOW = 1 days;
 
     mapping(bytes32 => address) private _accountOf;
     mapping(address => bytes32) private _personOf;
