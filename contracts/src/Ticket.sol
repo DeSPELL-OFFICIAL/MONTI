@@ -58,8 +58,13 @@ contract Ticket is ERC721, EIP712, ITicket {
         uint64 ts;
         bytes32 nonceHash;
         bool manual;
-        /// @dev 스펙 12 의 오프라인 큐가 복구 후에 밀어 넣은 기록이다. manual 과 같은 슬롯에
-        ///      들어가므로 저장 비용은 0이다.
+        /// @dev 스펙 12 의 오프라인 큐가 복구 후에 밀어 넣은 기록이다. manual 과 같은 슬롯이지만
+        ///      **저장 비용이 0은 아니다**: nonceHash 가 bytes32 라 ts 와 같은 슬롯에 못 들어가고,
+        ///      그래서 manual/late 는 현장 경로에서 통째로 0인 네 번째 슬롯에 산다. late 를 세우는
+        ///      것은 거기에 0 -> 비0 SSTORE 하나(약 20k)를 새로 만드는 일이고, checkInLate 가
+        ///      checkIn 보다 28.7k 비싼 이유의 대부분이 이것이다(TicketCheckInLate.t.sol 이 둘을
+        ///      같은 픽스처 위에서 잰다). 필드 순서를 ts/manual/late 로 바꾸면 사라지지만 그것은
+        ///      checkInOf 의 반환 튜플 순서를 바꾸는 일이라 여기서 하지 않는다.
         bool late;
     }
 

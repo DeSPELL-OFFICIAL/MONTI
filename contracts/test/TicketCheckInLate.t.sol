@@ -267,3 +267,62 @@ contract TicketCheckInLateBoundaryTest is CheckInLateBase {
         assertTrue(ticket.checkInOf(tokenId).late);
     }
 }
+
+/// @notice 04 가 UserOp 의 네 가스 필드를 잡을 때 쓰는 출발점(I10). 두 경로를 **같은 픽스처
+///         위에서** 나란히 잰다 — `CheckInGas.t.sol` 의 현장 측정은 자기 행사를 따로 세우므로
+///         두 숫자의 차이를 늦은 경로의 값으로 읽을 수 없다. 여기서는 배포도, 행사도, 티켓도,
+///         게이트도 같고 다른 것은 호출하는 함수와 탭이 흘러 들어온 시각뿐이다.
+///
+///         픽스처는 `setUp` 에, 즉 별도 트랜잭션에 둔다 — 같은 트랜잭션에서 재면 계정과 슬롯이
+///         이미 따뜻해서 게이트 폰이 실제로 내는 값보다 한참 낮게 나온다. 측정 창 안에는 인자를
+///         calldata 로 인코딩하는 비용과 CALL 자체도 들어가므로 몇백 가스 보수적으로 나온다.
+contract CheckInLateGasTest is CheckInLateBase {
+    /// @dev 스펙 8.3 은 스폰서된 UserOp 전체에 275k 를 준다. 번들러·검증 오버헤드에 75k 를 남기고
+    ///      호출 자체에 200k 를 주는 것이 그 배분이며, 아래 로그가 실제 여유를 그대로 찍는다.
+    uint256 internal constant CHECK_IN_GAS_CEILING = 200_000;
+
+    function setUp() public {
+        _setUpLate(ISSUED, ISSUED + 6 hours);
+    }
+
+    /// @dev 대조군. 같은 코드·같은 서명이 발급 직후에 도착하면 이만큼 든다.
+    function test_checkInGasOnThisFixture() public {
+        vm.warp(ISSUED + 5);
+        Ticket.GateCode memory g = _code();
+        bytes memory sig = _sig();
+        Ticket t = ticket;
+        uint256 id = tokenId;
+
+        vm.prank(GATE_A);
+        uint256 before = gasleft();
+        t.checkIn(id, g, sig);
+        uint256 used = before - gasleft();
+
+        assertEq(ticket.checkInOf(id).gateId, gateId, "the measured call must be a real check-in");
+        assertFalse(ticket.checkInOf(id).late, "and it must be the live path");
+        emit log_named_uint("checkIn gas (local osaka, shared fixture)", used);
+        assertLt(used, CHECK_IN_GAS_CEILING, "spec 8.3 budgets 275k for the whole user op; the call gets 200k");
+    }
+
+    /// @dev 늦은 경로. 같은 `_admit` 을 타지만 제출 기한을 재느라 `endsAt` 을 한 번 더 읽고
+    ///      `late` 를 세운다(`manual` 과 같은 슬롯이라 추가 SSTORE 는 없다).
+    function test_checkInLateGas() public {
+        vm.warp(ISSUED + 1 hours);
+        Ticket.GateCode memory g = _code();
+        bytes memory sig = _sig();
+        // 테스트 자신의 장부 SLOAD 가 측정 창에 들어오지 않게 미리 읽어 둔다.
+        Ticket t = ticket;
+        uint256 id = tokenId;
+
+        vm.prank(GATE_A);
+        uint256 before = gasleft();
+        t.checkInLate(id, g, sig);
+        uint256 used = before - gasleft();
+
+        // 되돌린 호출은 싸다. 진짜 늦은 입장을 쟀는지 확인하고 나서 숫자를 믿는다.
+        assertTrue(ticket.checkInOf(id).late, "the measured call must be a real late check-in");
+        emit log_named_uint("checkInLate gas (local osaka)", used);
+        emit log_named_uint("margin under the 200k call budget (gas)", CHECK_IN_GAS_CEILING - used);
+        assertLt(used, CHECK_IN_GAS_CEILING, "spec 8.3 budgets 275k for the whole user op; the call gets 200k");
+    }
+}
