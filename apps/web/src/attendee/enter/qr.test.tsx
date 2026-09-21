@@ -27,7 +27,12 @@ const GATE_CODE: GateCodeWire = {
   ky: `0x${'00'.repeat(32)}`,
   sig: `0x${'00'.repeat(64)}`,
 };
-const WIRE: GateResponseWire = { v: 1, tokenId: '7', deviceSig: `0x${'22'.repeat(64)}` as Hex };
+const WIRE: GateResponseWire = {
+  v: 2,
+  tokenId: '7',
+  nonce: `0x${'11'.repeat(32)}` as Hex,
+  deviceSig: `0x${'22'.repeat(64)}` as Hex,
+};
 
 beforeEach(() => {
   vi.setSystemTime(ISSUED_AT * 1000);

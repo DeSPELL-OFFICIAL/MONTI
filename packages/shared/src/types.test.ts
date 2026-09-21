@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   EVENT_STATUS_BY_CODE,
   GATE_DENY_CODES,
+  GATE_RESPONSE_VERSION,
   SUPPORTED_LOCALES,
   isGateCodeWire,
   isGateDenyCode,
@@ -26,7 +27,7 @@ const validGateCode: GateCodeWire = {
   sig: B64,
 };
 
-const validResponse: GateResponseWire = { v: 1, tokenId: '7', deviceSig: B64 };
+const validResponse: GateResponseWire = { v: 2, tokenId: '7', nonce: B32, deviceSig: B64 };
 
 describe('hex guards', () => {
   it('isHex32 accepts 32-byte hex and rejects the rest', () => {
@@ -65,6 +66,18 @@ describe('wire guards', () => {
     expect(isGateResponseWire(validResponse)).toBe(true);
     expect(isGateResponseWire({ ...validResponse, deviceSig: B32 })).toBe(false);
   });
+
+  it('isGateResponseWire requires the gate code nonce, which is what matches answer to code', () => {
+    const { nonce: _nonce, ...withoutNonce } = validResponse;
+    expect(isGateResponseWire(withoutNonce)).toBe(false);
+    expect(isGateResponseWire({ ...validResponse, nonce: B64 })).toBe(false);
+  });
+
+  it('isGateResponseWire rejects the v1 shape outright — no device ever carried one', () => {
+    expect(isGateResponseWire({ v: 1, tokenId: '7', deviceSig: B64 })).toBe(false);
+    expect(isGateResponseWire({ ...validResponse, v: 1 })).toBe(false);
+    expect(isGateResponseWire({ ...validResponse, v: 3 })).toBe(false);
+  });
 });
 
 describe('enumerations', () => {
@@ -74,6 +87,10 @@ describe('enumerations', () => {
     expect(EVENT_STATUS_BY_CODE[2]).toBe('Cancelled');
     expect(EVENT_STATUS_BY_CODE[3]).toBe('Ended');
     expect(EVENT_STATUS_BY_CODE).toHaveLength(4);
+  });
+
+  it('pins the gate response wire version the staff app must speak', () => {
+    expect(GATE_RESPONSE_VERSION).toBe(2);
   });
 
   it('supports exactly the two locales the app ships', () => {

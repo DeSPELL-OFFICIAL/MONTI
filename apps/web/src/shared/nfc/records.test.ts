@@ -84,7 +84,12 @@ describe('nfc records', () => {
   });
 
   it('writes the response as an external record and round-trips through the QR form', () => {
-    const wire: GateResponseWire = { v: 1, tokenId: '42', deviceSig: `0x${'ab'.repeat(64)}` };
+    const wire: GateResponseWire = {
+      v: 2,
+      tokenId: '42',
+      nonce: `0x${'11'.repeat(32)}`,
+      deviceSig: `0x${'ab'.repeat(64)}`,
+    };
     const record = gateResponseRecord(wire);
     expect(record.type).toBe('monti.app:s');
     // v + tokenId + a 64-byte signature as 130 hex chars: comfortably over 140 bytes.

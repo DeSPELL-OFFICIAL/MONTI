@@ -197,7 +197,7 @@ describe('<Enter /> one session', () => {
     await tapEnter();
     expect(opened).toBe(1);
     expect(closed).toBe(1);
-    expect(written).toMatchObject({ v: 1, tokenId: '7' });
+    expect(written).toMatchObject({ v: 2, tokenId: '7', nonce: WIRE.nonce });
     expect(written?.deviceSig).toHaveLength(2 + 128);
     // What the primitive hands the tag is the shared encoding of exactly that wire.
     expect(encodeGateResponse(written as GateResponseWire).byteLength).toBeGreaterThan(0);

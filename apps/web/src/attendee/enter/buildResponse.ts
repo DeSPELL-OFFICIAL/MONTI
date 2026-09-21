@@ -166,6 +166,10 @@ async function assertOurOwnDevice(wire: GateResponseWire, message: Hex): Promise
 /**
  * The signed answer, ready for either hand-over. `deviceSig` is `abi.encode(r, s)` — two 32-byte
  * words, which for two `bytes32` is exactly `r || s`, the 64 bytes `Ticket.checkIn` decodes.
+ *
+ * `nonce` is the gate code's own nonce, echoed back untouched. It is already one of the seven
+ * words this signature covers, so it costs nothing to say out loud — and the staff phone has no
+ * other way to tell which of the codes it has in flight this answer belongs to.
  */
 export async function buildGateResponse(tokenId: string, gateCode: GateCodeWire): Promise<GateResponseWire> {
   const fields = { tokenId, gateCode };
@@ -179,7 +183,12 @@ export async function buildGateResponse(tokenId: string, gateCode: GateCodeWire)
   // the normaliser was bypassed, and sending it would be a revert the attendee cannot explain.
   if (BigInt(signature.s) > P256_HALF_ORDER) throw new HandOverError('signFailed');
 
-  const wire: GateResponseWire = { v: 1, tokenId, deviceSig: joinRs(signature.r, signature.s) };
+  const wire: GateResponseWire = {
+    v: 2,
+    tokenId,
+    nonce: gateCode.nonce,
+    deviceSig: joinRs(signature.r, signature.s),
+  };
   if (!isGateResponseWire(wire)) throw new HandOverError('signFailed');
   await assertOurOwnDevice(wire, deviceSigMessage(fields));
   return wire;

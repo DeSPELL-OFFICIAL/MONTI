@@ -15,9 +15,25 @@ export interface GateCodeWire {
   sig: Hex;
 }
 
+/**
+ * 이 빌드가 말하는 게이트 응답 형식. 기기에 나간 v1 은 없으므로 하위 호환 경로도 없다 —
+ * v1 페이로드는 {@link GateResponseVersionError} 로 끊는다.
+ */
+export const GATE_RESPONSE_VERSION = 2;
+
+/**
+ * 관객 기기가 게이트에 돌려주는 답. **필드 순서가 계약이다** — CBOR 맵은 이 순서 그대로
+ * 인코딩되고, 스태프 앱(04)이 같은 바이트열을 재현한다. 순서를 바꾸면 고정 벡터가 깨진다.
+ */
 export interface GateResponseWire {
-  v: 1;
+  v: typeof GATE_RESPONSE_VERSION;
   tokenId: string;
+  /**
+   * 관객이 서명한 **그 게이트 코드의 nonce**. 스태프 단말기가 자기가 방금 발급한 코드와
+   * 돌아온 답을 맞춰보는 유일한 열쇠다 — 한 화면에 여러 관객이 겹칠 때 어느 답이 어느
+   * 코드의 것인지 알아야 한다.
+   */
+  nonce: Hex;
   /** r||s 64B over sha256(abi.encode(tokenId,gateId,eventId,nonce,issuedAt)) */
   deviceSig: Hex;
 }
@@ -157,5 +173,7 @@ export function isGateCodeWire(value: unknown): value is GateCodeWire {
 export function isGateResponseWire(value: unknown): value is GateResponseWire {
   if (typeof value !== 'object' || value === null) return false;
   const v = value as Record<string, unknown>;
-  return v.v === 1 && isDecimalString(v.tokenId) && isHex64(v.deviceSig);
+  return (
+    v.v === GATE_RESPONSE_VERSION && isDecimalString(v.tokenId) && isHex32(v.nonce) && isHex64(v.deviceSig)
+  );
 }

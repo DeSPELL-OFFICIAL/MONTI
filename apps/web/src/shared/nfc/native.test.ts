@@ -27,7 +27,12 @@ const GATE_CODE: GateCodeWire = {
   ky: `0x${'bb'.repeat(32)}`,
   sig: `0x${'cc'.repeat(64)}`,
 };
-const RESPONSE: GateResponseWire = { v: 1, tokenId: '42', deviceSig: `0x${'ab'.repeat(64)}` };
+const RESPONSE: GateResponseWire = {
+  v: 2,
+  tokenId: '42',
+  nonce: `0x${'11'.repeat(32)}`,
+  deviceSig: `0x${'ab'.repeat(64)}`,
+};
 
 const typeBytes = (type: string): number[] => [...type].map((character) => character.charCodeAt(0));
 

@@ -156,8 +156,21 @@ describe('buildGateResponse', () => {
   it('puts r and s on the wire as two 32-byte words', async () => {
     const wire = await buildGateResponse(TOKEN_ID, GATE_CODE);
     const { r, s } = await signWithDeviceKey.mock.results[0]?.value;
-    expect(wire).toEqual({ v: 1, tokenId: TOKEN_ID, deviceSig: `${r}${s.slice(2)}` });
+    expect(wire).toEqual({ v: 2, tokenId: TOKEN_ID, nonce: NONCE, deviceSig: `${r}${s.slice(2)}` });
     expect(wire.deviceSig).toHaveLength(2 + 128);
+  });
+
+  it('echoes back the nonce of the code it answered, so the gate can match the two', async () => {
+    // The staff phone may have several codes in flight at once; the nonce is the only thing in
+    // the answer that says which one this is. It is a field the signature already covers, so
+    // nothing here can put a nonce on the wire that the signature does not stand behind.
+    const other: GateCodeWire = { ...GATE_CODE, nonce: `0x${'ee'.repeat(32)}` as Hex };
+    signWithDeviceKey.mockImplementation(async () =>
+      device.sign(deviceSigMessage({ tokenId: TOKEN_ID, gateCode: other })),
+    );
+    const wire = await buildGateResponse(TOKEN_ID, other);
+    expect(wire.nonce).toBe(other.nonce);
+    expect(decodeGateResponse(encodeGateResponse(wire)).nonce).toBe(other.nonce);
   });
 
   it('round-trips through the shared codec', async () => {
@@ -214,7 +227,7 @@ describe('tapSigner — the body of the one NFC session', () => {
       signWithDeviceKey.mock.invocationCallOrder[0] as number,
     );
     const { r, s: low } = await signWithDeviceKey.mock.results[0]?.value;
-    expect(wire).toEqual({ v: 1, tokenId: TOKEN_ID, deviceSig: `${r}${low.slice(2)}` });
+    expect(wire).toEqual({ v: 2, tokenId: TOKEN_ID, nonce: NONCE, deviceSig: `${r}${low.slice(2)}` });
     // The primitive writes exactly these bytes to the tag it read.
     expect(decodeGateResponse(encodeGateResponse(wire))).toEqual(wire);
   });
