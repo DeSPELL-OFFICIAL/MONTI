@@ -153,12 +153,73 @@ describe('TransferInvite', () => {
     expect(await screen.findByText('아직 확인 중이에요. 잠시 뒤 내 티켓에서 확인해 주세요.')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: '문자 앱 열기' })).toBeNull();
     expect(screen.queryByText('초대를 보내지 못했어요. 잠시 뒤 다시 시도해 주세요.')).toBeNull();
+    // Never a dead screen: the send stays visible but disabled, and there is a way forward.
+    expect(screen.getByRole('button', { name: '초대 문자 보내기' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '다시 시도' })).toBeInTheDocument();
+  });
+
+  it('asks the chain again after a timeout and finds the offer landed', async () => {
+    ticketOp.mockRejectedValueOnce(new OpReverted('createOffer', 'TIMEOUT'));
+    renderInvite();
+    await send();
+    await screen.findByText('아직 확인 중이에요. 잠시 뒤 내 티켓에서 확인해 주세요.');
+
+    ticket.offerOf.mockResolvedValue({ from: ME, recipientCommitment: COMMITMENT, expiresAt: BigInt(EXPIRES_AT) });
+    await userEvent.click(screen.getByRole('button', { name: '다시 시도' }));
+    expect(await screen.findByRole('button', { name: '초대 취소' })).toBeInTheDocument();
+  });
+
+  it('never opens the message itself — the person taps the link', async () => {
+    const assign = vi.fn();
+    vi.stubGlobal('location', { ...window.location, assign } as unknown as Location);
+    renderInvite();
+    await send();
+
+    expect(await screen.findByRole('link', { name: '문자 앱 열기' })).toBeInTheDocument();
+    expect(assign).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it('mentions the verification only on an event that asks for it', async () => {
+    const note = '가입 후 본인인증을 마쳐야 티켓을 받을 수 있어요.';
+    renderInvite();
+    await screen.findByRole('button', { name: '초대 문자 보내기' });
+    expect(screen.queryByText(note)).toBeNull();
+
+    cleanup();
+    ticket.eventMeta.mockResolvedValue({ orgId: 9n, requireKyc: true });
+    renderInvite();
+    expect(await screen.findByText(note)).toBeInTheDocument();
   });
 
   it('gives the number back when the screen is opened without one', async () => {
     renderInvite({});
     expect(await screen.findByText('초대할 번호를 먼저 골라 주세요.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '초대 문자 보내기' })).toBeNull();
+  });
+
+  it('hands the message back for an offer that is already on chain', async () => {
+    // A reload, or a send whose receipt timed out: the offer is live and the message is gone.
+    ticket.offerOf.mockResolvedValue({ from: ME, recipientCommitment: COMMITMENT, expiresAt: BigInt(EXPIRES_AT) });
+    renderInvite();
+
+    expect(await screen.findByText('이미 보낸 초대예요. 문구를 다시 받아 보낼 수 있어요.')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '문자 앱 열기' })).toBeNull();
+
+    await userEvent.click(screen.getByRole('button', { name: '문구 다시 받기' }));
+    expect(createTransferInvite).toHaveBeenCalledWith({ tokenId: '1', phoneE164: PHONE });
+    // The offer is already there, so nothing new goes on chain.
+    expect(ticketOp).not.toHaveBeenCalled();
+    expect(await screen.findByRole('link', { name: '문자 앱 열기' })).toHaveAttribute('href', SMS_URI);
+  });
+
+  it('says so when the ticket is already on its way to somebody else', async () => {
+    ticket.offerOf.mockResolvedValue({ from: ME, recipientCommitment: COMMITMENT, expiresAt: BigInt(EXPIRES_AT) });
+    createTransferInvite.mockRejectedValueOnce(new CallableError('failed-precondition', 'OFFER_ALREADY_OPEN'));
+    renderInvite();
+
+    await userEvent.click(await screen.findByRole('button', { name: '문구 다시 받기' }));
+    expect(await screen.findByText('이 티켓은 이미 다른 분에게 보내는 중이에요.')).toBeInTheDocument();
   });
 
   it('shows an offer already open on chain, and cancels it', async () => {

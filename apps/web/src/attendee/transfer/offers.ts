@@ -1,6 +1,7 @@
 import type { Hex } from '@monti/shared';
-import { callableFailure } from '../../shared/api/functions';
-import { OpReverted } from '../../shared/chain/ops';
+import { api, callableFailure } from '../../shared/api/functions';
+import { getAttendeeAccount } from '../../shared/chain/accounts';
+import { OpReverted, ticketOp } from '../../shared/chain/ops';
 import { readTicket, type OfferStruct } from '../../shared/chain/reads';
 import type { Copy } from '../../shared/copy/index';
 import { precheckMessage } from './precheck';
@@ -9,8 +10,9 @@ import { revertMatch, revertRule } from './useTransfer';
 /** `wait` gave up before the operation landed. Not a refusal — it is still on its way. */
 export const STILL_CONFIRMING = 'TIMEOUT';
 
-/** `offerOf` answers with the zero struct when nothing is pending, so this is "no offer". */
-const NO_COMMITMENT = `0x${'00'.repeat(32)}`;
+/** `offerOf` answers with the zero struct when nothing is pending, and `from` at zero is the
+ *  contract's own test for that (`Ticket.sol` `cancelOffer`/`acceptOffer`). */
+const NO_SENDER = `0x${'00'.repeat(20)}`;
 
 /**
  * The organisation that sponsors an operation on one ticket. Two reads, named once here,
@@ -26,7 +28,38 @@ export async function orgIdOfTicket(tokenId: bigint): Promise<bigint> {
  * `acceptOffer` refuses on `block.timestamp > o.expiresAt`, so the last second still counts.
  */
 export function isOpenOffer(offer: OfferStruct, now: number): boolean {
-  return offer.recipientCommitment.toLowerCase() !== NO_COMMITMENT && offer.expiresAt >= BigInt(now);
+  return offer.from.toLowerCase() !== NO_SENDER && offer.expiresAt >= BigInt(now);
+}
+
+export type OrgIdOf = (tokenId: bigint) => Promise<bigint>;
+
+/**
+ * Called the moment signup finishes, so somebody who arrived from a text finds the ticket
+ * already theirs. Rows go one at a time on purpose: a single refusal — a verification not
+ * done, an invite that expired, one already collected — must not abort the rest of the inbox.
+ * Returns how many were really collected. It lives here rather than beside the inbox screen
+ * so that signup can call it without pulling a react-query screen into its chunk.
+ */
+export async function acceptPendingOffers(orgIdOf: OrgIdOf = orgIdOfTicket): Promise<number> {
+  const offers = await api.pendingOffers();
+  if (offers.length === 0) return 0;
+  const account = await getAttendeeAccount();
+  let accepted = 0;
+  for (const offer of offers) {
+    const tokenId = BigInt(offer.tokenId);
+    try {
+      await ticketOp({
+        account,
+        orgId: await orgIdOf(tokenId),
+        functionName: 'acceptOffer',
+        args: [tokenId, offer.attesterSig],
+      });
+      accepted += 1;
+    } catch {
+      /* leave it in the inbox; the screen there says why when the person opens it */
+    }
+  }
+  return accepted;
 }
 
 /** True while the operation is on its way rather than refused. Never shown as a denial. */
