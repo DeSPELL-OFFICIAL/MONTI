@@ -273,9 +273,36 @@ contract Ticket is ERC721, ITicket {
         return _events[eventId].orgId;
     }
 
+    /// @notice Every transfer — from any app, any wallet, any relayer — passes through here (spec 10.2).
+    ///         Mint (from == 0), burn (to == 0) and migrate (_internalMove) skip the rules.
     function _update(address to, uint256 tokenId, address auth) internal override returns (address) {
         address from = _ownerOf(tokenId);
         uint256 eventId = _eventOf[tokenId];
+
+        if (from != address(0) && to != address(0)) {
+            if (_offers[tokenId].from != address(0)) {
+                delete _offers[tokenId];
+                emit OfferCancelled(tokenId);
+            }
+            if (!_internalMove) {
+                EventMeta storage m = _events[eventId];
+                if (_revoked[tokenId]) revert TicketRevoked();
+                if (!m.transferable) revert TransfersDisabled();
+                if (_checkIns[tokenId].ts != 0) revert AlreadyCheckedIn();
+                if (block.timestamp + m.transferCutoffSeconds >= m.startsAt) revert TransferCutoffPassed();
+                if (!identity.isMember(to)) revert NotMember();
+                if (m.requireKyc && identity.kycLevelOf(to) < 1) revert KycRequired();
+
+                uint8 done = _transfers[tokenId];
+                if (done >= m.maxTransfers) revert TransferLimitReached();
+
+                Tier storage t = _tiers[eventId][_tierOf[tokenId]];
+                if (_balanceOfEvent[to][eventId] >= t.maxPerWallet) revert MaxPerWalletExceeded();
+
+                _transfers[tokenId] = done + 1;
+            }
+        }
+
         address previous = super._update(to, tokenId, auth);
         if (from != address(0)) _balanceOfEvent[from][eventId] -= 1;
         if (to != address(0)) _balanceOfEvent[to][eventId] += 1;
