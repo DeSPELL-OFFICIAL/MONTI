@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   attesterAddress,
   BANNED_ATTENDEE_WORDS,
+  CLOCK_SKEW_SECONDS,
   CODE_WINDOW_SECONDS,
   CREATE2_DEPLOYER_ADDRESS,
   DEVICE_COOLDOWN_SECONDS,
@@ -49,6 +50,9 @@ describe('protocol timings', () => {
   it('matches spec §7.3', () => {
     expect(GATE_CODE_ROTATE_MS).toBe(3_000);
     expect(CODE_WINDOW_SECONDS).toBe(60);
+    // Both mirror Ticket.sol: `CODE_WINDOW = 60`, `CLOCK_SKEW = 5`. A phone that judges a gate
+    // code by anything else either signs a code the chain will reject or refuses a good one.
+    expect(CLOCK_SKEW_SECONDS).toBe(5);
     expect(DEVICE_COOLDOWN_SECONDS).toBe(604_800);
     expect(HCE_AID).toBe('D2760000850101');
     expect(QR_PREFIX).toBe('MONTI1:');

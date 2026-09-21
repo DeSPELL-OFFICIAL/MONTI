@@ -14,20 +14,31 @@ function assertBytes32(value: Hex, label: string): void {
   if (typeof value !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(value)) throw new Error(label);
 }
 
-/** 게이트 단말기의 게이트 키가 서명하는 값. GateCodeWire.sig 가 이 해시에 대한 r||s 다. */
-export function gateCodeHash(input: {
+export interface GateCodeDigestInput {
   gateId: bigint;
   eventId: bigint;
   issuedAt: bigint;
   nonce: Hex;
-}): Hex {
+}
+
+/**
+ * 게이트 키가 **서명하는 대상 바이트열**. `gateCodeHash` 는 이걸 sha256 한 값이다.
+ *
+ * 따로 내보내는 이유는 하나다: WebCrypto 의 `ECDSA`/`SHA-256` 검증은 다이제스트가 아니라
+ * 원문을 받아 자기가 해싱한다. 원문 정의가 두 군데 생기면 서명은 조용히 어긋나므로,
+ * 해시와 원문 모두 이 함수 하나에서 나온다.
+ */
+export function gateCodePreimage(input: GateCodeDigestInput): Hex {
   assertBytes32(input.nonce, 'BAD_NONCE');
-  return sha256(
-    encodeAbiParameters(
-      parseAbiParameters('uint256 gateId, uint256 eventId, uint64 issuedAt, bytes32 nonce'),
-      [input.gateId, input.eventId, input.issuedAt, input.nonce],
-    ),
+  return encodeAbiParameters(
+    parseAbiParameters('uint256 gateId, uint256 eventId, uint64 issuedAt, bytes32 nonce'),
+    [input.gateId, input.eventId, input.issuedAt, input.nonce],
   );
+}
+
+/** 게이트 단말기의 게이트 키가 서명하는 값. GateCodeWire.sig 가 이 해시에 대한 r||s 다. */
+export function gateCodeHash(input: GateCodeDigestInput): Hex {
+  return sha256(gateCodePreimage(input));
 }
 
 /**
