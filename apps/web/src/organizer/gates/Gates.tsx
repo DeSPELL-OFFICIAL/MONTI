@@ -128,7 +128,12 @@ export function Gates() {
           // land shows up in it.
           if (cause.revertReason === 'TIMEOUT') setConfirming(true);
           else {
-            const named = revertMatch(organizersAbi, cause.revertReason as Hex, GATE_REVERTS);
+            // A `success: false` receipt need not carry a reason, and `revertMatch` slices the
+            // four bytes off one — so the guard is what stops this catch throwing a second time
+            // and leaving the screen silent after a write that plainly did not land.
+            const named = cause.revertReason
+              ? revertMatch(organizersAbi, cause.revertReason as Hex, GATE_REVERTS)
+              : undefined;
             setProblem(named ?? 'failed');
           }
           setReload((count) => count + 1);

@@ -12,9 +12,18 @@ vi.mock('../../shared/api/functions', async (orig) => ({
 }));
 
 interface SentOp { functionName: string; orgId: bigint; args: readonly unknown[] }
+const TICKET = `0x${'33'.repeat(20)}` as const;
+
+// `createdEventId` filters the operation's logs by the Ticket address, so the config it reads
+// is pinned here rather than taken from a developer's `.env.local`.
+vi.mock('../../shared/config', async (orig) => ({
+  ...(await orig<typeof import('../../shared/config')>()),
+  getConfig: () => ({ addresses: { ticket: TICKET } }),
+}));
+
 /** `EventCreated(eventId, orgId, creator)` for event 12, all three arguments indexed. */
 const CREATED_LOG = {
-  address: `0x${'33'.repeat(20)}`,
+  address: TICKET,
   topics: [
     encodeEventTopics({ abi: ticketAbi, eventName: 'EventCreated', args: { eventId: 12n } })[0],
     numberToHex(12n, { size: 32 }),

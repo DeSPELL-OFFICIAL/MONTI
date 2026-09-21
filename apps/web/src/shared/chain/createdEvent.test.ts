@@ -1,15 +1,22 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { encodeEventTopics, numberToHex } from 'viem';
 import { ticketAbi } from './abis';
-import { createdEventId } from './createdEvent';
 
 const TICKET = `0x${'33'.repeat(20)}` as const;
 const CREATOR = `0x${'ab'.repeat(20)}` as const;
 
+// Pinned rather than read from `.env.local`: which contract emitted the log is the whole point
+// of the address filter below, and it must not depend on a developer's local addresses.
+vi.mock('../config', () => ({
+  getConfig: () => ({ addresses: { ticket: TICKET.toUpperCase() } }),
+}));
+
+const { createdEventId } = await import('./createdEvent');
+
 /** `EventCreated(uint256 indexed eventId, uint256 indexed orgId, address indexed creator)`. */
-function created(eventId: bigint) {
+function created(eventId: bigint, address: `0x${string}` = TICKET) {
   return {
-    address: TICKET,
+    address,
     topics: [
       encodeEventTopics({ abi: ticketAbi, eventName: 'EventCreated' })[0],
       numberToHex(eventId, { size: 32 }),
@@ -46,5 +53,23 @@ describe('createdEventId', () => {
 
   it('answers with nothing for a log this ABI cannot decode', () => {
     expect(createdEventId([{ address: TICKET, topics: [], data: '0xnothex' }])).toBe('');
+  });
+
+  /**
+   * `EventCreated`'s topic0 is a signature, not a deployment — any contract may emit a log
+   * with it, and a batched operation carries every call's logs together. The address is what
+   * says the log is the Ticket contract's, and the compare is case-insensitive because the
+   * bundler and the config need not agree on EIP-55.
+   */
+  it('ignores a matching log emitted by some other contract', () => {
+    expect(createdEventId([created(12n, `0x${'99'.repeat(20)}`)])).toBe('');
+  });
+
+  it('takes the Ticket contract\'s log from among another contract\'s', () => {
+    expect(createdEventId([created(77n, `0x${'99'.repeat(20)}`), created(12n)])).toBe('12');
+  });
+
+  it('compares the address without caring about its casing', () => {
+    expect(createdEventId([created(12n, TICKET.toUpperCase() as `0x${string}`)])).toBe('12');
   });
 });

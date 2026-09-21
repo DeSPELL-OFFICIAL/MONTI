@@ -102,6 +102,23 @@ describe('the pending-gate queue', () => {
     expect(await screen.findByText(copy.problems.unknownEvent)).toBeInTheDocument();
   });
 
+  /**
+   * A `success: false` receipt need not carry a reason. `revertMatch` slices the four bytes off
+   * one, so without the guard the catch threw a second time and the screen went silent after a
+   * write that plainly did not land — no sentence, no reload, the busy banner simply gone.
+   */
+  it('survives a failure that carries no revert reason', async () => {
+    const user = userEvent.setup();
+    organizersOp.mockRejectedValueOnce(new OpReverted('registerGate'));
+    open();
+    const before = listPendingGates.mock.calls.length;
+    await user.click(await screen.findByRole('button', { name: copy.register }));
+
+    expect(await screen.findByText(copy.problems.failed)).toBeInTheDocument();
+    // The list is reloaded either way, so whatever did land shows up in it.
+    await waitFor(() => expect(listPendingGates.mock.calls.length).toBeGreaterThan(before));
+  });
+
   /** The screen used to go quiet after a write that was still on its way. */
   it('says it is still confirming when the wait gave up', async () => {
     const user = userEvent.setup();

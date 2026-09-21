@@ -1,4 +1,5 @@
 import { parseEventLogs, type Log } from 'viem';
+import { getConfig } from '../config';
 import { ticketAbi } from './abis';
 import type { SponsoredOpLog } from './sendSponsoredOp';
 
@@ -18,12 +19,19 @@ import type { SponsoredOpLog } from './sendSponsoredOp';
 export function createdEventId(logs: readonly SponsoredOpLog[]): string {
   if (logs.length === 0) return '';
   try {
+    // Only the Ticket contract's own logs. `EventCreated`'s signature is not unique to this
+    // deployment — any contract may emit a log with the same topic0 — and a batched operation
+    // carries every call's logs together, so the address is what says this one is ours.
+    const ticket = getConfig().addresses.ticket.toLowerCase();
+    const mine = logs.filter((log) => log.address?.toLowerCase() === ticket);
+    if (mine.length === 0) return '';
+
     const [created] = parseEventLogs({
       abi: ticketAbi,
       eventName: 'EventCreated',
       // The bundler sends the three fields a decode needs; the block and index fields viem's
       // `Log` also carries are irrelevant here and are not invented.
-      logs: logs as unknown as Log[],
+      logs: mine as unknown as Log[],
     });
     const eventId = (created as { args?: { eventId?: bigint } } | undefined)?.args?.eventId;
     return typeof eventId === 'bigint' ? eventId.toString() : '';
