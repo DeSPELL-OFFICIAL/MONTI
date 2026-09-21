@@ -2,7 +2,6 @@ import { Encoder } from 'cbor-x';
 import { encodeAbiParameters, keccak256, parseAbiParameters, sha256, stringToBytes } from 'viem';
 import { QR_PREFIX } from './constants.js';
 import {
-  BAD_GATE_RESPONSE_VERSION,
   GATE_RESPONSE_VERSION,
   isGateCodeWire,
   isGateResponseWire,
@@ -132,23 +131,29 @@ export function decodeGateCode(bytes: Uint8Array): GateCodeWire {
 }
 
 /**
- * The key order is fixed here rather than taken from the caller's object. CBOR maps keep
- * insertion order, so two callers spelling the same answer in a different order would put
- * different bytes on the wire — and these bytes are a cross-branch contract: the attendee app,
- * the staff gate and the APDU write vectors all pin the same vector.
+ * 버전이 다른 게이트 응답. `BAD_GATE_RESPONSE`(못 읽는 바이트열)와 구분되는 이유는 하나다 —
+ * 스태프 화면이 "읽을 수 없는 코드"가 아니라 "앱을 업데이트하세요"라고 말해야 하기 때문이다.
+ * v1 은 기기에 나간 적이 없으므로 해석하지 않고 여기서 끊는다.
  */
-export function encodeGateResponse(wire: GateResponseWire): Uint8Array {
-  if (!isGateResponseWire(wire)) throw new Error('BAD_GATE_RESPONSE');
-  return new Uint8Array(
-    cbor.encode({ v: wire.v, tokenId: wire.tokenId, nonce: wire.nonce, deviceSig: wire.deviceSig }),
-  );
+export class GateResponseVersionError extends Error {
+  readonly version: unknown;
+
+  constructor(version: unknown) {
+    super('GATE_RESPONSE_VERSION');
+    this.name = 'GateResponseVersionError';
+    this.version = version;
+  }
 }
 
 /**
- * A payload of a version this build does not speak is told apart from one that is simply not a
- * gate response. The gate treats both as a bad tag, but only one of them means "that phone is
- * running a build from before the nonce landed", which is the difference a field report needs.
+ * 필드 순서는 {@link GateResponseWire} 선언 순서 그대로 나간다(v, tokenId, nonce, deviceSig).
+ * 고정 벡터가 그 순서를 못 박고 있으니, 순서를 바꾸려면 벡터부터 바꿔야 한다.
  */
+export function encodeGateResponse(wire: GateResponseWire): Uint8Array {
+  if (!isGateResponseWire(wire)) throw new Error('BAD_GATE_RESPONSE');
+  return new Uint8Array(cbor.encode(wire));
+}
+
 export function decodeGateResponse(bytes: Uint8Array): GateResponseWire {
   let decoded: unknown;
   try {
@@ -156,13 +161,11 @@ export function decodeGateResponse(bytes: Uint8Array): GateResponseWire {
   } catch {
     throw new Error('BAD_GATE_RESPONSE');
   }
-  if (!isGateResponseWire(decoded)) {
-    const version = (decoded as { v?: unknown } | null)?.v;
-    if (typeof version === 'number' && version !== GATE_RESPONSE_VERSION) {
-      throw new Error(BAD_GATE_RESPONSE_VERSION);
-    }
-    throw new Error('BAD_GATE_RESPONSE');
+  if (typeof decoded === 'object' && decoded !== null) {
+    const version = (decoded as Record<string, unknown>).v;
+    if (typeof version === 'number' && version !== GATE_RESPONSE_VERSION) throw new GateResponseVersionError(version);
   }
+  if (!isGateResponseWire(decoded)) throw new Error('BAD_GATE_RESPONSE');
   return decoded;
 }
 

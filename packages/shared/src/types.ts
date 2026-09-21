@@ -21,24 +21,23 @@ export interface GateCodeWire {
  * v1 was `{ v, tokenId, deviceSig }` — no nonce. An answer without one cannot name the code it
  * answers: the gate serves a new code every 3 seconds and the HCE plugin swaps the served
  * payload only *between* taps, so a write landing just after a rotation answers the code before
- * it, and the gate cannot see which side of the swap the read fell on. Without the nonce the
- * gate has to guess, and a wrong guess is a `BadDeviceSignature` revert at the door.
- *
- * Nothing is on a device yet, so there is no compatibility to keep: a v1 payload is a bug or a
- * stale build, and `decodeGateResponse` says so with `BAD_GATE_RESPONSE_VERSION`.
+ * it, and the gate cannot see which side of the swap the read fell on. Nothing was ever on a
+ * device, so there is no compatibility to keep.
  */
 export const GATE_RESPONSE_VERSION = 2;
 
-/** What `decodeGateResponse` throws for a well-formed payload of a version this build refuses. */
-export const BAD_GATE_RESPONSE_VERSION = 'BAD_GATE_RESPONSE_VERSION';
-
+/**
+ * 관객 기기가 게이트에 돌려주는 답. **필드 순서가 계약이다** — CBOR 맵은 이 순서 그대로
+ * 인코딩되고, 관객 앱(03)과 스태프 앱(04)이 같은 바이트열을 재현한다. 순서를 바꾸면 고정
+ * 벡터가 깨진다.
+ */
 export interface GateResponseWire {
-  v: 2;
+  v: typeof GATE_RESPONSE_VERSION;
   tokenId: string;
   /**
-   * The `nonce` of the gate code this answers — the one field that makes an answer traceable
-   * to a code. `Ticket.checkIn` burns `keccak256(abi.encode(nonce))`, so it is also what makes
-   * the answer single-use on chain.
+   * 관객이 서명한 **그 게이트 코드의 nonce**. 스태프 단말기가 자기가 방금 발급한 코드와
+   * 돌아온 답을 맞춰보는 유일한 열쇠다 — 한 화면에 여러 관객이 겹칠 때 어느 답이 어느
+   * 코드의 것인지 알아야 한다.
    */
   nonce: Hex;
   /** r||s 64B over sha256(abi.encode(tokenId,gateId,eventId,nonce,issuedAt)) */
@@ -149,9 +148,6 @@ export function isGateResponseWire(value: unknown): value is GateResponseWire {
   if (typeof value !== 'object' || value === null) return false;
   const v = value as Record<string, unknown>;
   return (
-    v.v === GATE_RESPONSE_VERSION &&
-    isDecimalString(v.tokenId) &&
-    isHex32(v.nonce) &&
-    isHex64(v.deviceSig)
+    v.v === GATE_RESPONSE_VERSION && isDecimalString(v.tokenId) && isHex32(v.nonce) && isHex64(v.deviceSig)
   );
 }

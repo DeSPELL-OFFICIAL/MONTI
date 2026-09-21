@@ -56,7 +56,7 @@ const RESPONSE: GateResponseWire = {
   v: 2,
   tokenId: '7',
   nonce: NONCE,
-  deviceSig: `0x${'22'.repeat(64)}`,
+  deviceSig: `0x${'22'.repeat(32)}${'33'.repeat(32)}`,
 };
 
 /** The refusal code, or the returned value when nothing was refused. */
@@ -116,7 +116,7 @@ describe('decoding the answer a tap carries', () => {
       expect(error).toBeInstanceOf(ResponseDecodeError);
       expect((error as ResponseDecodeError).code).toBe(RESPONSE_ERROR.badTag);
       expect(String((error as { cause?: { cause?: unknown } }).cause?.cause)).toContain(
-        'BAD_GATE_RESPONSE_VERSION',
+        'GATE_RESPONSE_VERSION',
       );
     }
   });

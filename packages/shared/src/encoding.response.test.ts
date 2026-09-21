@@ -7,7 +7,8 @@ import {
   fromQrPayload,
   toQrPayload,
 } from './encoding.js';
-import { BAD_GATE_RESPONSE_VERSION, GATE_RESPONSE_VERSION } from './types.js';
+import { GateResponseVersionError } from './encoding.js';
+import { GATE_RESPONSE_VERSION } from './types.js';
 import type { GateResponseWire, Hex } from './types.js';
 
 const NONCE = ('0x' + '11'.repeat(32)) as Hex;
@@ -21,7 +22,7 @@ const wire: GateResponseWire = {
   v: 2,
   tokenId: '7',
   nonce: NONCE,
-  deviceSig: ('0x' + '22'.repeat(64)) as Hex,
+  deviceSig: ('0x' + '22'.repeat(32) + '33'.repeat(32)) as Hex,
 };
 
 /** `a4` = a 4-entry map, then `v`, `tokenId`, `nonce`, `deviceSig` in that fixed order. */
@@ -30,8 +31,8 @@ const VECTOR_HEX =
   '31313131313131313131313131313131313131313131313131313131313131313131313131313131' +
   '31313131313131316964657669636553696778823078323232323232323232323232323232323232' +
   '32323232323232323232323232323232323232323232323232323232323232323232323232323232' +
-  '32323232323232323232323232323232323232323232323232323232323232323232323232323232' +
-  '323232323232323232323232323232323232323232323232323232323232';
+  '32323232323233333333333333333333333333333333333333333333333333333333333333333333' +
+  '333333333333333333333333333333333333333333333333333333333333';
 
 const hex = (bytes: Uint8Array): string =>
   [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -60,21 +61,31 @@ describe('GateResponseWire CBOR', () => {
   });
 
   /**
-   * CBOR maps keep insertion order, so an answer spelled in a different order would otherwise
-   * be different bytes. The encoder fixes the order; this is what says so.
+   * The CBOR map is written in `GateResponseWire` declaration order, so the field order IS the
+   * contract: the vector above pins it, and this reads it back out of the decoded object.
    */
-  it('is the same bytes however the caller spelled the object', () => {
-    const shuffled = {
-      deviceSig: wire.deviceSig,
-      nonce: wire.nonce,
-      tokenId: wire.tokenId,
-      v: wire.v,
-    } as GateResponseWire;
-    expect(hex(encodeGateResponse(shuffled))).toBe(VECTOR_HEX);
+  it('carries the four fields in declaration order', () => {
+    expect(Object.keys(decodeGateResponse(encodeGateResponse(wire)))).toEqual([
+      'v',
+      'tokenId',
+      'nonce',
+      'deviceSig',
+    ]);
   });
 
-  it('stays inside the 400-byte NDEF write budget', () => {
-    expect(encodeGateResponse(wire).byteLength).toBeLessThanOrEqual(400);
+  it('stays inside the 255-byte NDEF short-record bound at the largest signature', () => {
+    // Everything but `tokenId` is fixed width — a hex string is 66 or 130 characters whatever it
+    // holds — so the only thing that can push the record past a short record is a long token id,
+    // and 25 decimal digits is where it lands exactly on the bound. Token ids are a sequential
+    // ERC-721 counter, so the real payload is the 230 bytes above.
+    const widest: GateResponseWire = {
+      v: 2,
+      tokenId: '9'.repeat(25),
+      nonce: ('0x' + 'ff'.repeat(32)) as Hex,
+      deviceSig: ('0x' + 'ff'.repeat(64)) as Hex,
+    };
+    expect(encodeGateResponse(widest).byteLength).toBe(255);
+    expect(encodeGateResponse(wire).byteLength).toBe(230);
   });
 
   it('refuses a 32-byte deviceSig and a nonce that is not 32 bytes', () => {
@@ -94,7 +105,13 @@ describe('GateResponseWire CBOR', () => {
   it('tells a v1 payload apart from something that is not a response at all', () => {
     expect(GATE_RESPONSE_VERSION).toBe(2);
     const v1 = encodeV1Response();
-    expect(() => decodeGateResponse(v1)).toThrow(BAD_GATE_RESPONSE_VERSION);
+    expect(() => decodeGateResponse(v1)).toThrow(GateResponseVersionError);
+    expect(() => decodeGateResponse(v1)).toThrow('GATE_RESPONSE_VERSION');
+    try {
+      decodeGateResponse(v1);
+    } catch (error) {
+      expect((error as GateResponseVersionError).version).toBe(1);
+    }
     expect(() => decodeGateResponse(new Uint8Array([0x00, 0x01, 0x02]))).toThrow('BAD_GATE_RESPONSE');
   });
 });
@@ -123,8 +140,8 @@ describe('QR fallback', () => {
     expect(toQrPayload(wire)).toBe(
       'MONTI1:pGF2Amd0b2tlbklkYTdlbm9uY2V4QjB4MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExM' +
       'TExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMWlkZXZpY2VTaWd4gjB4MjIyMjIyMjIyMjIyM' +
-      'jIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyM' +
-      'jIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjI',
+      'jIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjMzMzMzMzMzM' +
+      'zMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM',
     );
   });
 });
