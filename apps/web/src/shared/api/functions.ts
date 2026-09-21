@@ -114,6 +114,25 @@ export interface PendingOffer {
 /** The callable answers `{ offers }`; every caller wants the rows, so the wrapper unwraps. */
 const callPendingOffers = call<void, { offers: PendingOffer[] }>('pendingOffers');
 
+/**
+ * One staff device asking to be registered as a gate, field for field
+ * (functions/src/functions/pendingGates.ts). These four are the whole of it: the server
+ * validates exactly them, stores exactly them, and hands exactly them back to the organizer
+ * as the arguments of `Organizers.registerGate(eventId, gateAccount, kx, ky)`.
+ *
+ * There is deliberately no device label. The callable reads `request.data.eventId`,
+ * `gateAccount`, `kx` and `ky` and nothing else, so a label would be typed as sent, shown on
+ * the setup screen's fallback, and silently dropped — a field the staff device only thinks
+ * the organizer can see.
+ */
+export interface PendingGateSubmission {
+  /** Decimal, as the server normalises it: `BigInt(value).toString()`. */
+  eventId: string;
+  gateAccount: Hex;
+  kx: Hex;
+  ky: Hex;
+}
+
 export const api = {
   startSignup: call<void, { personId: Hex }>('startSignup'),
   // Identity verification is per event, not part of signup. startKyc opens a fresh Didit session.
@@ -168,10 +187,7 @@ export const api = {
     Array<{ tokenId: string; nickname: string; tier: number; checkedIn: boolean; kycLevel: number }>
   >('listAttendees'),
   // Sub-plan 04's staff gate-registration screen calls this instead of writing Firestore directly.
-  submitPendingGate: call<
-    { eventId: string; gateAccount: Hex; kx: Hex; ky: Hex; deviceLabel: string },
-    { ok: true }
-  >('submitPendingGate'),
+  submitPendingGate: call<PendingGateSubmission, { ok: true }>('submitPendingGate'),
   listPendingGates: call<
     { eventId: string },
     { gates: Array<{ gateAccount: Hex; kx: Hex; ky: Hex; label: string; createdAt: number }> }
@@ -193,3 +209,10 @@ export const api = {
   pinMessage: call<{ eventId: string; msgId: string; pinned: boolean }, { ok: true }>('pinMessage'),
   requestAccountDeletion: call<{ reason?: string }, { ok: true; scheduledFor: number }>('requestAccountDeletion'),
 };
+
+/**
+ * The staff setup screen's one call, named rather than reached through `api`, so the screen
+ * and its tests depend on this single callable instead of the whole surface. It is the same
+ * wrapper, not a second one.
+ */
+export const submitPendingGate = api.submitPendingGate;

@@ -27,6 +27,21 @@ export const CONFIRM_SPINNER_MS = 2000;
 /** Silence this long after a tap starts is a failed tap: the screen asks for a re-tap. */
 export const RETAP_PROMPT_MS = 5000;
 
+/**
+ * How often the setup screen asks the chain whether the organizer has registered this device.
+ * The answer is a single `eth_call`, and a staff member is standing in front of the phone
+ * waiting for it, so it is short — but it is a poll, not a subscription: `Organizers` emits
+ * the registration and the gate must work on a network where the socket never connects.
+ */
+export const GATE_REGISTRATION_POLL_MS = 3000;
+
+/**
+ * The event the demo deployment seeded (`contracts/deployments/seed-10143.json`). It is the
+ * setup screen's **prefilled value and nothing more** — the field stays editable, because a
+ * gate device registered against the wrong event opens a door for the wrong ticket.
+ */
+export const SEEDED_EVENT_ID = '1' as const;
+
 /** The staff device's own IndexedDB — separate from anything the attendee build stores. */
 export const STAFF_DB_NAME = 'monti-staff' as const;
 export const STAFF_DB_VERSION = 1;

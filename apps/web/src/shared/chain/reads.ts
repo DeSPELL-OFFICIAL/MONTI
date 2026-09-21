@@ -107,6 +107,9 @@ export function readTicket() {
   const call = reader('Ticket', getConfig().addresses.ticket);
   return {
     eventOf: (tokenId: bigint) => call<bigint>('eventOf', [tokenId]),
+    // The organization that owns an event. `Organizers` keys permissions by org, not event,
+    // so every screen that starts from an event id and needs a permission passes through here.
+    eventOrg: (eventId: bigint) => call<bigint>('eventOrg', [eventId]),
     tierOf: (tokenId: bigint) => call<number>('tierOf', [tokenId]),
     eventStatus: (eventId: bigint) => call<number>('eventStatus', [eventId]),
     isRevoked: (tokenId: bigint) => call<boolean>('isRevoked', [tokenId]),

@@ -23,6 +23,13 @@ describe('staff constants match the spec parameter table (§7.3, §11)', () => {
     expect(C.GATE_KEY_ALIAS).toBe('monti-gate');
   });
 
+  it('pins the gate registration parameters', () => {
+    expect(C.GATE_REGISTRATION_POLL_MS).toBe(3000);
+    // The seeded demo event, not a gate id: the setup screen reads `gateOf(account)` and is
+    // told which gate it became. See contracts/deployments/seed-10143.json.
+    expect(C.SEEDED_EVENT_ID).toBe('1');
+  });
+
   it('names the staff device database', () => {
     expect(C.STAFF_DB_NAME).toBe('monti-staff');
     expect(C.STAFF_DB_VERSION).toBe(1);
