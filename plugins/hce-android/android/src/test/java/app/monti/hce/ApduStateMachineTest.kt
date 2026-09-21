@@ -167,6 +167,21 @@ class ApduStateMachineTest {
     }
 
     @Test
+    fun readBinaryWithLeZeroStopsAtTheMleTheCcDeclares() {
+        // ISO 7816-4 단축 APDU에서 Le = 0 은 256이지만, CC 가 선언한 MLe 는 255다. 선언보다
+        // 많이 돌려주면 적합성 시험이 지적한다. 408바이트짜리 파일이라 잘림이 눈에 보인다.
+        val record = gateRecord()
+        val m = machine(record)
+        m.selectApplication()
+        m.selectFile(0x04)
+        val window = m.readBinary(0x0002, 0x00)
+        assertEquals(Type4Files.MLE + 2, window.size)
+        assertEquals(255, Type4Files.MLE)
+        assertArrayEquals(record.copyOfRange(0, Type4Files.MLE), window.copyOfRange(0, Type4Files.MLE))
+        assertTrailingStatus(ApduStatus.SW_OK, window)
+    }
+
+    @Test
     fun readBinaryAtTheVeryEndOfTheFileReturnsNothingAndSucceeds() {
         val m = machine()
         m.selectApplication()
@@ -224,9 +239,10 @@ class ApduStateMachineTest {
         val m = machine()
         m.selectApplication()
         assertStatus(ApduStatus.SW_INS_NOT_SUPPORTED, m.process(bytes(0x00, 0xCA, 0x00, 0x00, 0x00)))
-        // UPDATE BINARY 도 아직은 여기로 떨어진다. Task 5 가 쓰기 경로를 넣으면서 바뀐다.
+        // UPDATE BINARY(0xD6)는 더 이상 여기로 떨어지지 않는다. 파일을 고르기 전이라 6982 다.
+        // 쓰기 경로 전체는 ApduWriteTest 가 본다.
         assertStatus(
-            ApduStatus.SW_INS_NOT_SUPPORTED,
+            ApduStatus.SW_SECURITY,
             m.process(bytes(0x00, 0xD6, 0x00, 0x00, 0x02, 0x00, 0x00)),
         )
         // 세션은 살아 있어야 한다: 다음 SELECT 가 계속 동작한다.

@@ -42,6 +42,10 @@ class Type4FilesTest {
         // 메시지 한도는 파일 크기에서 NLEN 2바이트를 뺀 값이다 (T4T 2.0 §5.1.2).
         assertEquals(2046, Type4Files.MAX_NDEF_SIZE)
         assertEquals(Type4Files.NDEF_FILE_SIZE - 2, Type4Files.MAX_NDEF_SIZE)
+        // MLe 는 상수와 CC 바이트 두 군데로 갈라지면 안 된다. CC 인덱스 3~4가 그 자리다.
+        assertEquals(255, Type4Files.MLE)
+        val cc = Type4Files.capabilityContainer()
+        assertEquals(Type4Files.MLE, ((cc[3].toInt() and 0xFF) shl 8) or (cc[4].toInt() and 0xFF))
     }
 
     @Test

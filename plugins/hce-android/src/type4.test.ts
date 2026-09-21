@@ -162,6 +162,15 @@ describe('NDEF file capacity', () => {
     expect(MAX_NDEF_SIZE).toBe(NDEF_FILE_SIZE - 2);
   });
 
+  it('declares the same MLe in the constant and in the CC bytes', () => {
+    const MLE = kotlinConst(type4FilesKt, 'MLE');
+    expect(MLE).toBe(255);
+    // CC 인덱스 3~4가 MLe(한 번에 읽어 갈 수 있는 크기), 5~6이 MLc(한 번에 써 넣을 수 있는
+    // 크기)다. 상수와 CC 가 갈라지면 READ BINARY 가 선언한 것보다 많이 돌려주게 된다.
+    expect((CC[3] ?? 0) * 256 + (CC[4] ?? 0)).toBe(MLE);
+    expect((CC[5] ?? 0) * 256 + (CC[6] ?? 0)).toBe(255);
+  });
+
   it('holds a long-form gate record with room to spare', () => {
     // 게이트 코드는 ~389바이트 CBOR이라 레코드 헤더가 long form(0xC4)으로 붙어 ~420바이트가 된다.
     expect(MAX_NDEF_SIZE).toBeGreaterThanOrEqual(420);

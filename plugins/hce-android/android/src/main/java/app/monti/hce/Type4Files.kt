@@ -27,6 +27,15 @@ object Type4Files {
     val NDEF_FILE_ID = byteArrayOf(0xE1.toByte(), 0x04)
 
     /**
+     * CC가 선언하는 MLe — READ BINARY 한 번에 돌려줄 수 있는 최대 바이트.
+     *
+     * [capabilityContainer]의 인덱스 3~4(`00FF`)와 같은 값이어야 한다. 리더는 CC를 먼저 읽고
+     * 그 선언만큼만 요구하므로, R-APDU가 이걸 넘기면 T4T 적합성 시험이 지적한다. ISO 7816-4
+     * 단축 APDU의 "Le = 0 은 256" 규약이 여기에 걸린다 — 그 자리는 256이 아니라 이 값이다.
+     */
+    const val MLE = 255
+
+    /**
      * CC에 적는 NDEF **파일** 최대 크기. 스펙(T4T 2.0 §5.1.2)상 이 값은 NLEN 2바이트를
      * 포함한 파일 전체 크기이므로, 리더는 이만큼만 버퍼를 잡는다.
      */
