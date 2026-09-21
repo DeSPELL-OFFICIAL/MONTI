@@ -100,8 +100,10 @@ packages/shared/                 (이 계획이 부트스트랩, 02가 확장)
 export type Hex = `0x${string}`;
 export interface GateCodeWire { v: 1; gateId: string; eventId: string; issuedAt: number; nonce: Hex; kx: Hex; ky: Hex; sig: Hex }
 export interface GateResponseWire { v: 1; tokenId: string; deviceSig: Hex }
-export interface SnapshotWire { v: 1; eventId: string; epoch: number; expiresAt: number;
-  tickets: Array<{ tokenId: string; account: Hex; deviceX: Hex; deviceY: Hex; photoJpegB64: string; displayName: string; tier: number; checkedIn: boolean }>;
+export interface SnapshotWire { v: 1; eventId: string; eventTitle: string; requireKyc: boolean;
+  epoch: number; expiresAt: number;
+  tickets: Array<{ tokenId: string; account: Hex; deviceX: Hex; deviceY: Hex; photoJpegB64: string;
+    displayName: string; tier: number; tierName: string; seat: string; checkedIn: boolean }>;
   attesterSig: Hex }
 export const BANNED_ATTENDEE_WORDS: string[];
 
@@ -150,10 +152,11 @@ export type EventStatus = 0 | 1 | 2 | 3;  // Draft, Published, Cancelled, Ended
 
 ```ts
 startSignup(): Promise<{ personId: string }>;                    // no KYC here: identity verification is per-event
-startKyc(): Promise<{ kycUrl: string }>;                          // opens a Didit session for the signed-in person
+startKyc(): Promise<{ kycUrl: string; sessionId: string }>;       // opens a Didit session for the signed-in person
 getSignupStatus(): Promise<{
   status: 'pending' | 'kyc_ok' | 'rejected' | 'active' | 'rotated';
   kycLevel: number;          // 0 unverified, 1 id + face verified
+  reason?: 'duplicate_face' | 'document_failed' | 'liveness_failed';
   account?: Hex;
   kycUrl?: string;           // present while a Didit session is open
 }>;
@@ -205,8 +208,8 @@ export function sendSponsoredOp(args: { account: SmartAccount; calls: SponsoredC
 // calls.length > 1 → Coinbase Smart Wallet executeBatch (account.encodeCalls already emits it).
 
 // shared/chain/subscribeLogs.ts
-export type ChainStage = 'speculative' | 'finalized';
-export type ChainLog = Log & { stage: ChainStage };
+export type LogStage = 'speculative' | 'finalized';        // renamed: staff/types.ts owns `ChainStage` (3 members)
+export type ChainLog = Log & { stage: LogStage };
 export function subscribeLogs(args: { address: Hex; topics: (Hex | Hex[] | null)[]; onLog: (log: ChainLog) => void }): () => void;
 // monadLogs WebSocket: commitState Proposed/Voted → 'speculative', Finalized → 'finalized';
 // fallback = per-block eth_getLogs with blockTag 'latest' then 'finalized'.
@@ -280,6 +283,8 @@ type RequestAccountDeletionRes = { ok: true; scheduledFor: number };
 - Consumes: 없음(이 sub-plan의 첫 태스크). 저장소는 master Task 0.1에서 `pnpm-workspace.yaml`에 `apps/*`가 들어간 상태여야 한다.
 - Produces: `@monti/web` 워크스페이스 패키지, `pnpm vitest run`이 `apps/web/`에서 동작, `App` 컴포넌트.
 
+**이 태스크가 저장소의 모든 웹 의존성을 한 번에 설치한다.** Capacitor 코어·플러그인까지 전부 여기서 고정하고, 뒤 태스크는 **import만** 한다. 이유는 하나다 — T12가 `@capgo/capacitor-passkey`를, T13이 `@perfood/capacitor-crypto-api`를, T15가 `@capgo/capacitor-nfc`를, T16~T18이 `@capacitor/*`를 정적으로 import하는데 설치가 T32에 있으면 T3이 CI에 건 `typecheck`가 T12부터 빨간불로 남는다. 버전은 2026-09-21 npm 실측값이다.
+
 - [ ] **Step 1: 패키지와 의존성 설치**
 
 ```bash
@@ -300,13 +305,26 @@ cat > apps/web/package.json <<'EOF'
     "e2e": "playwright test"
   },
   "dependencies": {
+    "@capacitor-firebase/authentication": "8.5.2",
+    "@capacitor-mlkit/barcode-scanning": "8.0.0",
+    "@capacitor/android": "8.5.2",
+    "@capacitor/app": "8.5.2",
+    "@capacitor/browser": "8.5.2",
+    "@capacitor/core": "8.5.2",
+    "@capacitor/ios": "8.5.2",
+    "@capacitor/preferences": "8.5.2",
+    "@capacitor/push-notifications": "8.5.2",
+    "@capgo/capacitor-nfc": "8.2.8",
+    "@capgo/capacitor-passkey": "8.5.2",
     "@dnd-kit/core": "6.3.1",
     "@dnd-kit/sortable": "10.0.0",
+    "@dnd-kit/utilities": "3.2.2",
     "@monti/shared": "workspace:*",
     "@noble/curves": "1.9.2",
     "@noble/hashes": "1.8.0",
+    "@perfood/capacitor-crypto-api": "8.0.0",
     "@tanstack/react-query": "5.62.11",
-    "firebase": "12.3.0",
+    "firebase": "12.6.0",
     "i18next": "25.5.2",
     "ox": "0.9.6",
     "qrcode": "1.5.4",
@@ -317,6 +335,7 @@ cat > apps/web/package.json <<'EOF'
     "viem": "2.38.0"
   },
   "devDependencies": {
+    "@capacitor/cli": "8.5.2",
     "@playwright/test": "1.55.0",
     "@testing-library/jest-dom": "6.6.3",
     "@testing-library/react": "16.3.0",
@@ -343,12 +362,30 @@ node -e "const p=require('./apps/web/package.json');delete p.dependencies['@mont
 pnpm install
 ```
 
-- [ ] **Step 2: Vite, TypeScript, vitest 설정 파일**
+- [ ] **Step 2: 고정한 버전이 실제로 npm에 있는지 확인**
+
+```bash
+cd /Users/moomi/Downloads/z03.Vibe_Coding/MONTI
+for spec in \
+  @capacitor/core@8.5.2 @capacitor/ios@8.5.2 @capacitor/android@8.5.2 @capacitor/cli@8.5.2 \
+  @capacitor/app@8.5.2 @capacitor/browser@8.5.2 @capacitor/push-notifications@8.5.2 @capacitor/preferences@8.5.2 \
+  @capacitor-firebase/authentication@8.5.2 @capacitor-mlkit/barcode-scanning@8.0.0 \
+  @capgo/capacitor-nfc@8.2.8 @capgo/capacitor-passkey@8.5.2 @perfood/capacitor-crypto-api@8.0.0 \
+  firebase@12.6.0 viem@2.38.0 ox@0.9.6 i18next@25.5.2 react-i18next@16.0.0 \
+  @dnd-kit/core@6.3.1 @dnd-kit/sortable@10.0.0 @dnd-kit/utilities@3.2.2 @tanstack/react-query@5.62.11; do
+  npm view "$spec" version >/dev/null 2>&1 && echo "ok   $spec" || echo "MISS $spec"
+done
+npm view @capacitor-firebase/authentication@8.5.2 peerDependencies.firebase
+```
+Expected: 모든 줄이 `ok`. 마지막 줄이 `^12.6.0` — `firebase`를 12.3.x로 두면 peer 경고가 난다. `MISS`가 나오면 그 패키지만 `npm view <name> versions --json | tail -5` 로 최신을 확인해 `package.json`을 고치고 다시 돌린다. **버전을 고친 뒤에도 설치는 이 태스크에서만 한다.**
+
+- [ ] **Step 3: Vite, TypeScript, vitest 설정 파일**
 
 ```bash
 cd /Users/moomi/Downloads/z03.Vibe_Coding/MONTI/apps/web
 cat > vite.config.ts <<'EOF'
-import { defineConfig } from 'vite';
+// vitest/config re-exports Vite's defineConfig with the `test` key typed.
+import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig({
@@ -400,7 +437,7 @@ if (!globalThis.crypto?.getRandomValues) {
 EOF
 ```
 
-- [ ] **Step 3: 실패하는 테스트를 쓴다**
+- [ ] **Step 4: 실패하는 테스트를 쓴다**
 
 ```tsx
 // apps/web/src/App.test.tsx
@@ -416,12 +453,12 @@ describe('App', () => {
 });
 ```
 
-- [ ] **Step 4: 테스트가 실패하는지 확인**
+- [ ] **Step 5: 테스트가 실패하는지 확인**
 
 Run (from `apps/web/`): `pnpm vitest run src/App.test.tsx`
 Expected: FAIL — `Failed to resolve import "./App"` 또는 `Cannot find module './App'`.
 
-- [ ] **Step 5: 최소 구현**
+- [ ] **Step 6: 최소 구현**
 
 ```tsx
 // apps/web/src/App.tsx
@@ -461,12 +498,12 @@ createRoot(rootElement).render(
 </html>
 ```
 
-- [ ] **Step 6: 테스트가 통과하는지 확인**
+- [ ] **Step 7: 테스트가 통과하는지 확인**
 
 Run (from `apps/web/`): `pnpm vitest run src/App.test.tsx`
 Expected: PASS — `Test Files  1 passed (1)` / `Tests  1 passed (1)`.
 
-- [ ] **Step 7: 커밋**
+- [ ] **Step 8: 커밋**
 
 ```bash
 cd /Users/moomi/Downloads/z03.Vibe_Coding/MONTI
@@ -479,12 +516,12 @@ git commit -m "chore(web): scaffold vite react19 app with vitest harness"
 ## Task 2: `packages/shared` 부트스트랩 — 타입, CBOR, base64url, DER→r‖s
 
 **Files:**
-- Create: `packages/shared/package.json`, `packages/shared/tsconfig.json`, `packages/shared/src/types.ts`, `packages/shared/src/encoding.ts`, `packages/shared/src/index.ts`
+- Create: `packages/shared/package.json`, `packages/shared/tsconfig.json`, `packages/shared/src/types.ts`, `packages/shared/src/constants.ts`, `packages/shared/src/encoding.ts`, `packages/shared/src/index.ts`
 - Test: `packages/shared/src/encoding.test.ts`
 
 **Interfaces:**
 - Consumes: 없음.
-- Produces: `@monti/shared` 패키지. `Hex`, `GateCodeWire`, `GateResponseWire`, `SnapshotWire`, `BANNED_ATTENDEE_WORDS`, `encodeCbor`, `decodeCbor`, `toBase64Url`, `fromBase64Url`, `derToCompactSignature`, `spkiToXy`. sub-plan 02가 같은 패키지에 Firestore 타입과 ABI JSON을 추가하고, 01이 `src/abi/*.json`을 채운다. **이미 존재하면 덮어쓰지 말고 Step 1의 확인 명령 결과에 따라 빠진 export만 추가한다.**
+- Produces: `@monti/shared` 패키지. `Hex`, `GateCodeWire`, `GateResponseWire`, `SnapshotWire`, `BANNED_ATTENDEE_WORDS`, `encodeCbor`, `decodeCbor`, `toBase64Url`, `fromBase64Url`, `derToCompactSignature`, `spkiToXy`, 그리고 `constants.ts`의 `MONAD_MAINNET_CHAIN_ID`, `MONAD_TESTNET_CHAIN_ID`, `ENTRY_POINT_V06`, `EXPLORER_URLS`, `P256_PRECOMPILE`. **체인 id와 탐색기 URL 리터럴은 이 파일에만 있고, 나머지 코드는 `getConfig()`를 거친다**(Global Constraint "Never hardcode a chain id in logic"). sub-plan 02가 같은 패키지에 Firestore 타입과 ABI JSON을 추가하고, 01이 `src/abi/*.json`을 채운다. **이미 존재하면 덮어쓰지 말고 Step 1의 확인 명령 결과에 따라 빠진 export만 추가한다.**
 
 - [ ] **Step 1: 이미 있는지 확인**
 
@@ -618,9 +655,15 @@ export interface GateResponseWire {
   deviceSig: Hex;
 }
 
+/**
+ * Master plan final shape. The gate screen needs eventTitle and the per-ticket tierName/seat
+ * because AdmitCard renders them offline, with no indexer and no IPFS metadata fetch.
+ */
 export interface SnapshotWire {
   v: 1;
   eventId: string;
+  eventTitle: string;
+  requireKyc: boolean;
   epoch: number;
   expiresAt: number;
   tickets: Array<{
@@ -631,6 +674,8 @@ export interface SnapshotWire {
     photoJpegB64: string;
     displayName: string;
     tier: number;
+    tierName: string;
+    seat: string;
     checkedIn: boolean;
   }>;
   attesterSig: Hex;
@@ -640,6 +685,30 @@ export const BANNED_ATTENDEE_WORDS = [
   '지갑', 'NFT', '민팅', '가스', '체인', '토큰', '트랜잭션',
   'wallet', 'mint', 'gas', 'chain', 'token', 'transaction', 'blockchain', 'monad',
 ];
+```
+
+```ts
+// packages/shared/src/constants.ts
+import type { Hex } from './types.js';
+
+/** The only place these literals exist. Everything else reads them through config. */
+export const MONAD_MAINNET_CHAIN_ID = 143;
+export const MONAD_TESTNET_CHAIN_ID = 10143;
+
+/** EntryPoint v0.6 — same address on every chain (Coinbase Smart Wallet v1). */
+export const ENTRY_POINT_V06 = '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789' as Hex;
+
+/** EIP-7951 P-256 precompile, 6,900 gas. */
+export const P256_PRECOMPILE = '0x0000000000000000000000000000000000000100' as Hex;
+
+export const EXPLORER_URLS: Record<number, string> = {
+  [MONAD_MAINNET_CHAIN_ID]: 'https://monadexplorer.com',
+  [MONAD_TESTNET_CHAIN_ID]: 'https://testnet.monadexplorer.com',
+};
+
+export function explorerUrlFor(chainId: number): string {
+  return EXPLORER_URLS[chainId] ?? EXPLORER_URLS[MONAD_TESTNET_CHAIN_ID]!;
+}
 ```
 
 ```ts
@@ -710,6 +779,7 @@ export function spkiToXy(spki: Uint8Array): { x: Hex; y: Hex } {
 ```ts
 // packages/shared/src/index.ts
 export * from './types.js';
+export * from './constants.js';
 export * from './encoding.js';
 ```
 
@@ -734,7 +804,7 @@ Expected: `packages/shared/dist/encoding.js` 가 출력된다.
 ```bash
 cd /Users/moomi/Downloads/z03.Vibe_Coding/MONTI
 git add packages/shared apps/web/package.json pnpm-lock.yaml
-git commit -m "feat(shared): add wire types, CBOR, base64url and DER to compact signature"
+git commit -m "feat(shared): add wire types, chain constants, CBOR, base64url and DER conversion"
 ```
 
 ---
@@ -749,7 +819,13 @@ git commit -m "feat(shared): add wire types, CBOR, base64url and DER to compact 
 - Consumes: `BANNED_ATTENDEE_WORDS` (Task 2).
 - Produces: `lintCopy(targets: string[]): CopyLintFinding[]`, CLI `node packages/shared/dist/copy-lint.js <path...>` (위반이 있으면 exit 1). 루트 스크립트 `pnpm lint:copy`.
 
-린트는 **문자열 리터럴과 JSX 텍스트만** 본다. `chainId`, `getChain()` 같은 식별자는 금지어가 아니다 — 관객에게 보이는 것은 문자열뿐이기 때문이다. 영어 금지어는 리터럴 안에서 단어 경계(`\b`)로, 한국어 금지어는 부분 문자열로 검사한다(한국어는 조사가 붙어 `가스비`, `체인에` 형태로 나온다).
+린트는 **사람에게 보이는 문자열 리터럴과 JSX 텍스트만** 본다. 세 가지를 명시적으로 제외한다:
+
+1. **모듈 지정자.** `import { x } from '../../shared/chain/accounts'` 의 `'…/chain/…'` 도 문자열 리터럴이다. 제외하지 않으면 관객 코드 전역에서 `chain`이 46번 걸려 CI가 T18부터 영구히 빨갛다. `import`/`export … from` 줄과 `import('…')` 는 통째로 건너뛴다.
+2. **테스트 파일.** `*.test.ts(x)` 의 `it('...chain...')` 같은 제목은 배포물이 아니다.
+3. **식별자.** `chainId`, `getChain()` 은 리터럴이 아니므로 애초에 스캔 대상이 아니다.
+
+영어 금지어는 리터럴 안에서 단어 경계(`\b`)로, 한국어 금지어는 부분 문자열로 검사한다(한국어는 조사가 붙어 `가스비`, `체인에` 형태로 나온다). 단어 경계 규칙 덕분에 `https://testnet.monadexplorer.com` 은 `\bmonad\b` 에 걸리지 않는다.
 
 - [ ] **Step 1: 실패하는 테스트를 쓴다**
 
@@ -783,6 +859,23 @@ describe('lintCopy', () => {
 
   it('does not flag identifiers such as chainId or getChain', () => {
     const file = fixture('Ok.ts', 'export const chainId = 10143;\nexport function getChain() { return chainId; }\n');
+    expect(lintCopy([file])).toEqual([]);
+  });
+
+  it('does not flag module specifiers that contain a banned word', () => {
+    const file = fixture('Imports.tsx', [
+      "import { getAttendeeAccount } from '../../shared/chain/accounts';",
+      "import { sendOp } from '../../shared/chain/ops';",
+      "export { readTicket } from '../../shared/chain/reads';",
+      "const lazy = await import('../../shared/chain/bundler');",
+      "export const ok = '티켓을 받았어요';",
+      '',
+    ].join('\n'));
+    expect(lintCopy([file])).toEqual([]);
+  });
+
+  it('skips test files, whose titles are not shipped copy', () => {
+    const file = fixture('thing.test.ts', "it('reads the chain and pays no gas', () => {});\n");
     expect(lintCopy([file])).toEqual([]);
   });
 
@@ -823,6 +916,12 @@ export interface CopyLintFinding {
 
 const SCANNED_EXTENSIONS = new Set(['.ts', '.tsx']);
 const SKIPPED_DIRECTORIES = new Set(['node_modules', 'dist', 'ios', 'android', '__snapshots__']);
+const TEST_FILE = /\.(test|spec)\.tsx?$/;
+
+/** import/export … from '…'  and  import('…') — module specifiers are never user-visible copy. */
+const MODULE_SPECIFIER_LINE = /^\s*(?:import\b|export\b[^=]*\bfrom\b)/;
+const DYNAMIC_IMPORT = /\bimport\s*\(\s*(['"`])(?:[^'"`\\]|\\.)*\1\s*\)/g;
+const VI_MOCK = /\bvi\.mock\s*\(\s*(['"`])(?:[^'"`\\]|\\.)*\1/g;
 
 const LITERAL_PATTERN =
   /'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"|`(?:[^`\\]|\\.)*`|>[^<>{}]+</g;
@@ -845,10 +944,13 @@ function collectFiles(target: string, out: string[]): void {
 }
 
 function lintFile(file: string): CopyLintFinding[] {
+  if (TEST_FILE.test(file)) return [];
   const findings: CopyLintFinding[] = [];
   const source = readFileSync(file, 'utf8');
   const lines = source.split('\n');
-  lines.forEach((line, index) => {
+  lines.forEach((rawLine, index) => {
+    if (MODULE_SPECIFIER_LINE.test(rawLine)) return;
+    const line = rawLine.replace(DYNAMIC_IMPORT, 'import()').replace(VI_MOCK, 'vi.mock(');
     for (const match of line.matchAll(LITERAL_PATTERN)) {
       const text = match[0];
       for (const word of KOREAN_WORDS) {
@@ -893,7 +995,7 @@ export type { CopyLintFinding } from './copy-lint.js';
 - [ ] **Step 4: 테스트가 통과하는지 확인**
 
 Run (from `packages/shared/`): `pnpm vitest run src/copy-lint.test.ts`
-Expected: PASS — `Tests  5 passed (5)`.
+Expected: PASS — `Tests  7 passed (7)`.
 
 - [ ] **Step 5: 루트 스크립트와 CI 연결**
 
@@ -914,7 +1016,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with: { version: 9 }
+        with: { version: 10 }
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
@@ -960,11 +1062,14 @@ git commit -m "feat(shared): add copy-lint gate for attendee vocabulary and wire
 
 **Files:**
 - Create: `apps/web/src/shared/copy/ko.ts`, `apps/web/src/shared/copy/en.ts`, `apps/web/src/shared/copy/index.ts`, `apps/web/src/shared/i18n.ts`
+- Modify: `apps/web/vitest.setup.ts` (i18n 초기화)
 - Test: `apps/web/src/shared/copy/copy.test.ts`
 
 **Interfaces:**
 - Consumes: Task 3의 `pnpm lint:copy`(대상 디렉터리 `apps/web/src/shared/copy`).
-- Produces: `type Copy`, `ko`, `en`, `initI18n()`, `useCopy(): Copy`, `setLocale(l: 'ko' | 'en')`, `fmt(template, vars)`. 이후 모든 관객 화면은 `useCopy()`만 쓴다.
+- Produces: `type Copy`, `ko`, `en`, `initI18n(lng?: Locale)`, `useCopy(): Copy`, `useLocale()`, `setLocale(l: 'ko' | 'en')`, `fmt(template, vars)`. 이후 모든 관객 화면은 `useCopy()`만 쓴다.
+
+**테스트 하네스가 i18next를 실제로 초기화한다.** 초기화하지 않으면 `useTranslation()`이 미초기화 스텁을 돌려주고 `useCopy()`가 우연히 `ko`로 떨어지는데, 이 sub-plan의 컴포넌트 테스트 아홉 개가 전부 그 우연에 기대게 된다. react-i18next 동작이 한 번 바뀌면 동시에 전부 깨진다. 그래서 Step 5에서 `vitest.setup.ts`에 `await initI18n('ko')`를 넣는다.
 
 i18next를 **로케일 감지·전환·저장**에만 쓰고, 문구 접근은 `useCopy()`가 돌려주는 **타입이 붙은 중첩 객체**로 한다. `t('a.b.c')` 문자열 키를 쓰지 않는 이유는 오타가 컴파일에서 안 잡히고, 금지어 린트가 문자열 리터럴을 스캔하는 구조와 맞지 않기 때문이다. `en: Copy = {…}` 선언이 두 로케일의 키 집합이 어긋나면 빌드를 깬다.
 
@@ -1238,10 +1343,10 @@ export function detectLocale(): Locale {
   return navigator.language.toLowerCase().startsWith('ko') ? 'ko' : 'en';
 }
 
-export async function initI18n(): Promise<void> {
+export async function initI18n(lng?: Locale): Promise<void> {
   if (i18next.isInitialized) return;
   await i18next.use(initReactI18next).init({
-    lng: detectLocale(),
+    lng: lng ?? detectLocale(),
     fallbackLng: 'ko',
     resources: { ko: { translation: {} }, en: { translation: {} } },
     interpolation: { escapeValue: false },
@@ -1273,22 +1378,47 @@ export function fmt(template: string, vars: Record<string, string | number>): st
 }
 ```
 
-- [ ] **Step 5: 테스트 통과 확인**
+- [ ] **Step 5: 테스트 하네스에서 i18n 초기화**
+
+```ts
+// apps/web/vitest.setup.ts
+import '@testing-library/jest-dom/vitest';
+import { cleanup } from '@testing-library/react';
+import { afterEach, beforeAll, vi } from 'vitest';
+import { initI18n } from './src/shared/i18n';
+
+// Component tests assert Korean copy; initialise i18next for real instead of
+// relying on react-i18next's uninitialised stub falling back to ko by accident.
+beforeAll(async () => {
+  await initI18n('ko');
+});
+
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
+
+if (!globalThis.crypto?.getRandomValues) {
+  throw new Error('WebCrypto is required for these tests; use Node 22+');
+}
+```
+
+- [ ] **Step 6: 테스트 통과 확인**
 
 Run (from `apps/web/`): `pnpm vitest run src/shared/copy/copy.test.ts`
 Expected: PASS — `Tests  3 passed (3)`.
 
-- [ ] **Step 6: 금지어 게이트 통과 확인**
+- [ ] **Step 7: 금지어 게이트 통과 확인**
 
 Run (from repo root): `pnpm lint:copy`
 Expected: `copy-lint: clean`. 실패하면 해당 줄의 단어를 바꾼다 — **예외 주석은 만들지 않는다.**
 
-- [ ] **Step 7: 커밋**
+- [ ] **Step 8: 커밋**
 
 ```bash
 cd /Users/moomi/Downloads/z03.Vibe_Coding/MONTI
-git add apps/web/src/shared/copy apps/web/src/shared/i18n.ts apps/web/src/shared/copy/copy.test.ts
-git commit -m "feat(web): add typed ko/en attendee copy and i18next locale switching"
+git add apps/web/src/shared/copy apps/web/src/shared/i18n.ts apps/web/vitest.setup.ts
+git commit -m "feat(web): add typed ko/en attendee copy, i18next switching and test-harness init"
 ```
 
 ---
@@ -1336,7 +1466,10 @@ describe('ui primitives', () => {
     const onExpire = vi.fn();
     render(<Countdown seconds={3} onExpire={onExpire} />);
     expect(screen.getByRole('timer')).toHaveTextContent('3');
-    act(() => { vi.advanceTimersByTime(3000); });
+    // One second per act: the next timer is only armed after React flushes the state update.
+    for (let tick = 0; tick < 3; tick += 1) {
+      act(() => { vi.advanceTimersByTime(1000); });
+    }
     expect(screen.getByRole('timer')).toHaveTextContent('0');
     expect(onExpire).toHaveBeenCalledTimes(1);
   });
@@ -1475,7 +1608,9 @@ export function Button({ variant = 'primary', ...rest }: Props) {
 
 ```tsx
 // apps/web/src/shared/ui/Alert.tsx
-export function Alert({ tone = 'info', children }: { tone?: 'info' | 'warn' | 'error'; children: React.ReactNode }) {
+import type { ReactNode } from 'react';
+
+export function Alert({ tone = 'info', children }: { tone?: 'info' | 'warn' | 'error'; children: ReactNode }) {
   return (
     <div className={`alert alert--${tone}`} role={tone === 'error' ? 'alert' : 'status'}>
       {children}
@@ -1574,7 +1709,9 @@ git commit -m "feat(web): add mobile-only screen shell, bottom tabs, fab and ui 
 
 **Interfaces:**
 - Consumes: `Screen`, `BottomTabs` (Task 5), `useCopy` (Task 4).
-- Produces: `router` (createBrowserRouter), `<App />`, `queryClient`, `useSession(): { status: 'loading'|'anonymous'|'signedIn'; account?: Hex; personId?: string }`, `setSession(s)`, `clearSession()`, `<RequireSession>`.
+- Produces: `routes` (React Router `RouteObject[]`), `<App />`, `queryClient`, `useSession(): Session`, `setSession(s)`, `clearSession()`, `registerSessionHydrator(h)`, `bootSession()`, `<RequireSession>`.
+
+**세션은 부팅 때 반드시 해소된다.** `status`는 `'loading'`에서 시작하지만 `App`이 마운트되자마자 `bootSession()`이 돌아 `'anonymous'` 또는 `'signedIn'`으로 바꾼다. 하이드레이터가 등록되지 않았으면(초기 태스크, 테스트) 즉시 `'anonymous'`다. 이게 없으면 새로고침 한 번에 `/tickets` `/me` `/chats` `/org/*`가 영원히 스피너에 갇히고, T33의 스모크 두 개가 첫 단언 전에 멈춘다. Firebase를 아는 실제 하이드레이터는 T16이 등록한다(`shared/api/sessionHydrator.ts`) — `session.ts`는 Firebase를 import하지 않는다.
 
 라우트는 마스터 계획 + v2.4 델타 그대로: `/`, `/events/:id`, `/signup/*`, `/login`, `/tickets`, `/tickets/:id`, `/tickets/:id/transfer`, `/tickets/:id/enter`, `/chats`, `/chats/:eventId`, `/me`, `/org/*`, `/staff/*`. 하단 탭 바는 **관객 탭 4개 경로에서만** 보인다(가입·입장·주최자·스태프 화면에서는 숨긴다).
 
@@ -1588,7 +1725,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { describe, expect, it } from 'vitest';
 import { routes } from './router';
 import { queryClient } from './shared/query';
-import { setSession } from './shared/session';
+import { bootSession, getSession, registerSessionHydrator, setSession } from './shared/session';
 
 function renderAt(path: string) {
   const router = createMemoryRouter(routes, { initialEntries: [path] });
@@ -1618,6 +1755,25 @@ describe('router', () => {
     renderAt('/me');
     expect(await screen.findByRole('heading', { name: '다시 오셨네요' })).toBeInTheDocument();
   });
+
+  it('never leaves a guarded route stuck on loading after a cold boot', async () => {
+    setSession({ status: 'loading' });
+    bootSession();
+    expect(getSession().status).toBe('anonymous');
+    renderAt('/tickets');
+    expect(await screen.findByRole('heading', { name: '다시 오셨네요' })).toBeInTheDocument();
+  });
+
+  it('uses a registered hydrator when one exists', async () => {
+    setSession({ status: 'loading' });
+    registerSessionHydrator((set) => {
+      set({ status: 'signedIn', account: `0x${'22'.repeat(20)}`, personId: 'p2' });
+      return () => undefined;
+    });
+    bootSession();
+    expect(getSession()).toMatchObject({ status: 'signedIn', personId: 'p2' });
+    registerSessionHydrator(null);
+  });
 });
 ```
 
@@ -1641,6 +1797,31 @@ export interface Session {
 
 let current: Session = { status: 'loading' };
 const listeners = new Set<() => void>();
+
+/**
+ * Supplied by shared/api/sessionHydrator.ts (Task 16) so this module stays Firebase-free.
+ * Receives `set` and returns an unsubscribe.
+ */
+export type SessionHydrator = (set: (session: Session) => void) => () => void;
+let hydrator: SessionHydrator | null = null;
+
+export function registerSessionHydrator(next: SessionHydrator | null): void {
+  hydrator = next;
+}
+
+/** Called once from <App/>. Guarantees status leaves 'loading'. */
+export function bootSession(): () => void {
+  if (!hydrator) {
+    setSession({ status: 'anonymous' });
+    return () => undefined;
+  }
+  const unsubscribe = hydrator(setSession);
+  // A hydrator that has not answered yet must not leave the guard spinning forever.
+  setTimeout(() => {
+    if (current.status === 'loading') setSession({ status: 'anonymous' });
+  }, 3_000);
+  return unsubscribe;
+}
 
 function emit(): void {
   for (const listener of listeners) listener();
@@ -1767,15 +1948,18 @@ export const routes: RouteObject[] = [
 
 ```tsx
 // apps/web/src/App.tsx
+import { useEffect } from 'react';
 import { RouterProvider, createBrowserRouter } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { routes } from './router';
 import { queryClient } from './shared/query';
+import { bootSession } from './shared/session';
 import './shared/theme.css';
 
 const router = createBrowserRouter(routes);
 
 export function App() {
+  useEffect(() => bootSession(), []);
   return (
     <QueryClientProvider client={queryClient}>
       <RouterProvider router={router} />
@@ -1855,7 +2039,7 @@ export function StaffRoutes() {
 - [ ] **Step 6: 테스트 통과 확인**
 
 Run (from `apps/web/`): `pnpm vitest run src/router.test.tsx`
-Expected: PASS — `Tests  3 passed (3)`.
+Expected: PASS — `Tests  5 passed (5)`.
 
 - [ ] **Step 7: 타입 검사와 커밋**
 
@@ -1914,6 +2098,7 @@ describe('getConfig', () => {
     expect(config.rpcUrls).toHaveLength(3);
     expect(config.addresses.ticket).toBe(BASE.VITE_ADDR_TICKET);
     expect(config.entryPoint).toBe('0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789');
+    expect(config.explorerUrl).toBe('https://testnet.monadexplorer.com');
   });
 
   it('throws naming the missing variable', () => {
@@ -1926,6 +2111,7 @@ describe('getConfig', () => {
     for (const [key, value] of Object.entries(BASE)) vi.stubEnv(key, value);
     vi.stubEnv('VITE_CHAIN_ID', '143');
     expect(getConfig().chainId).toBe(143);
+    expect(getConfig().explorerUrl).toBe('https://monadexplorer.com');
   });
 });
 ```
@@ -1939,7 +2125,7 @@ Expected: FAIL — `Failed to resolve import "./config"`.
 
 ```ts
 // apps/web/src/shared/config.ts
-import type { Hex } from '@monti/shared';
+import { ENTRY_POINT_V06, explorerUrlFor, type Hex } from '@monti/shared';
 
 export interface AppConfig {
   chainId: number;
@@ -1952,10 +2138,9 @@ export interface AppConfig {
   rpId: string;
   ipfsGateway: string;
   pinataJwt: string;
+  /** Derived from chainId via @monti/shared, so no view hardcodes an explorer host. */
+  explorerUrl: string;
 }
-
-/** EntryPoint v0.6 — same address on every chain (Coinbase Smart Wallet v1). */
-const ENTRY_POINT_V06 = '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789' as Hex;
 
 let cached: AppConfig | null = null;
 
@@ -1973,8 +2158,9 @@ export function resetConfig(): void {
 
 export function getConfig(): AppConfig {
   if (cached) return cached;
+  const chainId = Number.parseInt(required('VITE_CHAIN_ID'), 10);
   cached = {
-    chainId: Number.parseInt(required('VITE_CHAIN_ID'), 10),
+    chainId,
     rpcUrls: required('VITE_RPC_URLS').split(',').map((url) => url.trim()).filter(Boolean),
     wsUrl: required('VITE_WS_URL'),
     bundlerUrl: required('VITE_BUNDLER_URL'),
@@ -1989,6 +2175,7 @@ export function getConfig(): AppConfig {
     rpId: required('VITE_RP_ID'),
     ipfsGateway: required('VITE_IPFS_GATEWAY'),
     pinataJwt: required('VITE_PINATA_JWT'),
+    explorerUrl: explorerUrlFor(chainId),
   };
   return cached;
 }
@@ -2043,7 +2230,7 @@ git commit -m "feat(web): add typed app config with fail-fast env parsing"
 
 **Interfaces:**
 - Consumes: `getConfig()` (Task 7).
-- Produces: `monadChain(chainId, rpcUrls, wsUrl): Chain`, `getPublicClient(): PublicClient`, `resetChainClients(): void`, `getWebSocketClient(): PublicClient`, `type ChainStage`, `type ChainLog`, `subscribeLogs({ address, topics, onLog }): () => void`. **sub-plan 04가 게이트 판정 화면에서 같은 함수를 쓴다.**
+- Produces: `monadChain(chainId, rpcUrls, wsUrl): Chain`, `getPublicClient(): PublicClient`, `resetChainClients(): void`, `getWebSocketClient(): PublicClient`, `resetWebSocketClient(): void`, `type LogStage`, `type ChainLog`, `subscribeLogs({ address, topics, onLog }): () => void`. **sub-plan 04가 게이트 판정 화면에서 같은 함수를 쓴다.**
 
 폴백 전송은 viem `fallback([...])`로 만든다. 순서는 `VITE_RPC_URLS`가 정하고(권장: Alchemy → Tenderly → 공식), `rank: false`로 두어 **순서를 뒤집지 않는다** — 공식 RPC는 마지막 보루이지 최고 속도가 아니다. 구독은 Monad 전용 `monadLogs`를 쓴다. `commitState`가 `Proposed`/`Voted`면 `stage: 'speculative'`, `Finalized`면 `stage: 'finalized'`로 올려 보낸다. 소켓이 없거나 서버가 `monadLogs`를 모르면 **블록마다 `eth_getLogs`를 `blockTag: 'latest'` 그다음 `'finalized'`로 돌리는 폴링**으로 떨어진다. 스태프 화면이 0.7초에 초록을 켜고 확정에서 굳히는 스펙 §7.2 8단계가 이 두 단계에 그대로 대응한다.
 
@@ -2053,6 +2240,7 @@ git commit -m "feat(web): add typed app config with fail-fast env parsing"
 // apps/web/src/shared/chain/client.test.ts
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getPublicClient, monadChain, resetChainClients } from './client';
+import { resetWebSocketClient } from './subscribeLogs';
 
 beforeEach(() => {
   vi.stubEnv('VITE_CHAIN_ID', '10143');
@@ -2070,6 +2258,7 @@ beforeEach(() => {
 
 afterEach(() => {
   resetChainClients();
+  resetWebSocketClient();   // otherwise a live socket leaks between test files
   vi.unstubAllEnvs();
 });
 
@@ -2101,9 +2290,10 @@ describe('chain client', () => {
   });
 
   it('returns the same client instance until reset', () => {
-    expect(getPublicClient()).toBe(getPublicClient());
+    const first = getPublicClient();
+    expect(getPublicClient()).toBe(first);
     resetChainClients();
-    expect(getPublicClient()).not.toBe(getPublicClient.call(null));
+    expect(getPublicClient()).not.toBe(first);
   });
 });
 ```
@@ -2118,20 +2308,16 @@ Expected: FAIL — `Failed to resolve import "./client"`.
 ```ts
 // apps/web/src/shared/chain/chain.ts
 import { defineChain, type Chain } from 'viem';
+import { MONAD_MAINNET_CHAIN_ID, explorerUrlFor } from '@monti/shared';
 
 export function monadChain(chainId: number, rpcUrls: string[], wsUrl: string): Chain {
   return defineChain({
     id: chainId,
-    name: chainId === 143 ? 'Monad' : 'Monad Testnet',
+    name: chainId === MONAD_MAINNET_CHAIN_ID ? 'Monad' : 'Monad Testnet',
     nativeCurrency: { name: 'MON', symbol: 'MON', decimals: 18 },
     rpcUrls: { default: { http: rpcUrls, webSocket: [wsUrl] } },
-    blockExplorers: {
-      default: {
-        name: 'MonadVision',
-        url: chainId === 143 ? 'https://monadexplorer.com' : 'https://testnet.monadexplorer.com',
-      },
-    },
-    testnet: chainId !== 143,
+    blockExplorers: { default: { name: 'MonadVision', url: explorerUrlFor(chainId) } },
+    testnet: chainId !== MONAD_MAINNET_CHAIN_ID,
   });
 }
 ```
@@ -2162,6 +2348,7 @@ export function getPublicClient(): PublicClient {
   return publicClient;
 }
 
+/** Only the HTTP client lives here. The socket is owned by subscribeLogs.resetWebSocketClient(). */
 export function resetChainClients(): void {
   publicClient = null;
 }
@@ -2177,8 +2364,13 @@ import { getConfig } from '../config';
 import { monadChain } from './chain';
 import { getPublicClient } from './client';
 
-export type ChainStage = 'speculative' | 'finalized';
-export type ChainLog = Log & { stage: ChainStage };
+/**
+ * Named LogStage, not ChainStage: src/staff/types.ts exports a three-member `ChainStage`
+ * ('speculative' | 'finalized' | 'offline') for the gate header, and two same-named
+ * exported unions in one codebase widen silently when the wrong one is imported.
+ */
+export type LogStage = 'speculative' | 'finalized';
+export type ChainLog = Log & { stage: LogStage };
 
 let wsClient: PublicClient | null = null;
 
@@ -2199,7 +2391,7 @@ export function resetWebSocketClient(): void {
   wsClient = null;
 }
 
-const STAGE_BY_COMMIT_STATE: Record<string, ChainStage> = {
+const STAGE_BY_COMMIT_STATE: Record<string, LogStage> = {
   Proposed: 'speculative',
   Voted: 'speculative',
   Finalized: 'finalized',
@@ -2221,14 +2413,14 @@ export function subscribeLogs({ address, topics, onLog }: SubscribeLogsArgs): ()
   let timer: ReturnType<typeof setInterval> | undefined;
   const seen = new Set<string>();
 
-  const emit = (raw: Record<string, unknown>, stage: ChainStage) => {
+  const emit = (raw: Record<string, unknown>, stage: LogStage) => {
     const key = `${stage}:${String(raw.transactionHash)}:${String(raw.logIndex)}`;
     if (seen.has(key)) return;
     seen.add(key);
     onLog({ ...(raw as unknown as Log), stage });
   };
 
-  const pollOnce = async (stage: ChainStage) => {
+  const pollOnce = async (stage: LogStage) => {
     const blockTag = stage === 'speculative' ? 'latest' : 'finalized';
     const logs = await getPublicClient()
       .request({ method: 'eth_getLogs', params: [{ address, topics, fromBlock: blockTag, toBlock: blockTag }] } as never)
@@ -2292,17 +2484,19 @@ git commit -m "feat(web): add monad public client with fallback transports and s
 
 ---
 
-## Task 9: ABI 조각과 타입 붙은 읽기 (`abis.ts`, `reads.ts`)
+## Task 9: 생성된 ABI 전량 로딩과 타입 붙은 읽기 (`abis.ts`, `reads.ts`)
 
 **Files:**
 - Create: `apps/web/src/shared/chain/abis.ts`, `apps/web/src/shared/chain/reads.ts`
 - Test: `apps/web/src/shared/chain/reads.test.ts`, `apps/web/src/shared/chain/abi-conformance.test.ts`
 
 **Interfaces:**
-- Consumes: `getPublicClient()` (Task 8), `getConfig()` (Task 7), sub-plan 01이 넣는 `@monti/shared/abi/{Identity,Organizers,Ticket}.json`.
-- Produces: `identityAbi`, `organizersAbi`, `ticketAbi` (모두 `as const`), `readIdentity()`, `readOrganizers()`, `readTicket()`. 각 팩터리는 바인딩된 읽기 함수 묶음을 돌려준다.
+- Consumes: `getPublicClient()` (Task 8), `getConfig()` (Task 7), sub-plan 01의 `export-abi.sh`가 넣는 `@monti/shared/abi/{Identity,Organizers,Ticket}.json` **전량(이벤트 포함)**.
+- Produces: `identityAbi`, `organizersAbi`, `ticketAbi` (생성 JSON 그대로, `viem`의 `Abi`), `USED_ABI` 사용 매니페스트, `readIdentity()`, `readOrganizers()`, `readTicket()` 및 구조체 타입 `EventMetaStruct` `TierStruct` `CheckInStruct` `OfferStruct`.
 
-JSON ABI를 그대로 import하면 viem이 타입을 못 읽는다(`as const`가 사라진다). 그래서 **쓰는 함수만** `as const` 조각으로 적고, 생성된 JSON과 이름·입출력이 같은지 conformance 테스트로 강제한다. 01이 시그니처를 바꾸면 그 테스트가 먼저 깨진다.
+**손으로 ABI 조각을 다시 적지 않는다.** 01이 내보낸 JSON을 그대로 싣는다. 이유 둘: ① 손으로 적은 조각에는 **이벤트가 하나도 없어서** `encodeEventTopics({ abi: ticketAbi, eventName: 'CheckedIn' })`(Task 26)가 `AbiEventNotFoundError`로 죽는다. ② solc가 뱉는 JSON은 모든 입출력에 `internalType`을 붙이고 키 순서도 `{internalType, name, type}`이라, 손으로 적은 `{name, type}`과 `JSON.stringify` 비교를 하면 **영원히 불일치**다.
+
+대신 **사용 매니페스트**를 둔다. 이 앱이 실제로 부르는 함수와 구독하는 이벤트의 이름·입력 타입·출력 타입만 적고, conformance 테스트가 생성 ABI를 `internalType`을 벗긴 형태로 정규화해 대조한다. 01이 시그니처를 바꾸면 그 테스트가 가장 먼저 깨진다.
 
 - [ ] **Step 1: 실패하는 테스트 두 개**
 
@@ -2329,7 +2523,7 @@ describe('reads', () => {
     );
   });
 
-  it('maps gateInfo tuple to a named object', async () => {
+  it('maps the gateInfo tuple to a named object', async () => {
     readContract.mockResolvedValueOnce([7n, `0x${'bb'.repeat(20)}`, `0x${'01'.repeat(32)}`, `0x${'02'.repeat(32)}`, true, false]);
     await expect(readOrganizers().gateInfo(3n)).resolves.toEqual({
       eventId: 7n, account: `0x${'bb'.repeat(20)}`, kx: `0x${'01'.repeat(32)}`, ky: `0x${'02'.repeat(32)}`, open: true, revoked: false,
@@ -2346,118 +2540,151 @@ describe('reads', () => {
 ```ts
 // apps/web/src/shared/chain/abi-conformance.test.ts
 import { describe, expect, it } from 'vitest';
-import identityJson from '@monti/shared/abi/Identity.json';
-import organizersJson from '@monti/shared/abi/Organizers.json';
-import ticketJson from '@monti/shared/abi/Ticket.json';
-import { identityAbi, organizersAbi, ticketAbi } from './abis';
+import { USED_ABI, identityAbi, organizersAbi, ticketAbi, normaliseTypes } from './abis';
 
-type Entry = { type: string; name?: string; inputs?: unknown[]; outputs?: unknown[] };
+const BY_CONTRACT = { Identity: identityAbi, Organizers: organizersAbi, Ticket: ticketAbi } as const;
 
-function signature(entry: Entry): string {
-  const io = (list: unknown[] = []) => JSON.stringify(list);
-  return `${entry.type}:${entry.name ?? ''}:${io(entry.inputs)}:${io(entry.outputs)}`;
-}
-
-function assertSubset(local: readonly Entry[], generated: Entry[], label: string) {
-  const known = new Set(generated.map(signature));
-  for (const entry of local) {
-    expect(known.has(signature(entry)), `${label} ${entry.name} differs from the generated ABI`).toBe(true);
+describe('generated abi covers everything this app uses', () => {
+  for (const [contract, entries] of Object.entries(USED_ABI)) {
+    for (const wanted of entries) {
+      it(`${contract}.${wanted.name} (${wanted.type}) matches the generated abi`, () => {
+        const abi = BY_CONTRACT[contract as keyof typeof BY_CONTRACT];
+        const found = abi.find((entry) => entry.type === wanted.type && 'name' in entry && entry.name === wanted.name);
+        expect(found, `${contract}.${wanted.name} missing from the generated ABI`).toBeDefined();
+        // internalType and key order are solc artefacts; compare names + types only.
+        expect(normaliseTypes(found!.inputs ?? [])).toEqual(wanted.inputs);
+        expect(normaliseTypes((found as { outputs?: unknown[] }).outputs ?? [])).toEqual(wanted.outputs ?? []);
+      });
+    }
   }
-}
-
-describe('abi conformance with sub-plan 01 output', () => {
-  it('Identity fragments match', () => assertSubset(identityAbi, identityJson as Entry[], 'Identity'));
-  it('Organizers fragments match', () => assertSubset(organizersAbi, organizersJson as Entry[], 'Organizers'));
-  it('Ticket fragments match', () => assertSubset(ticketAbi, ticketJson as Entry[], 'Ticket'));
 });
 ```
 
 - [ ] **Step 2: 실패 확인**
 
-Run (from `apps/web/`): `pnpm vitest run src/shared/chain/reads.test.ts src/shared/chain/abi-conformance.test.ts`
-Expected: FAIL — `Failed to resolve import "./reads"` 및 `Cannot find module '@monti/shared/abi/Identity.json'`. 01이 아직 ABI를 안 넣었으면 conformance 테스트는 `it.skipIf(!identityJson)` 대신 **01 완료 후 실행**한다. 그 전까지는 `pnpm vitest run src/shared/chain/reads.test.ts` 만 돌린다.
+Run (from `apps/web/`): `pnpm vitest run src/shared/chain/reads.test.ts`
+Expected: FAIL — `Failed to resolve import "./reads"`.
 
-- [ ] **Step 3: ABI 조각**
+`abi-conformance.test.ts`는 **sub-plan 01이 `packages/shared/src/abi/*.json`을 넣은 뒤에** 돌린다. 그 전에는 `Cannot find module '@monti/shared/abi/Identity.json'` 로 실패하는 것이 정상이며, Step 5에서 조건을 명시한다.
+
+- [ ] **Step 3: 생성 ABI 로딩과 사용 매니페스트**
 
 ```ts
 // apps/web/src/shared/chain/abis.ts
-export const identityAbi = [
-  { type: 'function', name: 'isMember', stateMutability: 'view', inputs: [{ name: 'account', type: 'address' }], outputs: [{ type: 'bool' }] },
-  { type: 'function', name: 'isLocked', stateMutability: 'view', inputs: [{ name: 'account', type: 'address' }], outputs: [{ type: 'bool' }] },
-  { type: 'function', name: 'accountOf', stateMutability: 'view', inputs: [{ name: 'personId', type: 'bytes32' }], outputs: [{ type: 'address' }] },
-  { type: 'function', name: 'personOf', stateMutability: 'view', inputs: [{ name: 'account', type: 'address' }], outputs: [{ type: 'bytes32' }] },
-  { type: 'function', name: 'activeDevice', stateMutability: 'view', inputs: [{ name: 'account', type: 'address' }], outputs: [{ name: 'x', type: 'bytes32' }, { name: 'y', type: 'bytes32' }] },
-  { type: 'function', name: 'deviceUpdatedAt', stateMutability: 'view', inputs: [{ name: 'account', type: 'address' }], outputs: [{ type: 'uint64' }] },
-  { type: 'function', name: 'nicknameOwner', stateMutability: 'view', inputs: [{ name: 'nicknameHash', type: 'bytes32' }], outputs: [{ type: 'address' }] },
-  { type: 'function', name: 'nicknameOf', stateMutability: 'view', inputs: [{ name: 'account', type: 'address' }], outputs: [{ type: 'bytes32' }] },
-  { type: 'function', name: 'kycLevelOf', stateMutability: 'view', inputs: [{ name: 'account', type: 'address' }], outputs: [{ type: 'uint8' }] },
-  { type: 'function', name: 'setActiveDevice', stateMutability: 'nonpayable', inputs: [{ name: 'x', type: 'bytes32' }, { name: 'y', type: 'bytes32' }], outputs: [] },
-  { type: 'function', name: 'setNickname', stateMutability: 'nonpayable', inputs: [{ name: 'nicknameHash', type: 'bytes32' }, { name: 'nickname', type: 'string' }], outputs: [] },
-] as const;
+import type { Abi } from 'viem';
+import identityJson from '@monti/shared/abi/Identity.json';
+import organizersJson from '@monti/shared/abi/Organizers.json';
+import ticketJson from '@monti/shared/abi/Ticket.json';
 
-export const organizersAbi = [
-  { type: 'function', name: 'gateInfo', stateMutability: 'view', inputs: [{ name: 'gateId', type: 'uint256' }], outputs: [{ name: 'eventId', type: 'uint256' }, { name: 'account', type: 'address' }, { name: 'kx', type: 'bytes32' }, { name: 'ky', type: 'bytes32' }, { name: 'open', type: 'bool' }, { name: 'revoked', type: 'bool' }] },
-  { type: 'function', name: 'isOpenGate', stateMutability: 'view', inputs: [{ name: 'eventId', type: 'uint256' }, { name: 'gateAccount', type: 'address' }], outputs: [{ type: 'bool' }] },
-  { type: 'function', name: 'hasPermission', stateMutability: 'view', inputs: [{ name: 'orgId', type: 'uint256' }, { name: 'account', type: 'address' }, { name: 'bit', type: 'uint32' }], outputs: [{ type: 'bool' }] },
-  { type: 'function', name: 'gateOf', stateMutability: 'view', inputs: [{ name: 'gateAccount', type: 'address' }], outputs: [{ type: 'uint256' }] },
-  { type: 'function', name: 'ownerOf', stateMutability: 'view', inputs: [{ name: 'orgId', type: 'uint256' }], outputs: [{ type: 'address' }] },
-  { type: 'function', name: 'registerGate', stateMutability: 'nonpayable', inputs: [{ name: 'eventId', type: 'uint256' }, { name: 'gateAccount', type: 'address' }, { name: 'kx', type: 'bytes32' }, { name: 'ky', type: 'bytes32' }], outputs: [{ type: 'uint256' }] },
-  { type: 'function', name: 'openGate', stateMutability: 'nonpayable', inputs: [{ name: 'gateId', type: 'uint256' }], outputs: [] },
-  { type: 'function', name: 'closeGate', stateMutability: 'nonpayable', inputs: [{ name: 'gateId', type: 'uint256' }], outputs: [] },
-  { type: 'function', name: 'setAdmin', stateMutability: 'nonpayable', inputs: [{ name: 'orgId', type: 'uint256' }, { name: 'admin', type: 'address' }, { name: 'permissionBits', type: 'uint32' }], outputs: [] },
-  { type: 'function', name: 'setManager', stateMutability: 'nonpayable', inputs: [{ name: 'orgId', type: 'uint256' }, { name: 'manager', type: 'address' }, { name: 'exists', type: 'bool' }, { name: 'canApprove', type: 'bool' }], outputs: [] },
-] as const;
+// Full generated ABIs, events included. Nothing here is hand-written.
+export const identityAbi = identityJson as Abi;
+export const organizersAbi = organizersJson as Abi;
+export const ticketAbi = ticketJson as Abi;
 
-const EVENT_META = {
-  type: 'tuple',
-  components: [
-    { name: 'orgId', type: 'uint256' }, { name: 'titleHash', type: 'bytes32' }, { name: 'descHash', type: 'bytes32' },
-    { name: 'imageCid', type: 'string' }, { name: 'startsAt', type: 'uint64' }, { name: 'endsAt', type: 'uint64' },
-    { name: 'venueHash', type: 'bytes32' }, { name: 'saleStart', type: 'uint64' }, { name: 'saleEnd', type: 'uint64' },
-    { name: 'transferable', type: 'bool' }, { name: 'transferCutoffSeconds', type: 'uint32' },
-    { name: 'maxTransfers', type: 'uint8' }, { name: 'approvalRequired', type: 'bool' },
-    { name: 'category', type: 'uint8' }, { name: 'regionCode', type: 'bytes32' },
-    { name: 'requireKyc', type: 'bool' },
+export interface AbiParamShape { name: string; type: string; components?: AbiParamShape[] }
+export interface UsedEntry { type: 'function' | 'event'; name: string; inputs: AbiParamShape[]; outputs?: AbiParamShape[] }
+
+/** Strips solc's `internalType` and any extra keys, recursively. */
+export function normaliseTypes(params: readonly unknown[]): AbiParamShape[] {
+  return params.map((raw) => {
+    const param = raw as { name?: string; type: string; components?: readonly unknown[] };
+    const shape: AbiParamShape = { name: param.name ?? '', type: param.type };
+    if (param.components) shape.components = normaliseTypes(param.components);
+    return shape;
+  });
+}
+
+const u256 = (name: string): AbiParamShape => ({ name, type: 'uint256' });
+const addr = (name: string): AbiParamShape => ({ name, type: 'address' });
+const b32 = (name: string): AbiParamShape => ({ name, type: 'bytes32' });
+
+const EVENT_META_COMPONENTS: AbiParamShape[] = [
+  { name: 'orgId', type: 'uint256' }, { name: 'titleHash', type: 'bytes32' }, { name: 'descHash', type: 'bytes32' },
+  { name: 'imageCid', type: 'string' }, { name: 'startsAt', type: 'uint64' }, { name: 'endsAt', type: 'uint64' },
+  { name: 'venueHash', type: 'bytes32' }, { name: 'saleStart', type: 'uint64' }, { name: 'saleEnd', type: 'uint64' },
+  { name: 'transferable', type: 'bool' }, { name: 'transferCutoffSeconds', type: 'uint32' },
+  { name: 'maxTransfers', type: 'uint8' }, { name: 'approvalRequired', type: 'bool' },
+  { name: 'category', type: 'uint8' }, { name: 'regionCode', type: 'bytes32' }, { name: 'requireKyc', type: 'bool' },
+];
+
+const TIER_COMPONENTS: AbiParamShape[] = [
+  { name: 'name', type: 'string' }, { name: 'priceUsdCents', type: 'uint256' }, { name: 'supply', type: 'uint32' },
+  { name: 'minted', type: 'uint32' }, { name: 'maxPerWallet', type: 'uint16' }, { name: 'seated', type: 'bool' },
+];
+
+const CHECKIN_COMPONENTS: AbiParamShape[] = [
+  { name: 'gateId', type: 'uint256' }, { name: 'ts', type: 'uint64' },
+  { name: 'nonceHash', type: 'bytes32' }, { name: 'manual', type: 'bool' },
+];
+
+const OFFER_COMPONENTS: AbiParamShape[] = [
+  { name: 'from', type: 'address' }, { name: 'recipientCommitment', type: 'bytes32' }, { name: 'expiresAt', type: 'uint64' },
+];
+
+/** Every contract entry this web app calls or subscribes to. The conformance test is the guard. */
+export const USED_ABI: Record<'Identity' | 'Organizers' | 'Ticket', UsedEntry[]> = {
+  Identity: [
+    { type: 'function', name: 'isMember', inputs: [addr('account')], outputs: [{ name: '', type: 'bool' }] },
+    { type: 'function', name: 'isLocked', inputs: [addr('account')], outputs: [{ name: '', type: 'bool' }] },
+    { type: 'function', name: 'accountOf', inputs: [b32('personId')], outputs: [{ name: '', type: 'address' }] },
+    { type: 'function', name: 'personOf', inputs: [addr('account')], outputs: [{ name: '', type: 'bytes32' }] },
+    { type: 'function', name: 'activeDevice', inputs: [addr('account')], outputs: [b32('x'), b32('y')] },
+    { type: 'function', name: 'deviceUpdatedAt', inputs: [addr('account')], outputs: [{ name: '', type: 'uint64' }] },
+    { type: 'function', name: 'kycLevelOf', inputs: [addr('account')], outputs: [{ name: '', type: 'uint8' }] },
+    { type: 'function', name: 'nicknameOwner', inputs: [b32('nicknameHash')], outputs: [{ name: '', type: 'address' }] },
+    { type: 'function', name: 'nicknameOf', inputs: [addr('account')], outputs: [{ name: '', type: 'bytes32' }] },
+    { type: 'function', name: 'setActiveDevice', inputs: [b32('x'), b32('y')], outputs: [] },
+    { type: 'function', name: 'setNickname', inputs: [b32('nicknameHash'), { name: 'nickname', type: 'string' }], outputs: [] },
   ],
-} as const;
-
-const TIER_ARRAY = {
-  type: 'tuple[]',
-  components: [
-    { name: 'name', type: 'string' }, { name: 'priceUsdCents', type: 'uint256' }, { name: 'supply', type: 'uint32' },
-    { name: 'minted', type: 'uint32' }, { name: 'maxPerWallet', type: 'uint16' }, { name: 'seated', type: 'bool' },
+  Organizers: [
+    { type: 'function', name: 'gateInfo', inputs: [u256('gateId')],
+      outputs: [u256('eventId'), addr('account'), b32('kx'), b32('ky'), { name: 'open', type: 'bool' }, { name: 'revoked', type: 'bool' }] },
+    { type: 'function', name: 'isOpenGate', inputs: [u256('eventId'), addr('gateAccount')], outputs: [{ name: '', type: 'bool' }] },
+    { type: 'function', name: 'hasPermission', inputs: [u256('orgId'), addr('account'), { name: 'bit', type: 'uint32' }], outputs: [{ name: '', type: 'bool' }] },
+    { type: 'function', name: 'gateOf', inputs: [addr('gateAccount')], outputs: [{ name: '', type: 'uint256' }] },
+    { type: 'function', name: 'ownerOf', inputs: [u256('orgId')], outputs: [{ name: '', type: 'address' }] },
+    { type: 'function', name: 'registerGate', inputs: [u256('eventId'), addr('gateAccount'), b32('kx'), b32('ky')], outputs: [{ name: '', type: 'uint256' }] },
+    { type: 'function', name: 'openGate', inputs: [u256('gateId')], outputs: [] },
+    { type: 'function', name: 'closeGate', inputs: [u256('gateId')], outputs: [] },
+    { type: 'function', name: 'setAdmin', inputs: [u256('orgId'), addr('admin'), { name: 'permissionBits', type: 'uint32' }], outputs: [] },
+    { type: 'function', name: 'setManager', inputs: [u256('orgId'), addr('manager'), { name: 'exists', type: 'bool' }, { name: 'canApprove', type: 'bool' }], outputs: [] },
+    { type: 'event', name: 'GateRegistered',
+      inputs: [u256('gateId'), u256('eventId'), addr('gateAccount'), b32('kx'), b32('ky')] },
   ],
-} as const;
-
-export const ticketAbi = [
-  { type: 'function', name: 'ownerOf', stateMutability: 'view', inputs: [{ name: 'tokenId', type: 'uint256' }], outputs: [{ type: 'address' }] },
-  { type: 'function', name: 'eventOf', stateMutability: 'view', inputs: [{ name: 'tokenId', type: 'uint256' }], outputs: [{ type: 'uint256' }] },
-  { type: 'function', name: 'tierOf', stateMutability: 'view', inputs: [{ name: 'tokenId', type: 'uint256' }], outputs: [{ type: 'uint8' }] },
-  { type: 'function', name: 'eventOrg', stateMutability: 'view', inputs: [{ name: 'eventId', type: 'uint256' }], outputs: [{ type: 'uint256' }] },
-  { type: 'function', name: 'balanceOfEvent', stateMutability: 'view', inputs: [{ name: 'account', type: 'address' }, { name: 'eventId', type: 'uint256' }], outputs: [{ type: 'uint256' }] },
-  { type: 'function', name: 'transfersOf', stateMutability: 'view', inputs: [{ name: 'tokenId', type: 'uint256' }], outputs: [{ type: 'uint8' }] },
-  { type: 'function', name: 'eventStatus', stateMutability: 'view', inputs: [{ name: 'eventId', type: 'uint256' }], outputs: [{ type: 'uint8' }] },
-  { type: 'function', name: 'checkInOf', stateMutability: 'view', inputs: [{ name: 'tokenId', type: 'uint256' }], outputs: [{ type: 'tuple', components: [{ name: 'gateId', type: 'uint256' }, { name: 'ts', type: 'uint64' }, { name: 'nonceHash', type: 'bytes32' }, { name: 'manual', type: 'bool' }] }] },
-  { type: 'function', name: 'offerOf', stateMutability: 'view', inputs: [{ name: 'tokenId', type: 'uint256' }], outputs: [{ type: 'tuple', components: [{ name: 'from', type: 'address' }, { name: 'recipientCommitment', type: 'bytes32' }, { name: 'expiresAt', type: 'uint64' }] }] },
-  { type: 'function', name: 'eventMeta', stateMutability: 'view', inputs: [{ name: 'eventId', type: 'uint256' }], outputs: [EVENT_META] },
-  { type: 'function', name: 'tiers', stateMutability: 'view', inputs: [{ name: 'eventId', type: 'uint256' }], outputs: [TIER_ARRAY] },
-  { type: 'function', name: 'claim', stateMutability: 'nonpayable', inputs: [{ name: 'eventId', type: 'uint256' }, { name: 'tier', type: 'uint8' }, { name: 'voucher', type: 'bytes' }], outputs: [{ type: 'uint256' }] },
-  { type: 'function', name: 'safeTransferFrom', stateMutability: 'nonpayable', inputs: [{ name: 'from', type: 'address' }, { name: 'to', type: 'address' }, { name: 'tokenId', type: 'uint256' }], outputs: [] },
-  { type: 'function', name: 'createOffer', stateMutability: 'nonpayable', inputs: [{ name: 'tokenId', type: 'uint256' }, { name: 'recipientCommitment', type: 'bytes32' }, { name: 'expiresAt', type: 'uint64' }], outputs: [] },
-  { type: 'function', name: 'cancelOffer', stateMutability: 'nonpayable', inputs: [{ name: 'tokenId', type: 'uint256' }], outputs: [] },
-  { type: 'function', name: 'acceptOffer', stateMutability: 'nonpayable', inputs: [{ name: 'tokenId', type: 'uint256' }, { name: 'attesterSig', type: 'bytes' }], outputs: [] },
-  { type: 'function', name: 'createEvent', stateMutability: 'nonpayable', inputs: [{ name: 'meta', ...EVENT_META }, { name: 'tiers', ...TIER_ARRAY }], outputs: [{ type: 'uint256' }] },
-  { type: 'function', name: 'updateEventMeta', stateMutability: 'nonpayable', inputs: [{ name: 'eventId', type: 'uint256' }, { name: 'meta', ...EVENT_META }, { name: 'tiers', ...TIER_ARRAY }], outputs: [] },
-  { type: 'function', name: 'publishEvent', stateMutability: 'nonpayable', inputs: [{ name: 'eventId', type: 'uint256' }], outputs: [] },
-  { type: 'function', name: 'cancelEvent', stateMutability: 'nonpayable', inputs: [{ name: 'eventId', type: 'uint256' }], outputs: [] },
-] as const;
+  Ticket: [
+    { type: 'function', name: 'ownerOf', inputs: [u256('tokenId')], outputs: [{ name: '', type: 'address' }] },
+    { type: 'function', name: 'eventOf', inputs: [u256('tokenId')], outputs: [{ name: '', type: 'uint256' }] },
+    { type: 'function', name: 'tierOf', inputs: [u256('tokenId')], outputs: [{ name: '', type: 'uint8' }] },
+    { type: 'function', name: 'eventOrg', inputs: [u256('eventId')], outputs: [{ name: '', type: 'uint256' }] },
+    { type: 'function', name: 'balanceOfEvent', inputs: [addr('account'), u256('eventId')], outputs: [{ name: '', type: 'uint256' }] },
+    { type: 'function', name: 'transfersOf', inputs: [u256('tokenId')], outputs: [{ name: '', type: 'uint8' }] },
+    { type: 'function', name: 'eventStatus', inputs: [u256('eventId')], outputs: [{ name: '', type: 'uint8' }] },
+    { type: 'function', name: 'checkInOf', inputs: [u256('tokenId')], outputs: [{ name: '', type: 'tuple', components: CHECKIN_COMPONENTS }] },
+    { type: 'function', name: 'offerOf', inputs: [u256('tokenId')], outputs: [{ name: '', type: 'tuple', components: OFFER_COMPONENTS }] },
+    { type: 'function', name: 'eventMeta', inputs: [u256('eventId')], outputs: [{ name: '', type: 'tuple', components: EVENT_META_COMPONENTS }] },
+    { type: 'function', name: 'tiers', inputs: [u256('eventId')], outputs: [{ name: '', type: 'tuple[]', components: TIER_COMPONENTS }] },
+    { type: 'function', name: 'claim', inputs: [u256('eventId'), { name: 'tier', type: 'uint8' }, { name: 'voucher', type: 'bytes' }], outputs: [{ name: '', type: 'uint256' }] },
+    { type: 'function', name: 'safeTransferFrom', inputs: [addr('from'), addr('to'), u256('tokenId')], outputs: [] },
+    { type: 'function', name: 'createOffer', inputs: [u256('tokenId'), b32('recipientCommitment'), { name: 'expiresAt', type: 'uint64' }], outputs: [] },
+    { type: 'function', name: 'cancelOffer', inputs: [u256('tokenId')], outputs: [] },
+    { type: 'function', name: 'acceptOffer', inputs: [u256('tokenId'), { name: 'attesterSig', type: 'bytes' }], outputs: [] },
+    { type: 'function', name: 'createEvent', inputs: [{ name: 'meta', type: 'tuple', components: EVENT_META_COMPONENTS }, { name: 'tiers', type: 'tuple[]', components: TIER_COMPONENTS }], outputs: [{ name: '', type: 'uint256' }] },
+    { type: 'function', name: 'updateEventMeta', inputs: [u256('eventId'), { name: 'meta', type: 'tuple', components: EVENT_META_COMPONENTS }, { name: 'tiers', type: 'tuple[]', components: TIER_COMPONENTS }], outputs: [] },
+    { type: 'function', name: 'publishEvent', inputs: [u256('eventId')], outputs: [] },
+    { type: 'function', name: 'cancelEvent', inputs: [u256('eventId')], outputs: [] },
+    { type: 'event', name: 'CheckedIn', inputs: [u256('tokenId'), u256('eventId'), u256('gateId'), b32('nonceHash'), { name: 'ts', type: 'uint64' }] },
+    { type: 'event', name: 'Claimed', inputs: [u256('tokenId'), u256('eventId'), addr('to'), { name: 'tier', type: 'uint8' }] },
+    { type: 'event', name: 'Transfer', inputs: [addr('from'), addr('to'), u256('tokenId')] },
+    { type: 'event', name: 'OfferAccepted', inputs: [u256('tokenId'), addr('from'), addr('to')] },
+  ],
+};
 ```
 
 - [ ] **Step 4: 읽기 팩터리**
 
 ```ts
 // apps/web/src/shared/chain/reads.ts
-import type { Hex } from '@monti/shared';
+import type { Abi, Hex } from 'viem';
 import { getConfig } from '../config';
 import { getPublicClient } from './client';
 import { identityAbi, organizersAbi, ticketAbi } from './abis';
@@ -2471,19 +2698,22 @@ export interface EventMetaStruct {
 }
 export interface TierStruct { name: string; priceUsdCents: bigint; supply: number; minted: number; maxPerWallet: number; seated: boolean }
 
+function reader(address: Hex, abi: Abi) {
+  return <T>(functionName: string, args: readonly unknown[]): Promise<T> =>
+    getPublicClient().readContract({ address, abi, functionName, args }) as Promise<T>;
+}
+
 export function readIdentity() {
-  const address = getConfig().addresses.identity;
-  const call = <T>(functionName: string, args: unknown[]) =>
-    getPublicClient().readContract({ address, abi: identityAbi, functionName, args } as never) as Promise<T>;
+  const call = reader(getConfig().addresses.identity, identityAbi);
   return {
     isMember: (account: Hex) => call<boolean>('isMember', [account]),
     isLocked: (account: Hex) => call<boolean>('isLocked', [account]),
     accountOf: (personId: Hex) => call<Hex>('accountOf', [personId]),
     personOf: (account: Hex) => call<Hex>('personOf', [account]),
     deviceUpdatedAt: (account: Hex) => call<bigint>('deviceUpdatedAt', [account]),
+    kycLevelOf: (account: Hex) => call<number>('kycLevelOf', [account]),
     nicknameOwner: (nicknameHash: Hex) => call<Hex>('nicknameOwner', [nicknameHash]),
     nicknameOf: (account: Hex) => call<Hex>('nicknameOf', [account]),
-    kycLevelOf: (account: Hex) => call<number>('kycLevelOf', [account]),
     activeDevice: async (account: Hex) => {
       const [x, y] = await call<[Hex, Hex]>('activeDevice', [account]);
       return { x, y };
@@ -2492,9 +2722,7 @@ export function readIdentity() {
 }
 
 export function readOrganizers() {
-  const address = getConfig().addresses.organizers;
-  const call = <T>(functionName: string, args: unknown[]) =>
-    getPublicClient().readContract({ address, abi: organizersAbi, functionName, args } as never) as Promise<T>;
+  const call = reader(getConfig().addresses.organizers, organizersAbi);
   return {
     isOpenGate: (eventId: bigint, gateAccount: Hex) => call<boolean>('isOpenGate', [eventId, gateAccount]),
     hasPermission: (orgId: bigint, account: Hex, bit: number) => call<boolean>('hasPermission', [orgId, account, bit]),
@@ -2509,9 +2737,7 @@ export function readOrganizers() {
 }
 
 export function readTicket() {
-  const address = getConfig().addresses.ticket;
-  const call = <T>(functionName: string, args: unknown[]) =>
-    getPublicClient().readContract({ address, abi: ticketAbi, functionName, args } as never) as Promise<T>;
+  const call = reader(getConfig().addresses.ticket, ticketAbi);
   return {
     ownerOf: (tokenId: bigint) => call<Hex>('ownerOf', [tokenId]),
     eventOf: (tokenId: bigint) => call<bigint>('eventOf', [tokenId]),
@@ -2532,14 +2758,16 @@ export function readTicket() {
 
 Run (from `apps/web/`): `pnpm vitest run src/shared/chain/reads.test.ts`
 Expected: PASS — `Tests  3 passed (3)`.
-01 배포 후: `pnpm vitest run src/shared/chain/abi-conformance.test.ts` → `Tests  3 passed (3)`.
+
+01이 ABI를 내보낸 뒤: `pnpm vitest run src/shared/chain/abi-conformance.test.ts`
+Expected: PASS — `Tests  46 passed (46)` (매니페스트 항목 수만큼. 숫자가 다르면 매니페스트를 센다). 실패하면 **매니페스트를 고치지 말고 01과 시그니처를 맞춘다** — 이 테스트가 존재하는 이유다.
 
 - [ ] **Step 6: 커밋**
 
 ```bash
 cd /Users/moomi/Downloads/z03.Vibe_Coding/MONTI
 git add apps/web/src/shared/chain/abis.ts apps/web/src/shared/chain/reads.ts apps/web/src/shared/chain/reads.test.ts apps/web/src/shared/chain/abi-conformance.test.ts
-git commit -m "feat(web): add typed contract abi fragments and read facades with conformance test"
+git commit -m "feat(web): load generated abis with events and guard them with a usage manifest"
 ```
 
 ---
@@ -2547,12 +2775,14 @@ git commit -m "feat(web): add typed contract abi fragments and read facades with
 ## Task 10: 번들러 클라이언트와 패스키 스마트 계정
 
 **Files:**
-- Create: `apps/web/src/shared/chain/bundler.ts`, `apps/web/src/shared/chain/accounts.ts`
+- Create: `apps/web/src/shared/chain/bundler.ts`
 - Test: `apps/web/src/shared/chain/bundler.test.ts`
 
 **Interfaces:**
 - Consumes: `getConfig()`, `getPublicClient()`.
-- Produces: `getBundlerClient(): BundlerClient`, `getSmartAccount(webAuthnAccount: WebAuthnAccount): Promise<SmartAccount>`, `resetBundler(): void`, `bundlerRequest<T>(method, params): Promise<T>`, 그리고 `accounts.ts`의 `getAttendeeAccount(): Promise<SmartAccount>` / `getStaffAccount(): Promise<SmartAccount>` (**sub-plan 04가 `getStaffAccount`를 쓴다** — 스태프 본인의 패스키 계정이며, 04가 따로 만드는 게이트 단말기 계정과 다르다).
+- Produces: `getBundlerClient(): BundlerClient`, `getSmartAccount(webAuthnAccount: WebAuthnAccount): Promise<SmartAccount>`, `setSmartAccount(a)`, `resetBundler(): void`, `bundlerRequest<T>(method, params): Promise<T>`.
+
+`accounts.ts`(`getAttendeeAccount` / `getStaffAccount`)는 **Task 12**에 있다. `shared/passkey/`를 import해야 하는데 그 폴더는 Task 12가 만들기 때문이다 — 여기에 두면 두 태스크가 서로를 기다린다.
 
 계정은 마스터 계획대로 **Coinbase Smart Wallet v1(EntryPoint v0.6)**이고, 소유자는 패스키 하나, `nonce: 0n`이다. `nonce`를 0으로 고정해야 같은 패스키가 항상 같은 주소를 만든다(관객·게이트·관리자 계정이 모두 이 규칙을 쓴다).
 
@@ -2616,6 +2846,7 @@ import { getPublicClient } from './client';
 
 let bundlerClient: BundlerClient | null = null;
 let smartAccount: SmartAccount | null = null;
+let smartAccountKey: string | null = null;
 
 export function getBundlerClient(): BundlerClient {
   if (bundlerClient) return bundlerClient;
@@ -2632,23 +2863,28 @@ export function getBundlerClient(): BundlerClient {
  * so the same credential always resolves to the same account on any device.
  */
 export async function getSmartAccount(webAuthnAccount: WebAuthnAccount): Promise<SmartAccount> {
-  if (smartAccount) return smartAccount;
+  // Memo keyed on the owner: after clearCredential() + re-login the stale account must not come back.
+  const key = String(webAuthnAccount.publicKey);
+  if (smartAccount && smartAccountKey === key) return smartAccount;
   smartAccount = await toCoinbaseSmartAccount({
     client: getPublicClient(),
     owners: [webAuthnAccount],
     nonce: 0n,
     version: '1',
   });
+  smartAccountKey = key;
   return smartAccount;
 }
 
 export function setSmartAccount(account: SmartAccount | null): void {
   smartAccount = account;
+  smartAccountKey = account ? String(account.address) : null;
 }
 
 export function resetBundler(): void {
   bundlerClient = null;
   smartAccount = null;
+  smartAccountKey = null;
 }
 
 /** Raw bundler JSON-RPC, used for eth_estimateUserOperationGas and eth_sendUserOperation. */
@@ -2657,42 +2893,17 @@ export async function bundlerRequest<T>(method: string, params: unknown[]): Prom
 }
 ```
 
-- [ ] **Step 4: 관객·스태프 계정 헬퍼**
-
-```ts
-// apps/web/src/shared/chain/accounts.ts
-import type { SmartAccount } from 'viem/account-abstraction';
-import { getPasskeyAccount } from '../passkey';
-import { getSmartAccount, setSmartAccount } from './bundler';
-
-/** The signed-in attendee's own passkey smart account. */
-export async function getAttendeeAccount(): Promise<SmartAccount> {
-  const account = await getSmartAccount(await getPasskeyAccount());
-  setSmartAccount(account);
-  return account;
-}
-
-/**
- * The signed-in staff member's own passkey smart account. Sub-plan 04 uses this for
- * requestOverride / manualOverride. It is NOT the gate device account, which 04 derives
- * from the gate hardware key under alias GATE_KEY_ALIAS.
- */
-export async function getStaffAccount(): Promise<SmartAccount> {
-  return getSmartAccount(await getPasskeyAccount());
-}
-```
-
-- [ ] **Step 5: 테스트 통과 확인**
+- [ ] **Step 4: 테스트 통과 확인**
 
 Run (from `apps/web/`): `pnpm vitest run src/shared/chain/bundler.test.ts`
 Expected: PASS — `Tests  1 passed (1)`.
 
-- [ ] **Step 6: 커밋**
+- [ ] **Step 5: 커밋**
 
 ```bash
 cd /Users/moomi/Downloads/z03.Vibe_Coding/MONTI
-git add apps/web/src/shared/chain/bundler.ts apps/web/src/shared/chain/accounts.ts apps/web/src/shared/chain/bundler.test.ts
-git commit -m "feat(web): add pimlico bundler client, smart account factory and role account helpers"
+git add apps/web/src/shared/chain/bundler.ts apps/web/src/shared/chain/bundler.test.ts
+git commit -m "feat(web): add pimlico bundler client and coinbase smart account factory"
 ```
 
 ---
@@ -2700,8 +2911,8 @@ git commit -m "feat(web): add pimlico bundler client, smart account factory and 
 ## Task 11: `sendSponsoredOp` — 시뮬레이션 → ×1.075 → 페이마스터 → 영수증
 
 **Files:**
-- Create: `apps/web/src/shared/chain/sendSponsoredOp.ts`
-- Test: `apps/web/src/shared/chain/sendSponsoredOp.test.ts`
+- Create: `apps/web/src/shared/chain/sendSponsoredOp.ts`, `apps/web/src/shared/chain/ops.ts`
+- Test: `apps/web/src/shared/chain/sendSponsoredOp.test.ts`, `apps/web/src/shared/chain/ops.test.ts`
 
 **Interfaces:**
 - Consumes: `bundlerRequest` (Task 10), `getPublicClient`, `getConfig`.
@@ -2709,11 +2920,14 @@ git commit -m "feat(web): add pimlico bundler client, smart account factory and 
 
 **Global Constraint 직결:** Monad는 **한도 기준 과금**이라 세 한도를 반드시 명시해야 하고, 시뮬레이션 값에 **7.5%**를 더한다. 테스트가 그 곱과 `paymasterAndData` 바이트 배치를 직접 검증한다.
 
+이 태스크는 **`ops.ts` 헬퍼 하나도 함께 만든다.** 그것이 없으면 뒤 여섯 화면이 `encodeFunctionData` → `sendSponsoredOp` → `wait()` 블록을 그대로 베껴 쓰게 되고, 실제로 그중 셋이 `success` 확인을 빠뜨린다(되돌린 `createOffer` 뒤에도 "초대를 보냈어요"가 뜬다). `sendOp`은 되돌림을 `OpReverted`로 던지므로 호출부는 성공 경로만 적는다.
+
 - [ ] **Step 1: 실패하는 테스트**
 
 ```ts
 // apps/web/src/shared/chain/sendSponsoredOp.test.ts
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { numberToHex } from 'viem';
 
 const PAYMASTER = `0x${'44'.repeat(20)}` as const;
 vi.mock('../config', () => ({
@@ -2740,9 +2954,17 @@ const account = {
 
 const { applyGasBuffer, encodePaymasterAndData, sendSponsoredOp, SponsoredOpTimeout } = await import('./sendSponsoredOp');
 
+// restoreMocks only restores spies; a bare vi.fn() keeps its call history between tests.
+beforeEach(() => {
+  bundlerRequest.mockReset();
+  account.encodeCalls.mockClear();
+});
+
 describe('sendSponsoredOp', () => {
   it('multiplies every simulated gas limit by 1.075', () => {
+    expect(applyGasBuffer(200_000n)).toBe(215_000n);
     expect(applyGasBuffer(100_000n)).toBe(107_500n);
+    expect(applyGasBuffer(50_000n)).toBe(53_750n);
     expect(applyGasBuffer(1n)).toBe(1n);
   });
 
@@ -2765,9 +2987,14 @@ describe('sendSponsoredOp', () => {
     const [sendMethod, sendParams] = bundlerRequest.mock.calls[1]!;
     const sent = (sendParams as unknown[])[0] as Record<string, string>;
     expect(sendMethod).toBe('eth_sendUserOperation');
-    expect(sent.callGasLimit).toBe('0x34bc0');          // 200000 * 1.075 = 215000
+    // Assert the multiplication itself, not a hand-typed hex string.
+    expect(sent.callGasLimit).toBe(numberToHex(applyGasBuffer(200_000n)));
+    expect(sent.verificationGasLimit).toBe(numberToHex(applyGasBuffer(100_000n)));
+    expect(sent.preVerificationGas).toBe(numberToHex(applyGasBuffer(50_000n)));
+    // And pin the three values so a silent change to the buffer is visible in the diff.
+    expect(sent.callGasLimit).toBe('0x347d8');          // 200000 * 1.075 = 215000
     expect(sent.verificationGasLimit).toBe('0x1a3ec');  // 100000 * 1.075 = 107500
-    expect(sent.preVerificationGas).toBe('0xd1ec');     //  50000 * 1.075 =  53750
+    expect(sent.preVerificationGas).toBe('0xd1f6');     //  50000 * 1.075 =  53750
     expect(sent.paymasterAndData).toBe(encodePaymasterAndData(PAYMASTER, 7n));
     expect(handle.userOpHash).toBe('0xuserophash');
     await expect(handle.wait()).resolves.toEqual({ success: true, txHash: '0xtx', blockNumber: 42n });
@@ -2929,78 +3156,219 @@ export async function sendSponsoredOp({ account, calls, orgId }: SendSponsoredOp
 }
 ```
 
-- [ ] **Step 4: 테스트 통과 확인**
+- [ ] **Step 4: 호출부 하나로 모으는 헬퍼**
 
-Run (from `apps/web/`): `pnpm vitest run src/shared/chain/sendSponsoredOp.test.ts`
-Expected: PASS — `Tests  5 passed (5)`.
+```ts
+// apps/web/src/shared/chain/ops.ts
+import { encodeFunctionData, type Abi, type Hex } from 'viem';
+import type { SmartAccount } from 'viem/account-abstraction';
+import { getConfig } from '../config';
+import { identityAbi, organizersAbi, ticketAbi } from './abis';
+import { sendSponsoredOp, type SponsoredOpReceipt } from './sendSponsoredOp';
 
-- [ ] **Step 5: 계산 검증**
+/** The user operation landed but the contract reverted — a real, user-facing failure. */
+export class OpReverted extends Error {
+  constructor(readonly functionName: string, readonly revertReason?: Hex) {
+    super(`OpReverted: ${functionName}${revertReason ? ` (${revertReason})` : ''}`);
+    this.name = 'OpReverted';
+  }
+}
 
-`200000 × 1075 / 1000 = 215000 = 0x34bc0`, `100000 × 1.075 = 107500 = 0x1a3ec`, `50000 × 1.075 = 53750 = 0xd1ec`. 테스트가 이 세 값을 리터럴로 들고 있으므로 상수를 바꾸면 즉시 깨진다.
+export interface SendOpArgs {
+  account: SmartAccount;
+  orgId: bigint;
+  to: Hex;
+  abi: Abi;
+  functionName: string;
+  args: readonly unknown[];
+  timeoutMs?: number;
+}
+
+/** Encode → sponsor → send → wait → throw on revert. Every write in this app goes through here. */
+export async function sendOp(options: SendOpArgs): Promise<SponsoredOpReceipt> {
+  const handle = await sendSponsoredOp({
+    account: options.account,
+    orgId: options.orgId,
+    calls: [{ to: options.to, data: encodeFunctionData({ abi: options.abi, functionName: options.functionName, args: options.args }) }],
+  });
+  const receipt = await handle.wait(options.timeoutMs);
+  if (!receipt.success) throw new OpReverted(options.functionName, receipt.revertReason);
+  return receipt;
+}
+
+type ContractOpArgs = Omit<SendOpArgs, 'to' | 'abi'>;
+
+export const ticketOp = (options: ContractOpArgs) =>
+  sendOp({ ...options, to: getConfig().addresses.ticket, abi: ticketAbi });
+
+export const identityOp = (options: ContractOpArgs) =>
+  sendOp({ ...options, to: getConfig().addresses.identity, abi: identityAbi });
+
+export const organizersOp = (options: ContractOpArgs) =>
+  sendOp({ ...options, to: getConfig().addresses.organizers, abi: organizersAbi });
+```
+
+```ts
+// apps/web/src/shared/chain/ops.test.ts
+import { describe, expect, it, vi } from 'vitest';
+
+const sendSponsoredOp = vi.fn();
+vi.mock('./sendSponsoredOp', () => ({ sendSponsoredOp }));
+vi.mock('./abis', () => ({
+  ticketAbi: [{ type: 'function', name: 'claim', stateMutability: 'nonpayable',
+    inputs: [{ name: 'eventId', type: 'uint256' }, { name: 'tier', type: 'uint8' }, { name: 'voucher', type: 'bytes' }],
+    outputs: [{ name: '', type: 'uint256' }] }],
+  identityAbi: [], organizersAbi: [],
+}));
+vi.mock('../config', () => ({ getConfig: () => ({ addresses: { ticket: `0x${'33'.repeat(20)}`, identity: `0x${'11'.repeat(20)}`, organizers: `0x${'22'.repeat(20)}` } }) }));
+
+const { OpReverted, ticketOp } = await import('./ops');
+const account = { address: `0x${'ab'.repeat(20)}` } as never;
+
+describe('ticketOp', () => {
+  it('encodes the call against the ticket address and returns the receipt', async () => {
+    sendSponsoredOp.mockResolvedValueOnce({
+      userOpHash: '0x1', wait: async () => ({ success: true, txHash: '0x2', blockNumber: 7n }),
+    });
+    await expect(ticketOp({ account, orgId: 9n, functionName: 'claim', args: [5n, 0, '0x'] }))
+      .resolves.toMatchObject({ success: true, blockNumber: 7n });
+    const sent = sendSponsoredOp.mock.calls[0]![0] as { orgId: bigint; calls: Array<{ to: string; data: string }> };
+    expect(sent.orgId).toBe(9n);
+    expect(sent.calls[0]!.to).toBe(`0x${'33'.repeat(20)}`);
+    expect(sent.calls[0]!.data.startsWith('0x')).toBe(true);
+  });
+
+  it('throws OpReverted when the operation lands but the contract reverts', async () => {
+    sendSponsoredOp.mockResolvedValueOnce({
+      userOpHash: '0x1', wait: async () => ({ success: false, txHash: '0x2', blockNumber: 7n, revertReason: '0xdead' }),
+    });
+    await expect(ticketOp({ account, orgId: 9n, functionName: 'claim', args: [5n, 0, '0x'] }))
+      .rejects.toBeInstanceOf(OpReverted);
+  });
+});
+```
+
+- [ ] **Step 5: 테스트 통과 확인**
+
+Run (from `apps/web/`): `pnpm vitest run src/shared/chain/sendSponsoredOp.test.ts src/shared/chain/ops.test.ts`
+Expected: PASS — `Tests  7 passed (7)`.
+
+- [ ] **Step 6: 계산 검증**
+
+`200000 × 1075 / 1000 = 215000 = 0x347d8`, `100000 × 1075 / 1000 = 107500 = 0x1a3ec`, `50000 × 1075 / 1000 = 53750 = 0xd1f6`. 테스트는 **곱셈 자체**(`numberToHex(applyGasBuffer(…))`)를 먼저 단언하고, 그다음 세 값을 리터럴로 고정한다 — 리터럴만 두면 오타가 그대로 규칙이 된다(실제로 초안에 `0x34bc0`=216000, `0xd1ec`=53740이 들어 있었다).
 
 Run (from `apps/web/`): `pnpm vitest run src/shared/chain --reporter=verbose`
-Expected: `client.test.ts`, `reads.test.ts`, `bundler.test.ts`, `sendSponsoredOp.test.ts` 전부 PASS.
+Expected: `client.test.ts`, `reads.test.ts`, `bundler.test.ts`, `sendSponsoredOp.test.ts`, `ops.test.ts` 전부 PASS. `abi-conformance.test.ts`는 01이 ABI를 넣기 전까지 실패하는 것이 정상이다.
 
-- [ ] **Step 6: 커밋**
+- [ ] **Step 7: 커밋**
 
 ```bash
 cd /Users/moomi/Downloads/z03.Vibe_Coding/MONTI
-git add apps/web/src/shared/chain/sendSponsoredOp.ts apps/web/src/shared/chain/sendSponsoredOp.test.ts
-git commit -m "feat(web): add sponsored user operation sender with 7.5% gas headroom"
+git add apps/web/src/shared/chain/sendSponsoredOp.ts apps/web/src/shared/chain/ops.ts apps/web/src/shared/chain/sendSponsoredOp.test.ts apps/web/src/shared/chain/ops.test.ts
+git commit -m "feat(web): add sponsored user operation sender with 7.5% headroom and a write helper"
 ```
 
 ---
 
-## Task 12: `shared/passkey/` — 웹(ox)과 네이티브(@capgo) 한 인터페이스
+## Task 12: `shared/passkey/` — 웹(ox)과 네이티브(@capgo) 한 인터페이스, 그리고 계정 헬퍼
 
 **Files:**
-- Create: `apps/web/src/shared/passkey/types.ts`, `plugin.ts`, `web.ts`, `native.ts`, `index.ts`
-- Test: `apps/web/src/shared/passkey/passkey.test.ts`
+- Create: `apps/web/src/shared/passkey/types.ts`, `cose.ts`, `plugin.ts`, `web.ts`, `native.ts`, `index.ts`, `apps/web/src/shared/chain/accounts.ts`
+- Test: `apps/web/src/shared/passkey/passkey.test.ts`, `apps/web/src/shared/passkey/cose.test.ts`
 
 **Interfaces:**
-- Consumes: `getConfig().rpId`, `getSmartAccount` (Task 10).
-- Produces: `interface WebAuthnCredential { id: string; publicKey: Hex; transports: string[]; attestationJson: string }`, `createPasskey(name: string): Promise<WebAuthnCredential>`, `getPasskeyAccount(): Promise<WebAuthnAccount>`, `storedCredential(): WebAuthnCredential | null`, `storeCredential(c)`, `clearCredential()`.
+- Consumes: `getConfig().rpId`, `getSmartAccount`/`setSmartAccount` (Task 10), `decodeCbor`/`fromBase64Url`/`toBase64Url` (`@monti/shared/encoding`).
+- Produces: `interface WebAuthnCredential { id: string; publicKey: Hex; transports: string[]; attestationJson: string }`, `createPasskey(name): Promise<WebAuthnCredential>`, `getPasskeyAccount(): Promise<WebAuthnAccount>`, `storedCredential()`, `storeCredential(c)`, `clearCredential()`, `parseAttestationPublicKey(attestationObjectB64Url): Hex`, 그리고 `shared/chain/accounts.ts`의 `getAttendeeAccount()` / `getStaffAccount()` (**sub-plan 04가 `getStaffAccount`를 import한다**).
 
-`getPasskeyAccount()`는 viem `toWebAuthnAccount({ credential, getFn, rpId })`를 쓴다. 네이티브에서는 `getFn`만 플러그인으로 갈아끼우면 되므로 서명 경로가 한 벌이다. **`signalAllAcceptedCredentials`는 어디서도 호출하지 않는다**(iOS 26 버그, Global Constraints).
+두 가지를 바로잡는다. ① 초안이 import하던 `webauthn-p256-cose`는 **npm에 없다(404)**. COSE 공개키 파싱은 이미 의존성에 있는 `ox`와 `@monti/shared/encoding`의 CBOR 디코더로 직접 한다. ② 플러그인의 실제 표면은 `CapacitorPasskey` 이고 메서드는 `createCredential` / `getCredential` 이다(`Passkey.register/authenticate`가 아니다). 어댑터는 `plugin.ts` 하나뿐이고 **캐스트를 쓰지 않는다** — 타입이 어긋나면 `tsc`가 잡아야 한다.
 
-- [ ] **Step 1: 실패하는 테스트 (가짜 크리덴셜)**
+`signalAllAcceptedCredentials`는 어디서도 호출하지 않는다(iOS 26 버그, Global Constraints).
+
+- [ ] **Step 1: 설치된 플러그인의 실제 타입 정의를 먼저 읽는다**
+
+```bash
+cd /Users/moomi/Downloads/z03.Vibe_Coding/MONTI/apps/web
+cat node_modules/@capgo/capacitor-passkey/dist/esm/definitions.d.ts
+cat node_modules/@capgo/capacitor-passkey/dist/esm/index.d.ts
+```
+Expected: `export declare const CapacitorPasskey: CapacitorPasskeyPlugin;` 와 `createCredential(...)`, `getCredential(...)` 두 메서드. **옵션·반환 필드 이름을 여기서 확인하고, 아래 `plugin.ts`의 인터페이스를 그 정의에 맞춘다.** 다른 파일은 손대지 않는다.
+
+- [ ] **Step 2: 실패하는 테스트 둘**
+
+```ts
+// apps/web/src/shared/passkey/cose.test.ts
+import { describe, expect, it } from 'vitest';
+import { encodeCbor, toBase64Url } from '@monti/shared/encoding';
+import { parseAttestationPublicKey } from './cose';
+
+function buildAttestation(x: Uint8Array, y: Uint8Array): string {
+  const credentialId = new Uint8Array(16).fill(0x7a);
+  // COSE_Key for ES256: kty 2, alg -7, crv 1, x -2, y -3
+  const cose = encodeCbor(new Map<number, unknown>([[1, 2], [3, -7], [-1, 1], [-2, x], [-3, y]]));
+  const authData = new Uint8Array(37 + 16 + 2 + credentialId.length + cose.length);
+  authData[32] = 0x45;                       // flags: UP | AT
+  authData.set([0x00, credentialId.length], 53);
+  authData.set(credentialId, 55);
+  authData.set(cose, 55 + credentialId.length);
+  return toBase64Url(encodeCbor({ fmt: 'none', attStmt: {}, authData }));
+}
+
+describe('parseAttestationPublicKey', () => {
+  it('extracts the uncompressed P-256 point from a WebAuthn attestation object', () => {
+    const x = new Uint8Array(32).fill(0x11);
+    const y = new Uint8Array(32).fill(0x22);
+    expect(parseAttestationPublicKey(buildAttestation(x, y)))
+      .toBe(`0x04${'11'.repeat(32)}${'22'.repeat(32)}`);
+  });
+
+  it('rejects an attestation without the attested-credential-data flag', () => {
+    const broken = toBase64Url(encodeCbor({ fmt: 'none', attStmt: {}, authData: new Uint8Array(37) }));
+    expect(() => parseAttestationPublicKey(broken)).toThrow('no attested credential data');
+  });
+});
+```
 
 ```ts
 // apps/web/src/shared/passkey/passkey.test.ts
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../config', () => ({ getConfig: () => ({ rpId: 'monti.app' }) }));
 vi.mock('@capacitor/core', () => ({ Capacitor: { isNativePlatform: () => false } }));
 
-const FAKE = {
+const createCredential = vi.fn(async () => ({
   id: 'Y3JlZC1pZA',
   publicKey: { prefix: 4, x: 0x11n, y: 0x22n },
   raw: { id: 'Y3JlZC1pZA', response: { clientDataJSON: 'e30', attestationObject: 'o2M' }, type: 'public-key' },
-};
-vi.mock('ox/WebAuthnP256', () => ({ createCredential: vi.fn(async () => FAKE) }));
-vi.mock('ox/PublicKey', () => ({ toHex: () => `0x04${'11'.repeat(32)}${'22'.repeat(32)}` }));
+}));
+vi.mock('ox/WebAuthnP256', () => ({ createCredential }));
 
 const { createPasskey, storedCredential, clearCredential } = await import('./index');
 
 beforeEach(() => clearCredential());
 
-describe('createPasskey', () => {
-  it('stores an id, an uncompressed public key and the attestation JSON', async () => {
+describe('createPasskey (web)', () => {
+  it('asks for a resident key with user verification and stores what registerPasskey needs', async () => {
     const credential = await createPasskey('MONTI');
+    const options = createCredential.mock.calls[0]![0] as {
+      rp: { id: string }; authenticatorSelection: { residentKey: string; userVerification: string };
+    };
+    expect(options.rp.id).toBe('monti.app');
+    expect(options.authenticatorSelection).toMatchObject({ residentKey: 'required', userVerification: 'required' });
     expect(credential.id).toBe('Y3JlZC1pZA');
-    expect(credential.publicKey).toHaveLength(2 + 2 + 128);
+    // 0x04 || x(32) || y(32) — the uncompressed point viem hands to toCoinbaseSmartAccount.
+    expect(credential.publicKey).toMatch(/^0x04[0-9a-f]{128}$/);
     expect(JSON.parse(credential.attestationJson).type).toBe('public-key');
     expect(storedCredential()?.id).toBe('Y3JlZC1pZA');
   });
 });
 ```
 
-- [ ] **Step 2: 실패 확인**
+- [ ] **Step 3: 실패 확인**
 
-Run (from `apps/web/`): `pnpm vitest run src/shared/passkey/passkey.test.ts`
-Expected: FAIL — `Failed to resolve import "./index"`.
+Run (from `apps/web/`): `pnpm vitest run src/shared/passkey`
+Expected: FAIL — `Failed to resolve import "./cose"`, `"./index"`.
 
-- [ ] **Step 3: 타입과 저장소**
+- [ ] **Step 4: 타입, 저장소, COSE 파서**
 
 ```ts
 // apps/web/src/shared/passkey/types.ts
@@ -3011,7 +3379,7 @@ export interface WebAuthnCredential {
   /** Uncompressed P-256 point, 0x04 || x || y. */
   publicKey: Hex;
   transports: string[];
-  /** Serialized WebAuthn registration response, forwarded to registerPasskey. */
+  /** Serialized WebAuthn registration response, forwarded verbatim to registerPasskey. */
   attestationJson: string;
 }
 
@@ -3031,25 +3399,104 @@ export function clearCredential(): void {
 }
 ```
 
-- [ ] **Step 4: 웹 경로와 네이티브 어댑터**
+```ts
+// apps/web/src/shared/passkey/cose.ts
+import { decodeCbor, fromBase64Url } from '@monti/shared/encoding';
+import type { Hex } from '@monti/shared';
+
+const FLAG_ATTESTED_CREDENTIAL_DATA = 0x40;
+
+function toHex(bytes: Uint8Array): string {
+  let out = '';
+  for (const byte of bytes) out += byte.toString(16).padStart(2, '0');
+  return out;
+}
+
+/**
+ * WebAuthn attestationObject → uncompressed P-256 public key.
+ * authData = rpIdHash(32) | flags(1) | signCount(4) | aaguid(16) | credIdLen(2) | credId | COSE key
+ */
+export function parseAttestationPublicKey(attestationObjectB64Url: string): Hex {
+  const attestation = decodeCbor<{ authData: Uint8Array }>(fromBase64Url(attestationObjectB64Url));
+  const authData = attestation.authData;
+  const flags = authData[32];
+  if (flags === undefined || (flags & FLAG_ATTESTED_CREDENTIAL_DATA) === 0) {
+    throw new Error('Attestation has no attested credential data');
+  }
+  const credentialIdLength = (authData[53]! << 8) | authData[54]!;
+  const coseStart = 55 + credentialIdLength;
+  // cborg returns a plain object for CBOR maps by default and a Map when useMaps is on; accept both.
+  const cose = decodeCbor<unknown>(authData.slice(coseStart));
+  const read = (label: number): Uint8Array | undefined =>
+    cose instanceof Map
+      ? (cose.get(label) as Uint8Array | undefined)
+      : ((cose as Record<string, Uint8Array>)[String(label)]);
+  const x = read(-2);
+  const y = read(-3);
+  if (!x || !y || x.length !== 32 || y.length !== 32) throw new Error('Attestation is not an ES256 key');
+  return `0x04${toHex(x)}${toHex(y)}` as Hex;
+}
+```
+
+- [ ] **Step 5: 어댑터, 웹 경로, 네이티브 경로**
+
+```ts
+// apps/web/src/shared/passkey/plugin.ts
+// ONLY file that touches @capgo/capacitor-passkey. Shapes checked against
+// node_modules/@capgo/capacitor-passkey/dist/esm/definitions.d.ts in Step 1.
+import { CapacitorPasskey } from '@capgo/capacitor-passkey';
+
+export interface NativeRegistrationResponse {
+  id: string;
+  rawId: string;
+  type: string;
+  response: { clientDataJSON: string; attestationObject: string };
+}
+
+export interface NativeAssertionResponse {
+  id: string;
+  rawId: string;
+  type: string;
+  response: { clientDataJSON: string; authenticatorData: string; signature: string; userHandle?: string };
+}
+
+export function createCredentialNative(options: {
+  rp: { id: string; name: string };
+  user: { id: string; name: string; displayName: string };
+  challenge: string;
+  pubKeyCredParams: Array<{ type: 'public-key'; alg: number }>;
+  authenticatorSelection: { residentKey: 'required'; userVerification: 'required' };
+}): Promise<NativeRegistrationResponse> {
+  return CapacitorPasskey.createCredential(options);
+}
+
+export function getCredentialNative(options: {
+  rpId: string;
+  challenge: string;
+  userVerification: 'required';
+  allowCredentials?: Array<{ type: 'public-key'; id: string }>;
+}): Promise<NativeAssertionResponse> {
+  return CapacitorPasskey.getCredential(options);
+}
+```
 
 ```ts
 // apps/web/src/shared/passkey/web.ts
 import * as PublicKey from 'ox/PublicKey';
 import * as WebAuthnP256 from 'ox/WebAuthnP256';
+import type { Hex } from '@monti/shared';
 import { getConfig } from '../config';
 import { storeCredential, type WebAuthnCredential } from './types';
 
 export async function createPasskeyWeb(name: string): Promise<WebAuthnCredential> {
-  const rpId = getConfig().rpId;
   const created = await WebAuthnP256.createCredential({
     name,
-    rp: { id: rpId, name: 'MONTI' },
+    rp: { id: getConfig().rpId, name: 'MONTI' },
     authenticatorSelection: { residentKey: 'required', userVerification: 'required' },
   });
   const credential: WebAuthnCredential = {
     id: created.id,
-    publicKey: PublicKey.toHex(created.publicKey) as `0x${string}`,
+    publicKey: PublicKey.toHex(created.publicKey) as Hex,
     transports: ['internal', 'hybrid'],
     attestationJson: JSON.stringify(created.raw),
   };
@@ -3057,56 +3504,35 @@ export async function createPasskeyWeb(name: string): Promise<WebAuthnCredential
   return credential;
 }
 
-/** Browser assertion path used by viem's toWebAuthnAccount. */
-export const getFnWeb: (options?: CredentialRequestOptions) => Promise<Credential | null> = (options) =>
-  navigator.credentials.get(options);
-```
-
-```ts
-// apps/web/src/shared/passkey/plugin.ts
-// ONLY file that touches @capgo/capacitor-passkey. Verify the signatures against
-// node_modules/@capgo/capacitor-passkey/dist/esm/definitions.d.ts before editing anything else.
-import { Passkey } from '@capgo/capacitor-passkey';
-
-export interface NativeRegistration { id: string; rawId: string; response: { clientDataJSON: string; attestationObject: string }; type: string }
-export interface NativeAssertion { id: string; rawId: string; response: { clientDataJSON: string; authenticatorData: string; signature: string; userHandle?: string }; type: string }
-
-export async function nativeRegister(options: unknown): Promise<NativeRegistration> {
-  return (await Passkey.register(options as never)) as unknown as NativeRegistration;
-}
-
-export async function nativeAuthenticate(options: unknown): Promise<NativeAssertion> {
-  return (await Passkey.authenticate(options as never)) as unknown as NativeAssertion;
+/** Browser assertion path handed to viem's toWebAuthnAccount. */
+export function getFnWeb(options?: CredentialRequestOptions): Promise<Credential | null> {
+  return navigator.credentials.get(options);
 }
 ```
 
 ```ts
 // apps/web/src/shared/passkey/native.ts
-import * as PublicKey from 'ox/PublicKey';
-import { parsePublicKey } from 'webauthn-p256-cose';
-import { fromBase64Url } from '@monti/shared/encoding';
+import { fromBase64Url, toBase64Url } from '@monti/shared/encoding';
 import { getConfig } from '../config';
-import { nativeAuthenticate, nativeRegister } from './plugin';
+import { createCredentialNative, getCredentialNative } from './plugin';
+import { parseAttestationPublicKey } from './cose';
 import { storeCredential, type WebAuthnCredential } from './types';
 
 function randomChallenge(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(32));
-  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return toBase64Url(crypto.getRandomValues(new Uint8Array(32)));
 }
 
 export async function createPasskeyNative(name: string): Promise<WebAuthnCredential> {
-  const rpId = getConfig().rpId;
-  const registration = await nativeRegister({
-    rp: { id: rpId, name: 'MONTI' },
+  const registration = await createCredentialNative({
+    rp: { id: getConfig().rpId, name: 'MONTI' },
     user: { id: randomChallenge(), name, displayName: name },
     challenge: randomChallenge(),
     pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
     authenticatorSelection: { residentKey: 'required', userVerification: 'required' },
   });
-  const cose = parsePublicKey(fromBase64Url(registration.response.attestationObject));
   const credential: WebAuthnCredential = {
     id: registration.id,
-    publicKey: PublicKey.toHex(cose) as `0x${string}`,
+    publicKey: parseAttestationPublicKey(registration.response.attestationObject),
     transports: ['internal'],
     attestationJson: JSON.stringify(registration),
   };
@@ -3114,16 +3540,22 @@ export async function createPasskeyNative(name: string): Promise<WebAuthnCredent
   return credential;
 }
 
-/** Native assertion path shaped like navigator.credentials.get for viem. */
+/** Native assertion shaped like navigator.credentials.get for viem. */
 export async function getFnNative(options?: CredentialRequestOptions): Promise<Credential> {
   const request = options?.publicKey;
-  const assertion = await nativeAuthenticate({
+  const challenge = request?.challenge instanceof ArrayBuffer
+    ? toBase64Url(new Uint8Array(request.challenge))
+    : toBase64Url(new Uint8Array((request?.challenge as ArrayBufferView | undefined)?.buffer ?? new ArrayBuffer(0)));
+  const assertion = await getCredentialNative({
     rpId: getConfig().rpId,
-    challenge: request?.challenge,
-    allowCredentials: request?.allowCredentials,
+    challenge,
     userVerification: 'required',
+    allowCredentials: (request?.allowCredentials ?? []).map((entry) => ({
+      type: 'public-key',
+      id: toBase64Url(new Uint8Array(entry.id as ArrayBuffer)),
+    })),
   });
-  return {
+  const credential = {
     id: assertion.id,
     rawId: fromBase64Url(assertion.rawId).buffer,
     type: 'public-key',
@@ -3133,13 +3565,12 @@ export async function getFnNative(options?: CredentialRequestOptions): Promise<C
       signature: fromBase64Url(assertion.response.signature).buffer,
       userHandle: assertion.response.userHandle ? fromBase64Url(assertion.response.userHandle).buffer : null,
     },
-  } as unknown as Credential;
+  };
+  return credential as unknown as Credential;
 }
 ```
 
-> `webauthn-p256-cose`는 COSE 공개키를 뽑는 작은 유틸이다. 별도 패키지를 더하기 싫으면 `attestationObject`를 서버(`registerPasskey`)가 이미 파싱하므로 **네이티브에서는 `publicKey`를 `'0x'`로 두고, `registerPasskey` 응답이 돌려주는 값을 저장하도록** 바꿔도 된다. Task 19 Step 4가 그 경로를 쓴다.
-
-- [ ] **Step 5: 분기와 계정**
+- [ ] **Step 6: 분기와 계정 헬퍼**
 
 ```ts
 // apps/web/src/shared/passkey/index.ts
@@ -3148,11 +3579,12 @@ import { toWebAuthnAccount, type WebAuthnAccount } from 'viem/account-abstractio
 import { getConfig } from '../config';
 import { createPasskeyWeb, getFnWeb } from './web';
 import { createPasskeyNative, getFnNative } from './native';
-import { storedCredential } from './types';
+import { storedCredential, type WebAuthnCredential } from './types';
 
 export * from './types';
+export { parseAttestationPublicKey } from './cose';
 
-export async function createPasskey(name: string) {
+export async function createPasskey(name: string): Promise<WebAuthnCredential> {
   return Capacitor.isNativePlatform() ? createPasskeyNative(name) : createPasskeyWeb(name);
 }
 
@@ -3167,23 +3599,41 @@ export async function getPasskeyAccount(): Promise<WebAuthnAccount> {
 }
 ```
 
-- [ ] **Step 6: 테스트 통과 확인과 플러그인 시그니처 검증**
+```ts
+// apps/web/src/shared/chain/accounts.ts
+import type { SmartAccount } from 'viem/account-abstraction';
+import { getPasskeyAccount } from '../passkey';
+import { getSmartAccount, setSmartAccount } from './bundler';
 
-Run (from `apps/web/`): `pnpm vitest run src/shared/passkey/passkey.test.ts`
-Expected: PASS — `Tests  1 passed (1)`.
+/** The signed-in attendee's own passkey smart account; also primes the module cache. */
+export async function getAttendeeAccount(): Promise<SmartAccount> {
+  const account = await getSmartAccount(await getPasskeyAccount());
+  setSmartAccount(account);
+  return account;
+}
 
-```bash
-cd /Users/moomi/Downloads/z03.Vibe_Coding/MONTI/apps/web
-sed -n '1,80p' node_modules/@capgo/capacitor-passkey/dist/esm/definitions.d.ts
+/**
+ * The signed-in staff member's own passkey smart account, used by sub-plan 04 for
+ * requestOverride / manualOverride. It is NOT the gate device account, which 04 derives
+ * from the gate hardware key under GATE_KEY_ALIAS and never signs with a passkey.
+ */
+export async function getStaffAccount(): Promise<SmartAccount> {
+  return getAttendeeAccount();
+}
 ```
-Expected: `register`/`authenticate` 메서드 이름과 인자 모양을 눈으로 확인. 다르면 **`plugin.ts` 만** 고친다.
 
-- [ ] **Step 7: 커밋**
+- [ ] **Step 7: 테스트 통과 확인과 커밋**
+
+Run (from `apps/web/`): `pnpm vitest run src/shared/passkey`
+Expected: PASS — `Test Files  2 passed (2)`, `Tests  3 passed (3)`.
+
+Run (from `apps/web/`): `pnpm typecheck`
+Expected: 출력 없음. `plugin.ts`에서 타입 에러가 나면 **Step 1에서 읽은 정의에 맞춰 `plugin.ts`만** 고친다 — 캐스트로 덮지 않는다.
 
 ```bash
 cd /Users/moomi/Downloads/z03.Vibe_Coding/MONTI
-git add apps/web/src/shared/passkey
-git commit -m "feat(web): add unified passkey create and account bridge for web and native"
+git add apps/web/src/shared/passkey apps/web/src/shared/chain/accounts.ts
+git commit -m "feat(web): add passkey create/assert for web and native with cose parsing and account helpers"
 ```
 
 ---
@@ -3198,6 +3648,8 @@ git commit -m "feat(web): add unified passkey create and account bridge for web 
 - Consumes: `derToCompactSignature`, `spkiToXy`, `fromBase64Url` (`@monti/shared/encoding`).
 - Produces: `class DeviceKeyUnavailable extends Error`, `ATTENDEE_KEY_ALIAS = 'monti-attendee'`, `GATE_KEY_ALIAS = 'monti-gate'`, `ensureDeviceKey({ alias, requireAuth, strongBox }): Promise<{ x: Hex; y: Hex }>`, `armDeviceKey({ alias }): Promise<void>`, `signWithDeviceKey(digest: Hex, { alias }): Promise<{ r: Hex; s: Hex }>`, `deviceKeyCapability(): 'native' | 'none'`, `ARM_WINDOW_SECONDS = 60`. **sub-plan 04가 게이트 키를 `{ alias: GATE_KEY_ALIAS, requireAuth: false, strongBox: true }`로 만든다.** `signWithDeviceKey`는 받은 32바이트 다이제스트를 **다시 해싱하지 않고 그대로 서명한다**(iOS `.ecdsaSignatureDigestX962SHA256`, Android `NONEwithECDSA`).
 
+**플러그인 실측 결과가 이 태스크의 전제를 바꾼다.** 사전 점검에서 `@perfood/capacitor-crypto-api@8.0.0`의 공개 타입을 읽어 보면 표면은 `CryptoApi.generateKey({ tag, algorithm })`, `loadKey({ tag, algorithm })`, `sign({ tag, data })` 뿐이고 **접근 제어(생체 요구)나 StrongBox 스위치가 아예 없다.** 즉 Global Constraints가 요구하는 `kSecAttrTokenIDSecureEnclave + biometryCurrentSet`, `setUserAuthenticationParameters(60, BIOMETRIC_STRONG)`, `setIsStrongBoxBacked(true)`를 이 플러그인으로는 표현할 수 없다. 그래서 `plugin.ts`는 **백엔드 전환 지점**이 되고, `PLUGIN_SUPPORTS_ACCESS_CONTROL = false`인 백엔드에 `requireAuth: true`를 요구하면 `DeviceKeyPolicyUnsupported`로 즉시 실패한다. 관객 키는 `requireAuth: true`이므로 **Task 14(자체 플러그인)가 사실상 필수**다 — 스파이크 S3가 반대 결과를 내면 그때 백엔드를 되돌린다.
+
 **웹 관객은 NFC 대신 QR 경로를 쓴다.** 웹에는 동기화되지 않는 하드웨어 키를 만들 방법이 없으므로 `web.ts`는 세 함수 모두 `DeviceKeyUnavailable`을 던지고, 호출부는 그 에러를 잡아 `copy.enter.deviceUnavailable`을 띄운다. iOS 사파리 관객은 이 경로로 들어온다.
 
 - [ ] **Step 1: 실패하는 테스트**
@@ -3209,8 +3661,10 @@ import { describe, expect, it, vi } from 'vitest';
 const generateKey = vi.fn();
 const sign = vi.fn();
 const loadKey = vi.fn(async () => { throw new Error('missing'); });
-vi.mock('./plugin', () => ({ generateKey, sign, loadKey }));
+vi.mock('./plugin', () => ({ generateKey, sign, loadKey, PLUGIN_SUPPORTS_ACCESS_CONTROL: true }));
 vi.mock('@capacitor/core', () => ({ Capacitor: { isNativePlatform: () => true } }));
+
+import { toBase64Url } from '@monti/shared/encoding';
 
 const { ensureDeviceKey, signWithDeviceKey, armDeviceKey, ARM_WINDOW_SECONDS, ATTENDEE_KEY_ALIAS, GATE_KEY_ALIAS } =
   await import('./index');
@@ -3234,13 +3688,29 @@ describe('device key', () => {
     expect(generateKey).toHaveBeenCalledWith({ alias: 'monti-gate', requireAuth: false, strongBox: true });
   });
 
-  it('signs the digest raw and converts the DER signature to r||s', async () => {
+  it('signs the digest raw — the exact 32 bytes, never re-hashed', async () => {
     sign.mockResolvedValueOnce({ signature: DER_B64 });
+    const digestBytes = new Uint8Array(32).fill(0xab);
     const digest = `0x${'ab'.repeat(32)}` as const;
     await expect(signWithDeviceKey(digest, { alias: ATTENDEE_KEY_ALIAS })).resolves.toEqual({
       r: `0x${'00'.repeat(31)}07`, s: `0x${'ff'.repeat(32)}`,
     });
-    expect(sign.mock.calls[0]![0]).toMatchObject({ alias: 'monti-attendee' });
+    const sent = sign.mock.calls[0]![0] as { alias: string; data: string };
+    expect(sent.alias).toBe('monti-attendee');
+    // This is the safety-critical invariant: Ticket.checkIn verifies P256 over this digest.
+    expect(sent.data).toBe(toBase64Url(digestBytes));
+  });
+
+  it('refuses to mint a biometric key on a backend that cannot enforce it', async () => {
+    const { ensureDeviceKeyNative } = await import('./native');
+    vi.doMock('./plugin', () => ({ generateKey, sign, loadKey, PLUGIN_SUPPORTS_ACCESS_CONTROL: false }));
+    vi.resetModules();
+    const { ensureDeviceKeyNative: guarded } = await import('./native');
+    await expect(guarded({ alias: ATTENDEE_KEY_ALIAS, requireAuth: true, strongBox: true }))
+      .rejects.toThrow('DeviceKeyPolicyUnsupported');
+    expect(ensureDeviceKeyNative).toBeTypeOf('function');
+    vi.doUnmock('./plugin');
+    vi.resetModules();
   });
 
   it('arms by signing a throwaway digest so the biometric context is retained for 60s', async () => {
@@ -3261,27 +3731,31 @@ Expected: FAIL — `Failed to resolve import "./index"`.
 
 ```ts
 // apps/web/src/shared/deviceKey/plugin.ts
-// ONLY file that touches @perfood/capacitor-crypto-api. Signatures verified against
-// node_modules/@perfood/capacitor-crypto-api/dist/esm/definitions.d.ts.
-import { CapacitorCryptoApi } from '@perfood/capacitor-crypto-api';
+// ONLY file that touches a native crypto plugin. Backend switch lives here.
+//
+// @perfood/capacitor-crypto-api@8.0.0 surface (read in Step 1):
+//   CryptoApi.generateKey({ tag, algorithm: 'ecdsa' | 'ecdh', type? }) -> { publicKey }
+//   CryptoApi.loadKey({ tag, algorithm })                              -> { publicKey }
+//   CryptoApi.sign({ tag, data, type? })                               -> { signature }
+// There is NO access-control and NO StrongBox option, so it cannot express the
+// Secure Enclave / biometric / StrongBox requirements in the Global Constraints.
+import { CryptoApi } from '@perfood/capacitor-crypto-api';
+
+/** Flip to true only with a backend that can enforce biometric access control (Task 14). */
+export const PLUGIN_SUPPORTS_ACCESS_CONTROL = false;
 
 export interface KeyOptions { alias: string; requireAuth: boolean; strongBox: boolean }
 
-export async function generateKey(options: KeyOptions): Promise<{ publicKey: string }> {
-  return CapacitorCryptoApi.generateKey({
-    tag: options.alias,
-    // The plugin maps these onto kSecAccessControl / KeyGenParameterSpec.
-    accessControl: options.requireAuth ? 'biometryCurrentSet' : 'none',
-    strongBox: options.strongBox,
-  } as never) as Promise<{ publicKey: string }>;
+export function generateKey(options: KeyOptions): Promise<{ publicKey: string }> {
+  return CryptoApi.generateKey({ tag: options.alias, algorithm: 'ecdsa' });
 }
 
-export async function loadKey(options: { alias: string }): Promise<{ publicKey: string }> {
-  return CapacitorCryptoApi.loadKey({ tag: options.alias } as never) as Promise<{ publicKey: string }>;
+export function loadKey(options: { alias: string }): Promise<{ publicKey: string }> {
+  return CryptoApi.loadKey({ tag: options.alias, algorithm: 'ecdsa' });
 }
 
-export async function sign(options: { alias: string; data: string }): Promise<{ signature: string }> {
-  return CapacitorCryptoApi.sign({ tag: options.alias, data: options.data } as never) as Promise<{ signature: string }>;
+export function sign(options: { alias: string; data: string }): Promise<{ signature: string }> {
+  return CryptoApi.sign({ tag: options.alias, data: options.data });
 }
 ```
 
@@ -3293,6 +3767,14 @@ export class DeviceKeyUnavailable extends Error {
   constructor() {
     super('DeviceKeyUnavailable');
     this.name = 'DeviceKeyUnavailable';
+  }
+}
+
+/** The active native backend cannot enforce `requireAuth`, so the key would be unprotected. */
+export class DeviceKeyPolicyUnsupported extends Error {
+  constructor(readonly alias: string) {
+    super(`DeviceKeyPolicyUnsupported: backend cannot enforce biometric access control for ${alias}`);
+    this.name = 'DeviceKeyPolicyUnsupported';
   }
 }
 
@@ -3311,8 +3793,8 @@ export const ARM_WINDOW_SECONDS = 60;
 // apps/web/src/shared/deviceKey/native.ts
 import { derToCompactSignature, fromBase64Url, spkiToXy, toBase64Url } from '@monti/shared/encoding';
 import type { Hex } from '@monti/shared';
-import { generateKey, loadKey, sign } from './plugin';
-import type { DeviceKeyOptions, DeviceKeyPublic } from './types';
+import { PLUGIN_SUPPORTS_ACCESS_CONTROL, generateKey, loadKey, sign } from './plugin';
+import { DeviceKeyPolicyUnsupported, type DeviceKeyOptions, type DeviceKeyPublic } from './types';
 
 const ARM_DIGEST = toBase64Url(new Uint8Array(32).fill(0x6d)); // constant, never leaves the device
 
@@ -3321,6 +3803,10 @@ function hexToBase64Url(hex: Hex): string {
 }
 
 export async function ensureDeviceKeyNative(options: DeviceKeyOptions): Promise<DeviceKeyPublic> {
+  // Never create a key that claims biometric protection the backend cannot enforce.
+  if (options.requireAuth && !PLUGIN_SUPPORTS_ACCESS_CONTROL) {
+    throw new DeviceKeyPolicyUnsupported(options.alias);
+  }
   let spki: string;
   try {
     spki = (await loadKey({ alias: options.alias })).publicKey;
@@ -3384,13 +3870,14 @@ export async function signWithDeviceKey(digest: Hex, options: { alias: string })
 - [ ] **Step 5: 테스트 통과 확인과 플러그인 시그니처 검증**
 
 Run (from `apps/web/`): `pnpm vitest run src/shared/deviceKey/deviceKey.test.ts`
-Expected: PASS — `Tests  4 passed (4)`.
+Expected: PASS — `Tests  5 passed (5)`.
 
 ```bash
 cd /Users/moomi/Downloads/z03.Vibe_Coding/MONTI/apps/web
-sed -n '1,60p' node_modules/@perfood/capacitor-crypto-api/dist/esm/definitions.d.ts
+cat node_modules/@perfood/capacitor-crypto-api/dist/esm/definitions.d.ts
+cat node_modules/@perfood/capacitor-crypto-api/dist/esm/index.d.ts
 ```
-Expected: `generateKey`, `loadKey`, `sign`의 인자 이름(`tag`, `data`)과 반환 필드(`publicKey`, `signature`)가 base64인지, 그리고 `sign`이 **주어진 바이트를 다시 해싱하지 않는지** 확인. 재해싱한다면 Task 14의 자체 플러그인으로 간다. 접근 제어 옵션 이름이 다르면 `plugin.ts`의 `generateKey`만 고친다.
+Expected: export 이름이 `CryptoApi` 이고 `generateKey`가 **필수** `algorithm`을 받는다. **접근 제어/StrongBox 옵션이 보이면** `plugin.ts`의 `PLUGIN_SUPPORTS_ACCESS_CONTROL`을 `true`로 올리고 `generateKey`에 그 옵션을 넘긴 뒤 Task 14를 건너뛴다. 보이지 않으면(예상되는 결과) **Task 14를 반드시 실행한다** — 그 전까지 관객 기기 키 생성은 `DeviceKeyPolicyUnsupported`로 막힌다.
 
 - [ ] **Step 6: 커밋**
 
@@ -3412,15 +3899,16 @@ git commit -m "feat(web): add hardware device key wrapper with web unavailable f
 - Consumes: 없음.
 - Produces: Capacitor 플러그인 `DeviceKey`, 메서드 `generateKey({tag, accessControl, strongBox}) -> {publicKey}`, `loadKey({tag}) -> {publicKey}`, `sign({tag, data}) -> {signature}`. **Task 13의 `plugin.ts`가 기대하는 것과 이름·필드가 동일**하므로 교체는 import 한 줄이다. 두 구현 모두 주어진 다이제스트를 재해싱하지 않는다.
 
-> **이 태스크는 조건부다.** 마스터 Task 0.5(스파이크 S3)가 `docs/superpowers/plans/spikes.md`에 **No-Go**를 기록한 경우에만 실행한다. Go면 건너뛰고 Task 15로 간다. 판단 기준은 두 가지: ① iOS에서 생체 인증 후 60초 안의 두 번째 `sign`이 다시 프롬프트를 띄우는가, ② Android에서 `setUserAuthenticationParameters(60, …)`가 반영되는가.
+> **이 태스크는 사실상 필수다.** `@perfood/capacitor-crypto-api@8.0.0`에는 접근 제어·StrongBox 스위치가 없어(Task 13 Step 5에서 실물 타입으로 확인) Global Constraints의 Secure Enclave·생체 60초·StrongBox 요구를 표현할 방법이 없다. 스파이크 S3가 그 반대를 입증한 경우에만 건너뛴다.
 
-- [ ] **Step 1: 스파이크 결과 확인**
+- [ ] **Step 1: 스파이크 결과와 플러그인 표면 확인**
 
 ```bash
 cd /Users/moomi/Downloads/z03.Vibe_Coding/MONTI
-grep -A3 "S3" docs/superpowers/plans/spikes.md
+grep -A3 "S3" docs/superpowers/plans/spikes.md || echo "no spike record"
+grep -c "accessControl\|biometry\|strongBox" apps/web/node_modules/@perfood/capacitor-crypto-api/dist/esm/definitions.d.ts || true
 ```
-Expected: `Go` 이면 이 태스크 전체를 건너뛴다. `No-Go` 이면 Step 2로 간다.
+Expected: 두 번째 명령이 `0` — 접근 제어 옵션이 없다는 뜻이고, 이 태스크를 실행한다. `0`이 아니고 S3가 `Go` 면 건너뛴다.
 
 - [ ] **Step 2: 플러그인 패키지 골격**
 
@@ -3431,13 +3919,65 @@ cat > plugins/device-key/package.json <<'EOF'
 {
   "name": "@monti/device-key",
   "version": "0.1.0",
-  "main": "dist/plugin.js",
+  "type": "module",
+  "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "files": ["dist", "ios", "android", "MontiDeviceKey.podspec"],
+  "scripts": { "build": "tsc -p tsconfig.json" },
   "capacitor": { "ios": { "src": "ios" }, "android": { "src": "android" } },
-  "peerDependencies": { "@capacitor/core": "^8.0.0" }
+  "peerDependencies": { "@capacitor/core": "^8.0.0" },
+  "devDependencies": { "@capacitor/core": "8.5.2", "typescript": "5.9.2" }
 }
 EOF
+cat > plugins/device-key/tsconfig.json <<'EOF'
+{
+  "compilerOptions": {
+    "target": "ES2022", "module": "ESNext", "moduleResolution": "bundler",
+    "declaration": true, "outDir": "dist", "rootDir": "src", "strict": true, "skipLibCheck": true
+  },
+  "include": ["src"]
+}
+EOF
+mkdir -p plugins/device-key/src
+cat > plugins/device-key/src/definitions.ts <<'EOF'
+export interface GenerateKeyOptions { tag: string; requireAuth: boolean; strongBox: boolean }
+export interface LoadKeyOptions { tag: string }
+export interface SignOptions { tag: string; data: string }
+
+export interface DeviceKeyPlugin {
+  /** Creates a hardware P-256 key. requireAuth -> biometric access control; strongBox -> StrongBox first. */
+  generateKey(options: GenerateKeyOptions): Promise<{ publicKey: string; backing: 'strongbox' | 'tee' | 'secure-enclave' }>;
+  loadKey(options: LoadKeyOptions): Promise<{ publicKey: string }>;
+  /** Signs the base64url digest RAW. Never hashes again. */
+  sign(options: SignOptions): Promise<{ signature: string }>;
+}
+EOF
+cat > plugins/device-key/src/index.ts <<'EOF'
+import { registerPlugin } from '@capacitor/core';
+import type { DeviceKeyPlugin } from './definitions';
+
+export * from './definitions';
+export const DeviceKey = registerPlugin<DeviceKeyPlugin>('DeviceKey');
+EOF
+cat > plugins/device-key/MontiDeviceKey.podspec <<'EOF'
+Pod::Spec.new do |s|
+  s.name = 'MontiDeviceKey'
+  s.version = '0.1.0'
+  s.summary = 'MONTI hardware device key'
+  s.license = 'MIT'
+  s.homepage = 'https://monti.app'
+  s.author = 'MONTI'
+  s.source = { :git => 'https://monti.app', :tag => s.version.to_s }
+  s.source_files = 'ios/Sources/**/*.{swift,h,m}'
+  s.ios.deployment_target = '16.0'
+  s.dependency 'Capacitor'
+  s.swift_version = '5.9'
+end
+EOF
+node -e "const fs=require('fs');const y=fs.readFileSync('pnpm-workspace.yaml','utf8');if(!y.includes('plugins/*'))fs.writeFileSync('pnpm-workspace.yaml',y.trimEnd()+'\n  - plugins/*\n')"
+pnpm install && pnpm -C plugins/device-key build
 ```
+Expected: `plugins/device-key/dist/index.js` 가 생긴다.
 
 - [ ] **Step 3: iOS — Secure Enclave + 60초 유지되는 `LAContext`**
 
@@ -3449,18 +3989,29 @@ import LocalAuthentication
 import Security
 
 @objc(DeviceKeyPlugin)
-public class DeviceKeyPlugin: CAPPlugin {
+public class DeviceKeyPlugin: CAPPlugin, CAPBridgedPlugin {
+  public let identifier = "DeviceKeyPlugin"
+  public let jsName = "DeviceKey"
+  public let pluginMethods: [CAPPluginMethod] = [
+    CAPPluginMethod(name: "generateKey", returnType: CAPPluginReturnPromise),
+    CAPPluginMethod(name: "loadKey", returnType: CAPPluginReturnPromise),
+    CAPPluginMethod(name: "sign", returnType: CAPPluginReturnPromise),
+  ]
+
   /// Retained authenticated context. The Secure Enclave honours it for 60 s,
   /// so the second sign inside the arming window does not prompt again.
+  static let armWindowSeconds: TimeInterval = 60
   private var context: LAContext?
   private var contextCreatedAt: Date?
 
   private func authenticatedContext() -> LAContext {
-    if let existing = context, let created = contextCreatedAt, Date().timeIntervalSince(created) < 60 {
+    if let existing = context, let created = contextCreatedAt,
+       Date().timeIntervalSince(created) < DeviceKeyPlugin.armWindowSeconds {
       return existing
     }
     let fresh = LAContext()
-    fresh.touchIDAuthenticationAllowableReuseDuration = 60
+    // Matches ARM_WINDOW_SECONDS in shared/deviceKey/types.ts.
+    fresh.touchIDAuthenticationAllowableReuseDuration = DeviceKeyPlugin.armWindowSeconds
     context = fresh
     contextCreatedAt = Date()
     return fresh
@@ -3470,10 +4021,13 @@ public class DeviceKeyPlugin: CAPPlugin {
 
   @objc func generateKey(_ call: CAPPluginCall) {
     guard let tag = call.getString("tag") else { return call.reject("tag required") }
+    // requireAuth true  -> attendee key: Face ID gated, invalidated when biometrics change.
+    // requireAuth false -> gate terminal key: unattended, must never prompt.
+    let requireAuth = call.getBool("requireAuth") ?? true
+    let flags: SecAccessControlCreateFlags = requireAuth ? [.privateKeyUsage, .biometryCurrentSet] : [.privateKeyUsage]
     var error: Unmanaged<CFError>?
     guard let access = SecAccessControlCreateWithFlags(
-      nil, kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
-      [.privateKeyUsage, .biometryCurrentSet], &error) else {
+      nil, kSecAttrAccessibleWhenUnlockedThisDeviceOnly, flags, &error) else {
       return call.reject("access control failed")
     }
     let attributes: [String: Any] = [
@@ -3491,7 +4045,8 @@ public class DeviceKeyPlugin: CAPPlugin {
           let spki = SecKeyCopyExternalRepresentation(publicKey, &error) as Data? else {
       return call.reject("key generation failed")
     }
-    call.resolve(["publicKey": spki.base64EncodedString()])
+    // The Secure Enclave is the only backing on iOS; strongBox is an Android-only hint.
+    call.resolve(["publicKey": spki.base64EncodedString(), "backing": "secure-enclave"])
   }
 
   @objc func loadKey(_ call: CAPPluginCall) {
@@ -3504,9 +4059,15 @@ public class DeviceKeyPlugin: CAPPlugin {
   }
 
   @objc func sign(_ call: CAPPluginCall) {
-    guard let tag = call.getString("tag"), let dataB64 = call.getString("data"),
-          let digest = Data(base64Encoded: dataB64.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")),
-          let key = findKey(tag) else { return call.reject("sign failed") }
+    guard let tag = call.getString("tag"), let dataB64 = call.getString("data") else {
+      return call.reject("tag and data required")
+    }
+    // base64url -> base64, restoring the padding the JS side strips.
+    var normalised = dataB64.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+    normalised += String(repeating: "=", count: (4 - normalised.count % 4) % 4)
+    guard let digest = Data(base64Encoded: normalised), let key = findKey(tag) else {
+      return call.reject("sign failed")
+    }
     var error: Unmanaged<CFError>?
     guard let signature = SecKeyCreateSignature(key, .ecdsaSignatureDigestX962SHA256, digest as CFData, &error) as Data? else {
       return call.reject("sign failed: \(error.debugDescription)")
@@ -3549,27 +4110,48 @@ import java.security.Signature
 class DeviceKeyPlugin : Plugin() {
   private val keyStore: KeyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
 
-  private fun spec(tag: String, strongBox: Boolean) =
+  companion object { const val ARM_WINDOW_SECONDS = 60 }
+
+  private fun spec(tag: String, requireAuth: Boolean, strongBox: Boolean) =
     KeyGenParameterSpec.Builder(tag, KeyProperties.PURPOSE_SIGN)
       .setAlgorithmParameterSpec(java.security.spec.ECGenParameterSpec("secp256r1"))
       .setDigests(KeyProperties.DIGEST_SHA256)
-      .setUserAuthenticationRequired(true)
-      // 60 s window, strong biometrics only — mirrors the iOS retained LAContext.
-      .setUserAuthenticationParameters(60, KeyProperties.AUTH_BIOMETRIC_STRONG)
-      .setInvalidatedByBiometricEnrollment(true)
+      .apply {
+        if (requireAuth) {
+          setUserAuthenticationRequired(true)
+          // 60 s window, strong biometrics only — mirrors the iOS retained LAContext.
+          setUserAuthenticationParameters(ARM_WINDOW_SECONDS, KeyProperties.AUTH_BIOMETRIC_STRONG)
+          setInvalidatedByBiometricEnrollment(true)
+        } else {
+          // Gate terminal key: signs unattended, must never raise a biometric prompt.
+          setUserAuthenticationRequired(false)
+        }
+      }
       .setIsStrongBoxBacked(strongBox)
       .build()
 
   @PluginMethod
   fun generateKey(call: PluginCall) {
     val tag = call.getString("tag") ?: return call.reject("tag required")
+    val requireAuth = call.getBoolean("requireAuth") ?: true
+    val wantStrongBox = call.getBoolean("strongBox") ?: true
     val generator = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore")
+    var backing = "tee"
     val pair = try {
-      generator.initialize(spec(tag, true)); generator.generateKeyPair()
+      if (!wantStrongBox) throw IllegalStateException("strongbox not requested")
+      generator.initialize(spec(tag, requireAuth, true))
+      backing = "strongbox"
+      generator.generateKeyPair()
     } catch (_: Exception) {
-      generator.initialize(spec(tag, false)); generator.generateKeyPair()   // TEE fallback
+      generator.initialize(spec(tag, requireAuth, false))   // TEE fallback
+      backing = "tee"
+      generator.generateKeyPair()
     }
-    call.resolve(com.getcapacitor.JSObject().put("publicKey", Base64.encodeToString(pair.public.encoded, Base64.NO_WRAP)))
+    call.resolve(
+      com.getcapacitor.JSObject()
+        .put("publicKey", Base64.encodeToString(pair.public.encoded, Base64.NO_WRAP))
+        .put("backing", backing),
+    )
   }
 
   @PluginMethod
@@ -3584,9 +4166,10 @@ class DeviceKeyPlugin : Plugin() {
     val tag = call.getString("tag") ?: return call.reject("tag required")
     val data = call.getString("data") ?: return call.reject("data required")
     val entry = keyStore.getEntry(tag, null) as? KeyStore.PrivateKeyEntry ?: return call.reject("key not found")
+    // NONEwithECDSA signs the supplied 32 bytes as-is; the digest must not be hashed twice.
     val signature = Signature.getInstance("NONEwithECDSA")
     signature.initSign(entry.privateKey)
-    signature.update(Base64.decode(data, Base64.URL_SAFE or Base64.NO_WRAP))
+    signature.update(Base64.decode(data, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING))
     call.resolve(com.getcapacitor.JSObject().put("signature", Base64.encodeToString(signature.sign(), Base64.NO_WRAP)))
   }
 }
@@ -3594,18 +4177,39 @@ class DeviceKeyPlugin : Plugin() {
 
 - [ ] **Step 5: 웹 쪽 교체는 import 한 줄**
 
-`apps/web/src/shared/deviceKey/plugin.ts`의 첫 줄만 바꾼다:
+`apps/web/src/shared/deviceKey/plugin.ts`를 새 백엔드로 돌린다. 메서드 이름과 필드를 같게 설계했으므로 바뀌는 것은 import 한 줄, 플래그 하나, `generateKey` 본문 한 줄이다:
 
 ```ts
-import { DeviceKey as CapacitorCryptoApi } from '@monti/device-key';
+// apps/web/src/shared/deviceKey/plugin.ts
+import { DeviceKey } from '@monti/device-key';
+
+/** The own plugin enforces biometric access control and StrongBox, so the guard opens. */
+export const PLUGIN_SUPPORTS_ACCESS_CONTROL = true;
+
+export interface KeyOptions { alias: string; requireAuth: boolean; strongBox: boolean }
+
+export function generateKey(options: KeyOptions): Promise<{ publicKey: string }> {
+  return DeviceKey.generateKey({ tag: options.alias, requireAuth: options.requireAuth, strongBox: options.strongBox });
+}
+
+export function loadKey(options: { alias: string }): Promise<{ publicKey: string }> {
+  return DeviceKey.loadKey({ tag: options.alias });
+}
+
+export function sign(options: { alias: string; data: string }): Promise<{ signature: string }> {
+  return DeviceKey.sign({ tag: options.alias, data: options.data });
+}
 ```
 
-나머지 세 함수 본문은 그대로다(메서드 이름과 필드가 같게 설계했다). Task 13의 테스트가 그대로 통과해야 한다.
+`apps/web/package.json`의 `dependencies`에 `"@monti/device-key": "workspace:*"` 를 더하고 `pnpm install`, `npx cap sync` 한다.
 
 - [ ] **Step 6: 확인과 커밋**
 
 Run (from `apps/web/`): `pnpm vitest run src/shared/deviceKey/deviceKey.test.ts`
-Expected: PASS — `Tests  3 passed (3)` (플러그인 어댑터는 테스트에서 mock되므로 변화 없음).
+Expected: PASS — `Tests  5 passed (5)` (어댑터는 테스트에서 mock되므로 단언은 그대로지만, `PLUGIN_SUPPORTS_ACCESS_CONTROL: true` 경로가 이제 실제 백엔드와 일치한다).
+
+Run (from repo root): `pnpm -C plugins/device-key build`
+Expected: 에러 없음.
 
 ```bash
 cd /Users/moomi/Downloads/z03.Vibe_Coding/MONTI
@@ -3623,7 +4227,9 @@ git commit -m "feat(device-key): add own secure enclave and strongbox plugin (S3
 
 **Interfaces:**
 - Consumes: `encodeCbor`, `decodeCbor`, `toBase64Url`, `fromBase64Url` (`@monti/shared/encoding`), `GateCodeWire`, `GateResponseWire`.
-- Produces: `GATE_CODE_RECORD_TYPE = 'monti.app:g'`, `GATE_RESPONSE_RECORD_TYPE = 'monti.app:s'`, `QR_PREFIX = 'MONTI1:'`, `decodeGateCode(payload)`, `encodeGateResponse(wire)`, `gateResponseToQr(wire)`, `qrToGateResponse(text)`, `nfcCapability(): 'native' | 'webnfc' | 'none'`, `readGateCode(): Promise<GateCodeWire>`, `writeGateResponse(wire): Promise<void>`.
+- Produces: `GATE_CODE_RECORD_TYPE = 'monti.app:g'`, `GATE_RESPONSE_RECORD_TYPE = 'monti.app:s'`, `TNF_EXTERNAL = 4`, `QR_PREFIX = 'MONTI1:'`, `recordTypeBytes(type)`, `recordTypeMatches(bytes, type)`, `decodeGateCode(payload)`, `encodeGateResponse(wire)`, `gateResponseToQr(wire)`, `qrToGateResponse(text)`, `nfcCapability(): 'native' | 'webnfc' | 'none'`, `readGateCode(): Promise<GateCodeWire>`, `writeGateResponse(wire): Promise<void>`.
+
+플러그인의 실제 표면은 `CapacitorNfc` 이고 `startScanning` / `stopScanning` / `write({ records })` 이며 **`NdefRecord.type`은 문자열이 아니라 바이트 배열**이다. 리스너 이름도 `ndefDiscovered` 다. `records.ts`가 문자열 ↔ 바이트 변환을 맡고 `plugin.ts`만 플러그인을 만진다. 캐스트는 쓰지 않는다.
 
 - [ ] **Step 1: 고정 CBOR 벡터로 실패하는 테스트**
 
@@ -3631,7 +4237,11 @@ git commit -m "feat(device-key): add own secure enclave and strongbox plugin (S3
 // apps/web/src/shared/nfc/records.test.ts
 import { describe, expect, it } from 'vitest';
 import type { GateCodeWire, GateResponseWire } from '@monti/shared';
-import { QR_PREFIX, decodeGateCode, encodeGateResponse, gateResponseToQr, qrToGateResponse } from './records';
+import { encodeCbor } from '@monti/shared/encoding';
+import {
+  GATE_CODE_RECORD_TYPE, GATE_RESPONSE_RECORD_TYPE, QR_PREFIX, decodeGateCode, encodeGateResponse,
+  gateResponseToQr, qrToGateResponse, recordTypeBytes, recordTypeMatches,
+} from './records';
 
 // cborg encodes object keys length-first, so this byte string is stable.
 // { v:1, kx:"0xaa", ky:"0xbb", sig:"0xcc", nonce:"0x01", gateId:"7", eventId:"3", issuedAt:1790000000 }
@@ -3657,16 +4267,26 @@ describe('nfc records', () => {
   });
 
   it('rejects a payload whose version is not 1', () => {
-    const wrong = Uint8Array.from(bytes);
-    wrong[2] = 0x02;
+    // Index 2 is the value byte of "v" (index 0 = map header, index 1-2 = key "v"… so build it instead).
+    const wrong = encodeCbor({ v: 2, gateId: '7', eventId: '3', issuedAt: 1790000000,
+      nonce: '0x01', kx: '0xaa', ky: '0xbb', sig: '0xcc' });
     expect(() => decodeGateCode(wrong)).toThrow('Unsupported gate code version');
+  });
+
+  it('encodes the record type as the NDEF external-type bytes the plugin wants', () => {
+    expect(recordTypeBytes(GATE_RESPONSE_RECORD_TYPE)).toEqual(
+      [...'monti.app:s'].map((character) => character.charCodeAt(0)),
+    );
+    expect(recordTypeMatches([...'monti.app:g'].map((c) => c.charCodeAt(0)), GATE_CODE_RECORD_TYPE)).toBe(true);
+    expect(recordTypeMatches([1, 2, 3], GATE_CODE_RECORD_TYPE)).toBe(false);
   });
 
   it('writes the response as an external record and round-trips through the QR form', () => {
     const wire: GateResponseWire = { v: 1, tokenId: '42', deviceSig: `0x${'ab'.repeat(64)}` };
     const record = encodeGateResponse(wire);
     expect(record.type).toBe('monti.app:s');
-    expect(record.payload.byteLength).toBeGreaterThan(64);
+    // v + tokenId + a 64-byte signature as 130 hex chars: comfortably over 140 bytes.
+    expect(record.payload.byteLength).toBeGreaterThan(140);
     const qr = gateResponseToQr(wire);
     expect(qr.startsWith(QR_PREFIX)).toBe(true);
     expect(qrToGateResponse(qr)).toEqual(wire);
@@ -3689,8 +4309,20 @@ import { decodeCbor, encodeCbor, fromBase64Url, toBase64Url } from '@monti/share
 export const GATE_CODE_RECORD_TYPE = 'monti.app:g';
 export const GATE_RESPONSE_RECORD_TYPE = 'monti.app:s';
 export const QR_PREFIX = 'MONTI1:';
+/** NDEF TNF 4 = external type. */
+export const TNF_EXTERNAL = 4;
 
 export interface NdefExternalRecord { type: string; payload: Uint8Array }
+
+/** The plugin models NdefRecord.type as a byte array, not a string. */
+export function recordTypeBytes(type: string): number[] {
+  return [...type].map((character) => character.charCodeAt(0));
+}
+
+export function recordTypeMatches(bytes: readonly number[] | undefined, type: string): boolean {
+  if (!bytes || bytes.length !== type.length) return false;
+  return bytes.every((byte, index) => byte === type.charCodeAt(index));
+}
 
 export function decodeGateCode(payload: Uint8Array): GateCodeWire {
   const wire = decodeCbor<GateCodeWire>(payload);
@@ -3722,50 +4354,72 @@ export function qrToGateResponse(text: string): GateResponseWire {
 
 ```ts
 // apps/web/src/shared/nfc/plugin.ts
-// ONLY file that touches @capgo/capacitor-nfc.
-import { Nfc } from '@capgo/capacitor-nfc';
+// ONLY file that touches @capgo/capacitor-nfc. Surface read in Step 1:
+//   CapacitorNfc.startScanning(options?) / stopScanning()
+//   CapacitorNfc.write({ records, allowFormat? })
+//   NdefRecord = { tnf: number; type: number[]; id: number[]; payload: number[] }
+//   events: nfcEvent | tagDiscovered | ndefDiscovered | ndefMimeDiscovered
+//         | ndefFormatableDiscovered | nfcStateChange | nfcSessionEnd
+import { CapacitorNfc } from '@capgo/capacitor-nfc';
+import { TNF_EXTERNAL, recordTypeBytes } from './records';
 
-export interface ScannedRecord { type?: string; payload?: number[] | Uint8Array }
+export interface ScannedRecord { tnf?: number; type?: number[]; id?: number[]; payload?: number[] }
+export interface PluginListener { remove: () => Promise<void> }
 
-export async function startScan(alertMessage: string): Promise<void> {
-  await Nfc.startScanSession({ alertMessage } as never);
+export function startScan(): Promise<void> {
+  return CapacitorNfc.startScanning();
 }
-export async function stopScan(): Promise<void> {
-  await Nfc.stopScanSession();
+
+export function stopScan(): Promise<void> {
+  return CapacitorNfc.stopScanning();
 }
-export function onTagScanned(handler: (records: ScannedRecord[]) => void): Promise<{ remove: () => Promise<void> }> {
-  return Nfc.addListener('nfcTagScanned', (event: { nfcTag?: { message?: { records?: ScannedRecord[] } } }) =>
-    handler(event.nfcTag?.message?.records ?? []),
-  ) as never;
+
+export function onNdefDiscovered(handler: (records: ScannedRecord[]) => void): Promise<PluginListener> {
+  return CapacitorNfc.addListener('ndefDiscovered', (event: { records?: ScannedRecord[] }) =>
+    handler(event.records ?? []),
+  );
 }
-export async function writeRecord(type: string, payload: Uint8Array): Promise<void> {
-  await Nfc.write({ message: { records: [{ tnf: 4, type, payload: Array.from(payload) }] } } as never);
+
+export function writeRecord(type: string, payload: Uint8Array): Promise<void> {
+  return CapacitorNfc.write({
+    records: [{ tnf: TNF_EXTERNAL, type: recordTypeBytes(type), id: [], payload: Array.from(payload) }],
+  });
 }
 ```
 
 ```ts
 // apps/web/src/shared/nfc/native.ts
 import type { GateCodeWire, GateResponseWire } from '@monti/shared';
-import { onTagScanned, startScan, stopScan, writeRecord } from './plugin';
-import { GATE_CODE_RECORD_TYPE, decodeGateCode, encodeGateResponse } from './records';
+import { onNdefDiscovered, startScan, stopScan, writeRecord, type PluginListener } from './plugin';
+import { GATE_CODE_RECORD_TYPE, decodeGateCode, encodeGateResponse, recordTypeMatches } from './records';
 
-export async function readGateCodeNative(alertMessage: string): Promise<GateCodeWire> {
-  return new Promise<GateCodeWire>((resolve, reject) => {
-    let listener: { remove: () => Promise<void> } | undefined;
-    const finish = async (run: () => void) => {
-      await listener?.remove();
-      await stopScan().catch(() => undefined);
-      run();
-    };
-    void onTagScanned((records) => {
-      const record = records.find((r) => r.type === GATE_CODE_RECORD_TYPE);
-      if (!record?.payload) return void finish(() => reject(new Error('No gate record in tag')));
-      void finish(() => resolve(decodeGateCode(Uint8Array.from(record.payload as number[]))));
-    }).then((handle) => {
-      listener = handle;
-      return startScan(alertMessage);
-    }).catch(reject);
-  });
+export async function readGateCodeNative(): Promise<GateCodeWire> {
+  // Register the listener BEFORE scanning so a fast tap cannot arrive first,
+  // and keep the handle in scope so finish() can always remove it.
+  let listener: PluginListener | undefined;
+  let settled = false;
+  try {
+    return await new Promise<GateCodeWire>((resolve, reject) => {
+      const finish = (run: () => void) => {
+        if (settled) return;
+        settled = true;
+        run();
+      };
+      void onNdefDiscovered((records) => {
+        const record = records.find((entry) => recordTypeMatches(entry.type, GATE_CODE_RECORD_TYPE));
+        if (!record?.payload) return finish(() => reject(new Error('No gate record in tag')));
+        finish(() => resolve(decodeGateCode(Uint8Array.from(record.payload!))));
+      })
+        .then((handle) => {
+          listener = handle;
+          return startScan();
+        })
+        .catch((cause: unknown) => finish(() => reject(cause)));
+    });
+  } finally {
+    await listener?.remove().catch(() => undefined);
+    await stopScan().catch(() => undefined);
+  }
 }
 
 export async function writeGateResponseNative(wire: GateResponseWire): Promise<void> {
@@ -3781,10 +4435,14 @@ import { GATE_CODE_RECORD_TYPE, decodeGateCode, encodeGateResponse } from './rec
 
 type NdefRecordLike = { recordType: string; mediaType?: string; data?: DataView };
 
-export async function readGateCodeWebNfc(): Promise<GateCodeWire> {
-  const Reader = (globalThis as { NDEFReader?: new () => never }).NDEFReader;
+function newReader(): object {
+  const Reader = (globalThis as { NDEFReader?: new () => object }).NDEFReader;
   if (!Reader) throw new Error('Web NFC unavailable');
-  const reader = new Reader() as unknown as {
+  return new Reader();
+}
+
+export async function readGateCodeWebNfc(): Promise<GateCodeWire> {
+  const reader = newReader() as unknown as {
     scan: () => Promise<void>;
     addEventListener: (name: string, fn: (event: { message: { records: NdefRecordLike[] } }) => void) => void;
   };
@@ -3801,10 +4459,8 @@ export async function readGateCodeWebNfc(): Promise<GateCodeWire> {
 }
 
 export async function writeGateResponseWebNfc(wire: GateResponseWire): Promise<void> {
-  const Writer = (globalThis as { NDEFReader?: new () => never }).NDEFReader;
-  if (!Writer) throw new Error('Web NFC unavailable');
   const record = encodeGateResponse(wire);
-  const writer = new Writer() as unknown as { write: (message: unknown) => Promise<void> };
+  const writer = newReader() as unknown as { write: (message: unknown) => Promise<void> };
   await writer.write({ records: [{ recordType: record.type, data: record.payload }] });
 }
 ```
@@ -3827,9 +4483,9 @@ export function nfcCapability(): NfcCapability {
   return 'NDEFReader' in globalThis ? 'webnfc' : 'none';
 }
 
-export async function readGateCode(alertMessage = ''): Promise<GateCodeWire> {
+export async function readGateCode(): Promise<GateCodeWire> {
   const capability = nfcCapability();
-  if (capability === 'native') return readGateCodeNative(alertMessage);
+  if (capability === 'native') return readGateCodeNative();
   if (capability === 'webnfc') return readGateCodeWebNfc();
   throw new Error('NFC unavailable');
 }
@@ -3845,13 +4501,14 @@ export async function writeGateResponse(wire: GateResponseWire): Promise<void> {
 - [ ] **Step 6: 테스트 통과와 플러그인 검증**
 
 Run (from `apps/web/`): `pnpm vitest run src/shared/nfc/records.test.ts`
-Expected: PASS — `Tests  3 passed (3)`.
+Expected: PASS — `Tests  4 passed (4)`.
 
 ```bash
 cd /Users/moomi/Downloads/z03.Vibe_Coding/MONTI/apps/web
-sed -n '1,100p' node_modules/@capgo/capacitor-nfc/dist/esm/definitions.d.ts
+cat node_modules/@capgo/capacitor-nfc/dist/esm/definitions.d.ts
+cat node_modules/@capgo/capacitor-nfc/dist/esm/index.d.ts
 ```
-Expected: `startScanSession`/`write`/`addListener('nfcTagScanned')`의 실제 이름과 레코드 필드(`tnf`, `type`, `payload`)를 확인. 다르면 `plugin.ts`만 고친다.
+Expected: export 이름 `CapacitorNfc`, 메서드 `startScanning` / `stopScanning` / `write({ records })`, 레코드 필드 `{ tnf, type, id, payload }`(전부 `number[]`), 리스너 이름 목록에 `ndefDiscovered`. 다르면 `plugin.ts`만 고친다.
 
 - [ ] **Step 7: 커밋**
 
@@ -3889,7 +4546,8 @@ vi.mock('firebase/functions', () => ({
     return async (payload: unknown) => ({ data: { name, payload } });
   },
 }));
-vi.mock('./firebase', () => ({ getFirebaseApp: () => ({}) }));
+// functions.ts imports FIREBASE_REGION too; a partial factory mock throws at import time.
+vi.mock('./firebase', () => ({ getFirebaseApp: () => ({}), FIREBASE_REGION: 'asia-northeast3' }));
 
 const { api } = await import('./functions');
 
@@ -3976,10 +4634,16 @@ export type SignupStatus = 'pending' | 'kyc_ok' | 'rejected' | 'active' | 'rotat
 export const api = {
   startSignup: call<void, { personId: string }>('startSignup'),
   // Identity verification is per event, not part of signup. startKyc opens a fresh Didit session.
-  startKyc: call<void, { kycUrl: string }>('startKyc'),
+  startKyc: call<void, { kycUrl: string; sessionId: string }>('startKyc'),
   getSignupStatus: call<
     void,
-    { status: SignupStatus; kycLevel: number; account?: Hex; kycUrl?: string }
+    {
+      status: SignupStatus;
+      kycLevel: number;
+      reason?: 'duplicate_face' | 'document_failed' | 'liveness_failed';
+      account?: Hex;
+      kycUrl?: string;
+    }
   >('getSignupStatus'),
   registerPasskey: call<{ personId: string; attestation: unknown }, { ok: true }>('registerPasskey'),
   registerIdentity: call<{ personId: string; deviceX: Hex; deviceY: Hex }, { txHash: Hex }>('registerIdentity'),
@@ -4089,8 +4753,12 @@ export async function saveUserProfile(patch: { nickname?: string; locale?: 'ko' 
   await setDoc(doc(getDb(), 'users', uid), patch, { merge: true });
 }
 
-export async function savePushToken(account: Hex, token: string, platform: 'ios' | 'android' | 'web'): Promise<void> {
-  await setDoc(doc(getDb(), 'devices', account), { pushToken: token, platform, updatedAt: Date.now() }, { merge: true });
+/**
+ * Security rules allow exactly one client-writable field on devices/{account}: pushToken.
+ * platform and updatedAt are written by Functions, never from here.
+ */
+export async function savePushToken(account: Hex, token: string): Promise<void> {
+  await setDoc(doc(getDb(), 'devices', account), { pushToken: token }, { merge: true });
 }
 ```
 
@@ -4110,7 +4778,7 @@ export async function registerPush(account: Hex, onPush: PushHandler): Promise<(
     const permission = await PushNotifications.requestPermissions();
     if (permission.receive !== 'granted') return () => undefined;
     const registration = await PushNotifications.addListener('registration', (token) => {
-      void savePushToken(account, token.value, Capacitor.getPlatform() === 'ios' ? 'ios' : 'android');
+      void savePushToken(account, token.value);
     });
     const received = await PushNotifications.addListener('pushNotificationReceived', (notification) => {
       onPush((notification.data ?? {}) as Record<string, string>);
@@ -4123,20 +4791,61 @@ export async function registerPush(account: Hex, onPush: PushHandler): Promise<(
   }
   const messaging = getMessaging(getFirebaseApp());
   const token = await getToken(messaging, { vapidKey: import.meta.env.VITE_FIREBASE_VAPID_KEY });
-  if (token) await savePushToken(account, token, 'web');
+  if (token) await savePushToken(account, token);
   return onMessage(messaging, (payload) => onPush((payload.data ?? {}) as Record<string, string>));
 }
 ```
 
-- [ ] **Step 6: 테스트 통과와 커밋**
+- [ ] **Step 6: 세션 하이드레이터 등록**
+
+Task 6이 `session.ts`에 만든 빈 자리를 여기서 채운다. `session.ts`는 Firebase를 모르고, 이 파일만 안다.
+
+```ts
+// apps/web/src/shared/api/sessionHydrator.ts
+import { onAuthStateChanged } from 'firebase/auth';
+import { registerSessionHydrator, type SessionHydrator } from '../session';
+import { getFirebaseAuth } from './firebase';
+import { storedCredential } from '../passkey';
+import { getAttendeeAccount } from '../chain/accounts';
+
+/**
+ * Resolves the session exactly once per auth change. A signed-in Firebase user with a
+ * passkey on this device becomes 'signedIn'; anything else is 'anonymous'.
+ */
+export const firebaseSessionHydrator: SessionHydrator = (set) =>
+  onAuthStateChanged(getFirebaseAuth(), (user) => {
+    if (!user || !storedCredential()) {
+      set({ status: 'anonymous' });
+      return;
+    }
+    void getAttendeeAccount()
+      .then((account) => set({ status: 'signedIn', account: account.address }))
+      .catch(() => set({ status: 'anonymous' }));
+  });
+
+export function installSessionHydrator(): void {
+  registerSessionHydrator(firebaseSessionHydrator);
+}
+```
+
+`main.tsx`에서 i18n 초기화 옆에 한 줄을 더한다:
+
+```tsx
+import { installSessionHydrator } from './shared/api/sessionHydrator';
+
+installSessionHydrator();
+void initI18n().then(() => { /* …createRoot… */ });
+```
+
+- [ ] **Step 7: 테스트 통과와 커밋**
 
 Run (from `apps/web/`): `pnpm vitest run src/shared/api/functions.test.ts`
 Expected: PASS — `Tests  2 passed (2)`.
 
 ```bash
 cd /Users/moomi/Downloads/z03.Vibe_Coding/MONTI
-git add apps/web/src/shared/api apps/web/src/shared/push
-git commit -m "feat(web): add typed cloud function wrappers, firestore chat helpers and push registration"
+git add apps/web/src/shared/api apps/web/src/shared/push apps/web/src/main.tsx
+git commit -m "feat(web): add typed cloud function wrappers, firestore helpers, push and session hydration"
 ```
 
 ---
@@ -4163,7 +4872,12 @@ import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 
 const sendOtp = vi.fn(async () => 'verification-id');
-vi.mock('../../shared/api/auth', () => ({ sendOtp, confirmOtp: vi.fn() }));
+// Phone.tsx calls toE164 before sendOtp; a partial mock makes it undefined and throws.
+vi.mock('../../shared/api/auth', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../shared/api/auth')>()),
+  sendOtp,
+  confirmOtp: vi.fn(),
+}));
 vi.mock('../../shared/api/functions', () => ({ api: { startSignup: vi.fn(async () => ({ personId: 'p1' })) } }));
 const navigate = vi.fn();
 vi.mock('react-router-dom', async (orig) => ({
@@ -4379,7 +5093,7 @@ vi.mock('@capacitor/browser', () => ({ Browser: { open: openBrowser, close: vi.f
 vi.mock('../../shared/api/deepLink', () => ({ listenDeepLink: async () => () => undefined, KYC_CALLBACK_URL: 'monti://kyc/callback' }));
 const getSignupStatus = vi.fn().mockResolvedValue({ status: 'active', kycLevel: 0 });
 vi.mock('../../shared/api/functions', () => ({
-  api: { startKyc: async () => ({ kycUrl: 'https://verify.didit.me/s/abc' }), getSignupStatus },
+  api: { startKyc: async () => ({ kycUrl: 'https://verify.didit.me/s/abc', sessionId: 'sess-1' }), getSignupStatus },
 }));
 
 const { VerifyIdentity } = await import('./VerifyIdentity');
@@ -4399,8 +5113,15 @@ describe('VerifyIdentity', () => {
     expect(openBrowser).toHaveBeenCalledWith({ url: 'https://verify.didit.me/s/abc', presentationStyle: 'popover' });
   });
 
-  it('reports a duplicate face as a rejection', async () => {
-    getSignupStatus.mockResolvedValue({ status: 'rejected', kycLevel: 0 });
+  it('reports a duplicate face with the "already have an account" copy', async () => {
+    getSignupStatus.mockResolvedValue({ status: 'rejected', kycLevel: 0, reason: 'duplicate_face' });
+    renderScreen();
+    await userEvent.click(await screen.findByRole('button', { name: '본인인증 하기' }));
+    expect(await screen.findByText('이미 계정이 있습니다. 기존 계정으로 로그인해 주세요.')).toBeInTheDocument();
+  });
+
+  it('reports any other failure with the generic rejection copy', async () => {
+    getSignupStatus.mockResolvedValue({ status: 'rejected', kycLevel: 0, reason: 'document_failed' });
     renderScreen();
     await userEvent.click(await screen.findByRole('button', { name: '본인인증 하기' }));
     expect(await screen.findByText('본인 확인에 실패했어요. 다시 시도해 주세요.')).toBeInTheDocument();
@@ -4481,13 +5202,18 @@ export function VerifyIdentity() {
   const poll = useCallback(async () => {
     setPolling(true);
     for (let attempt = 0; attempt < POLL_LIMIT && !stopped.current; attempt += 1) {
-      const { status, kycLevel } = await api.getSignupStatus();
+      const { status, kycLevel, reason } = await api.getSignupStatus();
       if (kycLevel >= 1) {
         await queryClient.invalidateQueries({ queryKey: ['kycLevel'] });
         navigate(returnTo, { replace: true });
         return;
       }
-      if (status === 'rejected') { setError(copy.kyc.rejected); setPolling(false); return; }
+      if (status === 'rejected') {
+        // M acceptance 1: the same face on a second phone must read "이미 계정이 있습니다".
+        setError(reason === 'duplicate_face' ? copy.kyc.duplicate : copy.kyc.rejected);
+        setPolling(false);
+        return;
+      }
       await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
     }
     setPolling(false);
@@ -4528,7 +5254,7 @@ export function VerifyIdentity() {
 - [ ] **Step 6: 테스트 통과와 커밋**
 
 Run (from `apps/web/`): `pnpm vitest run src/attendee/me/verifyIdentity.test.tsx`
-Expected: PASS — `Tests  2 passed (2)`.
+Expected: PASS — `Tests  3 passed (3)`.
 
 Run (from repo root): `pnpm lint:copy`
 Expected: `copy-lint: clean`.
@@ -5063,7 +5789,7 @@ export function EventDetail() {
 
   if (isLoading || !data) return <Screen><Spinner /></Screen>;
   const { event, tiers, metadata } = data;
-  const explorer = `${getConfig().chainId === 143 ? 'https://monadexplorer.com' : 'https://testnet.monadexplorer.com'}/address/${getConfig().addresses.ticket}`;
+  const explorer = `${getConfig().explorerUrl}/address/${getConfig().addresses.ticket}`;
 
   return (
     <Screen title={metadata?.title ?? event.id}>
@@ -5143,10 +5869,9 @@ import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { describe, expect, it, vi } from 'vitest';
 
-const sendSponsoredOp = vi.fn(async () => ({ userOpHash: '0x1', wait: async () => ({ success: true, txHash: '0x2' }) }));
-vi.mock('../../shared/chain/sendSponsoredOp', () => ({ sendSponsoredOp }));
+const ticketOp = vi.fn(async () => ({ success: true, txHash: '0x2', blockNumber: 1n }));
+vi.mock('../../shared/chain/ops', () => ({ ticketOp }));
 vi.mock('../../shared/chain/accounts', () => ({ getAttendeeAccount: async () => ({ address: `0x${'ab'.repeat(20)}` }) }));
-vi.mock('../../shared/config', () => ({ getConfig: () => ({ addresses: { ticket: `0x${'33'.repeat(20)}` } }) }));
 vi.mock('react-router-dom', async (orig) => ({
   ...(await orig<typeof import('react-router-dom')>()), useParams: () => ({ eventId: '5' }), useNavigate: () => vi.fn(),
 }));
@@ -5162,18 +5887,15 @@ describe('Claim', () => {
     render(<QueryClientProvider client={new QueryClient()}><MemoryRouter><Claim /></MemoryRouter></QueryClientProvider>);
     await userEvent.click(await screen.findByRole('button', { name: '티켓 받기' }));
     expect(await screen.findByText('이 행사는 본인인증이 필요해요')).toBeInTheDocument();
-    expect(sendSponsoredOp).not.toHaveBeenCalled();
+    expect(ticketOp).not.toHaveBeenCalled();
     kycLevel.value = 1;
   });
 
   it('sends a sponsored claim for the selected tier with the event org id', async () => {
     render(<QueryClientProvider client={new QueryClient()}><MemoryRouter><Claim /></MemoryRouter></QueryClientProvider>);
     await userEvent.click(await screen.findByRole('button', { name: '티켓 받기' }));
-    expect(sendSponsoredOp).toHaveBeenCalledWith(
-      expect.objectContaining({
-        orgId: 9n,
-        calls: [expect.objectContaining({ to: `0x${'33'.repeat(20)}` })],
-      }),
+    expect(ticketOp).toHaveBeenCalledWith(
+      expect.objectContaining({ orgId: 9n, functionName: 'claim', args: [5n, 0, '0x'] }),
     );
   });
 });
@@ -5334,15 +6056,12 @@ export function TicketDetail() {
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { encodeFunctionData } from 'viem';
 import { Alert, Button, Screen, Spinner } from '../../shared/ui';
 import { useCopy } from '../../shared/i18n';
 import { gql } from '../../shared/envio/client';
 import { EVENT_QUERY, type EnvioEvent, type EnvioTier } from '../../shared/envio/queries';
-import { ticketAbi } from '../../shared/chain/abis';
-import { sendSponsoredOp } from '../../shared/chain/sendSponsoredOp';
+import { ticketOp } from '../../shared/chain/ops';
 import { getAttendeeAccount } from '../../shared/chain/accounts';
-import { getConfig } from '../../shared/config';
 import { useKycLevel } from '../me/useKycLevel';
 
 /** Shown instead of claiming when the event requires identity verification. */
@@ -5381,16 +6100,12 @@ export function Claim() {
     setBusy(true);
     setError('');
     try {
-      const handle = await sendSponsoredOp({
+      await ticketOp({
         account: await getAttendeeAccount(),
         orgId: BigInt(event.orgId),
-        calls: [{
-          to: getConfig().addresses.ticket,
-          data: encodeFunctionData({ abi: ticketAbi, functionName: 'claim', args: [BigInt(eventId), tier, '0x'] }),
-        }],
+        functionName: 'claim',
+        args: [BigInt(eventId), tier, '0x'],
       });
-      const receipt = await handle.wait();
-      if (!receipt.success) throw new Error('claim reverted');
       navigate('/tickets');
     } catch {
       setError(copy.claim.failed);
@@ -5448,7 +6163,7 @@ const identity = { isMember: vi.fn(), isLocked: vi.fn(), kycLevelOf: vi.fn() };
 const ticket = { eventMeta: vi.fn(), balanceOfEvent: vi.fn(), transfersOf: vi.fn(), checkInOf: vi.fn() };
 vi.mock('../../shared/chain/reads', () => ({ readIdentity: () => identity, readTicket: () => ticket }));
 
-const { runPrecheck } = await import('./precheck');
+const { runPrecheck, precheckMessage } = await import('./precheck');
 
 const ME = `0x${'aa'.repeat(20)}` as const;
 const YOU = `0x${'bb'.repeat(20)}` as const;
@@ -5467,42 +6182,68 @@ function setup(overrides: Partial<Record<string, unknown>> = {}) {
   ticket.checkInOf.mockResolvedValue({ gateId: 0n, ts: 0n, nonceHash: `0x${'00'.repeat(32)}`, manual: false });
 }
 
+// startsAt - transferCutoffSeconds = 1_790_003_600 - 3600 = 1_790_000_000.
+// A transfer is allowed only while now < that instant; the instant itself is already closed.
+const BEFORE_CUTOFF = 1_789_999_999;
+const AT_CUTOFF = 1_790_000_000;
+
 describe('runPrecheck', () => {
-  it('passes a clean member transfer', async () => {
+  it('passes a clean member transfer before the cutoff', async () => {
     setup();
-    await expect(runPrecheck({ tokenId: 1n, eventId: 5n, from: ME, to: YOU, now: 1_790_000_000 })).resolves.toBeNull();
+    await expect(runPrecheck({ tokenId: 1n, eventId: 5n, from: ME, to: YOU, now: BEFORE_CUTOFF })).resolves.toBeNull();
+  });
+
+  it('blocks exactly at the cutoff instant', async () => {
+    setup();
+    await expect(runPrecheck({ tokenId: 1n, eventId: 5n, from: ME, to: YOU, now: AT_CUTOFF })).resolves.toBe('afterCutoff');
   });
 
   it('flags every blocking rule from spec 5.4', async () => {
     setup();
     identity.isMember.mockResolvedValueOnce(false);
-    await expect(runPrecheck({ tokenId: 1n, eventId: 5n, from: ME, to: YOU, now: 1_790_000_000 })).resolves.toBe('notMember');
+    await expect(runPrecheck({ tokenId: 1n, eventId: 5n, from: ME, to: YOU, now: BEFORE_CUTOFF })).resolves.toBe('notMember');
+
+    setup(); identity.isLocked.mockResolvedValue(true);
+    await expect(runPrecheck({ tokenId: 1n, eventId: 5n, from: ME, to: YOU, now: BEFORE_CUTOFF })).resolves.toBe('locked');
 
     setup(); ticket.checkInOf.mockResolvedValue({ gateId: 1n, ts: 5n, nonceHash: `0x${'00'.repeat(32)}`, manual: false });
-    await expect(runPrecheck({ tokenId: 1n, eventId: 5n, from: ME, to: YOU, now: 1_790_000_000 })).resolves.toBe('alreadyEntered');
+    await expect(runPrecheck({ tokenId: 1n, eventId: 5n, from: ME, to: YOU, now: BEFORE_CUTOFF })).resolves.toBe('alreadyEntered');
 
     setup({ transferable: false });
-    await expect(runPrecheck({ tokenId: 1n, eventId: 5n, from: ME, to: YOU, now: 1_790_000_000 })).resolves.toBe('notTransferable');
-
-    setup();
-    await expect(runPrecheck({ tokenId: 1n, eventId: 5n, from: ME, to: YOU, now: 1_790_002_000 })).resolves.toBe('afterCutoff');
+    await expect(runPrecheck({ tokenId: 1n, eventId: 5n, from: ME, to: YOU, now: BEFORE_CUTOFF })).resolves.toBe('notTransferable');
 
     setup(); ticket.transfersOf.mockResolvedValue(3);
-    await expect(runPrecheck({ tokenId: 1n, eventId: 5n, from: ME, to: YOU, now: 1_790_000_000 })).resolves.toBe('noTransfersLeft');
+    await expect(runPrecheck({ tokenId: 1n, eventId: 5n, from: ME, to: YOU, now: BEFORE_CUTOFF })).resolves.toBe('noTransfersLeft');
+
+    setup(); ticket.balanceOfEvent.mockResolvedValue(2n);
+    await expect(runPrecheck({ tokenId: 1n, eventId: 5n, from: ME, to: YOU, now: BEFORE_CUTOFF, maxPerWallet: 2 }))
+      .resolves.toBe('maxPerWallet');
 
     setup();
-    await expect(runPrecheck({ tokenId: 1n, eventId: 5n, from: ME, to: ME, now: 1_790_000_000 })).resolves.toBe('self');
+    await expect(runPrecheck({ tokenId: 1n, eventId: 5n, from: ME, to: ME, now: BEFORE_CUTOFF })).resolves.toBe('self');
+  });
+
+  it('maps every failure to attendee copy', () => {
+    const copy = { transfer: {
+      alertSelf: 'self', alertNotMember: 'notMember', alertLocked: 'locked',
+      alertAlreadyEntered: 'entered', alertNotTransferable: 'noTransfer',
+      alertAfterCutoff: 'cutoff', alertNoTransfersLeft: 'noneLeft', alertMaxPerWallet: 'maxed',
+    }, kyc: { recipientNotVerified: 'notVerified' } } as unknown as Parameters<typeof precheckMessage>[0];
+    for (const failure of ['self', 'notMember', 'locked', 'alreadyEntered', 'notTransferable',
+      'afterCutoff', 'noTransfersLeft', 'maxPerWallet', 'recipientNotVerified'] as const) {
+      expect(precheckMessage(copy, failure)).toBeTruthy();
+    }
   });
 
   it('blocks an unverified recipient on a KYC event', async () => {
     setup({ requireKyc: true });
     identity.kycLevelOf.mockResolvedValue(0);
-    await expect(runPrecheck({ tokenId: 1n, eventId: 5n, from: ME, to: YOU, now: 1_790_000_000 }))
+    await expect(runPrecheck({ tokenId: 1n, eventId: 5n, from: ME, to: YOU, now: BEFORE_CUTOFF }))
       .resolves.toBe('recipientNotVerified');
 
     setup({ requireKyc: false });
     identity.kycLevelOf.mockResolvedValue(0);
-    await expect(runPrecheck({ tokenId: 1n, eventId: 5n, from: ME, to: YOU, now: 1_790_000_000 })).resolves.toBeNull();
+    await expect(runPrecheck({ tokenId: 1n, eventId: 5n, from: ME, to: YOU, now: BEFORE_CUTOFF })).resolves.toBeNull();
   });
 });
 ```
@@ -5543,6 +6284,7 @@ export async function runPrecheck(args: PrecheckArgs): Promise<PrecheckFailure |
   // Per-event KYC: the contract reverts with KycRequired, so warn before spending a user operation.
   if (meta.requireKyc && (await identity.kycLevelOf(args.to)) < 1) return 'recipientNotVerified';
   if (!meta.transferable) return 'notTransferable';
+  // Allowed only while now < startsAt - cutoff. The cutoff instant itself is already closed.
   if (args.now >= Number(meta.startsAt) - meta.transferCutoffSeconds) return 'afterCutoff';
   if ((await ticket.transfersOf(args.tokenId)) >= meta.maxTransfers) return 'noTransfersLeft';
 
@@ -5572,23 +6314,17 @@ export function precheckMessage(copy: Copy, failure: PrecheckFailure): string {
 
 ```ts
 // apps/web/src/attendee/transfer/useTransfer.ts
-import { encodeFunctionData, type Hex } from 'viem';
-import { ticketAbi } from '../../shared/chain/abis';
-import { sendSponsoredOp } from '../../shared/chain/sendSponsoredOp';
+import type { Hex } from 'viem';
+import { ticketOp } from '../../shared/chain/ops';
 import { getAttendeeAccount } from '../../shared/chain/accounts';
-import { getConfig } from '../../shared/config';
 
 export async function sendTransfer(from: Hex, to: Hex, tokenId: bigint, orgId: bigint): Promise<void> {
-  const handle = await sendSponsoredOp({
+  await ticketOp({
     account: await getAttendeeAccount(),
     orgId,
-    calls: [{
-      to: getConfig().addresses.ticket,
-      data: encodeFunctionData({ abi: ticketAbi, functionName: 'safeTransferFrom', args: [from, to, tokenId] }),
-    }],
+    functionName: 'safeTransferFrom',
+    args: [from, to, tokenId],
   });
-  const receipt = await handle.wait();
-  if (!receipt.success) throw new Error('transfer reverted');
 }
 ```
 
@@ -5718,7 +6454,7 @@ export function TransferConfirm() {
 - [ ] **Step 6: 테스트 통과와 커밋**
 
 Run (from `apps/web/`): `pnpm vitest run src/attendee/transfer/precheck.test.ts`
-Expected: PASS — `Tests  3 passed (3)`.
+Expected: PASS — `Tests  5 passed (5)`.
 
 ```bash
 cd /Users/moomi/Downloads/z03.Vibe_Coding/MONTI
@@ -5751,13 +6487,12 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 
-const sendSponsoredOp = vi.fn(async () => ({ userOpHash: '0x1', wait: async () => ({ success: true, txHash: '0x2' }) }));
-vi.mock('../../shared/chain/sendSponsoredOp', () => ({ sendSponsoredOp }));
+const ticketOp = vi.fn(async () => ({ success: true, txHash: '0x2', blockNumber: 1n }));
+vi.mock('../../shared/chain/ops', () => ({ ticketOp }));
 vi.mock('../../shared/chain/accounts', () => ({ getAttendeeAccount: async () => ({ address: `0x${'ab'.repeat(20)}` }) }));
 vi.mock('../../shared/chain/reads', () => ({
   readTicket: () => ({ eventOf: async () => 5n, eventMeta: async () => ({ orgId: 9n }) }),
 }));
-vi.mock('../../shared/config', () => ({ getConfig: () => ({ addresses: { ticket: `0x${'33'.repeat(20)}` } }) }));
 vi.mock('../../shared/api/functions', () => ({
   api: {
     createTransferInvite: async () => ({
@@ -5781,7 +6516,9 @@ describe('TransferInvite', () => {
     vi.stubGlobal('location', { ...window.location, assign } as unknown as Location);
     render(<MemoryRouter><TransferInvite /></MemoryRouter>);
     await userEvent.click(screen.getByRole('button', { name: '초대 문자 보내기' }));
-    expect(sendSponsoredOp).toHaveBeenCalledWith(expect.objectContaining({ orgId: 9n }));
+    expect(ticketOp).toHaveBeenCalledWith(
+      expect.objectContaining({ orgId: 9n, functionName: 'createOffer', args: [1n, `0x${'cc'.repeat(32)}`, 1790600000n] }),
+    );
     expect(assign).toHaveBeenCalledWith('sms:+821012345678?body=MONTI');
     expect(await screen.findByText('초대를 보냈어요. 상대가 가입하면 티켓이 자동으로 전달됩니다.')).toBeInTheDocument();
   });
@@ -5799,15 +6536,12 @@ Expected: FAIL — `Failed to resolve import "./Invite"`.
 // apps/web/src/attendee/transfer/Invite.tsx
 import { useState } from 'react';
 import { useLocation, useParams } from 'react-router-dom';
-import { encodeFunctionData } from 'viem';
 import { Alert, Button, Screen } from '../../shared/ui';
 import { useCopy } from '../../shared/i18n';
 import { api } from '../../shared/api/functions';
 import { readTicket } from '../../shared/chain/reads';
-import { ticketAbi } from '../../shared/chain/abis';
-import { sendSponsoredOp } from '../../shared/chain/sendSponsoredOp';
+import { ticketOp } from '../../shared/chain/ops';
 import { getAttendeeAccount } from '../../shared/chain/accounts';
-import { getConfig } from '../../shared/config';
 
 export function TransferInvite() {
   const copy = useCopy();
@@ -5826,18 +6560,13 @@ export function TransferInvite() {
       const ticket = readTicket();
       const eventId = await ticket.eventOf(BigInt(tokenId));
       const meta = await ticket.eventMeta(eventId);
-      const handle = await sendSponsoredOp({
+      // sendOp throws on revert, so the SMS composer only opens once the offer is really on chain.
+      await ticketOp({
         account: await getAttendeeAccount(),
         orgId: meta.orgId,
-        calls: [{
-          to: getConfig().addresses.ticket,
-          data: encodeFunctionData({
-            abi: ticketAbi, functionName: 'createOffer',
-            args: [BigInt(tokenId), invite.commitment, BigInt(invite.expiresAt)],
-          }),
-        }],
+        functionName: 'createOffer',
+        args: [BigInt(tokenId), invite.commitment, BigInt(invite.expiresAt)],
       });
-      await handle.wait();
       setSent(true);
       location.assign(invite.smsUri); // the sender's own phone sends the text
     } catch {
@@ -5848,19 +6577,21 @@ export function TransferInvite() {
   }
 
   async function cancel() {
-    const ticket = readTicket();
-    const eventId = await ticket.eventOf(BigInt(tokenId));
-    const meta = await ticket.eventMeta(eventId);
-    const handle = await sendSponsoredOp({
-      account: await getAttendeeAccount(),
-      orgId: meta.orgId,
-      calls: [{
-        to: getConfig().addresses.ticket,
-        data: encodeFunctionData({ abi: ticketAbi, functionName: 'cancelOffer', args: [BigInt(tokenId)] }),
-      }],
-    });
-    await handle.wait();
-    setSent(false);
+    setError('');
+    try {
+      const ticket = readTicket();
+      const eventId = await ticket.eventOf(BigInt(tokenId));
+      const meta = await ticket.eventMeta(eventId);
+      await ticketOp({
+        account: await getAttendeeAccount(),
+        orgId: meta.orgId,
+        functionName: 'cancelOffer',
+        args: [BigInt(tokenId)],
+      });
+      setSent(false);
+    } catch {
+      setError(copy.common.error);
+    }
   }
 
   return (
@@ -5886,16 +6617,13 @@ export function TransferInvite() {
 // apps/web/src/attendee/tickets/Inbox.tsx
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { encodeFunctionData } from 'viem';
 import { Alert, Button } from '../../shared/ui';
 import { useCopy } from '../../shared/i18n';
 import { useKycLevel } from '../me/useKycLevel';
 import { api } from '../../shared/api/functions';
 import { readTicket } from '../../shared/chain/reads';
-import { ticketAbi } from '../../shared/chain/abis';
-import { sendSponsoredOp } from '../../shared/chain/sendSponsoredOp';
+import { ticketOp } from '../../shared/chain/ops';
 import { getAttendeeAccount } from '../../shared/chain/accounts';
-import { getConfig } from '../../shared/config';
 
 /** Called right after signup finishes and whenever the inbox is opened. */
 export async function acceptPendingOffers(): Promise<number> {
@@ -5906,17 +6634,13 @@ export async function acceptPendingOffers(): Promise<number> {
   for (const offer of offers) {
     const eventId = await ticket.eventOf(BigInt(offer.tokenId));
     const meta = await ticket.eventMeta(eventId);
-    const handle = await sendSponsoredOp({
-      account,
-      orgId: meta.orgId,
-      calls: [{
-        to: getConfig().addresses.ticket,
-        data: encodeFunctionData({
-          abi: ticketAbi, functionName: 'acceptOffer', args: [BigInt(offer.tokenId), offer.attesterSig],
-        }),
-      }],
-    });
-    if ((await handle.wait()).success) accepted += 1;
+    // One reverting offer must not abort the rest of the inbox.
+    try {
+      await ticketOp({ account, orgId: meta.orgId, functionName: 'acceptOffer', args: [BigInt(offer.tokenId), offer.attesterSig] });
+      accepted += 1;
+    } catch {
+      /* KycRequired or an expired offer: leave it in the inbox */
+    }
   }
   return accepted;
 }
@@ -6158,7 +6882,7 @@ export function Enter() {
     if (nfcCapability() === 'none') { setState((prev) => ({ ...prev, phase: 'qr' })); return; }
     setState((prev) => ({ ...prev, phase: 'reading' }));
     try {
-      const wire = await readGateCode(copy.enter.tapGuide);
+      const wire = await readGateCode();
       setGateCode(wire);
       setState((prev) => ({ ...prev, phase: 'verifying' }));
       if (!verifyGateSignature(wire)) { setState((prev) => ({ ...prev, phase: 'failed', error: 'unknownGate' })); return; }
@@ -6373,6 +7097,8 @@ git commit -m "feat(attendee): sign the gate digest, write it back over nfc and 
 - Consumes: `subscribeLogs({ address, topics, onLog })` (Task 8), `registerPush` (Task 16), `readTicket().checkInOf`, `ticketAbi`.
 - Produces: `checkedInTopics(tokenId): (Hex | Hex[] | null)[]`, `<Result tokenId />`.
 
+`ChainLog.stage`를 **실제로 읽는다.** `'speculative'`가 오면 즉시 초록을 켜되 아직 굳지 않았음을 표시하고(`data-stage`), `'finalized'`가 오면 굳힌다. 한 번 `finalized`가 되면 늦게 도착한 speculative 로그가 되돌리지 못한다. 스펙 §7.2 8단계의 "추측 단계에서 켜고 확정되면 굳힌다"가 이 두 전이다.
+
 관객 화면의 초록은 **참고용**이다(스펙 §3 원칙 4). 근거는 스태프 화면과 체인이다. 그래서 결과는 세 경로 중 먼저 오는 것으로 켠다: ① `CheckedIn` 로그 구독(`stage: 'speculative'`면 즉시 표시), ② FCM 푸시(`tenderlyWebhook`이 보냄), ③ 3초 간격 `checkInOf` 폴링(둘 다 실패할 때). 비행기 모드였다면 ①②는 오지 않고, 인터넷이 돌아온 뒤 ③이 켠다.
 
 - [ ] **Step 1: 실패하는 테스트**
@@ -6380,6 +7106,7 @@ git commit -m "feat(attendee): sign the gate digest, write it back over nfc and 
 ```tsx
 // apps/web/src/attendee/enter/result.test.tsx
 import { render, screen } from '@testing-library/react';
+import { act } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import type { ChainLog } from '../../shared/chain/subscribeLogs';
 
@@ -6395,11 +7122,26 @@ vi.mock('../../shared/session', () => ({ useSession: () => ({ status: 'signedIn'
 const { Result } = await import('./Result');
 
 describe('Result', () => {
-  it('turns green as soon as the speculative CheckedIn log arrives', async () => {
+  it('shows the result on the speculative log and settles it on the finalized one', async () => {
     render(<Result tokenId="42" />);
     expect(screen.getByText('확인하고 있어요')).toBeInTheDocument();
-    emit?.({ stage: 'speculative' } as ChainLog);
+
+    // Stage 1 (~0.7 s): speculative — show the green, flagged as still settling.
+    act(() => emit?.({ stage: 'speculative', transactionHash: '0xa', logIndex: 0 } as unknown as ChainLog));
     expect(await screen.findByText('입장 완료')).toBeInTheDocument();
+    expect(screen.getByTestId('entry-result')).toHaveAttribute('data-stage', 'speculative');
+
+    // Stage 2 (~1.3 s): finalized — same green, hardened.
+    act(() => emit?.({ stage: 'finalized', transactionHash: '0xa', logIndex: 0 } as unknown as ChainLog));
+    expect(screen.getByTestId('entry-result')).toHaveAttribute('data-stage', 'finalized');
+  });
+
+  it('does not downgrade a finalized result back to speculative', async () => {
+    render(<Result tokenId="42" />);
+    act(() => emit?.({ stage: 'finalized', transactionHash: '0xb', logIndex: 0 } as unknown as ChainLog));
+    expect(await screen.findByTestId('entry-result')).toHaveAttribute('data-stage', 'finalized');
+    act(() => emit?.({ stage: 'speculative', transactionHash: '0xb', logIndex: 0 } as unknown as ChainLog));
+    expect(screen.getByTestId('entry-result')).toHaveAttribute('data-stage', 'finalized');
   });
 });
 ```
@@ -6429,40 +7171,57 @@ export function checkedInTopics(tokenId: string): (Hex | Hex[] | null)[] {
   return [signature as Hex, numberToHex(BigInt(tokenId), { size: 32 }), null, null];
 }
 
+type ResultStage = 'waiting' | 'speculative' | 'finalized';
+
 export function Result({ tokenId }: { tokenId: string }) {
   const copy = useCopy();
   const session = useSession();
-  const [entered, setEntered] = useState(false);
+  const [stage, setStage] = useState<ResultStage>('waiting');
+
+  // Spec 7.2 step 8: light up on the speculative log (~0.7 s), harden on the finalized one
+  // (~1.3 s). Never step backwards — a late speculative log must not undo a finalized one.
+  const advance = (next: Exclude<ResultStage, 'waiting'>) =>
+    setStage((current) => (current === 'finalized' ? current : next));
 
   useEffect(() => {
-    if (entered) return;
+    if (stage === 'finalized') return;
     const stopLogs = subscribeLogs({
       address: getConfig().addresses.ticket,
       topics: checkedInTopics(tokenId),
-      onLog: () => setEntered(true),
+      onLog: (log) => advance(log.stage),
     });
 
     let stopPush = () => undefined as void;
     if (session.account) {
+      // The push arrives from tenderlyWebhook, which fires on a finalized event.
       void registerPush(session.account, (data) => {
-        if (data.tokenId === tokenId) setEntered(true);
+        if (data.tokenId === tokenId) advance('finalized');
       }).then((remove) => { stopPush = remove; });
     }
 
+    // Last resort for an attendee who was offline during the tap.
     const poll = setInterval(() => {
-      void readTicket().checkInOf(BigInt(tokenId)).then((checkIn) => { if (checkIn.ts > 0n) setEntered(true); })
+      void readTicket().checkInOf(BigInt(tokenId))
+        .then((checkIn) => { if (checkIn.ts > 0n) advance('finalized'); })
         .catch(() => undefined);
     }, 3_000);
 
     return () => { stopLogs(); stopPush(); clearInterval(poll); };
-  }, [tokenId, entered, session.account]);
+  }, [tokenId, stage, session.account]);
 
-  if (entered) return <Alert tone="info">{copy.enter.done}</Alert>;
+  if (stage === 'waiting') {
+    return (
+      <>
+        <Spinner />
+        <p>{copy.enter.resultWaiting}</p>
+      </>
+    );
+  }
   return (
-    <>
-      <Spinner />
-      <p>{copy.enter.resultWaiting}</p>
-    </>
+    <div data-testid="entry-result" data-stage={stage}>
+      <Alert tone="info">{copy.enter.done}</Alert>
+      {stage === 'speculative' ? <p>{copy.enter.resultWaiting}</p> : null}
+    </div>
   );
 }
 ```
@@ -6478,7 +7237,7 @@ export function Result({ tokenId }: { tokenId: string }) {
 - [ ] **Step 4: 테스트 통과 확인**
 
 Run (from `apps/web/`): `pnpm vitest run src/attendee/enter`
-Expected: PASS — `Test Files  3 passed (3)`.
+Expected: PASS — `Test Files  3 passed (3)`, `Tests  7 passed (7)`.
 
 - [ ] **Step 5: 입장 경로 전체의 금지어와 타입 검사**
 
@@ -6522,10 +7281,9 @@ import { describe, expect, it, vi } from 'vitest';
 
 const nicknameOwner = vi.fn(async () => `0x${'cc'.repeat(20)}`);
 vi.mock('../../shared/chain/reads', () => ({ readIdentity: () => ({ nicknameOwner }) }));
-const sendSponsoredOp = vi.fn(async () => ({ userOpHash: '0x1', wait: async () => ({ success: true, txHash: '0x2' }) }));
-vi.mock('../../shared/chain/sendSponsoredOp', () => ({ sendSponsoredOp }));
+const identityOp = vi.fn(async () => ({ success: true, txHash: '0x2', blockNumber: 1n }));
+vi.mock('../../shared/chain/ops', () => ({ identityOp }));
 vi.mock('../../shared/chain/accounts', () => ({ getAttendeeAccount: async () => ({ address: `0x${'ab'.repeat(20)}` }) }));
-vi.mock('../../shared/config', () => ({ getConfig: () => ({ addresses: { identity: `0x${'11'.repeat(20)}` } }) }));
 vi.mock('../../shared/api/firestore', () => ({ saveUserProfile: vi.fn() }));
 
 const { Nickname, normalizeNickname } = await import('./Nickname');
@@ -6542,7 +7300,7 @@ describe('Nickname', () => {
     await userEvent.type(screen.getByRole('textbox'), 'taken_name');
     await userEvent.click(screen.getByRole('button', { name: '저장' }));
     expect(await screen.findByText('이미 쓰는 별명이에요.')).toBeInTheDocument();
-    expect(sendSponsoredOp).not.toHaveBeenCalled();
+    expect(identityOp).not.toHaveBeenCalled();
   });
 });
 ```
@@ -6557,14 +7315,12 @@ Expected: FAIL — `Failed to resolve import "./Nickname"`.
 ```tsx
 // apps/web/src/attendee/me/Nickname.tsx
 import { useState } from 'react';
-import { encodeFunctionData, keccak256, toBytes } from 'viem';
+import { keccak256, toBytes } from 'viem';
 import { Alert, Button, Field } from '../../shared/ui';
 import { useCopy } from '../../shared/i18n';
-import { identityAbi } from '../../shared/chain/abis';
 import { readIdentity } from '../../shared/chain/reads';
-import { sendSponsoredOp } from '../../shared/chain/sendSponsoredOp';
+import { identityOp } from '../../shared/chain/ops';
 import { getAttendeeAccount } from '../../shared/chain/accounts';
-import { getConfig } from '../../shared/config';
 import { saveUserProfile } from '../../shared/api/firestore';
 
 const ZERO_ADDRESS = `0x${'00'.repeat(20)}`;
@@ -6589,15 +7345,12 @@ export function Nickname() {
       const hash = keccak256(toBytes(name));
       const owner = await readIdentity().nicknameOwner(hash);
       if (owner !== ZERO_ADDRESS) { setTone('error'); setMessage(copy.me.nicknameTaken); return; }
-      const handle = await sendSponsoredOp({
+      await identityOp({
         account: await getAttendeeAccount(),
         orgId: 0n, // platform budget: identity changes are not tied to an organizer
-        calls: [{
-          to: getConfig().addresses.identity,
-          data: encodeFunctionData({ abi: identityAbi, functionName: 'setNickname', args: [hash, name] }),
-        }],
+        functionName: 'setNickname',
+        args: [hash, name],
       });
-      if (!(await handle.wait()).success) throw new Error('reverted');
       await saveUserProfile({ nickname: name });
       setTone('info'); setMessage(copy.me.nicknameSaved);
     } catch {
@@ -6714,7 +7467,7 @@ export function Profile() {
   const copy = useCopy();
   const locale = useLocale();
   const session = useSession();
-  const explorerBase = getConfig().chainId === 143 ? 'https://monadexplorer.com' : 'https://testnet.monadexplorer.com';
+  const explorerBase = getConfig().explorerUrl;
 
   return (
     <Screen title={copy.me.title}>
@@ -6804,8 +7557,11 @@ const { ChatRoom } = await import('./ChatRoom');
 describe('ChatRoom', () => {
   it('pins the notice, shows the closed banner and disables sending', async () => {
     render(<ChatRoom />);
-    expect(await screen.findByText('공지')).toBeInTheDocument();
+    // The notice renders as one node, "공지 · 공지입니다" — match on a fragment.
+    expect(await screen.findByText(/공지/)).toBeInTheDocument();
     expect(screen.getByText('행사가 끝나 대화방이 닫혔어요')).toBeInTheDocument();
+    // The closed room is what disables the textarea; the button is also empty-draft disabled.
+    expect(screen.getByPlaceholderText('메시지 (최대 500자)')).toBeDisabled();
     expect(screen.getByRole('button', { name: '보내기' })).toBeDisabled();
   });
 });
@@ -7311,13 +8067,10 @@ export function Step4Rules({ draft, patch, onNext }: { draft: WizardDraft; patch
 ```tsx
 // apps/web/src/organizer/wizard/Step6Review.tsx
 import { useState } from 'react';
-import { encodeFunctionData } from 'viem';
 import { Alert, Button } from '../../shared/ui';
 import { organizerCopy } from '../copy';
-import { ticketAbi } from '../../shared/chain/abis';
-import { sendSponsoredOp } from '../../shared/chain/sendSponsoredOp';
+import { ticketOp } from '../../shared/chain/ops';
 import { getStaffAccount } from '../../shared/chain/accounts';
-import { getConfig } from '../../shared/config';
 import { buildEventMeta, buildTiers, type WizardDraft } from './buildEventMeta';
 import { pinJson } from './pinata';
 
@@ -7333,19 +8086,12 @@ export function Step6Review({ draft, onDone }: { draft: WizardDraft; onDone: () 
         title: draft.title, description: draft.description, image: draft.imageCid,
         venue: draft.venue, category: draft.category, region: draft.regionCode,
       });
-      const handle = await sendSponsoredOp({
+      await ticketOp({
         account: await getStaffAccount(),
         orgId: BigInt(draft.orgId),
-        calls: [{
-          to: getConfig().addresses.ticket,
-          data: encodeFunctionData({
-            abi: ticketAbi, functionName: 'createEvent',
-            args: [buildEventMeta(draft, metaCid), buildTiers(draft)],
-          }),
-        }],
+        functionName: 'createEvent',
+        args: [buildEventMeta(draft, metaCid), buildTiers(draft)],
       });
-      const receipt = await handle.wait();
-      if (!receipt.success) throw new Error(receipt.revertReason ?? 'reverted');
       setMessage(organizerCopy.wizard.published);
       onDone();
     } catch (cause) {
@@ -7439,11 +8185,10 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-const sendSponsoredOp = vi.fn(async () => ({ userOpHash: '0x1', wait: async () => ({ success: true, txHash: '0x2' }) }));
-vi.mock('../../shared/chain/sendSponsoredOp', () => ({ sendSponsoredOp }));
+const organizersOp = vi.fn(async () => ({ success: true, txHash: '0x2', blockNumber: 1n }));
+vi.mock('../../shared/chain/ops', () => ({ organizersOp }));
 vi.mock('../../shared/chain/accounts', () => ({ getStaffAccount: async () => ({ address: `0x${'ab'.repeat(20)}` }) }));
 vi.mock('../../shared/chain/reads', () => ({ readTicket: () => ({ eventOrg: async () => 9n }) }));
-vi.mock('../../shared/config', () => ({ getConfig: () => ({ addresses: { organizers: `0x${'22'.repeat(20)}` } }) }));
 vi.mock('../../shared/api/functions', () => ({
   api: {
     listPendingGates: async () => ({
@@ -7461,8 +8206,12 @@ describe('Gates', () => {
   it('registers a pending gate against the event org', async () => {
     render(<Gates />);
     await userEvent.click(await screen.findByRole('button', { name: '등록' }));
-    expect(sendSponsoredOp).toHaveBeenCalledWith(
-      expect.objectContaining({ orgId: 9n, calls: [expect.objectContaining({ to: `0x${'22'.repeat(20)}` })] }),
+    expect(organizersOp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orgId: 9n,
+        functionName: 'registerGate',
+        args: [5n, `0x${'dd'.repeat(20)}`, `0x${'01'.repeat(32)}`, `0x${'02'.repeat(32)}`],
+      }),
     );
   });
 });
@@ -7477,34 +8226,25 @@ Expected: FAIL — `Failed to resolve import "./Gates"`.
 
 ```ts
 // apps/web/src/organizer/lifecycle.ts
-import { encodeFunctionData } from 'viem';
 import type { EventMetaStruct, TierStruct } from '../shared/chain/reads';
-import { ticketAbi } from '../shared/chain/abis';
-import { sendSponsoredOp } from '../shared/chain/sendSponsoredOp';
+import { ticketOp } from '../shared/chain/ops';
 import { getStaffAccount } from '../shared/chain/accounts';
-import { getConfig } from '../shared/config';
 
-async function send(orgId: bigint, data: `0x${string}`): Promise<void> {
-  const handle = await sendSponsoredOp({
-    account: await getStaffAccount(),
-    orgId,
-    calls: [{ to: getConfig().addresses.ticket, data }],
-  });
-  const receipt = await handle.wait();
-  if (!receipt.success) throw new Error(receipt.revertReason ?? 'reverted');
+async function send(orgId: bigint, functionName: string, args: readonly unknown[]): Promise<void> {
+  await ticketOp({ account: await getStaffAccount(), orgId, functionName, args });
 }
 
 export function publishEvent(eventId: bigint, orgId: bigint): Promise<void> {
-  return send(orgId, encodeFunctionData({ abi: ticketAbi, functionName: 'publishEvent', args: [eventId] }));
+  return send(orgId, 'publishEvent', [eventId]);
 }
 
 export function cancelEvent(eventId: bigint, orgId: bigint): Promise<void> {
-  return send(orgId, encodeFunctionData({ abi: ticketAbi, functionName: 'cancelEvent', args: [eventId] }));
+  return send(orgId, 'cancelEvent', [eventId]);
 }
 
 /** Draft only — the contract reverts once the event is Published. */
 export function saveDraft(eventId: bigint, orgId: bigint, meta: EventMetaStruct, tiers: TierStruct[]): Promise<void> {
-  return send(orgId, encodeFunctionData({ abi: ticketAbi, functionName: 'updateEventMeta', args: [eventId, meta, tiers] }));
+  return send(orgId, 'updateEventMeta', [eventId, meta, tiers]);
 }
 ```
 
@@ -7513,17 +8253,13 @@ export function saveDraft(eventId: bigint, orgId: bigint, meta: EventMetaStruct,
 ```tsx
 // apps/web/src/organizer/gates/Gates.tsx
 import { useQuery } from '@tanstack/react-query';
-import { encodeFunctionData } from 'viem';
 import { useParams } from 'react-router-dom';
-import type { Hex } from '@monti/shared';
 import { Button, Screen, Spinner } from '../../shared/ui';
 import { organizerCopy } from '../copy';
 import { api } from '../../shared/api/functions';
-import { organizersAbi } from '../../shared/chain/abis';
 import { readTicket } from '../../shared/chain/reads';
-import { sendSponsoredOp } from '../../shared/chain/sendSponsoredOp';
+import { organizersOp } from '../../shared/chain/ops';
 import { getStaffAccount } from '../../shared/chain/accounts';
-import { getConfig } from '../../shared/config';
 
 export function Gates() {
   const { eventId = '' } = useParams();
@@ -7532,14 +8268,10 @@ export function Gates() {
     queryFn: () => api.listPendingGates({ eventId }),
   });
 
-  async function call(data_: Hex): Promise<void> {
+  async function call(functionName: string, args: readonly unknown[]): Promise<void> {
+    // The staff console bootstrap reads the same eventOrg to pass orgId into sub-plan 04's useGate.
     const orgId = await readTicket().eventOrg(BigInt(eventId));
-    const handle = await sendSponsoredOp({
-      account: await getStaffAccount(),
-      orgId,
-      calls: [{ to: getConfig().addresses.organizers, data: data_ }],
-    });
-    await handle.wait();
+    await organizersOp({ account: await getStaffAccount(), orgId, functionName, args });
     await refetch();
   }
 
@@ -7553,19 +8285,14 @@ export function Gates() {
         {gates.map((gate) => (
           <li key={gate.gateAccount} style={{ marginBottom: 12 }}>
             <p>{gate.label} · {gate.gateAccount}</p>
-            <Button
-              onClick={() => void call(encodeFunctionData({
-                abi: organizersAbi, functionName: 'registerGate',
-                args: [BigInt(eventId), gate.gateAccount, gate.kx, gate.ky],
-              }))}
-            >
+            <Button onClick={() => void call('registerGate', [BigInt(eventId), gate.gateAccount, gate.kx, gate.ky])}>
               {organizerCopy.gates.register}
             </Button>
           </li>
         ))}
       </ul>
-      <GateControls onOpen={(gateId) => call(encodeFunctionData({ abi: organizersAbi, functionName: 'openGate', args: [gateId] }))}
-                    onClose={(gateId) => call(encodeFunctionData({ abi: organizersAbi, functionName: 'closeGate', args: [gateId] }))} />
+      <GateControls onOpen={(gateId) => void call('openGate', [gateId])}
+                    onClose={(gateId) => void call('closeGate', [gateId])} />
     </Screen>
   );
 }
@@ -7594,14 +8321,12 @@ function GateControls({ onOpen, onClose }: { onOpen: (gateId: bigint) => void; o
 ```tsx
 // apps/web/src/organizer/Team.tsx
 import { useState } from 'react';
-import { encodeFunctionData } from 'viem';
 import { Button, Field, Screen } from '../shared/ui';
 import { organizerCopy } from './copy';
 import { api } from '../shared/api/functions';
-import { organizersAbi } from '../shared/chain/abis';
 import { sendSponsoredOp } from '../shared/chain/sendSponsoredOp';
+import { OpReverted } from '../shared/chain/ops';
 import { getStaffAccount } from '../shared/chain/accounts';
-import { getConfig } from '../shared/config';
 
 const PERM_CREATE_EVENT = 1, PERM_MANAGE_GATES = 2, PERM_APPROVE_OVERRIDE = 4, PERM_MANAGE_MANAGERS = 8;
 
@@ -7641,7 +8366,10 @@ export function Team({ orgId = '1' }: { orgId?: string }) {
   );
 }
 
-/** Accepting an invite returns the exact calldata the owner signs. */
+/**
+ * Accepting an invite returns pre-encoded calldata for setAdmin/setManager on Organizers,
+ * so this one write goes through sendSponsoredOp directly rather than through organizersOp.
+ */
 export async function applyInvite(inviteId: string): Promise<void> {
   const invite = await api.acceptInvite({ inviteId });
   const handle = await sendSponsoredOp({
@@ -7649,9 +8377,8 @@ export async function applyInvite(inviteId: string): Promise<void> {
     orgId: BigInt(invite.orgId),
     calls: [{ to: invite.to, data: invite.data }],
   });
-  await handle.wait();
-  // invite.data is already encodeFunctionData for setAdmin or setManager on Organizers:
-  void encodeFunctionData; void organizersAbi; void getConfig;
+  const receipt = await handle.wait();
+  if (!receipt.success) throw new OpReverted('acceptInvite', receipt.revertReason);
 }
 ```
 
@@ -8299,15 +9026,27 @@ Xcode에서 `App` 타깃 → Signing & Capabilities → **Near Field Communicati
             </intent-filter>
 ```
 
-WebView 안에서 패스키가 동작하려면 `MainActivity.java`(또는 `.kt`)의 `onCreate`에 한 줄이 필요하다:
+WebView 안에서 패스키가 동작하려면 `MainActivity`의 `onCreate`에서 WebView 설정을 열어 줘야 한다. API는 `WebSettingsCompat`에 있고(`WebViewCompat`이 아니다), 기기가 지원하지 않을 수 있으므로 **feature 체크가 필수**다:
 
 ```java
-        androidx.webkit.WebViewCompat.setWebAuthenticationSupport(
-            this.bridge.getWebView(),
-            androidx.webkit.WebViewCompat.WEB_AUTHENTICATION_SUPPORT_FOR_APP);
+        android.webkit.WebSettings settings = this.bridge.getWebView().getSettings();
+        if (androidx.webkit.WebViewFeature.isFeatureSupported(
+                androidx.webkit.WebViewFeature.WEB_AUTHENTICATION)) {
+            androidx.webkit.WebSettingsCompat.setWebAuthenticationSupport(
+                settings,
+                androidx.webkit.WebSettingsCompat.WEB_AUTHENTICATION_SUPPORT_FOR_APP);
+        }
 ```
 
-`android/app/build.gradle`의 `dependencies`에 `implementation "androidx.webkit:androidx.webkit:1.12.0"`을 더한다.
+`android/app/build.gradle`의 `dependencies`에 `implementation "androidx.webkit:webkit:1.12.0"` 을 더한다(좌표는 `group:artifact` = `androidx.webkit:webkit`이다).
+
+확인:
+
+```bash
+cd /Users/moomi/Downloads/z03.Vibe_Coding/MONTI/apps/web/android
+./gradlew :app:dependencies --configuration releaseRuntimeClasspath | grep androidx.webkit
+```
+Expected: `androidx.webkit:webkit:1.12.0` 한 줄. 이 단계는 Android SDK가 설치된 기기에서만 돌아간다.
 
 - [ ] **Step 6: 동기화와 실기기 확인**
 
@@ -8476,12 +9215,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with: { version: 9 }
+        with: { version: 10 }
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - run: pnpm -C packages/shared build
       - run: pnpm lint:copy
+      - run: pnpm -C packages/shared vitest run
       - run: pnpm -C apps/web typecheck
       - run: pnpm vitest run
       - run: pnpm -C apps/web exec playwright install --with-deps chromium
@@ -8570,11 +9310,42 @@ git commit -m "test(web): add three playwright smoke flows and finish the ci gat
 
 **남은 구멍 두 개(의도적):** ① §8.7 유료 결제는 MVP 밖이다 — `claim(eventId, tier, voucher)`의 `voucher` 자리만 `'0x'`로 비워 두었다. ② §12의 단말기 오프라인 큐·스냅샷은 sub-plan 04다 — 이 계획은 §13 UI만 만든다.
 
+### 1-b. 사전 점검(pre-flight) 지적 반영
+
+`.superpowers/sdd/2026-09-20-monti-03-web-attendee/preflight.md`의 19개 블로커와 비블로커 정리 항목을 아래와 같이 반영했다.
+
+| 지적 | 반영 위치 |
+|---|---|
+| B1 Capacitor·플러그인 설치가 T32에 있어 T12부터 `typecheck` 적색 | **T1** `package.json`에 전량 고정(2026-09-21 npm 실측) + Step 2 버전 검증 루프. 뒤 태스크는 import만 |
+| B2 `SnapshotWire`가 v2.5 이전 모양 | **T2** — `eventTitle`, `requireKyc`, `tickets[].tierName`, `seat` 추가. 앞머리 Interfaces도 동기화 |
+| B3 `lintCopy`가 import 지정자의 `chain`을 46건 오탐 | **T3** — `import`/`export … from` 줄, `import()`, `vi.mock()`, `*.test.*` 제외 + 테스트 2개 추가 |
+| B4 i18n 미초기화에 기댄 컴포넌트 테스트 9개 | **T4 Step 5** — `vitest.setup.ts`가 `initI18n('ko')` 호출. `initI18n(lng?)` 시그니처 추가 |
+| B5 세션 부팅 경로 없음 → 보호 라우트 영구 스피너 | **T6** — `registerSessionHydrator` / `bootSession()`, `App`이 마운트 시 호출, 3초 안전망. 테스트 2개 추가. 실제 Firebase 하이드레이터는 **T16 Step 6** |
+| B6 ABI 조각에 이벤트가 하나도 없음 | **T9** — 생성 JSON 전량을 그대로 로딩(이벤트 포함) |
+| B7 `abi-conformance`가 `internalType` 때문에 영구 실패 | **T9** — `normaliseTypes()`로 `internalType`·키 순서를 벗기고 **사용 매니페스트**와 대조 |
+| B8 T10 `accounts.ts`가 T12의 `passkey`를 import | **T12로 이동.** T10은 `bundler.ts`만 |
+| B9 가스 리터럴이 ×1.08 / ×1.0748 | **T11** — `0x347d8`, `0xd1f6`. 테스트가 `numberToHex(applyGasBuffer(…))`로 **곱셈을 먼저** 단언 |
+| B10 플러그인 어댑터 3개가 존재하지 않는 export·메서드 사용 | **T12/T13/T15** — `CapacitorPasskey.createCredential/getCredential`, `CryptoApi.generateKey({tag, algorithm})`, `CapacitorNfc.startScanning/write({records})` + `type: number[]`. `as never` 제거, 각 태스크 첫 스텝이 실제 `.d.ts`를 읽는다 |
+| B11 자체 플러그인이 `requireAuth`/`strongBox` 무시 | **T14** — Swift `flags` 분기, Kotlin `requireAuth`/`strongBox` 분기 + StrongBox→TEE 폴백과 `backing` 반환 |
+| B12 `@monti/device-key`에 진입점·빌드 없음 | **T14** — `src/definitions.ts` + `src/index.ts`(`registerPlugin`), `tsconfig`, `build`, podspec, `CAPBridgedPlugin` 준수, base64url 패딩 복원, 워크스페이스 등록 |
+| B13 `webauthn-p256-cose`가 npm에 없음 | **T12** — `cose.ts`가 `ox` + `@monti/shared/encoding`의 CBOR로 직접 파싱, 테스트 2개 |
+| B14 T16 mock이 `FIREBASE_REGION` 누락 | **T16 Step 1** |
+| B15 `savePushToken`이 규칙이 막는 필드까지 씀 | **T16** — `{ pushToken }` 만 |
+| B16 T17 mock이 `toE164` 누락 | **T17** — `importOriginal` 스프레드 |
+| B17 마감 시각 비교가 자기 단언과 충돌 | **T22** — `now < startsAt - cutoff` 만 허용, 픽스처를 `BEFORE_CUTOFF`로 옮기고 경계 차단 테스트 추가 |
+| B18 `findByText('공지')`가 `"공지 · …"`와 불일치 | **T28** — 정규식 + 닫힌 방은 `textarea` `disabled`로 단언 |
+| B19 `log.stage` 미사용, 2단계 표시 미구현 | **T26** — `speculative` → 표시, `finalized` → 굳힘, 역행 금지. 전이 두 개 다 테스트 |
+| N1·N2·N3·N4·N5 | 메모 테스트 수정, `Alert`의 `ReactNode` import, `Countdown` 1초 단위 `act`, `bundlerRequest.mockReset()`, 소유자 키 기반 메모 |
+| N6·N7·N13·N14·N15·N16 | `ChainStage`→**`LogStage`**, `startKyc → { kycUrl, sessionId }`, CI `pnpm 10`, CI에 `packages/shared` 테스트 복원, `firebase@12.6.0`, `androidx.webkit:webkit:1.12.0` |
+| N10·N17·N20·N22 | 오퍼 영수증 확인(`sendOp`가 되돌림을 던짐), `AppConfig.explorerUrl`, `copy.kyc.duplicate` 실제 사용, `Qr.tsx` 불필요 import 제거 |
+| 3.16/3.17 중복 여섯 블록 | **T11 `ops.ts`** — `sendOp` / `ticketOp` / `identityOp` / `organizersOp`. T21·T22·T23·T27·T29·T30이 전부 이걸 쓴다 |
+
 ### 2. 플레이스홀더 스캔
 
 - "TBD", "TODO", "나중에", "적절히 처리" 문자열: 없음.
 - "Similar to Task N": 없음. Task 29 Step 4의 `Step2When`·`Step3Tiers`·`Step4Rules`는 **같은 props 시그니처(`draft`, `patch`, `onNext`)와 구성 요소(`Field` + `input`)를 명시**했고, Task 6 Step 5의 화면 스텁도 두 개의 완전한 예시를 보여준 뒤 나머지 파일 이름을 나열했다. 반복 코드를 줄이되 실행자가 추측할 것은 남기지 않았다.
 - 모든 코드 스텝에 import 포함 완전한 TypeScript/TSX가 있다. `...` 생략 없음.
+- `as never` 캐스트는 플러그인 어댑터에서 전부 제거했다. 남은 여섯 개는 viem의 **타입 없는 커스텀 RPC**(`eth_getLogs` raw topics, 번들러 메서드) 세 곳과 **테스트 mock 객체** 세 곳뿐이다.
 - 정의되지 않은 타입 참조: 없음. `EventMetaStruct`/`TierStruct`/`CheckInStruct`/`OfferStruct`는 Task 9 `reads.ts`에서 정의되고 Task 29·30이 그것을 import한다.
 
 ### 3. 마스터 계획과의 타입 정합
@@ -8598,7 +9369,18 @@ git commit -m "test(web): add three playwright smoke flows and finish the ci gat
 | 스태프 컴포넌트 9개 + props 타입 export | Task 31 | 04가 지정한 이름·props에 `onDone?`(Admit/OfflineAdmit/Deny), `finalized`(Admit), `DenyCode.EVENT_ENDED` 추가 |
 | `getStaffAccount` / `getAttendeeAccount` | Task 10 | 04 정합 |
 
-**교차 확인 방법:** Task 9의 `abi-conformance.test.ts`가 `abis.ts`의 모든 조각을 01이 생성한 `packages/shared/src/abi/*.json`과 대조한다. 01이 `EventMeta`에 필드를 더하거나 순서를 바꾸면 그 테스트가 가장 먼저 깨진다.
+**교차 확인 방법:** Task 9의 `abi-conformance.test.ts`가 `USED_ABI` 매니페스트의 모든 항목(함수 + 이벤트)을 01이 생성한 `packages/shared/src/abi/*.json`과 `internalType`을 벗긴 형태로 대조한다. 01이 `EventMeta`에 필드를 더하거나 순서를 바꾸면 그 테스트가 가장 먼저 깨진다.
+
+| 추가된 이름 | 위치 | 비고 |
+|---|---|---|
+| `LogStage`(구 `ChainStage`) | T8 | 04는 `ChainLog.stage`만 쓰므로 영향 없음. 스태프의 3-멤버 `ChainStage`는 T31에 그대로 |
+| `sendOp` / `ticketOp` / `identityOp` / `organizersOp`, `OpReverted` | T11 `ops.ts` | 04도 `checkIn`·`manualOverride`에 쓸 수 있다 |
+| `registerSessionHydrator` / `bootSession` / `SessionHydrator` | T6 | 실제 구현은 T16 `sessionHydrator.ts` |
+| `USED_ABI` / `normaliseTypes` | T9 | conformance 테스트 전용 |
+| `parseAttestationPublicKey` | T12 `cose.ts` | 네이티브 패스키 공개키 추출 |
+| `DeviceKeyPolicyUnsupported`, `PLUGIN_SUPPORTS_ACCESS_CONTROL` | T13 | 백엔드가 생체 정책을 강제 못 하면 키를 만들지 않는다 |
+| `recordTypeBytes` / `recordTypeMatches` / `TNF_EXTERNAL` | T15 | 플러그인의 `type: number[]` 대응 |
+| `AppConfig.explorerUrl`, `@monti/shared/constants` | T7 / T2 | 체인 id·탐색기 리터럴을 한 곳으로 |
 
 ### 4. 이 sub-plan이 새로 정의한 콜러블 (마스터 계획에도 v2.4 델타에도 없음)
 

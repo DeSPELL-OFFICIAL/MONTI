@@ -23,7 +23,7 @@ contract Identity is IIdentity, AttesterRole {
     mapping(address => bytes32) private _personOf;
     mapping(bytes32 => uint64) private _rotatedAt;
     mapping(address => Device) private _devices;
-    mapping(address => uint8) private _kycLevel;
+    mapping(bytes32 => uint8) private _kycLevel;
     mapping(bytes32 => address) private _nicknameOwner;
     mapping(address => bytes32) private _nicknameOf;
 
@@ -67,11 +67,35 @@ contract Identity is IIdentity, AttesterRole {
         _personOf[account] = personId;
         _rotatedAt[personId] = uint64(block.timestamp);
         _devices[account] = Device({x: deviceX, y: deviceY, updatedAt: uint64(block.timestamp), locked: false});
-        _kycLevel[account] = kycLevel;
+        _kycLevel[personId] = kycLevel;
 
         emit Registered(personId, account);
         emit DeviceChanged(account, deviceX, deviceY);
         emit KycLevelSet(account, kycLevel);
+    }
+
+    /// @notice Spec 5.5: passkey lost -> new passkey -> the attester swaps the account on chain.
+    ///         7-day cooldown is the SIM-swap defence (spec 18 risk table). The old account keeps its
+    ///         personOf entry so Ticket.migrate can find the new account from an old ticket.
+    function rotateAccount(bytes32 personId, address newAccount) external onlyAttester {
+        address oldAccount = _accountOf[personId];
+        if (oldAccount == address(0)) revert NotRegistered();
+        if (newAccount == address(0)) revert InvalidAccount();
+        if (_personOf[newAccount] != bytes32(0)) revert AccountAlreadyRegistered();
+        if (block.timestamp < uint256(_rotatedAt[personId]) + ROTATION_COOLDOWN) revert CooldownActive();
+
+        _accountOf[personId] = newAccount;
+        _personOf[newAccount] = personId;
+        _rotatedAt[personId] = uint64(block.timestamp);
+
+        bytes32 nick = _nicknameOf[oldAccount];
+        if (nick != bytes32(0)) {
+            delete _nicknameOf[oldAccount];
+            _nicknameOf[newAccount] = nick;
+            _nicknameOwner[nick] = newAccount;
+        }
+
+        emit AccountRotated(personId, oldAccount, newAccount);
     }
 
     /// @notice Raises (or lowers) the verification level after a later Didit session. Attester only:
@@ -79,7 +103,7 @@ contract Identity is IIdentity, AttesterRole {
     function setKycLevel(bytes32 personId, uint8 level) external onlyAttester {
         address account = _accountOf[personId];
         if (account == address(0)) revert NotRegistered();
-        _kycLevel[account] = level;
+        _kycLevel[personId] = level;
         emit KycLevelSet(account, level);
     }
 
@@ -111,7 +135,57 @@ contract Identity is IIdentity, AttesterRole {
     }
 
     function kycLevelOf(address account) external view returns (uint8) {
-        return _kycLevel[account];
+        return _kycLevel[_personOf[account]];
+    }
+
+    /// @notice Register this phone's hardware key as the one key allowed to sign check-ins.
+    ///         Spec 9.3: one active device per account, 7-day cooldown enforced by the contract.
+    ///         Registering a fresh device also clears a lock — that is the on-chain recovery path.
+    function setActiveDevice(bytes32 x, bytes32 y) external {
+        if (!isMember(msg.sender)) revert NotRegistered();
+        if (x == bytes32(0) || y == bytes32(0)) revert InvalidDeviceKey();
+
+        Device storage d = _devices[msg.sender];
+        if (d.updatedAt != 0 && block.timestamp < uint256(d.updatedAt) + DEVICE_COOLDOWN) revert CooldownActive();
+
+        bool wasLocked = d.locked;
+        d.x = x;
+        d.y = y;
+        d.updatedAt = uint64(block.timestamp);
+        d.locked = false;
+
+        emit DeviceChanged(msg.sender, x, y);
+        if (wasLocked) emit DeviceLocked(msg.sender, false);
+    }
+
+    /// @notice Spec 5.5 / 9.3: the attendee (from any device or the web) or the attester can lock the
+    ///         active device instantly. While locked, Ticket.checkIn refuses this account.
+    function lockDevice(address account) external {
+        if (msg.sender != account && msg.sender != attester()) revert NotAccountOwner();
+        if (_personOf[account] == bytes32(0)) revert NotRegistered();
+
+        _devices[account].locked = true;
+        emit DeviceLocked(account, true);
+    }
+
+    /// @notice A unique handle so attendees can hand a ticket to "alice_01" instead of an address.
+    ///         Normalisation (lowercase, 3-20 chars of [a-z0-9_]) happens client-side; the chain only
+    ///         enforces that the hash matches the string and that the handle is free.
+    function setNickname(bytes32 nicknameHash, string calldata nickname) external {
+        if (!isMember(msg.sender)) revert NotRegistered();
+        if (nicknameHash != keccak256(bytes(nickname))) revert NicknameHashMismatch();
+
+        address holder = _nicknameOwner[nicknameHash];
+        if (holder == msg.sender) return;
+        if (holder != address(0)) revert NicknameTaken();
+
+        bytes32 previous = _nicknameOf[msg.sender];
+        if (previous != bytes32(0)) delete _nicknameOwner[previous];
+
+        _nicknameOwner[nicknameHash] = msg.sender;
+        _nicknameOf[msg.sender] = nicknameHash;
+
+        emit NicknameSet(msg.sender, nicknameHash, nickname);
     }
 
     function nicknameOwner(bytes32 nicknameHash) external view returns (address) {
