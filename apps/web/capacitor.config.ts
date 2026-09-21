@@ -1,5 +1,6 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
+import attendee from './capacitor.attendee.config';
 import staff from './capacitor.staff.config';
 
 /**
@@ -12,7 +13,7 @@ import staff from './capacitor.staff.config';
  * build one flavor's web assets under the other flavor's application id — which is invisible
  * until an APK is installed and the wrong app opens.
  */
-const FLAVORS: Record<string, CapacitorConfig> = { staff };
+const FLAVORS: Record<string, CapacitorConfig> = { attendee, staff };
 
 function selectedFlavor(): CapacitorConfig {
   const flavor = process.env.MONTI_APP_FLAVOR ?? '';
@@ -20,7 +21,7 @@ function selectedFlavor(): CapacitorConfig {
   if (!config) {
     throw new Error(
       `MONTI_APP_FLAVOR must be one of ${Object.keys(FLAVORS).join(', ')}; got ${JSON.stringify(flavor)}. ` +
-        'Use the package scripts (pnpm sync:staff) rather than calling cap directly.',
+        'Use the package scripts (pnpm sync:attendee, pnpm sync:staff) rather than calling cap directly.',
     );
   }
   return config;

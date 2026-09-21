@@ -18,6 +18,32 @@ const config: CapacitorConfig = {
   webDir: 'dist-staff',
   android: {
     path: 'android-staff',
+    /**
+     * An allowlist, not a filter: with `includePlugins` set, `cap sync` links exactly these and
+     * `getDependencies()` is never consulted (`@capacitor/cli` 8.5.2, `dist/plugin.js:25`).
+     *
+     * The Capgo NFC reader package — the one `capacitor.attendee.config.ts` lists and this file
+     * does not — is deliberately absent, and `noReaderMode.test.ts` asserts on this file's text
+     * that it stays unnamed here. The gate phone emulates a tag; it never opens a reader
+     * session. Before this list existed the reader plugin was still linked into the APK: a
+     * registered native plugin one `Capacitor.Plugins` lookup away from that text scan, plus an
+     * `android.permission.NFC` the gate build never used. Dropping the module removes the
+     * reachable surface rather than only forbidding the names that reach it.
+     *
+     * `@monti/hce-android` is the mirror image: card emulation belongs to this flavor and is
+     * excluded from the attendee one.
+     */
+    includePlugins: [
+      '@capacitor-firebase/authentication',
+      '@capacitor-mlkit/barcode-scanning',
+      '@capacitor/app',
+      '@capacitor/browser',
+      '@capacitor/preferences',
+      '@capacitor/push-notifications',
+      '@capgo/capacitor-passkey',
+      '@monti/device-key',
+      '@monti/hce-android',
+    ],
   },
   plugins: {
     /**

@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      The attendee app is a ticket you tap. A phone with no NFC controller can install it, open a
+      ticket and then have no way to enter, so Play should never offer it there — required="true"
+      is the whole point of this line. @capgo/capacitor-nfc's own library manifest declares the
+      same feature with required="false" (it merges into builds where a reader is optional); the
+      manifest merger ORs android:required, so this is the line that decides the attendee APK.
+
+      There is deliberately no android.hardware.nfc.hce here: emulating a tag is the gate app's
+      job (app.monti.staff), and @monti/hce-android is not linked into this flavor at all —
+      capacitor.attendee.config.ts leaves it out of `includePlugins`.
+    -->
+    <uses-feature
+        android:name="android.hardware.nfc"
+        android:required="true" />
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme">
+
+        <activity
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
+            android:name=".MainActivity"
+            android:label="@string/title_activity_main"
+            android:theme="@style/AppTheme.NoActionBarLaunch"
+            android:launchMode="singleTask"
+            android:exported="true">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!--
+              Where the link in a transfer invite SMS lands. `/i/:inviteId` is a real route in
+              src/router.tsx and it is public on purpose — the person it was sent to is usually
+              not signed in yet, and that screen is what starts their signup.
+
+              autoVerify makes this an Android App Link rather than a chooser dialog, which is
+              the difference between the invite opening the app and the invite opening Chrome.
+              Verification fetches https://monti.despell.io/.well-known/assetlinks.json and looks
+              for this package with this APK's signing certificate SHA-256 — so it stays
+              unverified until the founder fills the placeholder in that file (see the Task 32
+              report). `adb shell pm get-app-links app.monti` reports the verdict.
+
+              The pathPrefix is not decoration: without it the app would claim every path on the
+              site, including the hosted identity flow's own return URLs.
+            -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="monti.despell.io"
+                    android:pathPrefix="/i/" />
+            </intent-filter>
+
+            <!--
+              The native return address the app itself hands to the hosted identity flow:
+              shared/api/deepLink.ts sends `monti://kyc/callback` as KYC_CALLBACK_URL, and
+              App.addListener('appUrlOpen') is what closes the in-app browser and resumes
+              polling. Without this filter the provider finishes and the phone has nowhere to
+              return to. A custom scheme needs no verification, so this one works on day one.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="monti" android:host="kyc" />
+            </intent-filter>
+
+        </activity>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths"></meta-data>
+        </provider>
+            <!-- CapacitorPasskey auto-configuration -->
+        <meta-data
+            android:name="asset_statements"
+            android:resource="@string/capacitor_passkey_asset_statements" />
+    </application>
+
+    <!-- Permissions -->
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!--
+      @capgo/capacitor-nfc's library manifest already merges this in, but the gate app declares
+      the permissions it uses in its own manifest and so does this one: the merged result is what
+      ships, and a reader auditing either APK should not have to open node_modules to learn that
+      it talks to NFC.
+    -->
+    <uses-permission android:name="android.permission.NFC" />
+    <!--
+      @capacitor/push-notifications ships no permission of its own (its library manifest declares
+      only the Firebase messaging service), and from API 33 a notification permission that is
+      never declared can never be requested: PushNotifications.requestPermissions() returns
+      denied without ever showing a prompt. targetSdk is 36, so this line is load-bearing — it is
+      how an attendee hears that their transfer arrived or their gate opened.
+    -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!--
+      android.permission.USE_BIOMETRIC arrives by manifest merge from @monti/device-key, which is
+      the only thing that asks for it (BiometricPrompt arms the 60-second signing window).
+
+      There is deliberately no CAMERA permission and no android.hardware.camera feature: identity
+      verification is a hosted web flow opened in the system browser, and the MONTI1: QR is a
+      code this app *shows* (rendered by the `qrcode` JS library), never one it reads. The
+      scanner side of that fallback is the gate app's, and @capacitor-mlkit/barcode-scanning is
+      not linked into this flavor.
+    -->
+</manifest>
