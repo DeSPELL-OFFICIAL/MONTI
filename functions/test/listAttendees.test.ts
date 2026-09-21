@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HttpsError } from 'firebase-functions/v2/https';
 import { getAddress } from 'viem';
+import type { EnvioFilter } from '../src/lib/envio.js';
 
 process.env.GCP_PROJECT_ID = 'monti-dev';
 
@@ -68,15 +69,27 @@ const envioQuery = vi.fn(async (_query: string, _variables?: Record<string, unkn
   const index = cursor === '' ? 0 : pages.findIndex((page) => page.at(-1)?.id === cursor) + 1;
   return { rows: pages[index] ?? [] };
 });
-vi.mock('../src/lib/envio.js', () => ({ envioQuery, envioPage: vi.fn(async () => []) }));
+vi.mock('../src/lib/envio.js', async () => {
+  const actual = await vi.importActual<typeof import('../src/lib/envio.js')>('../src/lib/envio.js');
+  // 팩토리는 모듈을 통째로 바꾼다. 질의문과 드레인은 진짜를 쓰고 전송만 위 스파이로 돌린다 —
+  // 페이저까지 가짜로 두면 커서 규약이 아무 데서도 검증되지 않는다.
+  return {
+    envioQuery,
+    envioPage: (entity: string, fields: string, pageSize = 500, filter?: EnvioFilter) =>
+      actual.envioDrain(pageSize, async (cursor: string) => {
+        const { query, variables } = actual.envioPageQuery(entity, fields, cursor, pageSize, filter);
+        return (await envioQuery(query, variables)).rows;
+      }),
+  };
+});
 
 const { listAttendees, ATTENDEE_PAGE_SIZE } = await import('../src/functions/listAttendees.js');
 const functionsTest = (await import('firebase-functions-test')).default();
 const list = functionsTest.wrap(listAttendees);
 const auth = { uid: 'uid-1', token: { account: CALLER } };
 
-function call(data: Record<string, unknown> = { eventId: '11' }) {
-  return list({ data, auth } as never) as Promise<Array<Record<string, unknown>>>;
+async function call(data: Record<string, unknown> = { eventId: '11' }) {
+  return await list({ data, auth } as never);
 }
 
 function rowsOf(count: number, from = 1): EnvioRow[] {

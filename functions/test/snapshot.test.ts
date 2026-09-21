@@ -3,6 +3,7 @@ import { HttpsError } from 'firebase-functions/v2/https';
 import { getAddress, recoverAddress } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { snapshotDigest, type UnsignedSnapshot } from '@monti/shared';
+import type { EnvioFilter } from '../src/lib/envio.js';
 
 process.env.GCP_PROJECT_ID = 'monti-dev';
 
@@ -111,7 +112,24 @@ vi.mock('../src/lib/kms.js', () => ({
 vi.mock('../src/lib/attester.js', () => ({ getAttesterAccount: () => attester }));
 
 const envioQuery = vi.fn(async (_query: string, _variables?: Record<string, unknown>) => ({}) as never);
-vi.mock('../src/lib/envio.js', () => ({ envioQuery, envioPage: vi.fn(async () => []) }));
+vi.mock('../src/lib/envio.js', async () => {
+  const actual = await vi.importActual<typeof import('../src/lib/envio.js')>('../src/lib/envio.js');
+  // 팩토리는 모듈을 통째로 바꾼다. 질의문은 진짜를 쓰고 전송만 위 스파이로 돌린다 —
+  // 질의문까지 가짜로 두면 커서·필터 규약이 아무 데서도 검증되지 않는다.
+  return {
+    envioQuery,
+    envioPageOnce: async (
+      entity: string,
+      fields: string,
+      cursor: string,
+      limit: number,
+      filter?: EnvioFilter,
+    ) => {
+      const { query, variables } = actual.envioPageQuery(entity, fields, cursor, limit, filter);
+      return ((await envioQuery(query, variables)) as { rows: { id: string }[] }).rows;
+    },
+  };
+});
 
 const logInfo = vi.fn();
 const logWarn = vi.fn();

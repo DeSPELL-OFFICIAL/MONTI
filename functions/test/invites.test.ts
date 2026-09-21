@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { decodeFunctionData } from 'viem';
 import { organizersAbi } from '@monti/shared';
+import type { InviteCalldata } from '../src/functions/invites.js';
 
 process.env.GCP_PROJECT_ID = 'monti-dev';
 process.env.PHONE_INDEX_KEY = 'monti-test-key';
@@ -438,10 +439,9 @@ describe('acceptInvite', () => {
 
   it('leaks nothing about the org beyond this invite and who must send the calldata', async () => {
     const inviteId = await createManagerInvite();
-    const result = (await accept({ data: { inviteId }, auth: inviteeAuth } as never)) as Record<
-      string,
-      unknown
-    >;
+    // `createdBy` 처럼 **계약에 없는** 칸이 안 나가는지도 보므로, 진짜 타입에 키 조회만 열어 둔다.
+    const result = (await accept({ data: { inviteId }, auth: inviteeAuth } as never)) as InviteCalldata &
+      Record<string, unknown>;
     expect(Object.keys(result).sort()).toEqual(['data', 'orgId', 'requiredSender', 'role', 'to']);
     expect(JSON.stringify(result)).not.toContain(hmacPhone(PHONE, KEY));
     // 오너 주소는 `requiredSender` 로만 나간다 — 누가 초대를 만들었는지(`createdBy`)는 나가지 않는다.
@@ -540,9 +540,7 @@ describe('listInvites', () => {
   it('lists the org invites newest first with nothing the team screen does not need', async () => {
     const { sent, accepted } = await givenTeamInvites();
 
-    const result = (await listTeam({ data: { orgId: '1' }, auth: ownerAuth } as never)) as {
-      invites: Array<Record<string, unknown>>;
-    };
+    const result = await listTeam({ data: { orgId: '1' }, auth: ownerAuth } as never);
 
     expect(result.invites.map((row) => row.inviteId)).toEqual([accepted, sent]);
     // 수락된 줄에만 보낼 사람이 붙는다 — calldata 가 오너의 서명을 기다리는 유일한 상태다.
@@ -574,9 +572,7 @@ describe('listInvites', () => {
 
   it('leaks neither the phone index nor who created or accepted the invite', async () => {
     await givenTeamInvites();
-    const result = (await listTeam({ data: { orgId: '1' }, auth: ownerAuth } as never)) as {
-      invites: Array<Record<string, unknown>>;
-    };
+    const result = await listTeam({ data: { orgId: '1' }, auth: ownerAuth } as never);
 
     const serialised = JSON.stringify(result);
     expect(serialised).not.toContain(hmacPhone(PHONE, KEY));
@@ -593,9 +589,7 @@ describe('listInvites', () => {
     const inviteId = await createManagerInvite();
     await revoke({ data: { inviteId }, auth: ownerAuth } as never);
 
-    const result = (await listTeam({ data: { orgId: '1' }, auth: ownerAuth } as never)) as {
-      invites: Array<Record<string, unknown>>;
-    };
+    const result = await listTeam({ data: { orgId: '1' }, auth: ownerAuth } as never);
     expect(result.invites[0]?.status).toBe('revoked');
     expect(Object.keys(result.invites[0] as object).sort()).toEqual([
       'createdAt',

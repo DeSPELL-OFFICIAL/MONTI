@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { TransactionReceiptNotFoundError, getAddress } from 'viem';
 import { FIREBASE_REGION } from '@monti/shared';
+import type { CloudEvent, CloudFunction } from 'firebase-functions/v2';
 
 process.env.GCP_PROJECT_ID = 'monti-dev';
 
@@ -208,7 +209,9 @@ vi.mock('../src/lib/chain.js', () => ({
 await import('../src/config.js');
 const { reconcilePending } = await import('../src/functions/reconcilePending.js');
 const functionsTest = (await import('firebase-functions-test')).default();
-const run = functionsTest.wrap(reconcilePending);
+// `onSchedule` 이 주는 `ScheduleFunction` 은 `wrap` 오버로드 어디에도 맞지 않는다.
+// 런타임은 `__endpoint.scheduleTrigger` 만 보고 스케줄 경로로 흘리므로 호출 형태는 그대로다.
+const run = functionsTest.wrap(reconcilePending as unknown as CloudFunction<CloudEvent<unknown>>);
 
 function seconds(): number {
   return Math.floor(Date.now() / 1000);

@@ -1,9 +1,9 @@
 import { createHash, createHmac, createSign, generateKeyPairSync, randomBytes } from 'node:crypto';
-import { EventEmitter } from 'node:events';
 import { Encoder } from 'cbor-x';
 import { getAddress } from 'viem';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Hex } from '@monti/shared';
+import { FakeRes } from '../helpers/webhookRes.js';
 
 /**
  * 가입 한 줄 흐름을 **진짜 Firestore·Auth 에뮬레이터** 위에서 끝까지 돌린다.
@@ -100,19 +100,7 @@ vi.mock('../../src/lib/chain.js', () => ({
   gasLimitFor: (estimate: bigint) => estimate,
 }));
 
-/** DEK 를 'W' 한 바이트로 감싸는 가짜 KMS. 봉투 암호화 자체는 진짜 코드가 돈다(유닛 테스트와 같은 가짜). */
-vi.mock('@google-cloud/kms', () => ({
-  KeyManagementServiceClient: class {
-    async encrypt({ plaintext }: { plaintext: Buffer }) {
-      return [{ ciphertext: Buffer.concat([Buffer.from('W'), Buffer.from(plaintext)]) }];
-    }
-    async decrypt({ ciphertext }: { ciphertext: Buffer }) {
-      const buf = Buffer.from(ciphertext);
-      if (buf[0] !== 'W'.charCodeAt(0)) throw new Error('FAKE_KMS_BAD_WRAP');
-      return [{ plaintext: buf.subarray(1) }];
-    }
-  },
-}));
+vi.mock('@google-cloud/kms', async () => await import('../helpers/fakeKms.js'));
 
 /**
  * `firebase-functions-test` 는 인자가 없으면 `GCLOUD_PROJECT` 를 'not-a-project' 로 덮어쓴다.
@@ -235,35 +223,6 @@ function makeAssertion(challenge: string, counter: number) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Didit 웹훅 배달. 실제 핸들러를 그대로 부르고 rawBody 에 진짜 HMAC 서명을 붙인다.
 // ─────────────────────────────────────────────────────────────────────────────
-
-class FakeRes extends EventEmitter {
-  statusCode = 200;
-  body: unknown;
-  private readonly sent: Record<string, unknown> = {};
-  setHeader(key: string, value: unknown): void {
-    this.sent[key.toLowerCase()] = value;
-  }
-  getHeader(key: string): unknown {
-    return this.sent[key.toLowerCase()];
-  }
-  removeHeader(key: string): void {
-    delete this.sent[key.toLowerCase()];
-  }
-  status(code: number): this {
-    this.statusCode = code;
-    return this;
-  }
-  send(body?: unknown): this {
-    this.body = body;
-    this.emit('finish');
-    return this;
-  }
-  end(body?: unknown): this {
-    if (body !== undefined) this.body = body;
-    this.emit('finish');
-    return this;
-  }
-}
 
 async function deliver(body: unknown): Promise<FakeRes> {
   const raw = JSON.stringify(body);

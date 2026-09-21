@@ -9,15 +9,30 @@ import {
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 const ACCOUNT = '0x0000000000000000000000000000000000000001';
+const ROOT = join(process.cwd(), '..');
+
+// `pnpm test:rules` 가 띄우는 에뮬레이터를 그대로 읽는다. 룰 스위트와 통합 스위트가
+// 동시에 떠야 하니 포트를 테스트에 박지 않는다 — 박으면 둘이 같은 포트를 물고 죽는다.
+//
+// 포트만으로는 모자란다: `test:rules` 의 `--project demo-monti-rules` 도 함께 있어야 한다.
+// 에뮬레이터 허브의 위치 파일이 `os.tmpdir()/hub-<projectId>.json` 이라 **포트가 아니라
+// 프로젝트 id** 로 갈린다 — 둘이 같은 id 를 쓰면 포트를 나눠도 서로의 허브 파일을 덮어쓴다.
+// `test:int` 의 `mon-ti` 로 "정리"하지 말 것.
+const { host, port } = (
+  JSON.parse(readFileSync(join(ROOT, 'firebase.rules.json'), 'utf8')) as {
+    emulators: { firestore: { host: string; port: number } };
+  }
+).emulators.firestore;
+
 let env: RulesTestEnvironment;
 
 beforeAll(async () => {
   env = await initializeTestEnvironment({
     projectId: 'monti-rules-test',
     firestore: {
-      rules: readFileSync(join(process.cwd(), '..', 'firestore.rules'), 'utf8'),
-      host: '127.0.0.1',
-      port: 8089,
+      rules: readFileSync(join(ROOT, 'firestore.rules'), 'utf8'),
+      host,
+      port,
     },
   });
 });

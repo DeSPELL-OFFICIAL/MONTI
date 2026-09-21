@@ -23,11 +23,13 @@ describe('verifyTenderlySignature', () => {
 
 describe('decodeMontiLogs', () => {
   it('decodes a CheckedIn log into name and args', () => {
+    // 인덱스 인자 셋을 모두 주었으니 토픽에 `null` 도 배열도 없다 — `ticketAbi` 가
+    // `Abi` 라 viem 이 그 사실을 타입으로 좁혀 주지 못할 뿐이다.
     const topics = encodeEventTopics({
       abi: ticketAbi,
       eventName: 'CheckedIn',
       args: { tokenId: 7n, eventId: 11n, gateId: 3n },
-    });
+    }) as Hex[];
     const data = encodeAbiParameters(parseAbiParameters('bytes32 nonceHash, uint64 ts'), [
       `0x${'11'.repeat(32)}`,
       1_789_862_400n,
@@ -49,7 +51,7 @@ describe('decodeMontiLogs', () => {
 // tenderlyWebhook — 서명 검증·디코드·부수효과가 실제 핸들러에서 함께 도는지 본다.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { EventEmitter } from 'node:events';
+import { FakeRes } from './helpers/webhookRes.js';
 import { beforeEach, vi } from 'vitest';
 import { identityAbi, organizersAbi, type Hex } from '@monti/shared';
 
@@ -167,35 +169,6 @@ const { DEVICES, EVENT_CHATS, INVITES, PENDING_GATES, PERSONS, TRANSFER_INVITES,
   '../src/lib/db.js',
 );
 const { tenderlyWebhook } = await import('../src/functions/tenderlyWebhook.js');
-
-class FakeRes extends EventEmitter {
-  statusCode = 200;
-  body: unknown;
-  private readonly sent: Record<string, unknown> = {};
-  setHeader(key: string, value: unknown): void {
-    this.sent[key.toLowerCase()] = value;
-  }
-  getHeader(key: string): unknown {
-    return this.sent[key.toLowerCase()];
-  }
-  removeHeader(key: string): void {
-    delete this.sent[key.toLowerCase()];
-  }
-  status(code: number): this {
-    this.statusCode = code;
-    return this;
-  }
-  send(body?: unknown): this {
-    this.body = body;
-    this.emit('finish');
-    return this;
-  }
-  end(body?: unknown): this {
-    if (body !== undefined) this.body = body;
-    this.emit('finish');
-    return this;
-  }
-}
 
 interface MontiLog {
   raw: { address?: string; topics: readonly string[]; data: string };

@@ -25,6 +25,14 @@ describe('verifyDiditSignature', () => {
   });
 });
 
+/**
+ * `redactDiditPayload` 는 들어온 모양을 그대로 돌려주므로 반환이 `unknown` 이다.
+ * 색인 시그니처로 받으면 중간 칸마다 `undefined` 가 붙어 읽을 수 없다 — 넣은 모양을 그대로 적는다.
+ */
+interface Redacted {
+  decision: { id_verification: Record<string, unknown>; face_search: Record<string, unknown> };
+}
+
 describe('redactDiditPayload', () => {
   it('removes every PII field at any depth but keeps decision fields', () => {
     const redacted = redactDiditPayload({
@@ -35,7 +43,7 @@ describe('redactDiditPayload', () => {
         id_verification: { first_name: '길동', last_name: '홍', document_number: 'M12345678', portrait_image: 'data:...' },
         face_search: { status: 'clear', score: 0.1 },
       },
-    }) as Record<string, Record<string, Record<string, unknown>>>;
+    }) as Redacted;
 
     expect(redacted.decision.id_verification.first_name).toBe('[redacted]');
     expect(redacted.decision.id_verification.document_number).toBe('[redacted]');
@@ -66,7 +74,7 @@ describe('declineReason', () => {
 // diditWebhook — 서명 검증 · 멱등 · 레닥션이 실제 핸들러에서 함께 도는지 본다.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { EventEmitter } from 'node:events';
+import { FakeRes } from './helpers/webhookRes.js';
 import { beforeEach, vi } from 'vitest';
 import { decode as decodeJpeg, encode as encodeJpeg } from 'jpeg-js';
 import type { Hex } from '@monti/shared';
@@ -189,57 +197,19 @@ const awaitFinalized = vi.fn(async (_block: bigint) => undefined);
 
 vi.mock('../src/lib/chain.js', () => ({
   deployment: () => ({ identity: `0x${'11'.repeat(20)}` }),
-  publicClient: () => ({ waitForTransactionReceipt: (...args: unknown[]) => waitForTransactionReceipt(...(args as [])) }),
-  sendAttesterTx: (...args: unknown[]) => sendAttesterTx(...(args as [])),
-  awaitFinalized: (...args: unknown[]) => awaitFinalized(...(args as [])),
+  publicClient: () => ({
+    waitForTransactionReceipt: (...args: Parameters<typeof waitForTransactionReceipt>) =>
+      waitForTransactionReceipt(...args),
+  }),
+  sendAttesterTx: (...args: Parameters<typeof sendAttesterTx>) => sendAttesterTx(...args),
+  awaitFinalized: (...args: Parameters<typeof awaitFinalized>) => awaitFinalized(...args),
 }));
 
-/** DEK 를 'W' 한 바이트로 감싸는 가짜 KMS. 봉투 암호화 자체는 진짜 코드가 돈다. */
-vi.mock('@google-cloud/kms', () => ({
-  KeyManagementServiceClient: class {
-    async encrypt({ plaintext }: { plaintext: Buffer }) {
-      return [{ ciphertext: Buffer.concat([Buffer.from('W'), Buffer.from(plaintext)]) }];
-    }
-    async decrypt({ ciphertext }: { ciphertext: Buffer }) {
-      const buf = Buffer.from(ciphertext);
-      if (buf[0] !== 'W'.charCodeAt(0)) throw new Error('FAKE_KMS_BAD_WRAP');
-      return [{ plaintext: buf.subarray(1) }];
-    }
-  },
-}));
+vi.mock('@google-cloud/kms', async () => await import('./helpers/fakeKms.js'));
 
 const { KYC_SESSIONS, PERSONS } = await import('../src/lib/db.js');
 const { decryptField, piiAad } = await import('../src/lib/kms.js');
 const { diditWebhook } = await import('../src/functions/diditWebhook.js');
-
-class FakeRes extends EventEmitter {
-  statusCode = 200;
-  body: unknown;
-  private readonly sent: Record<string, unknown> = {};
-  setHeader(key: string, value: unknown): void {
-    this.sent[key.toLowerCase()] = value;
-  }
-  getHeader(key: string): unknown {
-    return this.sent[key.toLowerCase()];
-  }
-  removeHeader(key: string): void {
-    delete this.sent[key.toLowerCase()];
-  }
-  status(code: number): this {
-    this.statusCode = code;
-    return this;
-  }
-  send(body?: unknown): this {
-    this.body = body;
-    this.emit('finish');
-    return this;
-  }
-  end(body?: unknown): this {
-    if (body !== undefined) this.body = body;
-    this.emit('finish');
-    return this;
-  }
-}
 
 interface Delivery {
   raw?: string;

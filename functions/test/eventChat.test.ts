@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { CHAT_CLOSE_SCHEDULE, FIREBASE_REGION } from '@monti/shared';
+import type { CloudEvent, CloudFunction } from 'firebase-functions/v2';
 
 process.env.GCP_PROJECT_ID = 'monti-dev';
 
@@ -151,7 +152,9 @@ const functionsTest = (await import('firebase-functions-test')).default();
 
 const join = functionsTest.wrap(joinEventChat);
 const report = functionsTest.wrap(reportMessage);
-const closeChats = functionsTest.wrap(closeEndedChats);
+// `onSchedule` 이 주는 `ScheduleFunction` 은 `wrap` 오버로드 어디에도 맞지 않는다.
+// 런타임은 `__endpoint.scheduleTrigger` 만 보고 스케줄 경로로 흘리므로 호출 형태는 그대로다.
+const closeChats = functionsTest.wrap(closeEndedChats as unknown as CloudFunction<CloudEvent<unknown>>);
 
 /** 호출자는 언제나 세션에서 나온다 — 요청 본문의 주소는 어디에서도 읽지 않는다. */
 const auth = { uid: 'uid-1', token: { account: ACCOUNT } };

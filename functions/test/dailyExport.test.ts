@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FIREBASE_REGION } from '@monti/shared';
+import type { CloudEvent, CloudFunction } from 'firebase-functions/v2';
 
 process.env.GCP_PROJECT_ID = 'monti-dev';
 
@@ -70,7 +71,9 @@ const { dailyExport, toJsonl, seoulDate, EXPORT_ENTITIES } = await import(
   '../src/functions/dailyExport.js'
 );
 const functionsTest = (await import('firebase-functions-test')).default();
-const run = functionsTest.wrap(dailyExport);
+// `onSchedule` 이 주는 `ScheduleFunction` 은 `wrap` 오버로드 어디에도 맞지 않는다.
+// 런타임은 `__endpoint.scheduleTrigger` 만 보고 스케줄 경로로 흘리므로 호출 형태는 그대로다.
+const run = functionsTest.wrap(dailyExport as unknown as CloudFunction<CloudEvent<unknown>>);
 
 beforeEach(() => {
   files.length = 0;

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
+import type { AttesterTx } from '../src/lib/chain.js';
 
 process.env.GCP_PROJECT_ID = 'monti-dev';
 process.env.PHONE_INDEX_KEY = 'monti-test-key';
@@ -139,7 +140,7 @@ const chain = {
   kycLevelOf: 0 as number,
 };
 
-const sendAttesterTx = vi.fn(async () => guard(TX));
+const sendAttesterTx = vi.fn(async (_tx: AttesterTx) => guard(TX));
 const readContract = vi.fn(async (call: { functionName: string }) =>
   guard(chain[call.functionName as keyof typeof chain]),
 );

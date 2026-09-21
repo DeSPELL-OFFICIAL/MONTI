@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
+import type { CloudEvent, CloudFunction } from 'firebase-functions/v2';
 
 process.env.GCP_PROJECT_ID = 'monti-dev';
 
@@ -153,7 +154,9 @@ const { DELETION_GRACE_SECONDS, processDeletions, requestAccountDeletion } = awa
 );
 const functionsTest = (await import('firebase-functions-test')).default();
 const request = functionsTest.wrap(requestAccountDeletion);
-const sweep = functionsTest.wrap(processDeletions);
+// `onSchedule` 이 주는 `ScheduleFunction` 은 `wrap` 오버로드 어디에도 맞지 않는다.
+// 런타임은 `__endpoint.scheduleTrigger` 만 보고 스케줄 경로로 흘리므로 호출 형태는 그대로다.
+const sweep = functionsTest.wrap(processDeletions as unknown as CloudFunction<CloudEvent<unknown>>);
 
 const auth = { uid: 'uid-1', token: { personId: PERSON_ID, account: ACCOUNT } };
 

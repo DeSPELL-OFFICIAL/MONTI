@@ -77,8 +77,8 @@ const status = functionsTest.wrap(getSignupStatus);
 /** 가입 도중이라 패스키 세션이 아직 없다 — 호출자는 언제나 Firebase 전화 사용자다. */
 const auth = { uid: 'uid-1', token: { phone_number: '+821011112222' } };
 
-function call(uid = 'uid-1') {
-  return status({ data: {}, auth: { ...auth, uid } } as never) as Promise<Record<string, unknown>>;
+async function call(uid = 'uid-1') {
+  return await status({ data: {}, auth: { ...auth, uid } } as never);
 }
 
 /** 전화 가입만 끝난 사람. `startSignup` 이 실제로 쓰는 문서와 같은 모양이다. */

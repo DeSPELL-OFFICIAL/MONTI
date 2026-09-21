@@ -174,8 +174,8 @@ function post(data: Record<string, unknown> = payload, auth: unknown = staff) {
   return submit({ data, auth } as never) as Promise<{ ok: true }>;
 }
 
-function queue(data: Record<string, unknown> = { eventId: '11' }, auth: unknown = admin) {
-  return list({ data, auth } as never) as Promise<{ gates: Array<Record<string, unknown>> }>;
+async function queue(data: Record<string, unknown> = { eventId: '11' }, auth: unknown = admin) {
+  return await list({ data, auth } as never);
 }
 
 beforeEach(() => {

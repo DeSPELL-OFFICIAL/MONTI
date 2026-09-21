@@ -16,12 +16,13 @@ import { getAttesterAccount } from '../lib/attester.js';
 import { requireStaffForGate, resolveCallerAccount } from '../lib/auth.js';
 import { deployment, publicClient } from '../lib/chain.js';
 import { PERSONS, db } from '../lib/db.js';
-import { envioQuery } from '../lib/envio.js';
+import { envioPageOnce, envioQuery } from '../lib/envio.js';
 import { decryptField, piiAad } from '../lib/kms.js';
 import { PORTRAIT_MAX_BASE64_BYTES } from '../lib/portrait.js';
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 const DIGITS_RE = /^[0-9]+$/;
+/** Hasura 는 역할마다 행 수 상한이 있다. 한 쪽씩 커서로 끝까지 읽어야 스냅샷이 잘리지 않는다. */
 const TICKET_PAGE_SIZE = 500;
 
 /**
@@ -230,23 +231,6 @@ function requireGateAccount(value: unknown): Hex {
   return value as Hex;
 }
 
-/** Hasura 는 역할마다 행 수 상한이 있다. 한 쪽씩 커서로 끝까지 읽어야 스냅샷이 잘리지 않는다. */
-async function ticketPage(eventId: string, cursor: string): Promise<EnvioTicketRow[]> {
-  // `eventId` 는 schema.graphql 의 `BigInt!` → Hasura `numeric`. `String!` 로 선언하면 거절된다.
-  // `eventId`·`revoked` 는 서버 쪽 필터일 뿐이라 골라 받지 않는다.
-  const data = await envioQuery<{ rows: EnvioTicketRow[] }>(
-    `query Tickets($eventId: numeric!, $cursor: String!, $limit: Int!) {
-      rows: Ticket(
-        where: {eventId: {_eq: $eventId}, revoked: {_eq: false}, id: {_gt: $cursor}}
-        order_by: {id: asc}
-        limit: $limit
-      ) { id tier owner checkIn { id } }
-    }`,
-    { eventId, cursor, limit: TICKET_PAGE_SIZE },
-  );
-  return data.rows;
-}
-
 export const issueSnapshot = onCall(
   { secrets: [ATTESTER_PK], memory: '1GiB', timeoutSeconds: 120 },
   async (request): Promise<SnapshotWire> => {
@@ -295,14 +279,29 @@ export const issueSnapshot = onCall(
       audit.requireKyc = requireKyc;
       const eventTitle = await eventTitleOf(meta.imageCid);
 
+      // `eventId` 는 schema.graphql 의 `BigInt!` → Hasura `numeric`. `String!` 로 선언하면 거절된다.
+      // `eventId`·`revoked` 는 서버 쪽 필터일 뿐이라 골라 받지 않는다.
+      const ticketFilter = {
+        vars: '$eventId: numeric!',
+        where: 'eventId: {_eq: $eventId}, revoked: {_eq: false}',
+        values: { eventId },
+      };
+
       const tickets: SnapshotTicket[] = [];
       // 닉네임 표는 쪽을 넘어가며 쌓는다 — 같은 계정을 쪽마다 다시 묻지 않는다.
       const nicknames = new Map<string, string>();
       let photos = 0;
       let degraded = 0;
       let cursor = '';
+      // 끝까지 드레인하지 않고 한 쪽씩 읽는다 — 상한을 넘는 공연은 나머지 쪽을 읽기 전에 거절해야 한다.
       for (;;) {
-        const rows = await ticketPage(eventId, cursor);
+        const rows = await envioPageOnce<EnvioTicketRow>(
+          'Ticket',
+          'id tier owner checkIn { id }',
+          cursor,
+          TICKET_PAGE_SIZE,
+          ticketFilter,
+        );
         if (rows.length === 0) break;
         if (tickets.length + rows.length > SNAPSHOT_MAX_TICKETS) {
           // 복호화를 시작하기 전에 거절한다. 500장을 풀고 나서 터지는 것이 제일 비싸다.

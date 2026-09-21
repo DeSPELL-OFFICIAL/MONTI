@@ -29,7 +29,8 @@ const ALLOWED: readonly string[] = dbModule.ALLOWED_COLLECTIONS;
 
 /** `db.ts` 가 내보내는 문자열 상수 전부. 이름→값 표가 모듈에서 오므로 표가 따로 늙지 않는다. */
 const COLLECTION_CONSTANTS = new Map<string, string>(
-  Object.entries(dbModule).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+  // 네임스페이스에는 `db`·함수도 섞여 있다. 술어 대신 flatMap 으로 걸러야 값 타입이 좁혀진 채 남는다.
+  Object.entries(dbModule).flatMap(([name, value]) => (typeof value === 'string' ? [[name, value] as const] : [])),
 );
 
 const CHAIN_FILE = join('lib', 'chain.ts');

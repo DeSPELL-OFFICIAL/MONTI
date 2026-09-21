@@ -367,9 +367,7 @@ describe('listPinned', () => {
   it('returns the pinned announcements newest first, and nothing else about them', async () => {
     givenAnnouncements();
 
-    const result = (await list({ data: { eventId: '11' }, auth: ownerAuth } as never)) as {
-      messages: Array<Record<string, unknown>>;
-    };
+    const result = await list({ data: { eventId: '11' }, auth: ownerAuth } as never);
 
     expect(result.messages.map((m) => m.messageId)).toEqual(['p2', 'p1']);
     for (const row of result.messages) {

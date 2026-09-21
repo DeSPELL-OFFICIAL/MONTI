@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
+import type { Abi } from 'viem';
+import type { Hex } from '@monti/shared';
+import type { AttesterTx } from '../src/lib/chain.js';
 
 process.env.GCP_PROJECT_ID = 'monti-dev';
 
@@ -142,8 +145,13 @@ function guard<T>(value: T): T {
   return value;
 }
 
-const sendAttesterTx = vi.fn(async () => guard(TX));
-const readContract = vi.fn(async () => guard(false));
+const sendAttesterTx = vi.fn(async (_tx: AttesterTx) => guard(TX));
+// `publicClient()` 를 통째로 가짜로 바꾸므로, 인자는 실제 호출부가 넘기는 모양 그대로 적는다 —
+// 빈 인자로 두면 `mock.calls[0][0]` 이 타입상 존재하지 않는 칸이 된다.
+const readContract = vi.fn(
+  async (_args: { address: Hex; abi: Abi; functionName: string; args: readonly unknown[] }) =>
+    guard(false),
+);
 const waitForTransactionReceipt = vi.fn(async () => guard({ status: 'success', blockNumber: 100n }));
 const awaitFinalized = vi.fn(async (_blockNumber: bigint) => guard(undefined));
 

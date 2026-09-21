@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getAddress } from 'viem';
-import { recipientCommitment } from '@monti/shared';
+import { recipientCommitment, type ResolveRecipientResult } from '@monti/shared';
 
 process.env.GCP_PROJECT_ID = 'monti-dev';
 process.env.PHONE_INDEX_KEY = 'monti-test-key';
@@ -92,10 +92,8 @@ const resolve = functionsTest.wrap(resolveRecipient);
 /** 세션 클레임으로만 호출자를 묶는다 — 요청 본문의 주소는 어디에서도 읽지 않는다. */
 const auth = { uid: 'uid-1', token: { account: CALLER } };
 
-type Result = Record<string, unknown>;
-
-async function call(data: Record<string, unknown>): Promise<Result> {
-  return (await resolve({ data, auth } as never)) as Result;
+async function call(data: Record<string, unknown>): Promise<ResolveRecipientResult> {
+  return await resolve({ data, auth } as never);
 }
 
 /** 메시지만이 아니라 HttpsError 의 코드까지 본다 — 클라이언트가 분기하는 값이다. */

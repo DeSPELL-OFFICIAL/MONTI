@@ -414,9 +414,7 @@ describe('pendingOffers', () => {
 
   it('writes nothing and leaks neither the phone index nor the sender', async () => {
     const invite = await givenInvite();
-    const result = (await pending({ data: {}, auth: recipientAuth } as never)) as {
-      offers: Array<Record<string, unknown>>;
-    };
+    const result = await pending({ data: {}, auth: recipientAuth } as never);
 
     expect(writeCount).toBe(0);
     expect(snapshot(`${TRANSFER_INVITES}/${invite.inviteId}`).get('status')).toBe('sent');

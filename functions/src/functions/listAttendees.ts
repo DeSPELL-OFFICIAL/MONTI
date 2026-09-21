@@ -2,7 +2,7 @@ import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { organizersAbi, ticketAbi, type AttendeeRow, type Hex } from '@monti/shared';
 import { PERM_CREATE_EVENT, resolveCallerAccount } from '../lib/auth.js';
 import { deployment, publicClient } from '../lib/chain.js';
-import { envioQuery } from '../lib/envio.js';
+import { envioPage } from '../lib/envio.js';
 
 const DIGITS_RE = /^[0-9]+$/;
 
@@ -87,27 +87,6 @@ async function requireOrganizer(eventId: bigint, caller: Hex): Promise<void> {
 }
 
 /**
- * 한 쪽.
- *
- * `eventId` 는 schema.graphql 의 `BigInt!` → Hasura `numeric`. `String!` 로 선언하면 거절된다.
- * 값은 문자열로 보낸다(자바스크립트 number 는 2^53 에서 깨진다).
- * `eventId`·`revoked` 는 서버 쪽 필터일 뿐이라 골라 받지 않는다.
- */
-async function attendeePage(eventId: string, cursor: string): Promise<EnvioAttendeeRow[]> {
-  const data = await envioQuery<{ rows: EnvioAttendeeRow[] }>(
-    `query Attendees($eventId: numeric!, $cursor: String!, $limit: Int!) {
-      rows: Ticket(
-        where: {eventId: {_eq: $eventId}, revoked: {_eq: false}, id: {_gt: $cursor}}
-        order_by: {id: asc}
-        limit: $limit
-      ) { id tier checkIn { id } identity { nickname kycLevel } }
-    }`,
-    { eventId, cursor, limit: ATTENDEE_PAGE_SIZE },
-  );
-  return data.rows;
-}
-
-/**
  * 주최자용 참석자 목록.
  *
  * 인덱서는 목록용이다 — 체인 이벤트 말고는 아무것도 들고 있지 않아서
@@ -128,21 +107,25 @@ export const listAttendees = onCall(
     const eventId = requireEventId(raw.eventId);
     await requireOrganizer(BigInt(eventId), caller);
 
-    const attendees: AttendeeRow[] = [];
-    let cursor = '';
-    for (;;) {
-      const rows = await attendeePage(eventId, cursor);
-      for (const row of rows) {
-        attendees.push({
-          tokenId: row.id,
-          nickname: row.identity?.nickname ?? '',
-          checkedIn: row.checkIn !== null,
-          tier: row.tier,
-          kycLevel: narrowKycLevel(row.identity?.kycLevel),
-        });
-      }
-      if (rows.length < ATTENDEE_PAGE_SIZE) return attendees;
-      cursor = rows[rows.length - 1]!.id;
-    }
+    // `eventId` 는 schema.graphql 의 `BigInt!` → Hasura `numeric`. `String!` 로 선언하면 거절된다.
+    // 값은 문자열로 보낸다(자바스크립트 number 는 2^53 에서 깨진다).
+    // `eventId`·`revoked` 는 서버 쪽 필터일 뿐이라 골라 받지 않는다.
+    const rows = await envioPage<EnvioAttendeeRow>(
+      'Ticket',
+      'id tier checkIn { id } identity { nickname kycLevel }',
+      ATTENDEE_PAGE_SIZE,
+      {
+        vars: '$eventId: numeric!',
+        where: 'eventId: {_eq: $eventId}, revoked: {_eq: false}',
+        values: { eventId },
+      },
+    );
+    return rows.map((row) => ({
+      tokenId: row.id,
+      nickname: row.identity?.nickname ?? '',
+      checkedIn: row.checkIn !== null,
+      tier: row.tier,
+      kycLevel: narrowKycLevel(row.identity?.kycLevel),
+    }));
   },
 );
