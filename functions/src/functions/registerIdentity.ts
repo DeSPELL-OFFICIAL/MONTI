@@ -18,6 +18,14 @@ const RECEIPT_TIMEOUT_MS = 30_000;
  */
 const PENDING_TTL_MS = 60_000;
 
+/**
+ * 호출 결과. 평소에는 `{ txHash }` 다.
+ * `alreadyRegistered: true` 는 **성공**이고 — 체인이 이미 그 계정을 알고 있어서
+ * 이번에 보낼 것이 없었다는 뜻이다. 그때 `txHash` 는 없다(우리가 보낸 적이 없으므로).
+ * 웹 래퍼는 이 값을 오류가 아니라 "가입 완료"로 다뤄야 한다.
+ */
+export type RegisterIdentityResult = { txHash?: Hex; alreadyRegistered?: true };
+
 /** 체인에 올라간 뒤의 마무리. 성공 경로와 "이미 보낸 트랜잭션" 경로가 같이 쓴다. */
 async function settle(input: {
   personRef: FirebaseFirestore.DocumentReference;
@@ -66,7 +74,8 @@ async function settle(input: {
  *
  * **같은 `personId` 로 두 번 불러도 체인 쓰기는 한 번**이다(스펙 §10.4 규칙 3).
  * 세 겹으로 막는다. ① 이미 기록된 트랜잭션이 있으면 그 해시를 쓰고, 아직 확정 전이면
- * **다시 보내지 않고 기다린다**. ② 체인이 이미 그 계정을 알고 있으면 DB 만 맞춘다.
+ * **다시 보내지 않고 기다린다**. ② 체인이 이미 그 계정을 알고 있으면 DB 만 맞추고
+ * `{ alreadyRegistered: true }` 로 **성공** 반환한다(보낸 적이 없으니 `txHash` 는 없다).
  * ③ 전송 직전 Firestore 트랜잭션으로 `registerPending` 딱지를 붙여 동시 호출을 막고,
  * 그 딱지는 `PENDING_TTL_MS` 가 지나면 죽은 인스턴스가 남긴 것으로 보고 무시한다.
  *
@@ -74,7 +83,7 @@ async function settle(input: {
  */
 export const registerIdentity = onCall(
   { secrets: [ATTESTER_PK] },
-  async (request): Promise<{ txHash: Hex }> => {
+  async (request): Promise<RegisterIdentityResult> => {
     const uid = request.auth?.uid;
     if (!uid) throw new HttpsError('unauthenticated', 'AUTH_REQUIRED');
     const { personId, deviceX, deviceY, platform } = (request.data ?? {}) as {
@@ -139,7 +148,9 @@ export const registerIdentity = onCall(
         { status: 'active', updatedAt: FieldValue.serverTimestamp() },
         { merge: true },
       );
-      throw new HttpsError('already-exists', 'ALREADY_REGISTERED_ON_CHAIN');
+      // 등록은 이미 끝났다. 이것은 오류가 아니라 성공이다 — 오류로 올리면 일반적인
+      // 콜러블 래퍼가 멀쩡히 가입된 사람에게 실패 화면을 보여 준다.
+      return { alreadyRegistered: true };
     }
 
     // 멱등 ③: 동시 호출 잠금. Firestore 트랜잭션이 직렬화를 보장한다.

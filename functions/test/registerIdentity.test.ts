@@ -266,9 +266,11 @@ describe('registerIdentity — idempotency (spec §10.4 rule 3)', () => {
     expect(readContract).not.toHaveBeenCalled();
   });
 
-  it('reconciles the database and sends nothing when the account is already a member', async () => {
+  it('reconciles the database and reports success when the account is already a member', async () => {
     readContract.mockResolvedValueOnce(true as never);
-    await expect(call()).rejects.toThrow('ALREADY_REGISTERED_ON_CHAIN');
+    // 이미 끝난 등록은 오류가 아니라 성공이다. 오류로 올리면 일반적인 콜러블 래퍼가
+    // 멀쩡히 가입된 사람에게 실패 화면을 보여 준다. 우리가 보낸 적이 없으니 txHash 는 없다.
+    await expect(call()).resolves.toEqual({ alreadyRegistered: true });
     expect(sendAttesterTx).not.toHaveBeenCalled();
     expect(readContract.mock.calls[0]![0]).toMatchObject({
       address: IDENTITY,
