@@ -79,9 +79,3 @@ export function readThenWriteNative(
 export function readGateCodeNative(options: NfcTapOptions = {}): Promise<GateCodeWire> {
   return withSession(options, (readGateCode) => readGateCode());
 }
-
-/** Writes into the session that is already open; it does not start one. */
-export async function writeGateResponseNative(wire: GateResponseWire): Promise<void> {
-  const record = gateResponseRecord(wire);
-  await writeRecord(record.type, record.payload);
-}

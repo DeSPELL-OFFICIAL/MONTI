@@ -10,42 +10,16 @@
 // Everything past the write — the green, the chain subscription — is Task 26.
 import { useCallback, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import type { GateCodeWire } from '@monti/shared';
+import type { GateCodeWire, GateResponseWire } from '@monti/shared';
 import { Alert, Button, Countdown, Screen, Spinner } from '../../shared/ui';
 import { fmt, useCopy } from '../../shared/i18n';
-import type { Copy } from '../../shared/copy/index';
 import { nfcCapability, readThenWrite } from '../../shared/nfc';
-import { IDLE, useArm, type EnterPhase } from './useArm';
+import { IDLE, failureText, useArm, type EnterPhase } from './useArm';
 import { tapFailure, tapSigner } from './buildResponse';
 import { Qr } from './Qr';
 
 /** The phases that hold the armed window open, and so show the countdown. */
 const ARMED_PHASES: readonly EnterPhase[] = ['armed', 'reading', 'verifying', 'signing', 'writing'];
-
-/**
- * `ArmState.error` is a copy key, so the sentence is chosen here rather than carried around as a
- * string. Anything unrecognised falls back to the generic apology instead of rendering a key.
- */
-function failureText(copy: Copy, error: string): string {
-  const sentences: Record<string, string> = {
-    deviceUnavailable: copy.enter.deviceUnavailable,
-    expired: copy.enter.expired,
-    unknownGate: copy.enter.unknownGate,
-    gateClosed: copy.enter.gateClosed,
-    wrongEvent: copy.enter.wrongEvent,
-    badSignature: copy.enter.badSignature,
-    codeExpired: copy.enter.codeExpired,
-    tapCancelled: copy.enter.tapCancelled,
-    tapTimeout: copy.enter.tapTimeout,
-    tapFailed: copy.enter.tapFailed,
-    armFailed: copy.enter.armFailed,
-    signFailed: copy.enter.signFailed,
-    keyInvalidated: copy.enter.keyInvalidated,
-    deviceMismatch: copy.enter.deviceMismatch,
-    writeFailed: copy.enter.writeFailed,
-  };
-  return sentences[error] ?? copy.common.error;
-}
 
 export function Enter() {
   const copy = useCopy();
@@ -54,6 +28,9 @@ export function Enter() {
   // Held from the read onwards: the QR fallback answers the same code the tap read, and there
   // is no second chance to get it — the reader has already rotated by the time it is needed.
   const [gateCode, setGateCode] = useState<GateCodeWire | null>(null);
+  // The answer the tap built. If the write failed, this is what the code on screen shows —
+  // the same bytes, rather than a second signature over the same digest.
+  const [response, setResponse] = useState<GateResponseWire | null>(null);
   // The open session, so the countdown can take it back rather than leave a sheet up over a
   // window the secure chip has already closed.
   const tap = useRef<AbortController | null>(null);
@@ -70,11 +47,14 @@ export function Enter() {
     const armedAt = await arm();
     if (!armedAt) return;
     if (nfcCapability() === 'none') {
-      setState((prev) => ({ ...prev, phase: 'qr', error: 'deviceUnavailable' }));
+      // Out of MVP scope, and it cannot be papered over: the code the staff scan is a device
+      // signature over the gate's one-time code, which only a tap can deliver.
+      setState((prev) => ({ ...prev, phase: 'failed', error: 'deviceUnavailable' }));
       return;
     }
 
     setGateCode(null);
+    setResponse(null);
     // Local, because `gateCode` state is not readable from inside this closure and the failure
     // taxonomy turns on whether a code was ever read.
     let read: GateCodeWire | null = null;
@@ -93,6 +73,7 @@ export function Enter() {
             read = code;
             setGateCode(code);
           },
+          onResponse: setResponse,
         }),
         { signal: controller.signal },
       );
@@ -101,6 +82,8 @@ export function Enter() {
       setState((prev) => ({ ...prev, ...tapFailure(cause, read !== null) }));
       return;
     } finally {
+      // Cleared only once `readThenWrite` has settled: the session stays open through verify,
+      // sign and write, and `expire()` must be able to take back one that is mid-write.
       if (tap.current === controller) tap.current = null;
     }
     if (!isCurrent(armedAt)) return;
@@ -144,8 +127,9 @@ export function Enter() {
         <>
           <p>{copy.enter.qrTitle}</p>
           {state.error ? <Alert tone="info">{failureText(copy, state.error)}</Alert> : null}
-          {/* Without a code there is nothing to answer: a phone with no NFC never read one. */}
-          {gateCode ? <Qr tokenId={tokenId} gateCode={gateCode} onExpire={expire} /> : null}
+          {gateCode ? (
+            <Qr tokenId={tokenId} gateCode={gateCode} wire={response} onExpire={expire} />
+          ) : null}
         </>
       ) : null}
 

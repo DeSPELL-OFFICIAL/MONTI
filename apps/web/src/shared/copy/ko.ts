@@ -141,7 +141,7 @@ export const ko = {
     deviceMismatch: '이 휴대폰은 이 티켓에 등록된 기기가 아니에요. 프로필에서 다시 등록해 주세요.',
     qrTitle: '이 화면을 스태프에게 보여주세요',
     done: '입장 완료', resultWaiting: '확인하고 있어요',
-    deviceUnavailable: '이 휴대폰에서는 대는 방식이 안 돼요. QR을 보여주세요.',
+    deviceUnavailable: '이 휴대폰에서는 입장 기능을 쓸 수 없어요. 입구 스태프에게 말씀해 주세요.',
     locked: '휴대폰이 잠겨 있어요. 프로필에서 잠금을 풀어 주세요.',
   },
   chats: {

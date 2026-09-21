@@ -8,6 +8,7 @@ import {
   encodeGateResponse,
   splitRs,
   type GateCodeWire,
+  type GateResponseWire,
 } from '@monti/shared';
 import type { ArmState } from './useArm';
 
@@ -94,6 +95,7 @@ function session(over: Partial<{ armedAt: number; isCurrent: (armedAt: number) =
   const seen: ArmState[] = [];
   let current: ArmState = { phase: 'reading', error: '', armedAt: 1 };
   const codes: GateCodeWire[] = [];
+  const answers: GateResponseWire[] = [];
   const sign = tapSigner({
     tokenId: TOKEN_ID,
     setState: (update) => {
@@ -103,9 +105,10 @@ function session(over: Partial<{ armedAt: number; isCurrent: (armedAt: number) =
     armedAt: 1,
     isCurrent: (armedAt: number) => armedAt === 1,
     onGateCode: (code) => codes.push(code),
+    onResponse: (answer) => answers.push(answer),
     ...over,
   });
-  return { sign, seen, codes };
+  return { sign, seen, codes, answers };
 }
 
 beforeEach(async () => {
@@ -196,6 +199,13 @@ describe('tapSigner — the body of the one NFC session', () => {
     expect(decodeGateResponse(encodeGateResponse(wire))).toEqual(wire);
   });
 
+  it('hands the finished answer out before the tag gets it, so the code can reuse it', async () => {
+    const { sign, answers } = session();
+    const wire = await sign(GATE_CODE);
+    expect(answers).toEqual([wire]);
+    expect(signWithDeviceKey).toHaveBeenCalledTimes(1);
+  });
+
   it('never prompts inside the session — it only signs with the key already armed', async () => {
     const { sign } = session();
     await sign(GATE_CODE);
@@ -239,10 +249,16 @@ describe('tapSigner — the body of the one NFC session', () => {
 });
 
 describe('tapFailure — the QR is a fallback, never the default', () => {
-  it('offers the code when a session that had read one died before the write', () => {
-    expect(tapFailure(new NfcError(NFC_ERROR.cancelled), true)).toEqual({ phase: 'qr', error: 'writeFailed' });
-    expect(tapFailure(new NfcError(NFC_ERROR.timeout), true)).toEqual({ phase: 'qr', error: 'writeFailed' });
-    expect(tapFailure(new NfcError(NFC_ERROR.readFailed), true)).toEqual({ phase: 'qr', error: 'writeFailed' });
+  it('offers the code when a session that had read one died, keeping the reason', () => {
+    // Each `nfcSessionEnd` reason keeps its own sentence — a holder who pulled the phone away
+    // and a tag that left the field are not the same thing to say.
+    expect(tapFailure(new NfcError(NFC_ERROR.cancelled), true)).toEqual({ phase: 'qr', error: 'tapCancelled' });
+    expect(tapFailure(new NfcError(NFC_ERROR.timeout), true)).toEqual({ phase: 'qr', error: 'tapTimeout' });
+    expect(tapFailure(new NfcError(NFC_ERROR.readFailed), true)).toEqual({ phase: 'qr', error: 'tapFailed' });
+  });
+
+  it('still calls a write that failed for a non-NFC reason a failed hand-over', () => {
+    expect(tapFailure(new Error('tag write refused'), true)).toEqual({ phase: 'qr', error: 'writeFailed' });
   });
 
   it('keeps the sentence and the button when the session died before any code arrived', () => {
@@ -251,9 +267,10 @@ describe('tapFailure — the QR is a fallback, never the default', () => {
     expect(tapFailure(new NfcError(NFC_ERROR.noGateRecord), false)).toEqual({ phase: 'failed', error: 'tapFailed' });
   });
 
-  it('offers the code to a phone that cannot tap at all', () => {
+  it('explains rather than offering a code a phone that cannot tap could never make', () => {
+    // The payload is a device signature over the gate's one-time code: no tap, no code.
     expect(tapFailure(new NfcError(NFC_ERROR.unavailable), false)).toEqual({
-      phase: 'qr',
+      phase: 'failed',
       error: 'deviceUnavailable',
     });
   });
@@ -268,8 +285,9 @@ describe('tapFailure — the QR is a fallback, never the default', () => {
     expect(tapFailure(gone, true)).toEqual({ phase: 'failed', error: 'keyInvalidated' });
   });
 
-  it('offers the code when this phone has no hardware key', () => {
-    expect(tapFailure(new DeviceKeyUnavailable(), false)).toEqual({ phase: 'qr', error: 'deviceUnavailable' });
+  it('explains rather than offering a code when this phone has no hardware key', () => {
+    expect(tapFailure(new DeviceKeyUnavailable(), false)).toEqual({ phase: 'failed', error: 'deviceUnavailable' });
+    expect(tapFailure(new DeviceKeyUnavailable(), true)).toEqual({ phase: 'failed', error: 'deviceUnavailable' });
   });
 
   it('keeps a gate refusal as its own sentence', () => {

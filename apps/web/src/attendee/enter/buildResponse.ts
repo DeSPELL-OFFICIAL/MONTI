@@ -184,7 +184,7 @@ export async function buildGateResponse(tokenId: string, gateCode: GateCodeWire)
 export function handOverEnding(cause: unknown): PhaseEnding {
   const { reason } = asHandOverError(cause);
   if (reason === 'armExpired') return { phase: 'idle', error: 'expired' };
-  if (reason === 'deviceUnavailable') return { phase: 'qr', error: 'deviceUnavailable' };
+  // Not `qr`: the code carries a device signature, and a phone that cannot sign cannot make one.
   return { phase: 'failed', error: reason };
 }
 
@@ -207,6 +207,12 @@ export interface TapSigner {
   isCurrent: (armedAt: number) => boolean;
   /** Called the moment the code is read, so the QR fallback can answer the same one. */
   onGateCode: (code: GateCodeWire) => void;
+  /**
+   * Called with the finished answer before it is handed to the tag. If the write then fails,
+   * the QR shows THIS wire: re-signing would spend a second biometric window on the same
+   * digest, at the moment that window is most likely to be nearly over.
+   */
+  onResponse: (wire: GateResponseWire) => void;
 }
 
 /**
@@ -219,7 +225,7 @@ export interface TapSigner {
  * eat the session. A refusal or a failed signature throws, which tears the session down
  * without writing anything.
  */
-export function tapSigner({ tokenId, setState, armedAt, isCurrent, onGateCode }: TapSigner) {
+export function tapSigner({ tokenId, setState, armedAt, isCurrent, onGateCode, onResponse }: TapSigner) {
   return async (gateCode: GateCodeWire): Promise<GateResponseWire> => {
     const started = performance.now();
     // The countdown may have expired while the reader was waiting for a tag. Throwing ends the
@@ -236,6 +242,7 @@ export function tapSigner({ tokenId, setState, armedAt, isCurrent, onGateCode }:
     const wire = await buildGateResponse(tokenId, gateCode);
     if (!isCurrent(armedAt)) throw new NfcError(NFC_ERROR.cancelled);
 
+    onResponse(wire);
     setState((prev) => ({ ...prev, phase: 'writing', error: '' }));
     if (import.meta.env.DEV && import.meta.env.MODE !== 'test') {
       // The budget that matters: Android's HCE tag is up only while the phones touch.
@@ -255,10 +262,12 @@ export function tapSigner({ tokenId, setState, armedAt, isCurrent, onGateCode }:
 export function tapFailure(cause: unknown, hasGateCode: boolean): PhaseEnding {
   if (cause instanceof GateRefused) return { phase: 'failed', error: cause.reason };
   // Checked before the device-key codes: `NfcError` is how the session itself reports an
-  // ending, and `asHandOverError` would flatten every one of them into `signFailed`.
+  // ending, and `asHandOverError` would flatten every one of them into `signFailed`. The
+  // reason is kept either way — a holder who pulled the phone away and a tag that left the
+  // field are different sentences — and only the phase turns on whether a code was read.
   if (cause instanceof NfcError) {
     const ending = tapEnding(cause);
-    return ending.phase === 'qr' || !hasGateCode ? ending : { phase: 'qr', error: 'writeFailed' };
+    return hasGateCode ? { phase: 'qr', error: ending.error } : ending;
   }
   if (cause instanceof HandOverError || cause instanceof DeviceKeyUnavailable || deviceKeyErrorCode(cause)) {
     return handOverEnding(cause);

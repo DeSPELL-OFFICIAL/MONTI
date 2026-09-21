@@ -7,6 +7,7 @@
 // a dead screen; and a gate code read into a phone that then refuses to sign is a code burned
 // for nothing. Nothing in here re-arms on its own — an expired window is the person tapping again.
 import { useCallback, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import type { Copy } from '../../shared/copy/index';
 import { ARM_WINDOW_SECONDS, ATTENDEE_KEY_ALIAS, DeviceKeyUnavailable, armDeviceKey } from '../../shared/deviceKey';
 import { NFC_ERROR, NfcError, type NfcErrorCode } from '../../shared/nfc';
 
@@ -37,18 +38,48 @@ export interface PhaseEnding {
 }
 
 /**
- * Every way `shared/nfc` ends a tap, each with the phase and sentence it becomes. `unavailable`
- * is the only one that is not a failure: a phone with no NFC is told to show a code, not that
- * something went wrong. `nfcSessionEnd`'s three iOS reasons arrive here already mapped onto
- * `cancelled` / `timeout` / `readFailed` by `shared/nfc/native.ts`.
+ * Every way `shared/nfc` ends a tap, each with the phase and sentence it becomes.
+ * `nfcSessionEnd`'s three iOS reasons arrive here already mapped onto `cancelled` / `timeout` /
+ * `readFailed` by `shared/nfc/native.ts`.
+ *
+ * `unavailable` is a plain refusal, not a fallback: the QR carries a device signature over the
+ * gate's code, so a phone that never read a code has nothing to show. Entering without NFC is
+ * outside the MVP, and saying so is better than a screen that cannot work.
  */
 const TAP_ENDING: Record<NfcErrorCode, PhaseEnding> = {
-  [NFC_ERROR.unavailable]: { phase: 'qr', error: 'deviceUnavailable' },
+  [NFC_ERROR.unavailable]: { phase: 'failed', error: 'deviceUnavailable' },
   [NFC_ERROR.cancelled]: { phase: 'failed', error: 'tapCancelled' },
   [NFC_ERROR.timeout]: { phase: 'failed', error: 'tapTimeout' },
   [NFC_ERROR.noGateRecord]: { phase: 'failed', error: 'tapFailed' },
   [NFC_ERROR.readFailed]: { phase: 'failed', error: 'tapFailed' },
 };
+
+/**
+ * `ArmState.error` is a copy key, so the sentence is chosen in one place rather than carried
+ * around as a string. Anything unrecognised falls back to the generic apology instead of
+ * rendering a key. Both `<Enter />` and `<Qr />` read it, which is why it lives beside the
+ * taxonomy it translates and not inside either screen.
+ */
+export function failureText(copy: Copy, error: string): string {
+  const sentences: Record<string, string> = {
+    deviceUnavailable: copy.enter.deviceUnavailable,
+    expired: copy.enter.expired,
+    unknownGate: copy.enter.unknownGate,
+    gateClosed: copy.enter.gateClosed,
+    wrongEvent: copy.enter.wrongEvent,
+    badSignature: copy.enter.badSignature,
+    codeExpired: copy.enter.codeExpired,
+    tapCancelled: copy.enter.tapCancelled,
+    tapTimeout: copy.enter.tapTimeout,
+    tapFailed: copy.enter.tapFailed,
+    armFailed: copy.enter.armFailed,
+    signFailed: copy.enter.signFailed,
+    keyInvalidated: copy.enter.keyInvalidated,
+    deviceMismatch: copy.enter.deviceMismatch,
+    writeFailed: copy.enter.writeFailed,
+  };
+  return sentences[error] ?? copy.common.error;
+}
 
 /** A rejection from the tap, as a phase. Anything that is not an `NfcError` is a failed read. */
 export function tapEnding(cause: unknown): PhaseEnding {
@@ -101,10 +132,11 @@ export function useArm(): Arm {
       return armedAt;
     } catch (cause) {
       // A browser has no non-syncing hardware key at all: that is the QR path, not an error.
-      const unavailable = cause instanceof DeviceKeyUnavailable;
+      // A browser with no non-syncing hardware key cannot produce a signature at all, and the
+      // QR carries a signature — so there is nothing to fall back to, only something to explain.
       setState({
-        phase: unavailable ? 'qr' : 'failed',
-        error: unavailable ? 'deviceUnavailable' : 'armFailed',
+        phase: 'failed',
+        error: cause instanceof DeviceKeyUnavailable ? 'deviceUnavailable' : 'armFailed',
         armedAt: 0,
       });
       return 0;

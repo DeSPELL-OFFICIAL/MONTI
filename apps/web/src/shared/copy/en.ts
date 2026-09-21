@@ -143,7 +143,7 @@ export const en: typeof ko = {
     deviceMismatch: 'This phone is not the one this ticket is set up with. Set it up again in your profile.',
     qrTitle: 'Show this screen to the staff',
     done: 'You are in', resultWaiting: 'Confirming',
-    deviceUnavailable: 'Tapping is not available on this phone. Show the QR code.',
+    deviceUnavailable: 'Entry is not available on this phone. Please speak to the staff at the door.',
     locked: 'Your phone is locked. Unlock it in your profile.',
   },
   chats: {

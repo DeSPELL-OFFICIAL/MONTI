@@ -115,12 +115,13 @@ describe('<Enter /> arming', () => {
     expect(screen.getByText(ko.enter.verifying)).toBeInTheDocument();
   });
 
-  it('offers the code instead of a tap when this phone has no hardware key', async () => {
+  it('explains, rather than offering a code, when this phone has no hardware key', async () => {
     armDeviceKey.mockRejectedValue(new DeviceKeyUnavailable());
     await tapEnter();
     expect(readThenWrite).not.toHaveBeenCalled();
-    expect(screen.getByText(ko.enter.qrTitle)).toBeInTheDocument();
-    expect(screen.getByText(ko.enter.deviceUnavailable)).toBeInTheDocument();
+    // The code carries a device signature, so a phone that cannot sign has nothing to show.
+    expect(screen.queryByText(ko.enter.qrTitle)).not.toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(ko.enter.deviceUnavailable);
   });
 
   it('reports any other arming failure instead of opening a session', async () => {
@@ -130,12 +131,13 @@ describe('<Enter /> arming', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(ko.enter.armFailed);
   });
 
-  it('offers the code when the phone has no NFC at all, after arming', async () => {
+  it('explains that a phone with no NFC cannot enter, after arming', async () => {
     nfcCapability.mockReturnValue('none');
     await tapEnter();
     expect(armDeviceKey).toHaveBeenCalledTimes(1);
     expect(readThenWrite).not.toHaveBeenCalled();
-    expect(screen.getByText(ko.enter.qrTitle)).toBeInTheDocument();
+    expect(screen.queryByText(ko.enter.qrTitle)).not.toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(ko.enter.deviceUnavailable);
   });
 
   it('keeps the armed sentence and the timer on the same second', async () => {
@@ -272,11 +274,11 @@ describe('<Enter /> tap endings', () => {
     });
   }
 
-  it('sends an unsupported reader to the code, not to an error', async () => {
+  it('says so plainly when the reader turns out to be unsupported', async () => {
     readThenWrite.mockRejectedValue(new NfcError(NFC_ERROR.unavailable));
     await tapEnter();
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-    expect(screen.getByText(ko.enter.qrTitle)).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(ko.enter.deviceUnavailable);
+    expect(screen.queryByText(ko.enter.qrTitle)).not.toBeInTheDocument();
   });
 
   it('falls back to a failed read for a rejection that is not an NfcError', async () => {
@@ -285,7 +287,7 @@ describe('<Enter /> tap endings', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(ko.enter.tapFailed);
   });
 
-  it('offers the code when the session dies after the read but before the write', async () => {
+  it('offers the code, with the reason, when the session dies after the read', async () => {
     readThenWrite.mockImplementation(async (sign) => {
       opened += 1;
       await sign(WIRE);
@@ -294,8 +296,19 @@ describe('<Enter /> tap endings', () => {
     });
     await tapEnter();
     expect(screen.getByText(ko.enter.qrTitle)).toBeInTheDocument();
-    expect(screen.getByText(ko.enter.writeFailed)).toBeInTheDocument();
-    expect(screen.queryByText(ko.enter.tapTimeout)).not.toBeInTheDocument();
+    expect(screen.getByText(ko.enter.tapTimeout)).toBeInTheDocument();
+  });
+
+  it('shows that code without signing a second time', async () => {
+    readThenWrite.mockImplementation(async (sign) => {
+      opened += 1;
+      await sign(WIRE);
+      throw new NfcError(NFC_ERROR.readFailed);
+    });
+    await tapEnter();
+    expect(screen.getByText(ko.enter.qrTitle)).toBeInTheDocument();
+    // <Qr /> was handed the wire the tap built; a second signature would cost a second window.
+    expect(signWithDeviceKey).toHaveBeenCalledTimes(1);
   });
 });
 

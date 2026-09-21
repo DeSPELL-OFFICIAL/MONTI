@@ -2,6 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ko } from '../../shared/copy/index';
 
 const PERSON_ID = `0x${'aa'.repeat(32)}`;
 const ACCOUNT = `0x${'ab'.repeat(20)}`;
@@ -205,9 +206,9 @@ describe('device step', () => {
     renderScreen(<DeviceStep />);
     await userEvent.click(screen.getByRole('button', { name: '등록하기' }));
 
-    expect(await screen.findByRole('status')).toHaveTextContent(
-      '이 휴대폰에서는 대는 방식이 안 돼요. QR을 보여주세요.',
-    );
+    // The same sentence the entry screen shows, read from the copy rather than repeated here:
+    // a phone that cannot sign cannot produce the code either, so there is nothing to offer.
+    expect(await screen.findByRole('status')).toHaveTextContent(ko.enter.deviceUnavailable);
     expect(registerIdentity).not.toHaveBeenCalled();
     // Retrying cannot help, so the only button left finishes signup without a hardware key.
     await userEvent.click(screen.getByRole('button', { name: '이대로 계속하기' }));

@@ -111,8 +111,3 @@ export async function readGateCodeWebNfc(options: NfcTapOptions = {}): Promise<G
     controller.abort();
   }
 }
-
-export async function writeGateResponseWebNfc(wire: GateResponseWire): Promise<void> {
-  const record = gateResponseRecord(wire);
-  await newReader().write({ records: [{ recordType: record.type, data: record.payload }] }, { overwrite: true });
-}

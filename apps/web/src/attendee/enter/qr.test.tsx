@@ -13,6 +13,7 @@ const toDataURL = vi.fn<(text: string) => Promise<string>>();
 vi.mock('qrcode', () => ({ default: { toDataURL } }));
 
 const { Qr } = await import('./Qr');
+const { HandOverError } = await import('./buildResponse');
 const { qrToGateResponse } = await import('../../shared/nfc');
 
 const ISSUED_AT = 1_790_000_000;
@@ -37,7 +38,7 @@ beforeEach(() => {
 describe('<Qr />', () => {
   it('draws the same bytes the NFC write would have carried', async () => {
     await act(async () => {
-      render(<Qr tokenId="7" gateCode={GATE_CODE} onExpire={() => undefined} />);
+      render(<Qr tokenId="7" gateCode={GATE_CODE} wire={WIRE} onExpire={() => undefined} />);
     });
     const payload = toDataURL.mock.calls[0]?.[0] as string;
     expect(payload.startsWith('MONTI1:')).toBe(true);
@@ -45,20 +46,46 @@ describe('<Qr />', () => {
     expect(screen.getByRole('img', { name: ko.enter.qrTitle })).toHaveAttribute('src', 'data:image/png;base64,QQ==');
   });
 
+  it('reuses the answer the tap already built instead of signing again', async () => {
+    await act(async () => {
+      render(<Qr tokenId="7" gateCode={GATE_CODE} wire={WIRE} onExpire={() => undefined} />);
+    });
+    // A second signature would spend a second biometric window on the same digest, exactly
+    // when that window is most likely to be nearly over.
+    expect(buildGateResponse).not.toHaveBeenCalled();
+  });
+
+  it('builds one only when the tap never got that far', async () => {
+    await act(async () => {
+      render(<Qr tokenId="7" gateCode={GATE_CODE} wire={null} onExpire={() => undefined} />);
+    });
+    expect(buildGateResponse).toHaveBeenCalledWith('7', GATE_CODE);
+  });
+
   it('counts the code window down, not the arm window', async () => {
     vi.setSystemTime((ISSUED_AT + 12) * 1000);
     await act(async () => {
-      render(<Qr tokenId="7" gateCode={GATE_CODE} onExpire={() => undefined} />);
+      render(<Qr tokenId="7" gateCode={GATE_CODE} wire={WIRE} onExpire={() => undefined} />);
     });
     expect(screen.getByRole('timer')).toHaveTextContent(String(CODE_WINDOW_SECONDS - 12));
   });
 
-  it('tells the holder when it could not be drawn at all', async () => {
-    buildGateResponse.mockRejectedValue(new Error('no key'));
+  it('names the reason it could not be drawn, not a generic one', async () => {
+    // `deviceMismatch` is the one failure the holder can act on — a profile step — so it must
+    // not read as "could not finish the check".
+    buildGateResponse.mockRejectedValue(new HandOverError('deviceMismatch'));
     await act(async () => {
-      render(<Qr tokenId="7" gateCode={GATE_CODE} onExpire={() => undefined} />);
+      render(<Qr tokenId="7" gateCode={GATE_CODE} wire={null} onExpire={() => undefined} />);
+    });
+    expect(screen.getByText(ko.enter.deviceMismatch)).toBeInTheDocument();
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+  });
+
+  it('falls back to the generic sentence for a failure it cannot name', async () => {
+    buildGateResponse.mockRejectedValue(new Error('bridge died'));
+    await act(async () => {
+      render(<Qr tokenId="7" gateCode={GATE_CODE} wire={null} onExpire={() => undefined} />);
     });
     expect(screen.getByText(ko.enter.signFailed)).toBeInTheDocument();
-    expect(screen.queryByRole('img')).not.toBeInTheDocument();
   });
 });
