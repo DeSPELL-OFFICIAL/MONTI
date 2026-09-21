@@ -26,18 +26,42 @@ interface DiditBody {
 }
 
 /**
+ * 거절 사유는 우리가 정한 코드만 쓴다. Didit 이 준 자유 문장은 저장하지 않는다.
+ *  - `declined`             Didit 이 문서·얼굴 검증에서 거절했다(Expired·Abandoned 포함).
+ *  - `duplicate_face`       Face Search 1:N 이 같은 얼굴을 이미 찾았다.
+ *  - `face_search_missing`  승인인데 Face Search 결과 자체가 없다. **중복 얼굴이 아니다.**
+ *  - `face_search_not_clear` 승인인데 Face Search 가 `clear` 도 `duplicate` 도 아닌 값을 줬다.
+ * 넷 다 `kycLevel` 을 올리지 않는다(fail-closed).
+ */
+function rejectionReason(status: string, faceSearch: string | null): string {
+  if (status !== 'Approved') return 'declined';
+  if (faceSearch === null) return 'face_search_missing';
+  if (faceSearch === 'duplicate') return 'duplicate_face';
+  return 'face_search_not_clear';
+}
+
+/**
  * Didit 웹훅. 본문은 **절대** 응답이나 로그로 되돌려 보내지 않는다 — 실패 응답은 고정 문자열뿐이다.
  *
- *  1. `req.rawBody` 바이트에 대한 HMAC-SHA256 을 상수 시간으로 맞춰 본다(파싱된 JSON 이 아니다).
- *  2. `kycSessions/{session_id}` 를 트랜잭션에서 먼저 읽어 같은 결정의 재배달을 no-op 으로 끝낸다.
- *  3. 승인 + Face Search `clear` 면 `kyc_ok` 로 두고 `setKycLevel(personId, 1)` 을 보낸 뒤,
- *     **finalized 된 다음에만** `active` / `kycLevel: 1` 을 쓴다(스펙 §10.4 규칙 3).
- *     중간에 죽어도 `reconcilePending` 이 `kyc_ok` 를 복구한다.
- *  4. 거절·중복 얼굴이면 `rejected` 로만 두고 `kycLevel` 은 0 그대로다.
+ *  1. POST 가 아니면 405. 그다음 `req.rawBody` 바이트에 대한 HMAC-SHA256 을 상수 시간으로 맞춰 본다.
+ *  2. KMS 를 부르기 전에 세션 중복과 상태 전이를 **먼저 읽어** 걸러낸다. 여기서 막히면
+ *     세션에 도장을 찍지 않으므로 Didit 재배달이 그대로 다시 시도된다.
+ *  3. 사람 문서(`status:'kyc_ok'` + `kyc.sessionId` + PII 봉투)와 세션 도장을 **한 트랜잭션**에서
+ *     쓴다. 둘 다 있거나 둘 다 없다 — "처리됨" 도장만 남고 복구 지점이 없는 창이 사라진다.
+ *  4. 체인 호출은 커밋 **뒤에** 한다. 여기서 죽거나 터져도 사람은 `kyc_ok` 로 남고,
+ *     `reconcilePending` 이 `status === 'kyc_ok'` 이면서 체인의 `kycLevel` 이 0 인 사람을
+ *     다시 보낸다(`Identity.setKycLevel` 은 단순 대입이라 재전송이 안전하다).
+ *  5. finalized 된 다음에만 `active` / `kycLevel: 1` / `chain.kycLevelTx` 를 쓴다(스펙 §10.4 규칙 3).
  */
 export const diditWebhook = onRequest(
   { secrets: [DIDIT_WEBHOOK_SECRET, ATTESTER_PK], cors: false, invoker: 'public', timeoutSeconds: 120 },
   async (req, res) => {
+    // 웹훅은 POST 하나뿐이다. 본문 없는 메서드로 빈 문자열에 서명을 맞춰 보는 길 자체를 막는다.
+    if (req.method !== 'POST') {
+      res.status(405).send('method not allowed');
+      return;
+    }
+
     const raw = req.rawBody?.toString('utf8') ?? '';
     const ok = verifyDiditSignature({
       raw,
@@ -67,102 +91,137 @@ export const diditWebhook = onRequest(
     }
 
     const sessionRef = db.collection(KYC_SESSIONS).doc(sessionId);
+    const personRef = db.collection(PERSONS).doc(personId);
+    const decision = body.status ?? 'Unknown';
     const faceSearch = body.decision?.face_search?.status ?? null;
-    const duplicate = await db.runTransaction(async (tx) => {
-      const current = await tx.get(sessionRef);
-      if (current.exists && current.get('decision') === body.status) return true;
-      tx.set(
-        sessionRef,
-        {
-          personId,
-          status: body.status ?? 'Unknown',
-          decision: body.status ?? 'Unknown',
-          // 받은 본문을 통째로 넣지 않는다. 여기 적힌 결정 필드만 추려 담고, 그 위에 레닥션을
-          // 한 번 더 건다 — Didit 이 새 개인정보 필드를 추가해도 저장 경로로 샐 수 없다(스펙 §10.3).
-          raw: redactDiditPayload({
-            session_id: sessionId,
-            status: body.status ?? 'Unknown',
-            vendor_data: personId,
-            decision: { face_search: { status: faceSearch } },
-          }),
-          receivedAt: FieldValue.serverTimestamp(),
-        },
-        { merge: true },
-      );
-      return false;
-    });
-    if (duplicate) {
+
+    // 받은 본문을 통째로 넣지 않는다. 여기 적힌 결정 필드만 추려 담고, 그 위에 레닥션을
+    // 한 번 더 건다 — Didit 이 새 개인정보 필드를 추가해도 저장 경로로 샐 수 없다(스펙 §10.3).
+    const sessionStamp = {
+      personId,
+      status: decision,
+      decision,
+      raw: redactDiditPayload({
+        session_id: sessionId,
+        status: decision,
+        vendor_data: personId,
+        decision: { face_search: { status: faceSearch } },
+      }),
+      receivedAt: FieldValue.serverTimestamp(),
+    };
+    const isStamped = (snap: { exists: boolean; get: (field: string) => unknown }): boolean =>
+      snap.exists && snap.get('decision') === decision;
+
+    // 사전 읽기. KMS 왕복과 트랜잭션에 들어가기 전에 중복·전이를 먼저 걸러낸다.
+    if (isStamped(await sessionRef.get())) {
       res.status(200).send('duplicate');
       return;
     }
 
-    if (!TERMINAL.includes(body.status ?? '')) {
+    // 비종료 상태는 사람 문서를 건드릴 것이 없다. 접수 사실만 남긴다.
+    if (!TERMINAL.includes(decision)) {
+      await db.runTransaction(async (tx) => {
+        if (isStamped(await tx.get(sessionRef))) return;
+        tx.set(sessionRef, sessionStamp, { merge: true });
+      });
       res.status(200).send('pending');
       return;
     }
 
-    const faceSearchOk = faceSearch === 'clear';
-    const approved = body.status === 'Approved' && faceSearchOk;
-    const personRef = db.collection(PERSONS).doc(personId);
+    const approved = decision === 'Approved' && faceSearch === 'clear';
+    const target: PersonStatus = approved ? 'kyc_ok' : 'rejected';
+    const prePerson = await personRef.get();
 
-    // 거절·중복 얼굴이면 레벨을 올리지 않고 status 만 'rejected' 로 둔다(kycLevel 은 0 그대로).
-    if (!approved) {
-      const current = (await personRef.get()).get('status') as PersonStatus | undefined;
-      if (current) assertStatusTransition(current, 'rejected');
-      await personRef.set(
-        {
+    // 이미 레벨 1이면 다른 세션이 와도 체인에 다시 쓰지 않는다.
+    if (approved && (prePerson.get('kycLevel') as number | undefined) === 1) {
+      res.status(200).send('already-level-1');
+      return;
+    }
+
+    // 전이가 막히면(예: register 가 아직 finalized 되지 않아 `pending`) 여기서 던진다.
+    // 세션 도장도 봉투도 아직 쓰지 않았으므로 Didit 재배달이 그대로 다시 시도된다.
+    const preStatus = prePerson.get('status') as PersonStatus | undefined;
+    if (preStatus) assertStatusTransition(preStatus, target);
+    else if (approved) assertStatusTransition('pending', target);
+
+    // 개인정보는 KMS 봉투로만 저장한다. AAD 는 `personId:field` — 봉투를 다른 사람 문서나
+    // 다른 필드로 옮겨 붙이면 열리지 않는다. KMS 왕복은 트랜잭션 **밖에서** 끝낸다.
+    // 받지 못한 필드는 아예 쓰지 않는다 — 빈 문자열로 기존 봉투를 지우면 조용한 데이터 손실이다.
+    const pii: Record<string, unknown> = {};
+    if (approved) {
+      const identity = body.decision?.id_verification ?? {};
+      const fullName = `${identity.last_name ?? ''}${identity.first_name ?? ''}`.trim();
+      const documentNumber = identity.document_number ?? '';
+      const portrait = (identity.portrait_image ?? '').replace(/^data:image\/[a-z]+;base64,/, '');
+      const [encName, encDoc, encPhoto] = await Promise.all([
+        fullName ? encryptField(fullName, piiAad(personId, 'name')) : Promise.resolve(''),
+        documentNumber ? encryptField(documentNumber, piiAad(personId, 'docNumber')) : Promise.resolve(''),
+        portrait ? encryptField(portrait, piiAad(personId, 'photo')) : Promise.resolve(''),
+      ]);
+      const enc: Record<string, string> = {};
+      if (encName) enc.name = encName;
+      if (encDoc) enc.docNumber = encDoc;
+      if (Object.keys(enc).length > 0) pii.enc = enc;
+      if (encPhoto) pii.photoEnc = encPhoto;
+    }
+
+    const personUpdate = approved
+      ? {
+          // 'kyc_ok' = 승인됐지만 setKycLevel 이 아직 확정되지 않은 중간 상태. reconcilePending 의 키다.
+          status: 'kyc_ok',
+          kyc: { provider: 'didit', sessionId, status: 'approved', faceSearchOk: true },
+          ...pii,
+          updatedAt: FieldValue.serverTimestamp(),
+        }
+      : {
+          // 거절·중복 얼굴이면 레벨을 올리지 않고 status 만 'rejected' 로 둔다(kycLevel 은 0 그대로).
           status: 'rejected',
           kyc: {
             provider: 'didit',
             sessionId,
             status: 'rejected',
-            // Didit 이 준 자유 문장이 아니라 우리가 정한 코드만 쓴다.
-            rejectedReason: body.status === 'Approved' ? 'duplicate_face' : 'declined',
+            rejectedReason: rejectionReason(decision, faceSearch),
           },
           updatedAt: FieldValue.serverTimestamp(),
-        },
-        { merge: true },
-      );
+        };
+
+    // 사람 문서와 세션 도장은 한 트랜잭션에서 같이 커밋된다. 트랜잭션은 다시 읽고 다시 검사한다
+    // — 사전 읽기 뒤에 다른 배달이 끼어들었어도 도장만 남고 복구 지점이 없는 상태는 생기지 않는다.
+    const committed = await db.runTransaction(async (tx) => {
+      const session = await tx.get(sessionRef);
+      const person = await tx.get(personRef);
+      if (isStamped(session)) return false;
+      const current = person.get('status') as PersonStatus | undefined;
+      if (current) assertStatusTransition(current, target);
+      else if (approved) assertStatusTransition('pending', target);
+      tx.set(personRef, personUpdate, { merge: true });
+      tx.set(sessionRef, sessionStamp, { merge: true });
+      return true;
+    });
+    if (!committed) {
+      res.status(200).send('duplicate');
+      return;
+    }
+    if (!approved) {
       res.status(200).send('rejected');
       return;
     }
 
-    // 여기부터는 승인된 경우다. 개인정보는 KMS 봉투로만 저장한다. 평문은 어디에도 남지 않는다.
-    // AAD 는 `personId:field` — 봉투를 다른 사람 문서나 다른 필드로 옮겨 붙이면 열리지 않는다.
-    const identity = body.decision?.id_verification ?? {};
-    const fullName = `${identity.last_name ?? ''}${identity.first_name ?? ''}`.trim();
-    const portrait = (identity.portrait_image ?? '').replace(/^data:image\/[a-z]+;base64,/, '');
-    const [encName, encDoc, encPhoto] = await Promise.all([
-      fullName ? encryptField(fullName, piiAad(personId, 'name')) : Promise.resolve(''),
-      identity.document_number
-        ? encryptField(identity.document_number, piiAad(personId, 'docNumber'))
-        : Promise.resolve(''),
-      portrait ? encryptField(portrait, piiAad(personId, 'photo')) : Promise.resolve(''),
-    ]);
-    await personRef.set({ enc: { name: encName, docNumber: encDoc }, photoEnc: encPhoto }, { merge: true });
-
-    // 웹훅 재시도 멱등: 이미 레벨 1이면 체인에 다시 쓰지 않는다.
-    const person = await personRef.get();
-    if ((person.get('kycLevel') as number | undefined) === 1) {
-      res.status(200).send('already-level-1');
-      return;
-    }
-
-    // 승인됐지만 setKycLevel 이 아직 확정되지 않은 중간 상태가 'kyc_ok' 다.
-    const before = (person.get('status') ?? 'pending') as PersonStatus;
-    assertStatusTransition(before, 'kyc_ok');
-    await personRef.set({ status: 'kyc_ok', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-
+    // 여기부터 실패해도 사람은 `kyc_ok` 로 남는다 — reconcilePending 이 주워 간다.
     const txHash = await sendAttesterTx({
       address: deployment().identity,
       abi: identityKycAbi,
       functionName: 'setKycLevel',
       args: [personId, 1],
     });
-    // 해시를 먼저 남긴다. 여기서 죽어도 reconcilePending 이 kyc_ok 를 복구한다.
-    await personRef.set({ chain: { kycLevelTx: txHash } }, { merge: true });
     const receipt = await publicClient().waitForTransactionReceipt({ hash: txHash, timeout: 30_000 });
     if (receipt.status !== 'success') {
+      // 되돌린 해시를 `chain.kycLevelTx` 로 남기면 reconcilePending 이 "이미 보냈다"로 읽는다.
+      // 해시는 버리고 사유만 남긴다. 사람은 `kyc_ok` 그대로라 재전송 대상으로 잡힌다.
+      await personRef.set(
+        { chain: { kycLevelError: 'reverted' }, updatedAt: FieldValue.serverTimestamp() },
+        { merge: true },
+      );
       res.status(500).send('setKycLevel reverted');
       return;
     }
@@ -179,9 +238,9 @@ export const diditWebhook = onRequest(
           sessionId,
           status: 'approved',
           verifiedAt: FieldValue.serverTimestamp(),
-          faceSearchOk,
+          faceSearchOk: true,
         },
-        chain: { kycLevelTx: txHash, block: Number(receipt.blockNumber) },
+        chain: { kycLevelTx: txHash, block: Number(receipt.blockNumber), kycLevelError: null },
         updatedAt: FieldValue.serverTimestamp(),
       },
       { merge: true },

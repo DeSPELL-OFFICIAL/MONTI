@@ -76,9 +76,22 @@ function snapshot(path: string) {
   };
 }
 
+/** Firestore 의 `set(..., {merge:true})` 는 맵을 **깊이** 합친다. 가짜도 같게 둬야 덮어쓰기 버그가 보인다. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && Object.getPrototypeOf(value) === Object.prototype;
+}
+
+function mergeInto(previous: Record<string, unknown>, data: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...previous };
+  for (const [key, value] of Object.entries(data)) {
+    const existing = out[key];
+    out[key] = isPlainObject(value) && isPlainObject(existing) ? mergeInto(existing, value) : value;
+  }
+  return out;
+}
+
 function write(path: string, data: Record<string, unknown>, options?: { merge?: boolean }): void {
-  const previous = options?.merge ? (docs.get(path) ?? {}) : {};
-  docs.set(path, { ...previous, ...data });
+  docs.set(path, options?.merge ? mergeInto(docs.get(path) ?? {}, data) : { ...data });
 }
 
 function docRef(path: string) {
@@ -180,6 +193,7 @@ interface Delivery {
   signature?: string;
   timestamp?: number;
   secret?: string;
+  method?: string;
 }
 
 async function deliver(body: unknown, override: Delivery = {}): Promise<FakeRes> {
@@ -193,7 +207,7 @@ async function deliver(body: unknown, override: Delivery = {}): Promise<FakeRes>
     'x-timestamp': String(timestamp),
   };
   const req = {
-    method: 'POST',
+    method: override.method ?? 'POST',
     headers,
     rawBody: Buffer.from(raw, 'utf8'),
     get: (name: string) => headers[name.toLowerCase()],
@@ -204,25 +218,21 @@ async function deliver(body: unknown, override: Delivery = {}): Promise<FakeRes>
   return res;
 }
 
-function approvedBody(faceSearch = 'clear') {
-  return {
-    session_id: 's1',
-    status: 'Approved',
-    vendor_data: PERSON,
-    decision: {
-      session_id: 's1',
-      face_search: { status: faceSearch, score: 0.1 },
-      id_verification: {
-        status: 'Approved',
-        first_name: NAME_FIRST,
-        last_name: NAME_LAST,
-        document_number: DOC_NUMBER,
-        date_of_birth: '1990-01-01',
-        portrait_image: PORTRAIT,
-        address: '서울시 어딘가',
-      },
+function approvedBody(faceSearch: string | null = 'clear', sessionId = 's1') {
+  const decision: Record<string, unknown> = {
+    session_id: sessionId,
+    id_verification: {
+      status: 'Approved',
+      first_name: NAME_FIRST,
+      last_name: NAME_LAST,
+      document_number: DOC_NUMBER,
+      date_of_birth: '1990-01-01',
+      portrait_image: PORTRAIT,
+      address: '서울시 어딘가',
     },
   };
+  if (faceSearch !== null) decision.face_search = { status: faceSearch, score: 0.1 };
+  return { session_id: sessionId, status: 'Approved', vendor_data: PERSON, decision };
 }
 
 beforeEach(() => {
@@ -317,7 +327,7 @@ describe('diditWebhook', () => {
     expect(sendAttesterTx).not.toHaveBeenCalled();
   });
 
-  it('rejects an approved session whose face search is not clear as duplicate_face', async () => {
+  it('rejects an approved session whose face search found the same face as duplicate_face', async () => {
     const res = await deliver(approvedBody('duplicate'));
 
     expect(res.statusCode).toBe(200);
@@ -326,6 +336,120 @@ describe('diditWebhook', () => {
     expect(person.get('kycLevel')).toBe(0);
     expect((person.get('kyc') as Record<string, unknown>).rejectedReason).toBe('duplicate_face');
     expect(sendAttesterTx).not.toHaveBeenCalled();
+  });
+
+  // ── 리뷰 fix round 1 ────────────────────────────────────────────────────────
+
+  it('refuses any method but POST with 405, before it looks at the signature', async () => {
+    for (const method of ['GET', 'PUT', 'DELETE', 'PATCH']) {
+      const res = await deliver(approvedBody(), { method });
+      expect(res.statusCode).toBe(405);
+      expect(res.body).toBe('method not allowed');
+    }
+    // 서명이 아예 틀려도 405 가 먼저다 — 메서드 검사가 서명 검사보다 앞에 있다.
+    const forged = await deliver(approvedBody(), { method: 'GET', signature: 'deadbeef' });
+    expect(forged.statusCode).toBe(405);
+
+    expect(docs.size).toBe(1); // beforeEach 가 만든 person 문서 하나뿐
+    expect(snapshot(`${KYC_SESSIONS}/s1`).exists).toBe(false);
+    expect(sendAttesterTx).not.toHaveBeenCalled();
+  });
+
+  it('stamps neither the session nor the person when the transition is refused', async () => {
+    // register 가 아직 finalized 되지 않은 사람. pending → kyc_ok 는 전이 표가 막는다.
+    docs.set(`${PERSONS}/${PERSON}`, { status: 'pending', kycLevel: 0 });
+
+    await expect(deliver(approvedBody())).rejects.toThrow('BAD_STATUS_TRANSITION:pending->kyc_ok');
+
+    // 세션에 도장이 찍히지 않았다 — 그래서 재배달이 duplicate 로 삼켜지지 않는다.
+    expect(snapshot(`${KYC_SESSIONS}/s1`).exists).toBe(false);
+    const blocked = snapshot(`${PERSONS}/${PERSON}`);
+    expect(blocked.get('status')).toBe('pending');
+    // 검사에 걸리기 전에는 봉투도 쓰지 않는다.
+    expect(blocked.get('enc')).toBeUndefined();
+    expect(blocked.get('photoEnc')).toBeUndefined();
+    expect(blocked.get('kyc')).toBeUndefined();
+
+    // register 가 끝난 뒤 같은 배달이 다시 오면 이번엔 통과한다.
+    write(`${PERSONS}/${PERSON}`, { status: 'active' }, { merge: true });
+    const retry = await deliver(approvedBody());
+    expect(retry.statusCode).toBe(200);
+    expect(snapshot(`${PERSONS}/${PERSON}`).get('kycLevel')).toBe(1);
+  });
+
+  it('leaves a recoverable kyc_ok marker when the chain send blows up after the commit', async () => {
+    // Identity.register 전이면 estimateContractGas 가 NotRegistered() 로 되돌린다.
+    sendAttesterTx.mockRejectedValueOnce(new Error('NotRegistered'));
+
+    await expect(deliver(approvedBody())).rejects.toThrow('NotRegistered');
+
+    // 사람 도장과 세션 도장이 **둘 다** 남았다 — 한 트랜잭션에서 같이 커밋됐다.
+    const person = snapshot(`${PERSONS}/${PERSON}`);
+    expect(person.get('status')).toBe('kyc_ok'); // reconcilePending 이 찾는 키
+    expect(person.get('kycLevel')).toBe(0);
+    expect(person.get('chain')).toBeUndefined(); // 되돌린·보내지 못한 해시는 남기지 않는다
+    expect((person.get('kyc') as Record<string, unknown>).sessionId).toBe('s1');
+    expect(snapshot(`${KYC_SESSIONS}/s1`).get('decision')).toBe('Approved');
+
+    // 재배달은 duplicate 로 흡수되는 게 맞다. 복구는 reconcilePending 몫이고,
+    // 그 작업이 찾을 상태(kyc_ok + 체인 kycLevel 0)가 실제로 남아 있다.
+    const again = await deliver(approvedBody());
+    expect(again.body).toBe('duplicate');
+    expect(snapshot(`${PERSONS}/${PERSON}`).get('status')).toBe('kyc_ok');
+  });
+
+  it('does not record a tx hash when the setKycLevel receipt reverts', async () => {
+    waitForTransactionReceipt.mockResolvedValueOnce({ status: 'reverted', blockNumber: 43n });
+
+    const res = await deliver(approvedBody());
+
+    expect(res.statusCode).toBe(500);
+    const person = snapshot(`${PERSONS}/${PERSON}`);
+    const chain = person.get('chain') as Record<string, unknown>;
+    expect(chain.kycLevelTx).toBeUndefined(); // 실패한 해시를 "이미 보냈다"로 읽히게 두지 않는다
+    expect(chain.kycLevelError).toBe('reverted');
+    expect(person.get('status')).toBe('kyc_ok');
+    expect(person.get('kycLevel')).toBe(0);
+    expect(awaitFinalized).not.toHaveBeenCalled();
+  });
+
+  it('tells a missing face search apart from a duplicate one', async () => {
+    const missing = await deliver(approvedBody(null, 's3'));
+    expect(missing.statusCode).toBe(200);
+    const afterMissing = snapshot(`${PERSONS}/${PERSON}`);
+    expect((afterMissing.get('kyc') as Record<string, unknown>).rejectedReason).toBe('face_search_missing');
+    expect(afterMissing.get('kycLevel')).toBe(0); // 사유가 무엇이든 fail-closed 다
+
+    const unknown = await deliver(approvedBody('in_review', 's4'));
+    expect(unknown.statusCode).toBe(200);
+    expect((snapshot(`${PERSONS}/${PERSON}`).get('kyc') as Record<string, unknown>).rejectedReason).toBe(
+      'face_search_not_clear',
+    );
+    expect(snapshot(`${PERSONS}/${PERSON}`).get('kycLevel')).toBe(0);
+    expect(sendAttesterTx).not.toHaveBeenCalled();
+  });
+
+  it('never blanks an existing envelope when a later session carries no id_verification', async () => {
+    await deliver(approvedBody());
+    const enc = snapshot(`${PERSONS}/${PERSON}`).get('enc') as Record<string, string>;
+    const photoEnc = snapshot(`${PERSONS}/${PERSON}`).get('photoEnc') as string;
+    expect(enc.name).toBeTruthy();
+    expect(photoEnc).toBeTruthy();
+
+    // 같은 사람이 다시 본인인증을 받는다. 이번 결정에는 문서 정보가 실려 오지 않았다.
+    write(`${PERSONS}/${PERSON}`, { status: 'active', kycLevel: 0 }, { merge: true });
+    const res = await deliver({
+      session_id: 's5',
+      status: 'Approved',
+      vendor_data: PERSON,
+      decision: { face_search: { status: 'clear' } },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const after = snapshot(`${PERSONS}/${PERSON}`);
+    expect(after.get('enc')).toEqual(enc); // 빈 문자열로 덮어쓰지 않는다
+    expect(after.get('photoEnc')).toBe(photoEnc);
+    expect(after.get('kycLevel')).toBe(1);
   });
 
   it('never persists a Didit PII field, and binds every envelope to personId:field', async () => {
