@@ -43,6 +43,19 @@
   },
   {
     "type": "function",
+    "name": "LATE_WINDOW",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "MIGRATE_DELAY",
     "inputs": [],
     "outputs": [
@@ -245,6 +258,51 @@
   },
   {
     "type": "function",
+    "name": "checkInLate",
+    "inputs": [
+      {
+        "name": "tokenId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "g",
+        "type": "tuple",
+        "internalType": "struct Ticket.GateCode",
+        "components": [
+          {
+            "name": "gateId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "eventId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "issuedAt",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "nonce",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          }
+        ]
+      },
+      {
+        "name": "deviceSig",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "checkInOf",
     "inputs": [
       {
@@ -276,6 +334,11 @@
           },
           {
             "name": "manual",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "late",
             "type": "bool",
             "internalType": "bool"
           }
@@ -1324,6 +1387,37 @@
         "type": "bytes32",
         "indexed": false,
         "internalType": "bytes32"
+      },
+      {
+        "name": "ts",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "CheckedInLate",
+    "inputs": [
+      {
+        "name": "tokenId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "gateId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "issuedAt",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
       },
       {
         "name": "ts",

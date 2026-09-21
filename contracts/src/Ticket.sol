@@ -57,6 +57,9 @@ contract Ticket is ERC721, ITicket {
         uint64 ts;
         bytes32 nonceHash;
         bool manual;
+        /// @dev 스펙 12 의 오프라인 큐가 복구 후에 밀어 넣은 기록이다. manual 과 같은 슬롯에
+        ///      들어가므로 저장 비용은 0이다.
+        bool late;
     }
 
     struct Offer {
@@ -74,6 +77,9 @@ contract Ticket is ERC721, ITicket {
 
     uint256 public constant CODE_WINDOW = 60;
     uint256 public constant CLOCK_SKEW = 5;
+    /// @notice 스펙 12 의 오프라인 큐가 살 수 있는 시간. 큐에 담긴 코드는 개장 이 시간 전부터
+    ///         유효하고, 큐는 폐장 이 시간 뒤까지 흘릴 수 있다. 현장 창(CODE_WINDOW)과 무관하다.
+    uint256 public constant LATE_WINDOW = 12 hours;
 
     /// @notice 6.3 T11: 어테스터가 계정을 바꾼 뒤 티켓이 따라가기까지 본인에게 주는 유예.
     ///         본인은 Identity.cancelRotation() 으로 그 안에 되돌릴 수 있다.
@@ -114,6 +120,9 @@ contract Ticket is ERC721, ITicket {
     event CheckedIn(
         uint256 indexed tokenId, uint256 indexed eventId, uint256 indexed gateId, bytes32 nonceHash, uint64 ts
     );
+    /// @notice 큐에서 흘러들어온 입장. 같은 트랜잭션에서 CheckedIn 도 함께 나가므로, 입장 수를
+    ///         세는 쪽은 CheckedIn 하나만 보면 되고 오프라인 비율을 세는 쪽만 이걸 본다(스펙 12).
+    event CheckedInLate(uint256 indexed tokenId, uint256 indexed gateId, uint64 issuedAt, uint64 ts);
     event OverrideRequested(uint256 indexed tokenId, uint256 indexed gateId, address indexed requester, uint8 reason);
     event ManualOverride(
         uint256 indexed tokenId, uint256 indexed gateId, address indexed approver, uint8 role, uint8 reason
@@ -328,51 +337,88 @@ contract Ticket is ERC721, ITicket {
         emit OfferAccepted(tokenId, o.from, msg.sender);
     }
 
-    /// @notice Spec 7.2 step 6, checks in order: the ticket exists, it belongs to this event, the event
-    ///         is still running, the ticket is spendable, the caller is this event's open gate, the code
-    ///         is fresh, the device signature holds. Only an open gate of this event may call it. The
-    ///         staff device maps each of these errors to a DENY code on screen (sub-plan 04), so the
-    ///         names are part of the ABI.
+    /// @notice 스펙 7.2 6단계. 검사 순서: 티켓이 있고, 이 행사 것이고, 행사가 살아 있고, 티켓이
+    ///         쓸 수 있고, 부르는 쪽이 이 행사의 열린 게이트이고, 코드가 신선하고, 기기 서명이
+    ///         맞는가. 스태프 단말기가 이 에러들을 화면의 DENY 코드로 옮기므로(04) 이름이 ABI 다.
     function checkIn(uint256 tokenId, GateCode calldata g, bytes calldata deviceSig) external {
+        _admit(tokenId, g, deviceSig, false);
+    }
+
+    /// @notice 스펙 12: 단말기가 인터넷을 잃으면 서명된 스냅샷으로 로컬 검증하고 "OFFLINE 승인"을
+    ///         띄운 뒤 트랜잭션을 큐에 쌓아 복구 후 보낸다. 큐에 담긴 코드의 issuedAt 은 탭한
+    ///         그때 그대로라 60초 창으로는 영영 들어올 수 없다(C1). 증명은 똑같다 — 관객 기기 키
+    ///         서명이 여전히 필수이므로 단말기 혼자서는 만들 수 없다(T15). 다른 것은 시계뿐이다:
+    ///         코드는 개장 LATE_WINDOW 전부터 유효하고, 제출은 폐장 LATE_WINDOW 후까지 받는다.
+    ///         게이트가 '열려' 있을 필요는 없다 — 열림은 문을 여닫는 스위치이고, 늦은 제출은
+    ///         문이 아니라 장부다. 폐기된 게이트는 여전히 어느 경로로도 못 쓴다(T14).
+    /// @dev    이 경로는 현장 경로보다 느슨하므로 등록된 게이트는 60초 규칙을 피해 갈 수 있다.
+    ///         얻을 것은 없고(관객은 어차피 들어오려던 참이다) 남는 것은 그리핑이며, 대응은 T14 와
+    ///         같은 revokeGate 다. 며칠 전에 서명을 수확해 두는 공격은 issuedAt 하한이 막는다.
+    function checkInLate(uint256 tokenId, GateCode calldata g, bytes calldata deviceSig) external {
+        _admit(tokenId, g, deviceSig, true);
+    }
+
+    /// @dev 두 입장 경로의 공통 본문. 복사본을 두지 않는 이유는 크기가 아니라 안전이다:
+    ///      두 경로의 검사 순서가 한 글자라도 갈라지면 한쪽에만 있는 구멍이 생긴다.
+    function _admit(uint256 tokenId, GateCode calldata g, bytes calldata deviceSig, bool late) private {
         address holder = _ownerOf(tokenId);
         if (holder == address(0)) revert NoSuchTicket();
 
         uint256 eventId = _eventOf[tokenId];
         if (g.eventId != eventId) revert WrongEvent();
-        // eventStatus promotes to Ended only from Published, so Ended and Cancelled are mutually
-        // exclusive states, not a precedence: swapping these two lines would change nothing.
-        EventStatus status = eventStatus(eventId);
-        if (status == EventStatus.Ended) revert EventEnded();
-        if (status == EventStatus.Cancelled) revert EventCancelled();
+
+        EventMeta storage m = _events[eventId];
+        // 살아 있는 토큰의 행사는 Published 이거나 Cancelled 뿐이다(claim 이 Published 만 받고
+        // 상태는 Draft 로 되돌아가지 않는다). 그래서 eventStatus() 대신 두 가지만 직접 본다.
+        if (_status[eventId] == EventStatus.Cancelled) revert EventCancelled();
+        if (block.timestamp > uint256(m.endsAt) + (late ? LATE_WINDOW : 0)) revert EventEnded();
         if (_revoked[tokenId]) revert TicketRevoked();
         if (_checkIns[tokenId].ts != 0) revert AlreadyCheckedIn();
 
-        if (!organizers.isOpenGate(eventId, msg.sender)) revert GateNotOpen();
+        if (late) {
+            // 열려 있는지는 묻지 않는다. 폐기 여부는 묻는다(T14).
+            (uint256 gateEventId,,,,, bool gateRevoked) = organizers.gateInfo(g.gateId);
+            if (gateEventId != eventId || gateRevoked) revert GateNotOpen();
+        } else if (!organizers.isOpenGate(eventId, msg.sender)) {
+            revert GateNotOpen();
+        }
         if (organizers.gateOf(msg.sender) != g.gateId) revert GateMismatch();
-        // The gate phone's clock may run up to CLOCK_SKEW seconds ahead of the chain; past that the
-        // stamp is a forgery, and CODE_WINDOW seconds behind it is a replay.
+
+        // 게이트 폰의 시계는 체인보다 CLOCK_SKEW 초까지 앞설 수 있다. 그 너머는 위조다.
         if (g.issuedAt > block.timestamp + CLOCK_SKEW) revert CodeExpired();
-        if (uint256(g.issuedAt) + CODE_WINDOW < block.timestamp) revert CodeExpired();
+        if (late) {
+            // 개장 LATE_WINDOW 전보다 옛 코드는 받지 않는다. 넓은 창이 만드는 단 하나의 새 위험이
+            // 게이트의 서명 사전 수확이고, 이 줄이 그것을 죽인다.
+            if (uint256(g.issuedAt) + LATE_WINDOW < m.startsAt) revert CodeExpired();
+        } else if (uint256(g.issuedAt) + CODE_WINDOW < block.timestamp) {
+            revert CodeExpired();
+        }
 
-        // 회전된 계정이 티켓을 아직 들고 있을 수 있다. 잠금만으로도 막히지만(I2가 회전 시
-        // 잠그므로) 두 컨트랙트의 불변식을 서로에게 기대지 않도록 여기서도 직접 묻는다.
-        if (!identity.isMember(holder)) revert NotMember();
-        if (identity.isLocked(holder)) revert DeviceLocked();
-        (bytes32 x, bytes32 y) = identity.activeDevice(holder);
+        // 중괄호는 스타일이 아니라 필요다: `late` 가 한 슬롯을 더 먹어서 이 다섯 지역변수가
+        // 다음 문장까지 살아 있으면 legacy 코드젠이 stack too deep 으로 죽는다. 블록을 닫아
+        // 죽은 변수를 버린다 — 검사 순서는 한 줄도 바뀌지 않았다.
+        {
+            // 회전된 계정이 티켓을 아직 들고 있을 수 있다. 잠금만으로도 막히지만(I2가 회전 시
+            // 잠그므로) 두 컨트랙트의 불변식을 서로에게 기대지 않도록 여기서도 직접 묻는다.
+            if (!identity.isMember(holder)) revert NotMember();
+            if (identity.isLocked(holder)) revert DeviceLocked();
+            (bytes32 x, bytes32 y) = identity.activeDevice(holder);
 
-        if (deviceSig.length != 64) revert BadDeviceSignature();
-        bytes32 h = sha256(abi.encode(tokenId, g.gateId, g.eventId, g.nonce, g.issuedAt));
-        (bytes32 r, bytes32 s) = abi.decode(deviceSig, (bytes32, bytes32));
-        if (!P256.verifySignature(h, r, s, x, y)) revert BadDeviceSignature();
+            if (deviceSig.length != 64) revert BadDeviceSignature();
+            bytes32 h = sha256(abi.encode(tokenId, g.gateId, g.eventId, g.nonce, g.issuedAt));
+            (bytes32 r, bytes32 s) = abi.decode(deviceSig, (bytes32, bytes32));
+            if (!P256.verifySignature(h, r, s, x, y)) revert BadDeviceSignature();
+        }
 
         bytes32 nonceHash = keccak256(abi.encode(g.nonce));
         _checkIns[tokenId] =
-            CheckIn({gateId: g.gateId, ts: uint64(block.timestamp), nonceHash: nonceHash, manual: false});
+            CheckIn({gateId: g.gateId, ts: uint64(block.timestamp), nonceHash: nonceHash, manual: false, late: late});
         if (_offers[tokenId].from != address(0)) {
             delete _offers[tokenId];
             emit OfferCancelled(tokenId);
         }
 
+        if (late) emit CheckedInLate(tokenId, g.gateId, g.issuedAt, uint64(block.timestamp));
         emit CheckedIn(tokenId, eventId, g.gateId, nonceHash, uint64(block.timestamp));
     }
 
@@ -425,7 +471,8 @@ contract Ticket is ERC721, ITicket {
         (uint256 gateEventId,,,,,) = organizers.gateInfo(gateId);
         if (gateEventId != eventId) revert GateMismatch();
 
-        _checkIns[tokenId] = CheckIn({gateId: gateId, ts: uint64(block.timestamp), nonceHash: bytes32(0), manual: true});
+        _checkIns[tokenId] =
+            CheckIn({gateId: gateId, ts: uint64(block.timestamp), nonceHash: bytes32(0), manual: true, late: false});
         if (_offers[tokenId].from != address(0)) {
             delete _offers[tokenId];
             emit OfferCancelled(tokenId);
