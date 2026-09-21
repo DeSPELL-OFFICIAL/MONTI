@@ -12,6 +12,7 @@ contract OrganizersTest is Test {
     event OrganizerCreated(uint256 indexed orgId, address indexed owner);
     event OwnerTransferred(uint256 indexed orgId, address indexed from, address indexed to);
     event AdminSet(uint256 indexed orgId, address indexed admin, uint32 bits);
+    event ManagerSet(uint256 indexed orgId, address indexed manager, bool exists, bool canApprove);
 
     function setUp() public {
         orgs = new Organizers();
@@ -99,5 +100,62 @@ contract OrganizersTest is Test {
         vm.prank(OTHER);
         vm.expectRevert(Organizers.NotOwner.selector);
         orgs.setAdmin(1, OTHER, 1);
+    }
+
+    function test_ownerAppointsManagerWithApprovalRight() public {
+        orgs.createOrganizer(OWNER);
+        vm.expectEmit(true, true, false, true);
+        emit ManagerSet(1, OTHER, true, true);
+        vm.prank(OWNER);
+        orgs.setManager(1, OTHER, true, true);
+
+        (bool exists, bool canApprove) = orgs.managerOf(1, OTHER);
+        assertTrue(exists);
+        assertTrue(canApprove);
+    }
+
+    function test_requestOnlyManagerHasNoApprovalRight() public {
+        orgs.createOrganizer(OWNER);
+        vm.prank(OWNER);
+        orgs.setManager(1, OTHER, true, false);
+        (bool exists, bool canApprove) = orgs.managerOf(1, OTHER);
+        assertTrue(exists);
+        assertFalse(canApprove);
+    }
+
+    function test_managerCanBeRemoved() public {
+        orgs.createOrganizer(OWNER);
+        vm.startPrank(OWNER);
+        orgs.setManager(1, OTHER, true, true);
+        orgs.setManager(1, OTHER, false, false);
+        vm.stopPrank();
+        (bool exists, bool canApprove) = orgs.managerOf(1, OTHER);
+        assertFalse(exists);
+        assertFalse(canApprove);
+    }
+
+    function test_adminWithManageManagersBitCanAppoint() public {
+        orgs.createOrganizer(OWNER);
+        address admin = address(0x0A);
+        vm.startPrank(OWNER);
+        orgs.setAdmin(1, admin, orgs.PERM_MANAGE_MANAGERS());
+        vm.stopPrank();
+
+        vm.prank(admin);
+        orgs.setManager(1, OTHER, true, false);
+        (bool exists,) = orgs.managerOf(1, OTHER);
+        assertTrue(exists);
+    }
+
+    function test_adminWithoutTheBitCannotAppoint() public {
+        orgs.createOrganizer(OWNER);
+        address admin = address(0x0A);
+        vm.startPrank(OWNER);
+        orgs.setAdmin(1, admin, orgs.PERM_MANAGE_GATES());
+        vm.stopPrank();
+
+        vm.prank(admin);
+        vm.expectRevert(Organizers.Unauthorized.selector);
+        orgs.setManager(1, OTHER, true, false);
     }
 }

@@ -97,6 +97,21 @@ contract Organizers {
         emit AdminSet(orgId, admin, permissionBits);
     }
 
+    /// @notice Spec 9.4: a manager either approves overrides directly or can only file a request.
+    function setManager(uint256 orgId, address manager, bool exists, bool canApprove) external {
+        if (_owners[orgId] == address(0)) revert UnknownOrganizer();
+        if (!hasPermission(orgId, msg.sender, PERM_MANAGE_MANAGERS)) revert Unauthorized();
+        if (manager == address(0)) revert ZeroAddress();
+
+        _managers[orgId][manager] = Manager({exists: exists, canApprove: exists && canApprove});
+        emit ManagerSet(orgId, manager, exists, exists && canApprove);
+    }
+
+    function managerOf(uint256 orgId, address account) external view returns (bool exists, bool canApprove) {
+        Manager storage m = _managers[orgId][account];
+        return (m.exists, m.canApprove);
+    }
+
     /// @notice The owner implicitly holds every bit; an admin holds exactly the bits set for them.
     function hasPermission(uint256 orgId, address account, uint32 bit) public view returns (bool) {
         if (account == address(0)) return false;
