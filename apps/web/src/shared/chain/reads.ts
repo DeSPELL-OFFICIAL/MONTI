@@ -111,6 +111,12 @@ export interface GateInfoStruct {
   revoked: boolean;
 }
 
+/** `Organizers.managerOf` returns two separate booleans, not a struct (spec 9.4). */
+export interface ManagerStruct {
+  exists: boolean;
+  canApprove: boolean;
+}
+
 export function readOrganizers() {
   const call = reader('Organizers', getConfig().addresses.organizers);
   return {
@@ -119,6 +125,16 @@ export function readOrganizers() {
       call<boolean>('hasPermission', [orgId, account, bit]),
     gateOf: (gateAccount: Hex) => call<bigint>('gateOf', [gateAccount]),
     ownerOf: (orgId: bigint) => call<Hex>('ownerOf', [orgId]),
+    /**
+     * The bits an admin actually holds. Zero is "not an admin of this organisation" — this is
+     * how the team screen sees an invite finish, because the invite document's own `done` flag
+     * is written by the Tenderly webhook and the UI must not wait on it.
+     */
+    adminBitsOf: (orgId: bigint, admin: Hex) => call<number>('adminBitsOf', [orgId, admin]),
+    managerOf: async (orgId: bigint, account: Hex): Promise<ManagerStruct> => {
+      const [exists, canApprove] = await call<[boolean, boolean]>('managerOf', [orgId, account]);
+      return { exists, canApprove };
+    },
     gateInfo: async (gateId: bigint): Promise<GateInfoStruct> => {
       const [eventId, account, kx, ky, open, revoked] =
         await call<[bigint, Hex, Hex, Hex, boolean, boolean]>('gateInfo', [gateId]);
@@ -131,6 +147,9 @@ export function readTicket() {
   const call = reader('Ticket', getConfig().addresses.ticket);
   return {
     eventOf: (tokenId: bigint) => call<bigint>('eventOf', [tokenId]),
+    /** The organisation an event belongs to. Zero means there is no such event — the same
+     *  answer the backend turns into `UNKNOWN_EVENT` rather than "you have no permission". */
+    eventOrg: (eventId: bigint) => call<bigint>('eventOrg', [eventId]),
     tierOf: (tokenId: bigint) => call<number>('tierOf', [tokenId]),
     eventStatus: (eventId: bigint) => call<number>('eventStatus', [eventId]),
     isRevoked: (tokenId: bigint) => call<boolean>('isRevoked', [tokenId]),
@@ -182,6 +201,10 @@ const GATE_INFO_FIELDS = [
 // mirrored point and every check-in would read as a bad device signature.
 const ACTIVE_DEVICE_FIELDS = ['x', 'y'] as const satisfies readonly (keyof DeviceKeyPoint)[];
 
+// Two booleans of the same width: swapped, a manager who may only file a request would read as
+// one who may approve an entry exception outright.
+const MANAGER_FIELDS = ['exists', 'canApprove'] as const satisfies readonly (keyof ManagerStruct)[];
+
 /**
  * The same pin, for the structs this app **sends**. `Ticket.createEvent` takes an `EventMeta`
  * and a `Tier[]` as calldata, and viem encodes an object positionally out of the ABI's
@@ -202,6 +225,6 @@ export const STRUCT_SHAPES = {
     eventMeta: EVENT_META_FIELDS, tiers: TIER_FIELDS, checkInOf: CHECK_IN_FIELDS,
     offerOf: OFFER_FIELDS,
   },
-  Organizers: { gateInfo: GATE_INFO_FIELDS },
+  Organizers: { gateInfo: GATE_INFO_FIELDS, managerOf: MANAGER_FIELDS },
   Identity: { activeDevice: ACTIVE_DEVICE_FIELDS },
 } as const;

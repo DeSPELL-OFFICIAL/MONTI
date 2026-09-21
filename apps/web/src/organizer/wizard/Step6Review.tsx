@@ -26,9 +26,12 @@ function Row({ label, value }: { label: string; value: string }) {
 const HINT = { color: 'var(--muted)', fontSize: 13 } as const;
 
 export function Step6Review({
-  draft, onBack, onPublished, onDone,
+  draft, patch, onBack, onPublished, onDone,
 }: {
   draft: WizardDraft;
+  /** The draft is marked with the operation's hash when a `wait` gives up, so a reload cannot
+   *  publish the same event twice. */
+  patch: (next: Partial<WizardDraft>) => void;
   onBack: () => void;
   /** Runs the moment the event is on chain: the wizard throws the draft away here. */
   onPublished: () => void;
@@ -37,7 +40,7 @@ export function Step6Review({
 }) {
   const copy = useOrganizerCopy().wizard;
   const locale = useLocale();
-  const { phase, problems, error, publish } = usePublish(draft, onPublished);
+  const { phase, problems, error, publish } = usePublish(draft, onPublished, patch);
   const region = KR_REGIONS.find((entry) => entry.code === draft.regionCode);
   const busy = phase === 'pinning' || phase === 'sending';
   const yes = locale === 'en' ? 'Yes' : '예';

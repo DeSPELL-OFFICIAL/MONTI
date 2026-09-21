@@ -12,6 +12,7 @@ export const emptyDraft: WizardDraft = {
   requireKyc: false,
   tiers: [{ name: '', supply: 100, maxPerWallet: 2, seated: false }],
   gates: [],
+  submittedOpHash: '',
 };
 
 function text(value: unknown, fallback: string): string {
@@ -70,6 +71,7 @@ export function normalizeDraft(raw: unknown): WizardDraft {
     requireKyc: flag(saved.requireKyc, emptyDraft.requireKyc),
     tiers: tiers.length > 0 ? tiers : emptyDraft.tiers,
     gates: Array.isArray(saved.gates) ? saved.gates.filter((gate): gate is string => typeof gate === 'string') : [],
+    submittedOpHash: text(saved.submittedOpHash, emptyDraft.submittedOpHash),
   };
 }
 

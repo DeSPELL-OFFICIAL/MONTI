@@ -33,7 +33,12 @@ vi.mock('../../shared/api/functions', async (orig) => ({
 
 // The uid -> nickname resolution has its own test; here it only has to prove the screen shows
 // the name it is given and never the uid it was keyed by.
-vi.mock('./useChatNames', () => ({ useChatNames: () => ({ u1: 'organizer_kim', u2: 'alice' }) }));
+// `senderName` is not stubbed: the 주최자 label on a pinned row is this screen's own rule and
+// the test below checks it through the real function.
+vi.mock('./useChatNames', async (orig) => ({
+  ...(await orig<typeof import('./useChatNames')>()),
+  useChatNames: () => ({ u1: 'organizer_kim', u2: 'alice' }),
+}));
 
 // The route reuses one component instance across params, so the test has to be able to move
 // between rooms the way the router does.

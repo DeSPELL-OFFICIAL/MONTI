@@ -93,7 +93,7 @@ describe('VerifyIdentity', () => {
   });
 
   it('reports a duplicate face with the "already have an account" copy', async () => {
-    getSignupStatus.mockResolvedValue({ status: 'rejected', kycLevel: 0, reason: 'duplicate_face' });
+    getSignupStatus.mockResolvedValue({ status: 'rejected', kycLevel: 0, kycReason: 'duplicate_face' });
     renderScreen();
     await userEvent.click(cta());
     await comeBack();
@@ -101,7 +101,7 @@ describe('VerifyIdentity', () => {
   });
 
   it('reports any other failure with the generic rejection copy', async () => {
-    getSignupStatus.mockResolvedValue({ status: 'rejected', kycLevel: 0, reason: 'document_failed' });
+    getSignupStatus.mockResolvedValue({ status: 'rejected', kycLevel: 0, kycReason: 'declined' });
     renderScreen();
     await userEvent.click(cta());
     await comeBack();

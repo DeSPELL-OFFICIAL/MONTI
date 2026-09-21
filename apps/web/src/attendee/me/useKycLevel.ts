@@ -5,7 +5,7 @@ import { api } from '../../shared/api/functions';
 export function useKycLevel() {
   const query = useQuery({
     queryKey: ['kycLevel'],
-    queryFn: async () => (await api.getSignupStatus()).kycLevel,
+    queryFn: async () => (await api.getSignupStatus()).kycLevel ?? 0,
     staleTime: 60_000,
   });
   return { kycLevel: query.data ?? 0, isLoading: query.isLoading, refetch: query.refetch };

@@ -3,12 +3,20 @@ import { FirebaseError } from 'firebase/app';
 
 let nextError: unknown = null;
 
+/** Set by a test that needs the server's own answer rather than the echo below. */
+let nextResult: unknown = null;
+
 vi.mock('firebase/functions', () => ({
   httpsCallable: (_fns: unknown, name: string) => async (payload: unknown) => {
     if (nextError !== null) {
       const thrown = nextError;
       nextError = null;
       throw thrown;
+    }
+    if (nextResult !== null) {
+      const answer = nextResult;
+      nextResult = null;
+      return { data: answer };
     }
     return { data: { name, payload } };
   },
@@ -25,6 +33,7 @@ const { api, CallableError, callableFailure } = await import('./functions');
 
 beforeEach(() => {
   nextError = null;
+  nextResult = null;
 });
 
 describe('callable wrappers', () => {
@@ -32,9 +41,35 @@ describe('callable wrappers', () => {
     await expect(api.startSignup()).resolves.toMatchObject({ name: 'startSignup' });
     await expect(api.resolveRecipient({ type: 'phone', value: '+821012345678' }))
       .resolves.toMatchObject({ name: 'resolveRecipient', payload: { type: 'phone', value: '+821012345678' } });
-    await expect(api.listPendingGates({ eventId: '3' })).resolves.toMatchObject({ name: 'listPendingGates' });
     await expect(api.startKyc()).resolves.toMatchObject({ name: 'startKyc' });
-    await expect(api.pinMessage({ eventId: '3', msgId: 'm1', pinned: true })).resolves.toMatchObject({ name: 'pinMessage' });
+    await expect(api.revokeInvite({ inviteId: 'i1' })).resolves.toMatchObject({ name: 'revokeInvite' });
+  });
+
+  /**
+   * The shipped callable answers `{ gates }` and every caller wants the rows, so the wrapper
+   * unwraps — the same shape `pendingOffers` has. A row is exactly the four values
+   * `Organizers.registerGate` takes plus when it arrived: no device label, no `createdAt`,
+   * and never the uid that submitted it.
+   */
+  it('unwraps the pending-gate queue to its rows', async () => {
+    nextResult = { gates: [{ gateAccount: '0xabc', kx: '0x01', ky: '0x02', submittedAt: 7 }] };
+    await expect(api.listPendingGates({ eventId: '3' })).resolves.toEqual([
+      { gateAccount: '0xabc', kx: '0x01', ky: '0x02', submittedAt: 7 },
+    ]);
+  });
+
+  /**
+   * `pinMessage` takes `messageId`, never `msgId` — the server refuses an unknown target with
+   * `BAD_PIN_TARGET` — and authoring a notice is the `text` shape, with no `pinned` alongside
+   * it (`BAD_PINNED`). Both go to the same callable and both answer with the message id.
+   */
+  it('posts a notice by text and toggles an existing pin by messageId', async () => {
+    await expect(api.pinMessage({ eventId: '3', text: '문 앞에서 만나요' })).resolves.toMatchObject({
+      name: 'pinMessage', payload: { eventId: '3', text: '문 앞에서 만나요' },
+    });
+    await expect(api.pinMessage({ eventId: '3', messageId: 'm1', pinned: false })).resolves.toMatchObject({
+      name: 'pinMessage', payload: { eventId: '3', messageId: 'm1', pinned: false },
+    });
   });
 
   it('offers nothing sub-plan 02 never deployed', () => {

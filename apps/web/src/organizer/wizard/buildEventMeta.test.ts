@@ -18,6 +18,7 @@ const draft: WizardDraft = {
   tiers: [{ name: '일반', supply: 100, maxPerWallet: 2, seated: false }],
   gates: ['정문'],
   orgId: '9',
+  submittedOpHash: '',
 };
 
 describe('buildEventMeta', () => {

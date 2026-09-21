@@ -1,7 +1,11 @@
 import { useState } from 'react';
-import { encodeErrorResult } from 'viem';
 import type { Hex } from '@monti/shared';
 import { ticketAbi } from '../../shared/chain/abis';
+import {
+  errorSelector as abiErrorSelector,
+  revertMatch as abiRevertMatch,
+  selectorOf,
+} from '../../shared/chain/revert';
 import { OpReverted, ticketOp } from '../../shared/chain/ops';
 import { getAttendeeAccount } from '../../shared/chain/accounts';
 import { readTicket } from '../../shared/chain/reads';
@@ -30,24 +34,11 @@ const REVERT_RULES: ReadonlyArray<readonly [string, PrecheckFailure]> = [
   ['MaxPerWalletExceeded', 'maxPerWallet'],
 ];
 
-/**
- * The selector the generated ABI gives this error, or nothing when it does not carry the name.
- * `encodeErrorResult` throws on a name it cannot find, and every caller below runs inside a
- * `catch` — a rename in sub-plan 01 would otherwise throw a second time there and leave the
- * screen stuck mid-send instead of falling through to the generic sentence.
- */
-export function errorSelector(errorName: string): string | undefined {
-  try {
-    return encodeErrorResult({ abi: ticketAbi, errorName });
-  } catch {
-    return undefined;
-  }
-}
-
-/** Every one of these errors is argument-less, but slicing keeps a padded reason working. */
-function selectorOf(revertReason: Hex): string {
-  return revertReason.slice(0, 10).toLowerCase();
-}
+/** The two lookups in `shared/chain/revert.ts`, bound to `Ticket` — every screen that shares
+ *  the table below sends a `Ticket` write. The organiser's gate screen reads `Organizers`
+ *  refusals through the same helpers with its own ABI. */
+export const errorSelector = (errorName: string): string | undefined =>
+  abiErrorSelector(ticketAbi, errorName);
 
 /**
  * The same lookup for a screen with its own table. The invite and the inbox send other
@@ -55,16 +46,10 @@ function selectorOf(revertReason: Hex): string {
  * among the eight below, so they pair their own error names with their own sentences here and
  * fall back to `revertRule` for the ones a handover already owns.
  */
-export function revertMatch<T>(
+export const revertMatch = <T,>(
   revertReason: Hex,
   table: ReadonlyArray<readonly [string, T]>,
-): T | undefined {
-  const selector = selectorOf(revertReason);
-  for (const [errorName, value] of table) {
-    if (errorSelector(errorName) === selector) return value;
-  }
-  return undefined;
-}
+): T | undefined => abiRevertMatch(ticketAbi, revertReason, table);
 
 /** Built once, from the generated ABI rather than from hand-copied selectors. */
 let bySelector: Map<string, PrecheckFailure> | undefined;

@@ -66,3 +66,20 @@ export function useChatNames(eventId: string, enabled: boolean): Record<string, 
 
   return names;
 }
+
+/**
+ * The name one row is shown under.
+ *
+ * A pinned row is an organiser's notice: the `pinMessage` callable wrote it server-side under
+ * the organiser's own uid, and an organiser holds no ticket for their own event, so they are
+ * never in the room's roster and `names` can never have a name for them. Falling through to
+ * the roster would label every announcement 참석자, as if somebody in the room had posted it.
+ */
+export function senderName(
+  message: { uid: string; pinned?: boolean },
+  names: Record<string, string>,
+  copy: { organizer: string; someone: string },
+): string {
+  if (message.pinned === true) return copy.organizer;
+  return names[message.uid] ?? copy.someone;
+}

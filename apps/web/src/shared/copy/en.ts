@@ -153,6 +153,9 @@ export const en: typeof ko = {
     placeholder: 'Message (up to 500 characters)', tooLong: 'Messages can be up to 500 characters.',
     report: 'Report', reported: 'Reported', notice: 'Notice', reorderHint: 'Press and hold to reorder.',
     someone: 'Attendee',
+    // A pinned row is the organiser's notice, written for them by the server. Organisers are
+    // not members of the room, so the roster never has a name for one.
+    organizer: 'Organizer',
     joinFailed: 'Could not open this chat. Please try again in a moment.',
     noTicket: 'Only people holding a ticket for this event can join.',
     unavailable: 'This event has not opened its chat.',

@@ -1,7 +1,7 @@
 import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
 import type { FunctionsErrorCodeCore } from 'firebase/functions';
-import type { Hex, ResolveRecipientResult, SnapshotWire } from '@monti/shared';
+import type { AttendeeRow, Hex, PersonStatus, ResolveRecipientResult, SnapshotWire } from '@monti/shared';
 import { getFirebaseFunctions } from './firebase';
 
 /** The gRPC status the server chose, with Firebase's `functions/` prefix stripped. */
@@ -84,7 +84,28 @@ function call<Req, Res>(name: string): (payload?: Req) => Promise<Res> {
   };
 }
 
-export type SignupStatus = 'pending' | 'kyc_ok' | 'rejected' | 'active' | 'rotated';
+/**
+ * `getSignupStatus`'s own answer: every `persons/{id}.status` the backend writes, plus `none`
+ * for a uid that has never called `startSignup` (functions/src/functions/getSignupStatus.ts).
+ * `none` is not an error — it is the ordinary first screen.
+ */
+export type SignupStatus = PersonStatus | 'none';
+
+/**
+ * Why the last identity check did not raise the level, folded to four closed values by the
+ * server (functions/src/lib/didit.ts `declineReason`). None of it is personal data and none of
+ * it is the vendor's own wording: each code is a different thing for the person to do next.
+ *  - `declined`              the documents or the face were refused (expired and abandoned too)
+ *  - `duplicate_face`        the same face already has an account
+ *  - `face_search_missing`   approved, but no duplicate-face result came back — NOT a duplicate
+ *  - `face_search_not_clear` approved, with a duplicate-face result that was neither
+ * All four leave `kycLevel` at 0.
+ */
+export type KycDeclineReason =
+  | 'declined'
+  | 'duplicate_face'
+  | 'face_search_missing'
+  | 'face_search_not_clear';
 
 /**
  * What `createTransferInvite` answers with, field for field
@@ -114,18 +135,61 @@ export interface PendingOffer {
 /** The callable answers `{ offers }`; every caller wants the rows, so the wrapper unwraps. */
 const callPendingOffers = call<void, { offers: PendingOffer[] }>('pendingOffers');
 
+/**
+ * One terminal waiting on the organiser's approval. These four values are the whole of
+ * `Organizers.registerGate(eventId, gateAccount, kx, ky)` plus the time the staff phone sent
+ * it; `submittedAt` is epoch milliseconds.
+ */
+export interface PendingGate {
+  gateAccount: Hex;
+  kx: Hex;
+  ky: Hex;
+  submittedAt: number;
+}
+
+/** Same unwrapping as `pendingOffers`: the callable answers `{ gates }`. */
+const callPendingGates = call<{ eventId: string }, { gates: PendingGate[] }>('listPendingGates');
+
+/**
+ * What `acceptInvite` hands the invited person. `to`/`data` are a `setAdmin` or `setManager`
+ * call ready to send, and `requiredSender` is the only account the contract will accept it
+ * from — the organisation's owner.
+ */
+export interface InviteCalldata {
+  to: Hex;
+  data: Hex;
+  orgId: string;
+  role: 'admin' | 'manager';
+  requiredSender: Hex;
+}
+
+/** Authoring a notice, or turning the pin of an existing message on and off. Never both. */
+export type PinMessageArgs =
+  | { eventId: string; text: string }
+  | { eventId: string; messageId: string; pinned: boolean };
+
 export const api = {
   startSignup: call<void, { personId: Hex }>('startSignup'),
-  // Identity verification is per event, not part of signup. startKyc opens a fresh Didit session.
-  startKyc: call<void, { kycUrl: string; sessionId: string }>('startKyc'),
+  // Identity verification is per event, not part of signup. `startKyc` reuses the person's open
+  // session when there is one and opens a fresh one otherwise. `callbackUrl` is optional and
+  // must be one of our own origins — the server refuses anything else (`BAD_CALLBACK_URL`),
+  // because it is where the vendor sends the person's browser back to.
+  startKyc: call<{ callbackUrl?: string } | void, { kycUrl: string; sessionId: string }>('startKyc'),
+  // Exactly what the deployed callable returns (`SignupStatusResult`): how far signup got,
+  // whether a passkey and an account exist, the identity-check level, and the `personId` to
+  // carry back into `registerPasskey`. There is no `reason` — the vendor's verdict never
+  // leaves the server — and no `account` or `kycUrl`; a screen that wants the address reads
+  // the session, and a fresh identity-check link comes from `startKyc`.
   getSignupStatus: call<
     void,
     {
       status: SignupStatus;
-      kycLevel: number;
-      reason?: 'duplicate_face' | 'document_failed' | 'liveness_failed';
-      account?: Hex;
-      kycUrl?: string;
+      hasPasskey: boolean;
+      hasAccount: boolean;
+      kycLevel?: 0 | 1;
+      /** Absent once the check has passed, and absent for somebody who never tried. */
+      kycReason?: KycDeclineReason;
+      personId?: Hex;
     }
   >('getSignupStatus'),
   registerPasskey: call<
@@ -185,24 +249,33 @@ export const api = {
   // The answer is the message's new total, which is everybody's, not this person's.
   // See functions/src/functions/eventChat.ts.
   reportMessage: call<{ eventId: string; msgId: string }, { reported: number }>('reportMessage'),
-  listAttendees: call<
-    { eventId: string },
-    Array<{ tokenId: string; nickname: string; tier: number; checkedIn: boolean; kycLevel: number }>
-  >('listAttendees'),
-  // Sub-plan 04's staff gate-registration screen calls this instead of writing Firestore directly.
-  submitPendingGate: call<
-    { eventId: string; gateAccount: Hex; kx: Hex; ky: Hex; deviceLabel: string },
-    { ok: true }
-  >('submitPendingGate'),
-  listPendingGates: call<
-    { eventId: string },
-    { gates: Array<{ gateAccount: Hex; kx: Hex; ky: Hex; label: string; createdAt: number }> }
-  >('listPendingGates'),
+  // The row type is the server's own (packages/shared), so a change there breaks this call
+  // site rather than silently disagreeing with it. It carries no phone, no name and no photo.
+  listAttendees: call<{ eventId: string }, AttendeeRow[]>('listAttendees'),
+  // Sub-plan 04's staff gate-registration screen calls this instead of writing Firestore
+  // directly. The server records the submitting uid and nothing else about the device — there
+  // is no label, so nothing here invents one.
+  submitPendingGate: call<{ eventId: string; gateAccount: Hex; kx: Hex; ky: Hex }, { ok: true }>(
+    'submitPendingGate',
+  ),
+  /** The queue the organiser's gate screen approves from. Every field is an argument of
+   *  `Organizers.registerGate`, plus the time it arrived; who submitted it never leaves the
+   *  server (functions/src/functions/pendingGates.ts). */
+  listPendingGates: async (args: { eventId: string }): Promise<PendingGate[]> =>
+    (await callPendingGates(args)).gates,
+  // `link` is the one an organiser sends to the person; it carries the invite id and nothing
+  // else — no number, no organisation detail.
   createInvite: call<
     { orgId: string; role: 'admin' | 'manager'; phoneE164: string; permissionBits?: number; canApprove?: boolean },
-    { inviteId: string }
+    { inviteId: string; link: string }
   >('createInvite'),
-  acceptInvite: call<{ inviteId: string }, { orgId: string; role: 'admin' | 'manager'; to: Hex; data: Hex }>('acceptInvite'),
+  // The server does not put the role on chain: `setAdmin` is owner-only and `setManager` needs
+  // `PERM_MANAGE_MANAGERS`, and the attester is neither. It hands back the calldata and says
+  // who may send it — `requiredSender` is the organisation's owner as it is *now*, so a screen
+  // shows that address rather than remembering whoever made the invite.
+  acceptInvite: call<{ inviteId: string }, InviteCalldata>('acceptInvite'),
+  // Owner-only, and idempotent: a second call answers `revoked` rather than refusing.
+  revokeInvite: call<{ inviteId: string }, { status: 'revoked' }>('revokeInvite'),
   // Staff-only, consumed by sub-plan 04 through this same module.
   // The gate device account never authenticates; these go out on the staff member's Firebase
   // session and the server authorises them against organizers.isOpenGate(eventId, gateAccount).
@@ -211,8 +284,17 @@ export const api = {
     { tokenId: string; gateAccount: Hex },
     { photoJpegB64: string; displayName: string }
   >('getPhotoForGate'),
-  // Defined by this sub-plan, see the Interfaces block.
-  pinMessage: call<{ eventId: string; msgId: string; pinned: boolean }, { ok: true }>('pinMessage'),
+  /**
+   * The organiser's notice. Exactly one of the two shapes, never both
+   * (functions/src/functions/pinMessage.ts):
+   *  - `{ eventId, text }` — the server writes the notice itself and pins it. This is the only
+   *    way an organiser can leave one: they hold no ticket, so `joinEventChat` would refuse
+   *    them their own room.
+   *  - `{ eventId, messageId, pinned }` — turns the pin on or off for a message already there.
+   *
+   * The argument is `messageId`, never `msgId`, and the answer carries the id either way.
+   */
+  pinMessage: call<PinMessageArgs, { ok: true; messageId: string }>('pinMessage'),
   // The web never holds a pinning token. The organiser sends the cover picture and the two
   // readable fields; the server checks that this caller may create events for `orgId`, pins
   // the picture, then pins `{ name, description, image: "ipfs://<imageCid>" }` and answers

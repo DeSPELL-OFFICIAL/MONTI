@@ -12,7 +12,7 @@ import {
   type ChatRoomState,
 } from '../../shared/api/firestore';
 import { api, callableFailure } from '../../shared/api/functions';
-import { useChatNames } from './useChatNames';
+import { senderName, useChatNames } from './useChatNames';
 
 /** What kept this person out of the room, if anything. '' is the ordinary open room. */
 type Blocker = '' | 'noTicket' | 'unavailable' | 'failed';
@@ -137,14 +137,15 @@ export function ChatRoom() {
       {/* An announcement is a row the organiser pinned. This screen only ever reads `pinned`. */}
       {notices.map((notice) => (
         <Alert key={notice.id} tone="info">
-          {copy.chats.notice} · {notice.text}
+          {copy.chats.notice} · <span className="muted">{senderName(notice, names, copy.chats)}</span>{' '}
+          {notice.text}
         </Alert>
       ))}
 
       <ul className="event-list" style={{ listStyle: 'none', padding: 0 }}>
         {said.map((message) => (
           <li key={message.id} style={{ marginBottom: 8 }}>
-            <span className="muted">{names[message.uid] ?? copy.chats.someone}</span>{' '}
+            <span className="muted">{senderName(message, names, copy.chats)}</span>{' '}
             <span>{message.text}</span>{' '}
             {reported.has(message.id) ? (
               <span className="muted">{copy.chats.reported}</span>

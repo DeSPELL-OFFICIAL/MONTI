@@ -57,8 +57,8 @@ export function VerifyIdentity() {
       const snapshot = await api.getSignupStatus().catch(() => null);
       if (!alive()) return;
       if (snapshot !== null) {
-        const { status, kycLevel, reason } = snapshot;
-        if (kycLevel >= 1) {
+        const { status, kycLevel, kycReason } = snapshot;
+        if ((kycLevel ?? 0) >= 1) {
           await queryClient.invalidateQueries({ queryKey: ['kycLevel'] });
           navigate(returnTo, { replace: true });
           return;
@@ -67,7 +67,7 @@ export function VerifyIdentity() {
           // M acceptance 1: the same face on a second phone must read "이미 계정이 있습니다".
           // Every other reason the server can send collapses into one sentence; the vendor's own
           // wording never reaches the screen.
-          setError(reason === 'duplicate_face' ? copy.kyc.duplicate : copy.kyc.rejected);
+          setError(kycReason === 'duplicate_face' ? copy.kyc.duplicate : copy.kyc.rejected);
           setPolling(false);
           return;
         }

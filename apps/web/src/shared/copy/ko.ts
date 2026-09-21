@@ -151,6 +151,9 @@ export const ko = {
     placeholder: '메시지 (최대 500자)', tooLong: '500자까지 보낼 수 있어요.',
     report: '신고', reported: '신고했어요', notice: '공지', reorderHint: '길게 눌러 순서를 바꿀 수 있어요.',
     someone: '참석자',
+    // 고정된 글은 주최자가 서버를 통해 남긴 공지다. 주최자는 방의 구성원이 아니라
+    // 명단에 이름이 없다 — 그래서 명단을 찾는 대신 이 이름을 쓴다.
+    organizer: '주최자',
     joinFailed: '대화방에 들어가지 못했어요. 잠시 뒤 다시 시도해 주세요.',
     noTicket: '이 행사 티켓을 가진 사람만 들어갈 수 있어요.',
     unavailable: '아직 대화를 열지 않은 행사예요.',

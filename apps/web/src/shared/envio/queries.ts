@@ -44,6 +44,22 @@ export interface EnvioTier {
   seated: boolean;
 }
 
+/**
+ * `Organizers.GateRegistered` and the three toggles that follow it. The open column is
+ * `isOpen`, named after the contract view `isOpenGate` — the indexer does not call it `open`
+ * (indexer/schema.graphql), and a query asking for `open` comes back as a Hasura field error
+ * rather than as a closed gate.
+ */
+export interface EnvioGate {
+  id: string;
+  eventId: string;
+  account: string;
+  kx: string;
+  ky: string;
+  isOpen: boolean;
+  revoked: boolean;
+}
+
 export interface EnvioTicket {
   id: string;
   eventId: string;
@@ -87,5 +103,14 @@ export const EVENT_QUERY = `
     }
     Tier(where: { eventId: { _eq: $eventId } }, order_by: { idx: asc }) {
       id eventId idx name priceUsdCents supply minted maxPerWallet seated
+    }
+  }`;
+
+/** Every terminal ever registered on one event, retired ones included: a retired row is what
+ *  tells an organiser why the same terminal address cannot be approved a second time. */
+export const GATES_QUERY = `
+  query EventGates($eventId: numeric!) {
+    Gate(where: { eventId: { _eq: $eventId } }, order_by: { id: asc }) {
+      id eventId account kx ky isOpen revoked
     }
   }`;

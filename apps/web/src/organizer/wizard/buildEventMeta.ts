@@ -40,6 +40,15 @@ export interface WizardDraft {
    * the device's own key, which no browser has.
    */
   gates: string[];
+  /**
+   * The `userOpHash` of a `createEvent` whose `wait` gave up before it landed, or `''`.
+   *
+   * A timeout is not a failure: the operation may well be mined a second later. The draft
+   * survives a reload, so without this a second Publish sends a second `createEvent` — and two
+   * of those are two events, each with its own id, its own tickets and its own chat room. The
+   * hash is how the next attempt asks the bundler what became of the first one instead.
+   */
+  submittedOpHash: string;
 }
 
 /** The four themes the discover filter offers (`attendee/discover/useEvents.ts`). */

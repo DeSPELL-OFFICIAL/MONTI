@@ -28,13 +28,24 @@ export const USED_ABI = {
     isMember: 1, isLocked: 1, kycLevelOf: 1, activeDevice: 1, deviceUpdatedAt: 1,
     nicknameOwner: 1, setNickname: 2,
   },
-  Organizers: { gateInfo: 1, isOpenGate: 2, hasPermission: 3, gateOf: 1, ownerOf: 1 },
+  Organizers: {
+    gateInfo: 1, isOpenGate: 2, hasPermission: 3, gateOf: 1, ownerOf: 1,
+    adminBitsOf: 2, managerOf: 2,
+    // The organiser's team screen and gate screen. `setAdmin` is owner-only and `setManager`
+    // needs PERM_MANAGE_MANAGERS, which is why the backend hands back calldata rather than
+    // sending either itself (functions/src/functions/invites.ts).
+    setAdmin: 3, setManager: 4,
+    registerGate: 4, openGate: 1, closeGate: 1, revokeGate: 1,
+  },
   Ticket: {
     eventOf: 1, tierOf: 1, eventStatus: 1, isRevoked: 1, transfersOf: 1, balanceOfEvent: 2,
     checkInOf: 1, eventMeta: 1, tiers: 1, offerOf: 1,
     claim: 3, safeTransferFrom: 3,
     createOffer: 3, cancelOffer: 1, acceptOffer: 2,
     createEvent: 2,
+    // The event lifecycle. `updateEventMeta` reverts `NotDraft` once the event is published,
+    // which is why the organiser screen only offers it before publishing.
+    eventOrg: 1, publishEvent: 1, cancelEvent: 1, updateEventMeta: 3,
   },
 } as const satisfies Record<UsedContract, Readonly<Record<string, number>>>;
 

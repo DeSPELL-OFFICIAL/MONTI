@@ -61,7 +61,8 @@ describe('reads', () => {
     const writes = [
       'setNickname',
       'claim', 'safeTransferFrom', 'createOffer', 'cancelOffer', 'acceptOffer',
-      'createEvent',
+      'createEvent', 'publishEvent', 'cancelEvent', 'updateEventMeta',
+      'setAdmin', 'setManager', 'registerGate', 'openGate', 'closeGate', 'revokeGate',
     ];
     const readsOf = (contract: Record<string, number>) =>
       Object.keys(contract).filter((name) => !writes.includes(name)).sort();

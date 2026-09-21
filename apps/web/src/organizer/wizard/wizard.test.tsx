@@ -13,9 +13,11 @@ vi.mock('../../shared/api/functions', async (orig) => ({
 
 interface SentOp { functionName: string; orgId: bigint; args: readonly unknown[] }
 const ticketOp = vi.fn(async (_options: SentOp) => ({ success: true }));
+const resolveSubmittedOp = vi.fn(async (_hash: string) => 'pending' as 'pending' | 'landed' | 'failed');
 vi.mock('../../shared/chain/ops', async (orig) => ({
   ...(await orig<typeof import('../../shared/chain/ops')>()),
   ticketOp,
+  resolveSubmittedOp,
 }));
 
 const ACCOUNT = `0x${'ab'.repeat(20)}` as const;
@@ -26,6 +28,9 @@ const { organizerCopy } = await import('../copy');
 const { DRAFT_KEY } = await import('./useWizard');
 const { OrganizerRoutes } = await import('../Layout');
 const copy = organizerCopy.ko.wizard;
+
+/** A `userOpHash` shape; the value itself is only ever carried, never read. */
+const SUBMITTED = `0x${'11'.repeat(32)}` as const;
 
 const READY = {
   orgId: '9',
@@ -41,6 +46,7 @@ const READY = {
   requireKyc: false,
   tiers: [{ name: '일반', supply: 100, maxPerWallet: 2, seated: false }],
   gates: ['정문'],
+  submittedOpHash: '',
 };
 
 function open(draft: unknown = READY) {
@@ -62,6 +68,7 @@ async function toReview(user: ReturnType<typeof userEvent.setup>) {
 
 beforeEach(() => {
   localStorage.clear();
+  resolveSubmittedOp.mockResolvedValue('pending');
 });
 
 describe('the six-step wizard', () => {
@@ -206,6 +213,76 @@ describe('the review step', () => {
     await user.click(screen.getByRole('button', { name: copy.publish }));
     expect(await screen.findByText(copy.confirming)).toBeInTheDocument();
     expect(screen.queryByText(copy.failed)).not.toBeInTheDocument();
+  });
+
+  /**
+   * A timeout is not a failure, and the draft outlives the page. Without the hash a reload and
+   * a second Publish send a second `createEvent` — and two of those are two events, each with
+   * its own id, its own tickets and its own room. The hash turns the next attempt into a
+   * question for the bundler.
+   */
+  it('remembers the operation a wait gave up on, in the draft', async () => {
+    const user = userEvent.setup();
+    ticketOp.mockRejectedValueOnce(new OpReverted('createEvent', 'TIMEOUT', SUBMITTED));
+    open();
+    await toReview(user);
+    await user.click(screen.getByRole('button', { name: copy.publish }));
+
+    await screen.findByText(copy.confirming);
+    await waitFor(() =>
+      expect(JSON.parse(localStorage.getItem(DRAFT_KEY) ?? '{}')).toMatchObject({
+        submittedOpHash: SUBMITTED,
+      }),
+    );
+  });
+
+  it('asks after that operation instead of sending a second one', async () => {
+    const user = userEvent.setup();
+    resolveSubmittedOp.mockResolvedValue('pending');
+    open({ ...READY, submittedOpHash: SUBMITTED });
+    await toReview(user);
+    await user.click(screen.getByRole('button', { name: copy.publish }));
+
+    await waitFor(() => expect(resolveSubmittedOp).toHaveBeenCalledWith(SUBMITTED));
+    expect(await screen.findByText(copy.confirming)).toBeInTheDocument();
+    expect(ticketOp).not.toHaveBeenCalled();
+    expect(pinEventMetadata).not.toHaveBeenCalled();
+  });
+
+  it('shows the confirmation when that operation turns out to have landed', async () => {
+    const user = userEvent.setup();
+    resolveSubmittedOp.mockResolvedValue('landed');
+    open({ ...READY, submittedOpHash: SUBMITTED });
+    await toReview(user);
+    await user.click(screen.getByRole('button', { name: copy.publish }));
+
+    expect(await screen.findByText(copy.published)).toBeInTheDocument();
+    expect(ticketOp).not.toHaveBeenCalled();
+    expect(localStorage.getItem(DRAFT_KEY)).toBeNull();
+  });
+
+  it('sends the draft again once that operation is known to have reverted', async () => {
+    const user = userEvent.setup();
+    resolveSubmittedOp.mockResolvedValue('failed');
+    open({ ...READY, submittedOpHash: SUBMITTED });
+    await toReview(user);
+    await user.click(screen.getByRole('button', { name: copy.publish }));
+
+    await waitFor(() =>
+      expect(ticketOp).toHaveBeenCalledWith(expect.objectContaining({ functionName: 'createEvent' })),
+    );
+  });
+
+  /** A bundler that cannot be reached is not "it failed" — nothing new may be sent on that. */
+  it('sends nothing when the bundler cannot say what became of it', async () => {
+    const user = userEvent.setup();
+    resolveSubmittedOp.mockRejectedValue(new Error('offline'));
+    open({ ...READY, submittedOpHash: SUBMITTED });
+    await toReview(user);
+    await user.click(screen.getByRole('button', { name: copy.publish }));
+
+    expect(await screen.findByText(copy.confirming)).toBeInTheDocument();
+    expect(ticketOp).not.toHaveBeenCalled();
   });
 
   it('refuses the organisation the server refuses', async () => {
