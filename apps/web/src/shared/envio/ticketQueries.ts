@@ -28,6 +28,13 @@ export interface TicketContextResult {
   Ticket: EnvioTicket[];
 }
 
+export interface EventStatesResult {
+  Event: EnvioEventState[];
+}
+
+/** The two columns both event documents below read. */
+const EVENT_STATE_FIELDS = 'id status';
+
 /** Everything that hangs off the address itself: the tickets it holds and the offers it made. */
 export const OWNED_TICKETS_QUERY = `
   query OwnedTickets($owner: String!) {
@@ -44,6 +51,16 @@ export const OWNED_TICKETS_QUERY = `
 export const TICKET_CONTEXT_QUERY = `
   query TicketContext($tokenIds: [String!]!, $eventIds: [String!]!, $handedOverIds: [String!]!) {
     CheckIn(where: { id: { _in: $tokenIds } }) { id gateId ts manual txHash block }
-    Event(where: { id: { _in: $eventIds } }) { id status }
+    Event(where: { id: { _in: $eventIds } }) { ${EVENT_STATE_FIELDS} }
     Ticket(where: { id: { _in: $handedOverIds } }) { id eventId tier owner transfers revoked }
+  }`;
+
+/**
+ * The third round trip, sent only when a handed-over token turns out to belong to an event none
+ * of the held tickets named — its `eventId` only arrives with the token itself, and its status is
+ * what decides between 취소됨 and 양도됨.
+ */
+export const EVENT_STATES_QUERY = `
+  query EventStates($eventIds: [String!]!) {
+    Event(where: { id: { _in: $eventIds } }) { ${EVENT_STATE_FIELDS} }
   }`;

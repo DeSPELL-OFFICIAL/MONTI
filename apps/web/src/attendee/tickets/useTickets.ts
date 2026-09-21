@@ -1,8 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
 import { gql } from '../../shared/envio/client';
 import {
+  EVENT_STATES_QUERY,
   OWNED_TICKETS_QUERY,
   TICKET_CONTEXT_QUERY,
+  type EnvioEventState,
+  type EventStatesResult,
   type OwnedTicketsResult,
   type TicketContextResult,
 } from '../../shared/envio/ticketQueries';
@@ -44,10 +47,24 @@ export async function loadMyTickets(owner: string): Promise<MyTicket[]> {
       ? EMPTY_CONTEXT
       : await gql<TicketContextResult>(TICKET_CONTEXT_QUERY, { tokenIds, eventIds, handedOverIds });
 
+  // A handed-over token arrives in the same trip that would have had to name its event, so the
+  // event it belongs to can still be unknown here. Its status outranks 양도됨, so it is worth
+  // asking — but only for the ids no held ticket already covered.
+  const asked = new Set(eventIds);
+  const missingEventIds = [...new Set(context.Ticket.map((row) => String(row.eventId)))].filter(
+    (id) => !asked.has(id),
+  );
+  const lateEvents: EnvioEventState[] =
+    missingEventIds.length === 0
+      ? []
+      : (await gql<EventStatesResult>(EVENT_STATES_QUERY, { eventIds: missingEventIds })).Event;
+
   const offers = new Map(owned.Offer.map((offer) => [offer.id, offer]));
   const checkIns = new Map(context.CheckIn.map((entry) => [entry.id, entry]));
   const cancelledEvents = new Set(
-    context.Event.filter((event) => event.status === EVENT_CANCELLED).map((event) => event.id),
+    [...context.Event, ...lateEvents]
+      .filter((event) => event.status === EVENT_CANCELLED)
+      .map((event) => event.id),
   );
   const now = Math.floor(Date.now() / 1000);
 

@@ -21,10 +21,12 @@ const EVENT = { id: '5', orgId: '9', requireKyc: true };
 const TIER = { id: '5-0', eventId: '5', idx: 0, name: '일반', supply: 100, minted: 1, maxPerWallet: 2, seated: false };
 // The indexer is not deployed: one mock answers every document this screen sends, by name.
 const ownedTickets: { rows: Array<Record<string, unknown>> } = { rows: [] };
+const tiers: { rows: Array<Record<string, unknown>> } = { rows: [TIER] };
 const gql = vi.fn(async (query: string) => {
   if (query.includes('OwnedTickets')) return { Ticket: ownedTickets.rows, Offer: [] };
   if (query.includes('TicketContext')) return { CheckIn: [], Event: [], Ticket: [] };
-  return { Event: [EVENT], Tier: [TIER] };
+  if (query.includes('EventStates')) return { Event: [] };
+  return { Event: [EVENT], Tier: tiers.rows };
 });
 vi.mock('../../shared/envio/client', () => ({ gql }));
 const kycLevel = { value: 1 };
@@ -44,6 +46,7 @@ function renderClaim() {
 beforeEach(() => {
   kycLevel.value = 1;
   ownedTickets.rows = [];
+  tiers.rows = [TIER];
   ticketOp.mockReset();
   ticketOp.mockResolvedValue({ success: true, txHash: '0x2', blockNumber: 1n });
 });
@@ -85,6 +88,25 @@ describe('Claim', () => {
     renderClaim();
     await userEvent.click(await screen.findByRole('button', { name: '티켓 받기' }));
     expect(await screen.findByText('티켓을 받지 못했어요. 잠시 뒤 다시 시도해 주세요.')).toBeInTheDocument();
+  });
+
+  it('keeps the button down while an op is still confirming, so a second tap cannot claim twice', async () => {
+    ticketOp.mockRejectedValueOnce(new OpReverted('claim', 'TIMEOUT'));
+    renderClaim();
+    const cta = await screen.findByRole('button', { name: '티켓 받기' });
+    await userEvent.click(cta);
+    expect(await screen.findByText('아직 확인 중이에요. 잠시 뒤 내 티켓에서 확인해 주세요.')).toBeInTheDocument();
+    expect(cta).toBeDisabled();
+    await userEvent.click(cta);
+    expect(ticketOp).toHaveBeenCalledTimes(1);
+  });
+
+  it('claims nothing on a tier nobody may hold, the way the contract reads maxPerWallet 0', async () => {
+    tiers.rows = [{ ...TIER, maxPerWallet: 0 }];
+    renderClaim();
+    expect(await screen.findByText('이 행사에서 받을 수 있는 티켓을 이미 다 받았어요.')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '티켓 받기' })).toBeDisabled();
+    expect(ticketOp).not.toHaveBeenCalled();
   });
 
   it('blocks the button once the event-wide per-wallet limit is reached', async () => {

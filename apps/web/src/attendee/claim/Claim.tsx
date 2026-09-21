@@ -52,8 +52,10 @@ export function Claim() {
   // maxPerWallet is counted per event, not per tier, and a ticket I still hold counts even when
   // it is spent or voided — this mirrors Ticket.balanceOfEvent, which only a transfer decrements.
   const held = (myTickets ?? []).filter((mine) => mine.eventId === eventId && mine.state !== 'transferred').length;
+  // Unguarded on purpose: the chain compares the same way, so a tier with maxPerWallet 0 lets
+  // nobody claim rather than everybody.
   const perWallet = Number(selected?.maxPerWallet ?? 0);
-  const limitReached = selected !== undefined && perWallet > 0 && held >= perWallet;
+  const limitReached = selected !== undefined && held >= perWallet;
 
   async function run() {
     if (!event) return;
@@ -116,7 +118,9 @@ export function Claim() {
       ) : null}
       {error ? <Alert tone="error">{error}</Alert> : null}
       {needsKyc ? <KycRequiredSheet eventId={eventId} onClose={() => setNeedsKyc(false)} /> : null}
-      <Button onClick={() => void run()} disabled={phase === 'working' || limitReached}>
+      {/* Still confirming counts as busy: the op is already on its way and a second tap would
+          claim twice — `held` cannot have caught up yet to stop it. */}
+      <Button onClick={() => void run()} disabled={phase !== 'idle' || limitReached}>
         {phase === 'working' ? copy.claim.working : copy.claim.cta}
       </Button>
     </Screen>

@@ -20,24 +20,29 @@ function ticket(id: string, extra: Record<string, unknown> = {}) {
   return { id, eventId: '7', tier: 0, owner: OWNER, transfers: 0, revoked: false, ...extra };
 }
 
-// One row per state: 입장 전, 입장 완료, 양도 대기, 취소됨(회수), 취소됨(행사 취소), 양도됨.
+// One row per state: 입장 전, 입장 완료, 양도 대기, 취소됨(회수), 취소됨(행사 취소), 양도됨 —
+// plus a handed-over ticket whose own event was called off, where 취소됨 has to win.
 const OWNED = [ticket('1'), ticket('2'), ticket('3'), ticket('4', { revoked: true }), ticket('6', { eventId: '9' })];
 const OFFERS = [
   { id: '3', from: OWNER, commitment: '0x01', expiresAt: String(NOW + 3_600), status: 'open' },
   { id: '5', from: OWNER, commitment: '0x02', expiresAt: String(NOW - 3_600), status: 'accepted' },
+  { id: '10', from: OWNER, commitment: '0x03', expiresAt: String(NOW - 7_200), status: 'accepted' },
 ];
 const CONTEXT = {
   CheckIn: [{ id: '2', gateId: '1', ts: String(NOW - 600), manual: false, txHash: '0xaa', block: '10' }],
   Event: [{ id: '7', status: 'Published' }, { id: '9', status: 'Cancelled' }],
-  Ticket: [ticket('5', { owner: OTHER })],
+  // Both handovers sit on events no held ticket names, so their status arrives one trip later.
+  Ticket: [ticket('5', { owner: OTHER, eventId: '8' }), ticket('10', { owner: OTHER, eventId: '12' })],
 };
+const LATE_EVENTS = { Event: [{ id: '8', status: 'Published' }, { id: '12', status: 'Cancelled' }] };
 
 beforeEach(() => {
   setSession({ status: 'signedIn', account: OWNER as `0x${string}` });
   gql.mockReset();
   gql.mockImplementation(async (query: string) => {
     if (query.includes('OwnedTickets')) return { Ticket: OWNED, Offer: OFFERS };
-    return CONTEXT;
+    if (query.includes('TicketContext')) return CONTEXT;
+    return LATE_EVENTS;
   });
 });
 
@@ -73,18 +78,27 @@ describe('TicketList', () => {
     expect(screen.getByRole('link', { name: '#2 · 입장 완료' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '#3 · 양도 대기' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '#5 · 양도됨' })).toBeInTheDocument();
-    // A revoked ticket and a ticket on a called-off event read the same word.
-    expect(screen.getAllByRole('link', { name: /취소됨/ })).toHaveLength(2);
+    // A revoked ticket, a ticket on a called-off event and a ticket handed over out of one.
+    expect(screen.getAllByRole('link', { name: /취소됨/ })).toHaveLength(3);
+  });
+
+  it('lets a called-off event outrank 양도됨 even when its status arrives a trip later', async () => {
+    renderList();
+    expect(await screen.findByRole('link', { name: '#10 · 취소됨' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '#10 · 양도됨' })).not.toBeInTheDocument();
   });
 
   it('asks the indexer only for the check-ins, events and handovers its own rows name', async () => {
     renderList();
     await screen.findByRole('link', { name: '#1 · 입장 전' });
-    expect(gql).toHaveBeenLastCalledWith(expect.stringContaining('TicketContext'), {
+    expect(gql).toHaveBeenNthCalledWith(2, expect.stringContaining('TicketContext'), {
       tokenIds: ['1', '2', '3', '4', '6'],
       eventIds: ['7', '9'],
-      handedOverIds: ['5'],
+      handedOverIds: ['5', '10'],
     });
+    // Only the events the second trip could not have named are asked for again.
+    expect(gql).toHaveBeenNthCalledWith(3, expect.stringContaining('EventStates'), { eventIds: ['8', '12'] });
+    expect(gql).toHaveBeenCalledTimes(3);
   });
 
   it('shows the empty sentence when nothing is owned', async () => {
