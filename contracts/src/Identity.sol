@@ -168,6 +168,26 @@ contract Identity is IIdentity, AttesterRole {
         emit DeviceLocked(account, true);
     }
 
+    /// @notice A unique handle so attendees can hand a ticket to "alice_01" instead of an address.
+    ///         Normalisation (lowercase, 3-20 chars of [a-z0-9_]) happens client-side; the chain only
+    ///         enforces that the hash matches the string and that the handle is free.
+    function setNickname(bytes32 nicknameHash, string calldata nickname) external {
+        if (!isMember(msg.sender)) revert NotRegistered();
+        if (nicknameHash != keccak256(bytes(nickname))) revert NicknameHashMismatch();
+
+        address holder = _nicknameOwner[nicknameHash];
+        if (holder == msg.sender) return;
+        if (holder != address(0)) revert NicknameTaken();
+
+        bytes32 previous = _nicknameOf[msg.sender];
+        if (previous != bytes32(0)) delete _nicknameOwner[previous];
+
+        _nicknameOwner[nicknameHash] = msg.sender;
+        _nicknameOf[msg.sender] = nicknameHash;
+
+        emit NicknameSet(msg.sender, nicknameHash, nickname);
+    }
+
     function nicknameOwner(bytes32 nicknameHash) external view returns (address) {
         return _nicknameOwner[nicknameHash];
     }

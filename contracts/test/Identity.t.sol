@@ -291,19 +291,20 @@ contract IdentityTest is Test {
     function test_rotateAccountTransfersNickname() public {
         vm.prank(ATTESTER);
         identity.register(PERSON_A, ALICE, DEV_X, DEV_Y, 1);
-        vm.warp(block.timestamp + 7 days);
 
-        // Manually set nickname for ALICE (simulating a prior operation)
-        // This is a simplified test since there's no public setNickname in the provided code
-        // We just verify the internal state management through the rotation
+        // Alice sets a nickname
+        bytes32 nicknameHash = keccak256(bytes("alice_01"));
+        vm.prank(ALICE);
+        identity.setNickname(nicknameHash, "alice_01");
+
         vm.warp(block.timestamp + 7 days);
 
         vm.prank(ATTESTER);
         identity.rotateAccount(PERSON_A, BOB);
 
-        // The nickname would have transferred if it existed
-        // (verified via nicknameOf and nicknameOwner being empty for both in this case)
+        // Nickname should be transferred to BOB
+        assertEq(identity.nicknameOf(BOB), nicknameHash);
+        assertEq(identity.nicknameOwner(nicknameHash), BOB);
         assertEq(identity.nicknameOf(ALICE), bytes32(0));
-        assertEq(identity.nicknameOf(BOB), bytes32(0));
     }
 }
