@@ -27,7 +27,6 @@ import { useStaffCopy } from '../copy';
 import { warn } from '../log';
 import { scanFailureText, scanGateResponse } from '../qr/scan';
 import { useGateRegistration } from '../setup/useGateRegistration';
-import type { OverrideReason } from '../types';
 import { useGate } from './useGate';
 
 export function GateScreen(): ReactElement {
@@ -142,13 +141,35 @@ function RunningGate({ gateId, eventId, orgId, gateAccount, open, revoked }: Run
       parkedCount={gate.parkedCount}
       queueError={gate.queueError}
       onDone={gate.retry}
-      onOverrideSubmit={submitOverride}
+      canApprove={gate.canApprove}
+      onOverrideSubmit={(pin, reason) => void gate.submitOverride(pin, reason)}
+      // Cancelling is the way out of the dialog, and it is `retry` — the same press that clears
+      // any other settled screen — so the result lands in 직전 탭 on the way back to waiting.
       onOverrideCancel={gate.retry}
       actions={
         <>
           <Button variant="ghost" onClick={scan}>
             {copy.qr.scanButton}
           </Button>
+          {/*
+            The way into manual approval, and the only one (04 T32). It is offered exactly when
+            there is something to approve — `manualOverride(tokenId, …)` needs a ticket, and the
+            only ticket this screen knows is the one the guest list matched on the tap that is on
+            screen — and it is hidden while the dialog is open so the screen never shows two
+            buttons that both say 수동 승인.
+          */}
+          {gate.ticket === undefined || gate.state === 'override' ? null : (
+            <Button variant="ghost" onClick={gate.openOverride}>
+              {copy.override.open}
+            </Button>
+          )}
+          {/*
+            The door is open on a remembered answer rather than a fresh one. It still opens —
+            refusing every attendee because a venue's wifi is down is the worse failure — but a
+            permission read last session is a fact about last session, and whoever is holding the
+            phone gets told so rather than finding out from a queue of reverts.
+          */}
+          {gate.gateOpenStale ? <Alert tone="warn">{copy.setup.gateOpenStale}</Alert> : null}
           {/*
             The only way into the queue screen. Without it a terminal that took people in during a
             signal drop has no path to the one screen that can re-send them or show the conflicts,
@@ -163,18 +184,4 @@ function RunningGate({ gateId, eventId, orgId, gateAccount, open, revoked }: Run
       }
     />
   );
-}
-
-/**
- * The manual-approval hand-off, typed and deliberately empty — Task 32 owns the decision, the
- * `Organizers` permission read and the `Ticket.manualOverride` call.
- *
- * It is a stub rather than a missing prop so the shape Task 32 has to satisfy is already
- * written down, and so nothing here can quietly grow half an approval rule in the meantime: the
- * one thing this screen must never do is let somebody in on its own judgement. Nothing reaches
- * the `override` state today — no path calls `machine.onOverride()` — so the dialog is
- * unreachable, which is the honest state of the feature.
- */
-function submitOverride(pin: string, reason: OverrideReason): void {
-  warn('gate', 'manual approval is not wired yet (Task 32)', { reason, pin: pin.length });
 }

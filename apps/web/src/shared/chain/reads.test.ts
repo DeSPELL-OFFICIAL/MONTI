@@ -60,7 +60,10 @@ describe('reads', () => {
     expect(Object.keys(readIdentity()).sort()).toEqual(Object.keys(USED_ABI.Identity).sort());
     expect(Object.keys(readOrganizers()).sort()).toEqual(Object.keys(USED_ABI.Organizers).sort());
     // The manifest types the writes too (`ops.ts` reads it), and a write never shows up here.
-    const writes = ['checkIn', 'claim', 'safeTransferFrom', 'createOffer', 'cancelOffer', 'acceptOffer'];
+    const writes = [
+      'checkIn', 'claim', 'safeTransferFrom', 'createOffer', 'cancelOffer', 'acceptOffer',
+      'requestOverride', 'manualOverride',
+    ];
     const ticketReads = Object.keys(USED_ABI.Ticket).filter((name) => !writes.includes(name));
     expect(Object.keys(readTicket()).sort()).toEqual(ticketReads.sort());
   });

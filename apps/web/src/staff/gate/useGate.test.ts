@@ -93,6 +93,14 @@ vi.mock('../../shared/chain/gateAccount', () => ({
   getGateAddress: async () => GATE_ACCOUNT,
 }));
 
+// --- the staff member's own passkey account, which is NOT the gate's --------------------------
+// Check-ins go out as `0xaa…` (the terminal); manual approvals go out as `0xbb…` (the person).
+// Every assertion about an override below reads that address back off the operation.
+const STAFF_ACCOUNT = `0x${'bb'.repeat(20)}` as Hex;
+vi.mock('../../shared/chain/accounts', () => ({
+  getStaffAccount: async () => ({ address: STAFF_ACCOUNT }),
+}));
+
 // --- the backend callables ----------------------------------------------------------------------
 const issueSnapshot = vi.fn(async () => {
   throw new Error('offline');
@@ -109,6 +117,7 @@ const { nonceHashOf } = await import('./verdict');
 const { useGate } = await import('./useGate');
 const { GATE_CODE_ROTATE_MS, GATE_OPEN_RECHECK_MS, GATE_STATUS_POLL_MS } = await import('../constants');
 const { DRY_RUN_MARK } = await import('../types');
+const { staffKo } = await import('../copy');
 
 // --- the attendee, with a key that really signs -------------------------------------------------
 const devicePrivate = p256.utils.randomPrivateKey();
@@ -189,6 +198,12 @@ const EVENT_META = {
 
 const ZERO_CHECK_IN = { gateId: 0n, ts: 0n, nonceHash: ZERO32, manual: false };
 
+/** What `Organizers` says about the staff member holding the phone. Set per test. */
+let managerOf: [boolean, boolean] = [true, true];
+let hasPermission = false;
+/** What `isOpenGate` does. A test can make the read fail the way a venue's wifi does. */
+let openGateAnswer: (() => boolean) = () => true;
+
 /** The code the emitter actually put on the wire, read back off the plugin call. */
 function servedCode() {
   const last = hce.setPayload.mock.calls.at(-1)?.[0] as { ndef: string } | undefined;
@@ -251,7 +266,11 @@ beforeEach(async () => {
   readContract.mockImplementation(async ({ functionName }: { functionName: string }) => {
     switch (functionName) {
       case 'isOpenGate':
-        return true;
+        return openGateAnswer();
+      case 'managerOf':
+        return managerOf;
+      case 'hasPermission':
+        return hasPermission;
       case 'eventMeta':
         return EVENT_META;
       case 'checkInOf':
@@ -263,8 +282,17 @@ beforeEach(async () => {
     }
   });
   setRadio(true);
+  managerOf = [true, true];
+  hasPermission = false;
+  openGateAnswer = () => true;
   const db = await staffDb();
-  await Promise.all([db.clear('snapshots'), db.clear('photos'), db.clear('queue')]);
+  await Promise.all([
+    db.clear('snapshots'),
+    db.clear('photos'),
+    db.clear('queue'),
+    // The PIN and the remembered door answer live here, and both survive a reload by design.
+    db.clear('settings'),
+  ]);
   await seedSnapshot();
 });
 
@@ -745,5 +773,231 @@ describe('the QR fallback', () => {
     });
     expect(result.current.state).toBe('ready');
     expect(sendSponsoredOp).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Manual approval, through the real wiring (Task 32).
+ *
+ * The three things being pinned here are the three that can only be got wrong once:
+ *
+ *  * **the account** — a check-in is the terminal's operation and an override is a *person's*,
+ *    because `Ticket.manualOverride` writes `msg.sender` into `ManualOverride` as the approver.
+ *    Every test below reads the sender back off the operation and expects `0xbb…`, never `0xaa…`;
+ *  * **the call** — `Organizers` picks it, at that moment, never a flag on this device;
+ *  * **the PIN** — five tries and a minute, on disk, before anything is signed.
+ */
+describe('manual approval', () => {
+  /** A tap on screen, so there is a ticket to approve, and a PIN this terminal agreed on. */
+  async function ready() {
+    const { setPin } = await import('../override/pin');
+    await setPin('4821');
+    const rendered = await openGate();
+    await act(async () => {
+      tapWith(servedCode());
+    });
+    await waitFor(() => expect(rendered.result.current.state).toBe('confirming'));
+    sendSponsoredOp.mockClear();
+    return rendered;
+  }
+
+  /** The override operation, decoded. The check-in has already been cleared off the mock. */
+  async function sentOverride() {
+    const { decodeFunctionData } = await import('viem');
+    const { ticketAbi } = await import('@monti/shared');
+    const args = sendSponsoredOp.mock.calls.at(-1)?.[0] as unknown as {
+      account: { address: Hex };
+      calls: Array<{ data: Hex }>;
+    };
+    return {
+      sender: args.account.address,
+      ...decodeFunctionData({ abi: ticketAbi, data: args.calls[0]!.data }),
+    };
+  }
+
+  it('sends manualOverride from the staff member own account, and records who and why', async () => {
+    const { result } = await ready();
+
+    await act(async () => {
+      result.current.openOverride();
+    });
+    await waitFor(() => expect(result.current.state).toBe('override'));
+    await waitFor(() => expect(result.current.canApprove).toBe(true));
+
+    await act(async () => {
+      await result.current.submitOverride('4821', 2);
+    });
+
+    const sent = await sentOverride();
+    expect(sent.sender).toBe(STAFF_ACCOUNT);
+    expect(sent.sender).not.toBe(GATE_ACCOUNT);
+    expect(sent.functionName).toBe('manualOverride');
+    expect(sent.args).toEqual([BigInt(TOKEN_ID), GATE_ID, 2]);
+
+    // The three facts the `ManualOverride` event will carry, on the screen that filed it.
+    expect(result.current.override).toMatchObject({
+      status: 'approved',
+      route: 'manualOverride',
+      role: 'manager',
+      approver: STAFF_ACCOUNT,
+      reason: 2,
+    });
+    // A person went through the door, so the header counts them.
+    expect(result.current.entriesCount).toBe(1);
+  });
+
+  it('tags a permitted admin ROLE_APPROVER, the way the contract does', async () => {
+    managerOf = [false, false];
+    hasPermission = true;
+    const { result } = await ready();
+    await act(async () => {
+      result.current.openOverride();
+    });
+    await waitFor(() => expect(result.current.canApprove).toBe(true));
+    await act(async () => {
+      await result.current.submitOverride('4821', 1);
+    });
+    expect(result.current.override).toMatchObject({ role: 'approver', route: 'manualOverride' });
+  });
+
+  /**
+   * The half that admits nobody. `requestOverride` emits `OverrideRequested` and no check-in, so
+   * this sentence is the only thing that tells a staff member the request left the phone.
+   */
+  it('files a request for a manager who may not approve, and says 요청됨 — 승인 대기', async () => {
+    managerOf = [true, false];
+    const { result } = await ready();
+
+    await act(async () => {
+      result.current.openOverride();
+    });
+    await waitFor(() => expect(result.current.canApprove).toBe(false));
+
+    await act(async () => {
+      await result.current.submitOverride('4821', 3);
+    });
+
+    const sent = await sentOverride();
+    expect(sent.functionName).toBe('requestOverride');
+    expect(sent.args).toEqual([BigInt(TOKEN_ID), GATE_ID, 3]);
+    expect(result.current.override).toMatchObject({ status: 'requested', role: 'none' });
+    // Nobody went in on a request.
+    expect(result.current.entriesCount).toBe(0);
+  });
+
+  it('spends nothing on a wrong PIN, and says how many tries are left', async () => {
+    const { result } = await ready();
+    await act(async () => {
+      result.current.openOverride();
+    });
+    await act(async () => {
+      await result.current.submitOverride('0000', 1);
+    });
+    expect(sendSponsoredOp).not.toHaveBeenCalled();
+    expect(result.current.override?.status).toBe('failed');
+    expect(result.current.override?.detail).toContain('4');
+  });
+
+  /** The lockout refuses the right PIN too, because an attacker's last guess is a right one. */
+  it('locks after five wrong tries, and the right PIN does not get past it', async () => {
+    const { result } = await ready();
+    await act(async () => {
+      result.current.openOverride();
+    });
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await act(async () => {
+        await result.current.submitOverride('0000', 1);
+      });
+    }
+    await act(async () => {
+      await result.current.submitOverride('4821', 1);
+    });
+    expect(sendSponsoredOp).not.toHaveBeenCalled();
+    expect(result.current.override?.detail).toBe(staffKo.override.pinLocked.replace('{{seconds}}', '60'));
+  });
+
+  it('tells an account the chain refuses, without signing anything', async () => {
+    managerOf = [false, false];
+    const { result } = await ready();
+    await act(async () => {
+      result.current.openOverride();
+    });
+    await waitFor(() => expect(result.current.canApprove).toBe(false));
+    await act(async () => {
+      await result.current.submitOverride('4821', 1);
+    });
+    expect(sendSponsoredOp).not.toHaveBeenCalled();
+    expect(result.current.override).toMatchObject({ status: 'failed', detail: staffKo.override.denied });
+  });
+
+  it('has a way out: the result lands in 직전 탭 and the gate waits for the next attendee', async () => {
+    const { result } = await ready();
+    await act(async () => {
+      result.current.openOverride();
+    });
+    await act(async () => {
+      await result.current.submitOverride('4821', 1);
+    });
+    await waitFor(() => expect(result.current.override?.status).toBe('approved'));
+
+    await act(async () => {
+      result.current.retry();
+    });
+    expect(result.current.state).toBe('ready');
+    expect(result.current.override).toBeUndefined();
+    expect(result.current.canApprove).toBe(false);
+    expect(result.current.lastTap).toMatchObject({
+      state: 'override',
+      override: { status: 'approved', role: 'manager' },
+    });
+  });
+});
+
+/**
+ * A staff APK that cold-starts at a venue with no signal. `isOpenGate` cannot be read, so before
+ * Task 30's re-review `gateOpen` stayed `undefined` for ever and the door simply never opened —
+ * the one failure a door cannot recover from by waiting. It now runs on the last answer this
+ * device had, and says that is what it is doing.
+ */
+describe('a door open on a remembered answer', () => {
+  it('remembers what the chain said, and opens on it when the read fails', async () => {
+    const first = await openGate();
+    await waitFor(() => expect(first.result.current.gateOpen).toBe(true));
+    expect(first.result.current.gateOpenStale).toBe(false);
+    first.unmount();
+
+    openGateAnswer = () => {
+      throw new Error('offline');
+    };
+    const { result } = await openGate();
+    await waitFor(() => expect(result.current.gateOpen).toBe(true));
+    expect(result.current.gateOpenStale).toBe(true);
+  });
+
+  it('never inherits another gate permission', async () => {
+    const first = await openGate();
+    await waitFor(() => expect(first.result.current.gateOpen).toBe(true));
+    first.unmount();
+
+    openGateAnswer = () => {
+      throw new Error('offline');
+    };
+    const { result } = renderHook(() => useGate({ ...params, gateId: 9n }));
+    await waitFor(() => expect(readContract).toHaveBeenCalled());
+    expect(result.current.gateOpen).toBeUndefined();
+    expect(result.current.gateOpenStale).toBe(false);
+  });
+
+  /** A fresh answer beats a remembered one, in both directions and immediately. */
+  it('drops the mark the moment the chain answers for itself', async () => {
+    await (await staffDb()).put('settings', {
+      key: 'gateOpen',
+      gateId: GATE_ID.toString(),
+      open: true,
+      checkedAt: Date.now() - 3_600_000,
+    });
+    const { result } = await openGate();
+    await waitFor(() => expect(result.current.gateOpen).toBe(true));
+    expect(result.current.gateOpenStale).toBe(false);
   });
 });

@@ -18,7 +18,15 @@
 // while another is confirming is refused rather than allowed to displace it. Everything about
 // identity below exists because the alternative is an answer landing on the wrong attendee.
 import { CHECKING_LABEL_MS, WAIT_HINT_MS } from '../constants';
-import type { DenyCode, GateContext, GateState, Hex, PreflightResult, SnapshotTicket } from '../types';
+import type {
+  DenyCode,
+  GateContext,
+  GateState,
+  Hex,
+  OverrideOutcome,
+  PreflightResult,
+  SnapshotTicket,
+} from '../types';
 
 /**
  * What names one tap for its whole life.
@@ -73,12 +81,14 @@ export type TapRefusal = (typeof TAP_REFUSAL)[keyof typeof TAP_REFUSAL];
  */
 export interface SettledTap {
   tap: TapId;
-  state: Extract<GateState, 'admit' | 'offlineAdmit' | 'deny'>;
+  state: Extract<GateState, 'admit' | 'offlineAdmit' | 'deny' | 'override'>;
   ticket?: SnapshotTicket;
   blockNumber?: bigint;
   finalized: boolean;
   deny?: DenyCode;
   denyDetail?: string;
+  /** Set only for `'override'`: who let this person in by hand, and why (Task 32). */
+  override?: OverrideOutcome;
 }
 
 /** Stop listening. What `watchCheckedIn`/`subscribeLogs` hand back. */
@@ -134,6 +144,18 @@ export interface GateMachine {
    */
   setOnline(online: boolean): void;
   onOverride(): void;
+  /**
+   * How the manual approval went (Task 32), pushed in as it moves: `sending` while the passkey
+   * and the chain are being asked, then `requested` / `approved` / `failed`.
+   *
+   * It is a separate entry point from {@link GateMachine.onOverride} rather than a return value
+   * because the submit is asynchronous and can fail in ways the dialog has to say out loud —
+   * and it is **never** a verdict: an approval that landed is recorded here, not turned into
+   * `admit`, because `admit` means a `CheckedIn` naming this tap's nonce and `manualOverride`
+   * emits one with a zero nonce. Claiming otherwise would be the soft approval this file exists
+   * to refuse, wearing a badge.
+   */
+  onOverrideResult(outcome: OverrideOutcome): void;
   /** Clears the verdict and goes back to waiting for the next attendee. */
   reset(): void;
   /** The gate screen is going away. Closes the chain watch and the clocks. */
@@ -162,6 +184,7 @@ const CLEARED = {
   finalized: false,
   checking: false,
   waitHint: false,
+  override: undefined,
 } as const;
 
 export function createGateMachine(deps: GateMachineDeps): GateMachine {
@@ -199,9 +222,17 @@ export function createGateMachine(deps: GateMachineDeps): GateMachine {
     stopWatching = undefined;
   };
 
-  /** A tap that has already been answered. A second answer must not overwrite the first (T12). */
+  /**
+   * A tap that has already been answered, or one a staff member is answering by hand. A second
+   * answer must not overwrite the first (T12), and an override dialog must not be wiped by the
+   * next attendee tapping: the dialog is about whoever is standing there now, and losing it
+   * would lose the only record the gate keeps of an approval that may already be on chain.
+   */
   const settled = (): boolean =>
-    context.state === 'admit' || context.state === 'offlineAdmit' || context.state === 'deny';
+    context.state === 'admit' ||
+    context.state === 'offlineAdmit' ||
+    context.state === 'deny' ||
+    context.state === 'override';
 
   /** Somebody walked in on this tap. A later refusal may not take that back. */
   const admitted = (): boolean => context.state === 'admit' || context.state === 'offlineAdmit';
@@ -225,6 +256,7 @@ export function createGateMachine(deps: GateMachineDeps): GateMachine {
       finalized: context.finalized,
       deny: context.deny,
       denyDetail: context.denyDetail,
+      override: context.override,
     };
   };
 
@@ -386,7 +418,15 @@ export function createGateMachine(deps: GateMachineDeps): GateMachine {
       // A staff button press. It is inherently about whoever is on screen, so it names no tap.
       clearTimers();
       closeWatch();
-      emit({ state: 'override', checking: false, waitHint: false });
+      emit({ state: 'override', checking: false, waitHint: false, override: undefined });
+    },
+
+    onOverrideResult(outcome: OverrideOutcome) {
+      // Only while a dialog is actually open. A result that arrives after the staff member
+      // cancelled belongs to a screen that is gone, and writing it would put "승인됨" on top of
+      // the next attendee's tap.
+      if (context.state !== 'override') return;
+      emit({ override: outcome });
     },
 
     reset() {

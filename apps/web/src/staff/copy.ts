@@ -54,6 +54,23 @@ export const staffKo = {
     errUnknownEvent: '그런 행사 번호가 없어요. 번호를 다시 확인해 주세요.',
     errSubmitRejected: '등록 요청을 보내지 못했어요. 아래 값을 관리자에게 직접 전달하세요.',
     errChainUnreachable: '등록 상태를 확인하지 못했어요. 계속 다시 확인하고 있어요.',
+    /**
+     * PIN 단계(04 T32). 등록이 끝난 패널에서만 보이고, 여기서 정하기 전에는 입장을 받으러
+     * 갈 수 없다 — 수동 승인 창을 여는 열쇠가 이 숫자 몇 자리뿐이기 때문이다.
+     */
+    pinTitle: '수동 승인 PIN',
+    pinHint: '표를 손으로 들여보낼 때 쓸 숫자 {{digits}}자리를 정하세요. 이 단말기에만 저장되고 아무 데도 보내지 않아요.',
+    pinLabel: '새 PIN',
+    pinConfirmLabel: '한 번 더',
+    pinSave: 'PIN 저장',
+    pinSaved: 'PIN을 저장했어요.',
+    pinChange: 'PIN 다시 정하기',
+    pinTooShort: '{{digits}}자리 이상 숫자로 정해 주세요.',
+    pinMismatch: '두 번 넣은 숫자가 서로 달라요.',
+    pinRequired: '입장을 받기 전에 PIN을 먼저 정하세요.',
+    pinFailed: 'PIN을 저장하지 못했어요. 다시 해 보세요.',
+    /** 문이 열려 있다는 답을 이번에 받지 못해, 지난번 답으로 열어 둔 상태(04 T30 재리뷰). */
+    gateOpenStale: '연결이 안 돼서 지난번에 확인한 상태로 열었어요. 관리자에게 확인해 주세요.',
   },
 
   /** 콘솔 머리글. 게이트가 지금 무엇을 믿고 문을 여는지 한 줄로 말한다. */
@@ -166,6 +183,8 @@ export const staffKo = {
     admit: '입장',
     offlineAdmit: '연결 없이 입장',
     deny: '입장 불가',
+    /** 손으로 들여보냈거나, 결재를 요청했거나(04 T32). 어느 쪽인지는 그때 창이 말했다. */
+    override: '수동 승인',
     none: '아직 없어요',
   },
 
@@ -204,6 +223,8 @@ export const staffKo = {
   /** 수동 승인 창. 이 태스크는 껍데기만 만든다 — 승인 자체는 04 T32. */
   override: {
     title: '수동 승인',
+    /** 판정 옆에 붙는 단추. 이것을 눌러야 아래 창이 열린다. */
+    open: '수동 승인하기',
     pin: 'PIN',
     reasonLabel: '사유',
     reason1: '사진 대조',
@@ -213,6 +234,22 @@ export const staffKo = {
     approve: '수동 승인',
     request: '결재 요청 보내기',
     cancel: '취소',
+    /** 보낸 뒤. 체인 사건이 남길 것과 같은 세 가지를 화면에도 그대로 적는다. */
+    sending: '보내고 있어요. 잠시만요.',
+    requested: '요청됨 — 승인 대기',
+    approved: '들여보냈어요.',
+    failed: '보내지 못했어요. 다시 해 보세요.',
+    approverLabel: '승인한 사람',
+    roleLabel: '권한',
+    roleApprover: '주최자 · 승인 권한 있음',
+    roleManager: '매니저 · 승인 권한 있음',
+    roleNone: '승인 권한 없음 · 요청만 가능',
+    /** 막혔을 때. 전부 다음에 무엇을 하면 되는지까지 말한다. */
+    pinWrong: 'PIN이 달라요. {{tries}}번 더 틀리면 잠겨요.',
+    pinLocked: 'PIN을 여러 번 틀렸어요. {{seconds}}초 뒤에 다시 해 보세요.',
+    pinUnset: '이 단말기에는 아직 PIN이 없어요. 등록 화면에서 먼저 정하세요.',
+    denied: '이 계정에는 손으로 들여보낼 권한이 없어요. 관리자에게 문의하세요.',
+    noTicket: '표를 먼저 확인한 다음에 할 수 있어요.',
   },
 
   /** 카드를 닫고 다음 관객을 받는다. */
@@ -254,6 +291,18 @@ export const staffEn: typeof staffKo = {
     errUnknownEvent: 'There is no event with that number. Check it again.',
     errSubmitRejected: 'The request could not be sent. Read the values below to the organizer.',
     errChainUnreachable: 'Could not check the registration. Still trying.',
+    pinTitle: 'Manual approval PIN',
+    pinHint: 'Choose {{digits}} digits for letting somebody in by hand. It stays on this device and is never sent anywhere.',
+    pinLabel: 'New PIN',
+    pinConfirmLabel: 'Once more',
+    pinSave: 'Save PIN',
+    pinSaved: 'PIN saved.',
+    pinChange: 'Set a new PIN',
+    pinTooShort: 'Use at least {{digits}} digits.',
+    pinMismatch: 'The two entries do not match.',
+    pinRequired: 'Set a PIN before taking entries.',
+    pinFailed: 'The PIN was not saved. Try again.',
+    gateOpenStale: 'No connection, so this door is open on the last answer we had. Check with your organizer.',
   },
 
   shell: {
@@ -340,6 +389,7 @@ export const staffEn: typeof staffKo = {
     admit: 'Admitted',
     offlineAdmit: 'Admitted offline',
     deny: 'No entry',
+    override: 'By hand',
     none: 'Nothing yet',
   },
 
@@ -371,6 +421,7 @@ export const staffEn: typeof staffKo = {
 
   override: {
     title: 'Manual approval',
+    open: 'Approve by hand',
     pin: 'PIN',
     reasonLabel: 'Reason',
     reason1: 'Photo check',
@@ -380,6 +431,20 @@ export const staffEn: typeof staffKo = {
     approve: 'Approve manually',
     request: 'Send for approval',
     cancel: 'Cancel',
+    sending: 'Sending. One moment.',
+    requested: 'Requested - waiting for approval',
+    approved: 'They are in.',
+    failed: 'It did not go through. Try again.',
+    approverLabel: 'Approved by',
+    roleLabel: 'Rights',
+    roleApprover: 'Organizer - may approve',
+    roleManager: 'Manager - may approve',
+    roleNone: 'No approval rights - may only ask',
+    pinWrong: 'Wrong PIN. {{tries}} more wrong tries and it locks.',
+    pinLocked: 'Too many wrong PINs. Try again in {{seconds}}s.',
+    pinUnset: 'This device has no PIN yet. Set one on the registration screen.',
+    denied: 'This account may not let people in by hand. Ask your organizer.',
+    noTicket: 'Check a ticket first.',
   },
 
   done: 'Next',

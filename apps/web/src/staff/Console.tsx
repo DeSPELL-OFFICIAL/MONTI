@@ -154,6 +154,7 @@ export function GateConsole({
         return (
           <OverrideDialog
             canApprove={canApprove ?? false}
+            outcome={context.override}
             onSubmit={onOverrideSubmit ?? noop}
             onCancel={onOverrideCancel ?? noop}
           />

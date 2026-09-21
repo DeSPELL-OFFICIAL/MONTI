@@ -6,6 +6,7 @@ import { fmt } from '../../shared/i18n';
 import { Alert, Button, Field, Screen, Spinner } from '../../shared/ui';
 import { SEEDED_EVENT_ID } from '../constants';
 import { useStaffSetupCopy, type StaffSetupCopy } from '../copy';
+import { PinStep } from '../override/PinSetup';
 import { gatePayloadText, useGateRegistration, type GateSetupError } from './useGateRegistration';
 
 const DIGITS_ONLY = /\D/g;
@@ -90,6 +91,10 @@ export function GateSetupScreen() {
   // per character typed.
   const [chosenEventId, setChosenEventId] = useState<string | undefined>(undefined);
   const [draft, setDraft] = useState<string>(SEEDED_EVENT_ID);
+  // Whether this terminal can approve anything by hand yet (04 T32). The door is not offered
+  // until it can: the only calm moment to agree on four digits is this panel, and the moment
+  // they are needed is an attendee whose phone will not open with a queue behind them.
+  const [pinReady, setPinReady] = useState(false);
   const registration = useGateRegistration({ eventId: chosenEventId });
   const elapsed = useElapsedSeconds(registration.submittedAt);
 
@@ -108,14 +113,17 @@ export function GateSetupScreen() {
           <dt>{copy.orgIdLabel}</dt>
           <dd>{String(registration.orgId)}</dd>
         </dl>
-        {registration.open ? (
+        <PinStep onChange={setPinReady} />
+        {!registration.open ? (
+          <Alert tone="warn">{copy.notOpen}</Alert>
+        ) : pinReady ? (
           // The hand-off. It is a press rather than a redirect because this panel is the only
           // confirmation a staff member ever gets that the organizer approved *this* device for
           // *this* event — three numbers they can read back over the phone — and a screen that
           // vanished on its own would make the one moment that has to be checked unmissable.
           <Button onClick={() => navigate(GATE_PATH)}>{copy.openGate}</Button>
         ) : (
-          <Alert tone="warn">{copy.notOpen}</Alert>
+          <Alert tone="warn">{copy.pinRequired}</Alert>
         )}
       </Screen>
     );

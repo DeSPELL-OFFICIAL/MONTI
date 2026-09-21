@@ -1,3 +1,5 @@
+import 'fake-indexeddb/auto';
+
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useSearchParams } from 'react-router-dom';
@@ -60,9 +62,17 @@ async function renderSetup(): Promise<ReturnType<typeof render>> {
   return view;
 }
 
-beforeEach(() => {
+/** A terminal that has already agreed on a PIN, so the door is on offer. */
+async function givePin(): Promise<void> {
+  const { setPin } = await import('../override/pin');
+  await setPin('4821');
+}
+
+beforeEach(async () => {
   resubmit.mockReset();
   useGateRegistration.mockReset().mockReturnValue(registration());
+  const { staffDb } = await import('../snapshot/store');
+  await (await staffDb()).delete('settings', 'pin');
 });
 
 describe('gate setup screen', () => {
@@ -170,6 +180,7 @@ describe('gate setup screen', () => {
   });
 
   it('hands off the gate, event and organizer ids once the chain says it is registered', async () => {
+    await givePin();
     useGateRegistration.mockReturnValue(
       registration({ status: 'registered', gateId: 7n, eventId: 42n, orgId: 5n, open: true }),
     );
@@ -180,6 +191,30 @@ describe('gate setup screen', () => {
     expect(screen.getByText('42')).toBeInTheDocument();
     expect(screen.getByText('5')).toBeInTheDocument();
     expect(screen.queryByText(staffSetupKo.notOpen)).toBeNull();
+    expect(await screen.findByRole('button', { name: staffSetupKo.openGate })).toBeInTheDocument();
+  });
+
+  /**
+   * An open door and no PIN is a terminal that can take taps but cannot let anybody in by hand,
+   * which is exactly the shape of the evening nobody wants: the one attendee whose phone will
+   * not open, and four digits nobody agreed on. So the PIN step comes first (04 T32).
+   */
+  it('asks for the manual-approval PIN before it offers the door', async () => {
+    useGateRegistration.mockReturnValue(
+      registration({ status: 'registered', gateId: 7n, eventId: 42n, orgId: 5n, open: true }),
+    );
+    await renderSetup();
+
+    expect(await screen.findByText(staffSetupKo.pinRequired)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: staffSetupKo.openGate })).toBeNull();
+
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText(staffSetupKo.pinLabel), '4821');
+    await user.type(screen.getByLabelText(staffSetupKo.pinConfirmLabel), '4821');
+    await user.click(screen.getByRole('button', { name: staffSetupKo.pinSave }));
+
+    expect(await screen.findByRole('button', { name: staffSetupKo.openGate })).toBeInTheDocument();
+    expect(screen.queryByText(staffSetupKo.pinRequired)).toBeNull();
   });
 
   it('warns when the registered gate has not been opened yet', async () => {

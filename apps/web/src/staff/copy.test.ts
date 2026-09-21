@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
+import { OVERRIDE_REASONS } from '@monti/shared';
+
 import { staffEn, staffKo, staffSetupEn, staffSetupKo } from './copy';
 import { DENY_CODES } from './types';
+import type { OverrideRole } from './types';
 
 /**
  * **문장이 아니라 표(table) 자체를 검사한다.** 화면 테스트는 자기가 쓰는 문장 하나가 있는지만
@@ -106,5 +109,35 @@ describe('staff setup copy', () => {
   it('is the setup branch of the one staff table, not a copy of it', () => {
     expect(staffSetupKo).toBe(staffKo.setup);
     expect(staffSetupEn).toBe(staffEn.setup);
+  });
+});
+
+/**
+ * 수동 승인 창도 거절 화면과 같은 모양의 구멍을 낼 수 있다. 사유 코드는 계약이 정하고
+ * (`@monti/shared` 의 `OVERRIDE_REASONS`), 역할 표식은 `Ticket.ManualOverride` 가 정한다.
+ * 01b 가 다섯 번째 사유를 더하는 날 문장이 없는 선택지가 생기면 `undefined` 가 그려진 채로
+ * 승인이 기록되고, 그것은 사유 없이 열린 문과 같은 말이다.
+ */
+describe('staff override copy', () => {
+  it.each([
+    ['ko', staffKo.override],
+    ['en', staffEn.override],
+  ])('has a sentence for every reason code the contracts record, in %s', (_locale, table) => {
+    for (const code of OVERRIDE_REASONS) {
+      const leaf = (table as Record<string, string | undefined>)[`reason${code}`];
+      expect(leaf?.trim().length ?? 0, `reason${code}`).toBeGreaterThan(0);
+    }
+  });
+
+  it.each([
+    ['ko', staffKo.override],
+    ['en', staffEn.override],
+  ])('has a sentence for every role the chain can tag an override with, in %s', (_locale, table) => {
+    const roles: readonly OverrideRole[] = ['approver', 'manager', 'none'];
+    for (const role of roles) {
+      const key = `role${role[0]!.toUpperCase()}${role.slice(1)}`;
+      const leaf = (table as Record<string, string | undefined>)[key];
+      expect(leaf?.trim().length ?? 0, key).toBeGreaterThan(0);
+    }
   });
 });

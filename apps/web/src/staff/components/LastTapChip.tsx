@@ -7,6 +7,7 @@ const STATE_WORD: Record<SettledTap['state'], keyof StaffCopy['lastTap']> = {
   admit: 'admit',
   offlineAdmit: 'offlineAdmit',
   deny: 'deny',
+  override: 'override',
 };
 
 export interface LastTapChipProps {

@@ -377,6 +377,35 @@
   color: var(--muted);
 }
 
+.gate-dialog__outcome {
+  margin: 4px 0 0;
+  padding: 12px;
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.gate-dialog__outcome-line {
+  margin: 0 0 8px;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.gate-dialog__facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 0;
+  font-size: 15px;
+}
+
+.gate-dialog__facts dt {
+  color: var(--muted);
+}
+
+.gate-dialog__facts dd {
+  margin: 0;
+}
+
 .gate-dialog__field input,
 .gate-dialog__field select {
   width: 100%;

@@ -9,7 +9,14 @@
 // is the vocabularies that exist only on the staff device: the DENY codes a refusal is shown as,
 // the states a gate moves through, and the marks the offline queue writes on a row of its own.
 import { ticketAbi } from '@monti/shared';
-import type { GateCodeWire, GateDenyCode, GateResponseWire, Hex, SnapshotTicket } from '@monti/shared';
+import type {
+  GateCodeWire,
+  GateDenyCode,
+  GateResponseWire,
+  Hex,
+  OverrideReasonCode,
+  SnapshotTicket,
+} from '@monti/shared';
 
 export type { GateCodeWire, GateResponseWire, Hex, SnapshotTicket };
 
@@ -209,11 +216,49 @@ export const RESEND_EXHAUSTED = 'RESEND_EXHAUSTED';
 export type QueueMark = typeof DRY_RUN_MARK | typeof LATE_WINDOW_ELAPSED | typeof RESEND_EXHAUSTED;
 
 /**
- * The four reasons spec §7.5 recognises for letting somebody in by hand. The numbers are what
- * `Ticket.manualOverride` records on chain, so the order is frozen: renumbering them would
- * relabel every override already filed.
+ * The four reasons spec §7.5 recognises for letting somebody in by hand.
+ *
+ * The numbers are `@monti/shared`'s, because they are what `Ticket.requestOverride` and
+ * `Ticket.manualOverride` record on chain as `uint8 reason` — not a screen's enum. They used to
+ * be spelled out here as `1 | 2 | 3 | 4`, which was the same four values written down twice:
+ * the contracts' copy and the console's, with nothing to notice if 01b ever added a fifth.
  */
-export type OverrideReason = 1 | 2 | 3 | 4;
+export type OverrideReason = OverrideReasonCode;
+
+/** The two calls. `denied` is not one of them — it is what happens instead of sending. */
+export type OverrideCall = 'manualOverride' | 'requestOverride';
+export type OverrideRoute = OverrideCall | 'denied';
+
+/**
+ * The role tag `Ticket.ManualOverride` carries, named (`Ticket.sol:80-82`). `'none'` is what a
+ * filed request has: `OverrideRequested` records a requester and no role, because a request is
+ * precisely the case where nobody has approved anything yet.
+ */
+export type OverrideRole = 'approver' | 'manager' | 'none';
+
+/**
+ * How one manual approval went, in the shape the console draws it.
+ *
+ * It lives in the context rather than on the screen because it is the **only** record of an
+ * event the gate cannot otherwise show: `manualOverride` emits `CheckedIn` with a zero
+ * `nonceHash`, so the chain watch — which matches a tap by its nonce — will never see it, and
+ * `requestOverride` emits no check-in at all. If this object is not kept, a staff member who
+ * filed a request has no way to tell whether it went out.
+ *
+ * `reason` is present from the first moment because the staff member chose it before anything
+ * was sent; `route`, `role` and `approver` arrive with the chain's answer about who they are,
+ * and they are exactly the three fields the on-chain event will carry.
+ */
+export interface OverrideOutcome {
+  status: 'sending' | 'requested' | 'approved' | 'failed';
+  reason: OverrideReason;
+  route?: OverrideCall;
+  role?: OverrideRole;
+  /** The account the chain will record as approver — the staff member's own, never the gate's. */
+  approver?: Hex;
+  /** One sentence for a failure or a refusal, already chosen. Never a raw error. */
+  detail?: string;
+}
 
 /**
  * Everything the gate screen renders from, in one object. `finalized`, `pendingCount`,
@@ -249,4 +294,10 @@ export interface GateContext {
   pendingCount: number;
   snapshotAgeMs: number;
   online: boolean;
+  /**
+   * The manual approval on screen, while `state` is `'override'`. Cleared on the way back to
+   * waiting like every other settled fact — and kept in `lastSettled()` on the way out, because
+   * "누가 손으로 들여보냈는가" is exactly the thing a shift should still be able to read later.
+   */
+  override?: OverrideOutcome;
 }

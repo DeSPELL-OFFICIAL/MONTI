@@ -22,6 +22,8 @@ const registration = vi.fn<() => GateRegistration>();
 vi.mock('../setup/useGateRegistration', () => ({ useGateRegistration: () => registration() }));
 
 const handleResponse = vi.fn(async () => undefined);
+const openOverride = vi.fn();
+const submitOverride = vi.fn(async () => undefined);
 const gate = vi.fn<() => UseGateResult>();
 /** What the screen handed the hook. `enabled` is the guard, so it is asserted rather than read. */
 let asked: UseGateParams | undefined;
@@ -56,6 +58,19 @@ function registered(over: Partial<GateRegistration> = {}): GateRegistration {
   };
 }
 
+const TICKET = {
+  tokenId: '123',
+  account: `0x${'aa'.repeat(20)}`,
+  deviceX: `0x${'11'.repeat(32)}`,
+  deviceY: `0x${'22'.repeat(32)}`,
+  photoJpegB64: '',
+  displayName: '김입장',
+  tier: 0,
+  tierName: '일반',
+  seat: '',
+  checkedIn: false,
+} as const;
+
 function running(over: Partial<UseGateResult> = {}): UseGateResult {
   return {
     state: 'ready',
@@ -75,6 +90,10 @@ function running(over: Partial<UseGateResult> = {}): UseGateResult {
     eventTitle: '가을 밤 콘서트',
     parkedCount: 0,
     gateOpen: true,
+    gateOpenStale: false,
+    canApprove: false,
+    openOverride,
+    submitOverride,
     handleResponse,
     retry: vi.fn(),
     ...over,
@@ -225,5 +244,65 @@ describe('the QR fallback', () => {
     for (const line of [staffKo.qr.cameraDenied, staffKo.qr.failed, staffKo.qr.notGateCode]) {
       expect(screen.queryByText(line)).not.toBeInTheDocument();
     }
+  });
+});
+
+/**
+ * The reachability of the override state, which is the whole of Task 32 as far as this screen is
+ * concerned: before it, `machine.onOverride()` had no caller and the dialog could not be opened
+ * by anybody.
+ */
+describe('manual approval', () => {
+  it('offers it only once there is a ticket to approve', async () => {
+    renderGate();
+    expect(screen.queryByRole('button', { name: staffKo.override.open })).toBeNull();
+
+    gate.mockReturnValue(running({ state: 'deny', deny: 'EXPIRED_CODE', ticket: TICKET }));
+    renderGate();
+    await userEvent.click(screen.getByRole('button', { name: staffKo.override.open }));
+    expect(openOverride).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows one dialog and no second button once it is open', () => {
+    gate.mockReturnValue(running({ state: 'override', ticket: TICKET }));
+    renderGate();
+    expect(screen.getByRole('dialog', { name: staffKo.override.title })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: staffKo.override.open })).toBeNull();
+  });
+
+  it('hands the PIN and the reason to the hook, and says what the chain said this staff may do', async () => {
+    gate.mockReturnValue(running({ state: 'override', ticket: TICKET, canApprove: true }));
+    renderGate();
+    expect(screen.getByRole('button', { name: staffKo.override.approve })).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText(staffKo.override.pin), '4821');
+    await userEvent.click(screen.getByRole('button', { name: staffKo.override.approve }));
+    expect(submitOverride).toHaveBeenCalledWith('4821', 1);
+  });
+
+  it('offers only a request when the chain says this account may not approve', () => {
+    gate.mockReturnValue(running({ state: 'override', ticket: TICKET, canApprove: false }));
+    renderGate();
+    expect(screen.getByRole('button', { name: staffKo.override.request })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: staffKo.override.approve })).toBeNull();
+  });
+});
+
+/**
+ * A staff APK that cold-starts at a venue with no signal used to be stuck on "not told yet"
+ * forever: `isOpenGate` fails, `gateOpen` stays `undefined`, and the door never opens. It now
+ * runs on the last answer this device had — and says so, because a permission read an hour ago
+ * is a fact about an hour ago.
+ */
+describe('a door open on a remembered answer', () => {
+  it('runs, and marks itself stale', () => {
+    gate.mockReturnValue(running({ gateOpen: true, gateOpenStale: true }));
+    renderGate();
+    expect(screen.getByText(staffKo.setup.gateOpenStale)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: staffKo.qr.scanButton })).toBeInTheDocument();
+  });
+
+  it('says nothing when the chain answered for itself', () => {
+    renderGate();
+    expect(screen.queryByText(staffKo.setup.gateOpenStale)).toBeNull();
   });
 });

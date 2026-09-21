@@ -6,6 +6,8 @@ import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
+import { OVERRIDE_REASONS } from '@monti/shared';
+
 import { fmt, setLocale } from '../../shared/i18n';
 import { staffEn, staffKo } from '../copy';
 import { TAP_REFUSAL, type SettledTap } from '../gate/machine';
@@ -521,6 +523,101 @@ describe('OverrideDialog', () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(onSubmit).not.toHaveBeenCalled();
   });
+
+  /**
+   * The list is the contracts' list. A screen with its own copy of it is a screen that can file
+   * "사유 3" against an override the staff member described as "사유 2".
+   */
+  it('lists exactly the reason codes @monti/shared declares, in that order', () => {
+    render(<OverrideDialog canApprove onSubmit={noop} onCancel={noop} />);
+    const select = screen.getByLabelText(staffKo.override.reasonLabel);
+    expect(within(select).getAllByRole('option').map((option) => option.getAttribute('value'))).toEqual(
+      OVERRIDE_REASONS.map(String),
+    );
+  });
+
+  it('says nothing about an outcome until there is one', () => {
+    render(<OverrideDialog canApprove onSubmit={noop} onCancel={noop} />);
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('locks the fields and the button while it is going out', () => {
+    render(
+      <OverrideDialog canApprove outcome={{ status: 'sending', reason: 1 }} onSubmit={noop} onCancel={noop} />,
+    );
+    expect(screen.getByRole('status')).toHaveTextContent(staffKo.override.sending);
+    expect(screen.getByLabelText(staffKo.override.pin)).toBeDisabled();
+    expect(screen.getByRole('button', { name: staffKo.override.approve })).toBeDisabled();
+  });
+
+  /**
+   * `requestOverride` admits nobody, so this sentence is the only thing that tells a staff
+   * member the request left the phone at all. It carries the same three facts the chain event
+   * will: who asked, with what rights, and why.
+   */
+  it('shows 요청됨 — 승인 대기 with the role and the approver, and stops offering to send again', () => {
+    render(
+      <OverrideDialog
+        canApprove={false}
+        outcome={{
+          status: 'requested',
+          reason: 2,
+          route: 'requestOverride',
+          role: 'none',
+          approver: `0x${'bb'.repeat(20)}`,
+        }}
+        onSubmit={noop}
+        onCancel={noop}
+      />,
+    );
+    const status = screen.getByRole('status');
+    expect(status).toHaveTextContent(staffKo.override.requested);
+    expect(status).toHaveTextContent(staffKo.override.roleNone);
+    expect(status).toHaveTextContent(staffKo.override.reason2);
+    expect(status).toHaveTextContent('0xbbbb…bbbb');
+    expect(screen.queryByRole('button', { name: staffKo.override.request })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: staffKo.done })).toBeInTheDocument();
+  });
+
+  it('names the approver role the chain will record on a manual approval', () => {
+    render(
+      <OverrideDialog
+        canApprove
+        outcome={{
+          status: 'approved',
+          reason: 1,
+          route: 'manualOverride',
+          role: 'approver',
+          approver: `0x${'cc'.repeat(20)}`,
+        }}
+        onSubmit={noop}
+        onCancel={noop}
+      />,
+    );
+    expect(screen.getByRole('status')).toHaveTextContent(staffKo.override.roleApprover);
+    expect(screen.getByRole('status')).toHaveTextContent(staffKo.override.approved);
+  });
+
+  /**
+   * A wrong PIN and a refused permission both arrive as a failure with its own sentence, and
+   * both leave the button there: neither is a reason to make the staff member close the dialog
+   * and start again with a queue watching.
+   */
+  it('keeps the button after a failure, and shows the sentence it was given', async () => {
+    const onSubmit = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <OverrideDialog
+        canApprove
+        outcome={{ status: 'failed', reason: 1, detail: '틀렸어요' }}
+        onSubmit={onSubmit}
+        onCancel={noop}
+      />,
+    );
+    expect(screen.getByRole('status')).toHaveTextContent('틀렸어요');
+    await user.click(screen.getByRole('button', { name: staffKo.override.approve }));
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('GateConsole', () => {
@@ -670,6 +767,15 @@ describe('GateConsole', () => {
     renderConsole({ state: 'admit', ticket: ticket() }, { onDone });
     await user.click(screen.getByRole('button', { name: staffKo.done }));
     expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it('hands the machine own override record to the dialog', () => {
+    renderConsole(
+      { state: 'override', override: { status: 'requested', reason: 3, role: 'none' } },
+      { canApprove: false },
+    );
+    expect(screen.getByRole('status')).toHaveTextContent(staffKo.override.requested);
+    expect(screen.getByRole('status')).toHaveTextContent(staffKo.override.reason3);
   });
 
   it('wires the override dialog to the caller', async () => {

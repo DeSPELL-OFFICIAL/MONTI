@@ -47,6 +47,26 @@ interface StoredPhoto {
   expiresAt: number;
 }
 
+/**
+ * The last thing `Organizers.isOpenGate` said about this gate, kept so a terminal that boots
+ * with no signal is not stuck on "not told yet".
+ *
+ * It is a **cache and never an authority.** The chain's answer replaces it the instant one
+ * arrives, and it is only consulted when the very first read of a session fails — a terminal
+ * that has heard "closed" this session keeps that, because the remembered value is older. It is
+ * keyed by `gateId` so a device somehow re-registered onto another gate cannot inherit the
+ * previous gate's permission, and it carries `checkedAt` so the screen can say it is stale.
+ *
+ * Wiping it is `clearAll`'s job (sign-out), not `clearSnapshotData`'s: closing a gate screen is
+ * not a reason to make the next cold start blind.
+ */
+interface StoredGateOpen {
+  key: 'gateOpen';
+  gateId: string;
+  open: boolean;
+  checkedAt: number;
+}
+
 let dbPromise: Promise<IDBPDatabase> | null = null;
 
 /**
@@ -73,6 +93,34 @@ export function staffDb(): Promise<IDBPDatabase> {
     });
   }
   return dbPromise;
+}
+
+/** Remembers the chain's answer about this gate's door. Failures are swallowed: it is a cache. */
+export async function rememberGateOpen(gateId: bigint, open: boolean, now = Date.now()): Promise<void> {
+  try {
+    await (await staffDb()).put('settings', {
+      key: 'gateOpen',
+      gateId: gateId.toString(),
+      open,
+      checkedAt: now,
+    } satisfies StoredGateOpen);
+  } catch {
+    // A cache that cannot be written changes nothing about the door that is open right now.
+  }
+}
+
+/**
+ * What the chain last said about **this** gate, or `undefined` — including when the row names a
+ * different gate, which is the case that must not be inherited.
+ */
+export async function lastGateOpen(gateId: bigint): Promise<{ open: boolean; checkedAt: number } | undefined> {
+  try {
+    const row = (await (await staffDb()).get('settings', 'gateOpen')) as StoredGateOpen | undefined;
+    if (!row || row.gateId !== gateId.toString()) return undefined;
+    return { open: row.open, checkedAt: row.checkedAt };
+  } catch {
+    return undefined;
+  }
 }
 
 /**

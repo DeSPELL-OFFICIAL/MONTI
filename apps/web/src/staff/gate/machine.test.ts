@@ -340,6 +340,72 @@ describe('the states that are not admit', () => {
     machine.onOverride();
     expect(machine.state()).toBe('override');
   });
+
+  /**
+   * The dialog is the only record of a manual approval the gate will ever have: `manualOverride`
+   * emits `CheckedIn` with a zero `nonceHash`, which the tap watch cannot match, and
+   * `requestOverride` emits no check-in at all. So the result is carried in the context rather
+   * than drawn and forgotten.
+   */
+  it('carries how the override went, without leaving the override state', () => {
+    const machine = inFlight();
+    machine.onOverride();
+    machine.onOverrideResult({ status: 'sending', reason: 1 });
+    expect(machine.snapshot().override).toEqual({ status: 'sending', reason: 1 });
+
+    machine.onOverrideResult({
+      status: 'requested',
+      reason: 1,
+      route: 'requestOverride',
+      role: 'none',
+      approver: `0x${'bb'.repeat(20)}`,
+    });
+    expect(machine.state()).toBe('override');
+    expect(machine.snapshot().override).toMatchObject({ status: 'requested', route: 'requestOverride' });
+  });
+
+  it('ignores an override result when no dialog is open', () => {
+    const machine = inFlight();
+    machine.onOverrideResult({ status: 'approved', reason: 1 });
+    expect(machine.snapshot().override).toBeUndefined();
+    expect(machine.state()).toBe('confirming');
+  });
+
+  /**
+   * A tap that arrives while somebody is typing a PIN must not take the slot. The dialog is
+   * about the attendee already standing there, and a tap that wiped it would throw away the
+   * only copy of an approval that may already be on chain.
+   */
+  it('refuses a tap while the override dialog is open', () => {
+    const machine = inFlight();
+    machine.onOverride();
+    machine.onOverrideResult({ status: 'sending', reason: 1 });
+    expect(machine.onResponse(B)).toBe(false);
+    expect(machine.refusal()).toBe(TAP_REFUSAL.showingVerdict);
+    expect(machine.state()).toBe('override');
+    expect(machine.snapshot().override).toMatchObject({ status: 'sending' });
+  });
+
+  it('keeps the override in 직전 탭 on the way back to waiting, and clears it from the screen', () => {
+    const machine = inFlight();
+    machine.onOverride();
+    machine.onOverrideResult({
+      status: 'approved',
+      reason: 2,
+      route: 'manualOverride',
+      role: 'manager',
+      approver: `0x${'bb'.repeat(20)}`,
+    });
+    machine.reset();
+
+    expect(machine.state()).toBe('ready');
+    expect(machine.snapshot().override).toBeUndefined();
+    expect(machine.lastSettled()).toMatchObject({
+      state: 'override',
+      tap: { nonce: A.nonce },
+      override: { status: 'approved', role: 'manager', reason: 2 },
+    });
+  });
 });
 
 describe('going back to waiting', () => {

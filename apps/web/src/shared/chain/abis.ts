@@ -25,11 +25,15 @@ export type UsedContract = 'Identity' | 'Organizers' | 'Ticket';
  */
 export const USED_ABI = {
   Identity: { isMember: 1, isLocked: 1, kycLevelOf: 1, deviceUpdatedAt: 1 },
-  Organizers: { gateInfo: 1, isOpenGate: 2, hasPermission: 3, gateOf: 1, ownerOf: 1 },
+  Organizers: { gateInfo: 1, isOpenGate: 2, hasPermission: 3, gateOf: 1, ownerOf: 1, managerOf: 2 },
   Ticket: {
     eventOf: 1, eventOrg: 1, tierOf: 1, eventStatus: 1, isRevoked: 1, transfersOf: 1, balanceOfEvent: 2,
     checkInOf: 1, eventMeta: 1, tiers: 1, offerOf: 1,
     checkIn: 3,
+    // Manual approval (04 T32). Both are sent from the staff member's OWN passkey account and
+    // never from the gate account: the chain records `msg.sender` as the approver, and a gate
+    // terminal is a device rather than a person who can stand behind letting somebody in.
+    requestOverride: 3, manualOverride: 3,
     claim: 3, safeTransferFrom: 3,
     createOffer: 3, cancelOffer: 1, acceptOffer: 2,
   },

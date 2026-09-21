@@ -86,6 +86,21 @@ export const GATE_REGISTRATION_POLL_MS = 3000;
  */
 export const SEEDED_EVENT_ID = '1' as const;
 
+/**
+ * The local PIN that unlocks manual approval (`staff/override/pin.ts`), and the lockout that is
+ * the real defence around four digits.
+ *
+ * Five tries then a minute turns an exhaustive walk of a four-digit PIN from an afternoon into
+ * roughly 33 hours at the terminal, which outlasts any event. The iteration count is OWASP's
+ * 2023 figure for PBKDF2-SHA-256; on the phones this ships to it costs about 15 ms, which nobody
+ * standing at a door notices and which no attacker gets to skip.
+ */
+export const PIN_MIN_LENGTH = 4;
+export const PIN_MAX_ATTEMPTS = 5;
+export const PIN_LOCKOUT_MS = 60_000;
+export const PIN_PBKDF2_ITERATIONS = 210_000;
+export const PIN_SALT_BYTES = 16;
+
 /** The staff device's own IndexedDB — separate from anything the attendee build stores. */
 export const STAFF_DB_NAME = 'monti-staff' as const;
 export const STAFF_DB_VERSION = 1;

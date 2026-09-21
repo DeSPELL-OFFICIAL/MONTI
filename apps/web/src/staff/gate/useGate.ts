@@ -45,6 +45,7 @@ import type { Address } from 'viem';
 
 import type { GateResponseWire, SnapshotWire } from '@monti/shared';
 
+import { getStaffAccount } from '../../shared/chain/accounts';
 import { readIdentity, readOrganizers, readTicket } from '../../shared/chain/reads';
 import {
   CHECK_IN_WAIT_MS,
@@ -52,17 +53,23 @@ import {
   GATE_OPEN_RECHECK_MS,
   GATE_STATUS_POLL_MS,
 } from '../constants';
+import { useStaffCopy } from '../copy';
 import { warn } from '../log';
+import { checkPin } from '../override/pin';
+import { readOverrideAuthority, submitOverride as sendOverride } from '../override/route';
 import { createOnlineWatcher } from '../net/online';
 import { offlineAdmit } from '../offline/offlineAdmit';
 import { drainQueue, parkedCount, pendingCount } from '../queue/opQueue';
 import {
   current as currentSnapshot,
+  lastGateOpen,
   photoFor,
+  rememberGateOpen,
   snapshotAgeMs,
   startSnapshotRefresh,
 } from '../snapshot/store';
-import type { GateContext, PreflightResult } from '../types';
+import type { GateContext, OverrideOutcome, OverrideReason, PreflightResult } from '../types';
+import { overrideNotice } from '../components/OverrideDialog';
 import { sendCheckIn } from './checkInOp';
 import { matchIssuedCode } from './decodeResponse';
 import { DENY_LABELS, mapRevertToDenyCode } from './denyMap';
@@ -131,6 +138,23 @@ export type UseGateResult = GateContext & {
    * a gate that has not been told is not a gate that has been told "no".
    */
   gateOpen?: boolean;
+  /**
+   * `gateOpen` came from this device's memory of the last session, not from the chain. True only
+   * until the first successful read of this session, and only ever after one that failed.
+   */
+  gateOpenStale: boolean;
+  /**
+   * Whether the signed-in staff member may admit somebody outright, or only ask (Task 32).
+   * Read from `Organizers` when the dialog opens and **never** cached across openings: rights
+   * change inside a shift, and a stale `true` is a button that promises an operation the chain
+   * will refuse. `false` until the read answers, which is the safe way to be wrong — it offers
+   * to file a request, which every manager may do.
+   */
+  canApprove: boolean;
+  /** Opens the manual-approval dialog for whoever is on screen, and asks who this staff is. */
+  openOverride(): void;
+  /** The PIN, then the chain. Never throws: every outcome is a sentence in the dialog. */
+  submitOverride(pin: string, reason: OverrideReason): Promise<void>;
   /** The one receiving path NFC and the QR fallback (Task 31) share. */
   handleResponse(response: GateResponseWire): Promise<void>;
   /** Clear the verdict and wait for the next attendee. The only thing that clears one. */
@@ -143,6 +167,10 @@ const localDeny = (tap: TapId, code: GateContext['deny'] & string, detail?: stri
 
 export function useGate(params: UseGateParams): UseGateResult {
   const { gateId, eventId, orgId, gateAccount, enabled } = params;
+  // Manual approval is the one place this hook has a sentence to choose (a wrong PIN, a locked
+  // one, a refused permission), and the machine carries that sentence because the dialog has
+  // nowhere else to put it. The table is still the only place a sentence is written.
+  const copy = useStaffCopy();
 
   // One machine for the life of the screen. It is created lazily rather than in an effect
   // because the first render already reads its snapshot, and it is never recreated: the
@@ -166,6 +194,8 @@ export function useGate(params: UseGateParams): UseGateResult {
   const [refusal, setRefusal] = useState<TapRefusal>();
   const [gateOpen, setGateOpen] = useState<boolean>();
   const [queueError, setQueueError] = useState<string>();
+  const [canApprove, setCanApprove] = useState(false);
+  const [gateOpenStale, setGateOpenStale] = useState(false);
   // Held here rather than read off the machine: the machine learns the queue depth only when it
   // admits somebody offline, and the header has to show it after a drain too.
   const [queueDepth, setQueueDepth] = useState({ pending: 0, parked: 0 });
@@ -425,16 +455,33 @@ export function useGate(params: UseGateParams): UseGateResult {
     // an answer. Neither is worth an `eth_call` a minute.
     if (!enabled) {
       setGateOpen(false);
+      setGateOpenStale(false);
       return;
     }
     let alive = true;
+    /** Whether this session has ever had the chain's own answer. Only the first failure falls back. */
+    let answered = false;
     const ask = async (): Promise<void> => {
       try {
         const open = await readOrganizers().isOpenGate(eventId, gateAccount);
-        if (alive) setGateOpen(open);
+        if (!alive) return;
+        answered = true;
+        setGateOpen(open);
+        setGateOpenStale(false);
+        await rememberGateOpen(gateId, open);
       } catch {
-        // A read that did not arrive is not a closed gate. The last answer stands, which for a
-        // gate that has never had one is `undefined` — "not told", not "told no".
+        // A read that did not arrive is not a closed gate. The last answer of **this session**
+        // stands; for a gate that has never had one, the last answer of the last session does —
+        // otherwise a staff APK that cold-starts at a venue with no signal can never open the
+        // door at all, which is the one failure a door cannot recover from by waiting.
+        //
+        // It is marked stale rather than passed off as fresh: a permission read an hour ago is
+        // a fact about an hour ago, and the person holding the phone gets to know that.
+        if (!alive || answered) return;
+        const remembered = await lastGateOpen(gateId);
+        if (!alive || answered || remembered === undefined) return;
+        setGateOpen(remembered.open);
+        setGateOpenStale(true);
       }
     };
     void ask();
@@ -443,7 +490,7 @@ export function useGate(params: UseGateParams): UseGateResult {
       alive = false;
       clearInterval(timer);
     };
-  }, [enabled, eventId, gateAccount]);
+  }, [enabled, eventId, gateAccount, gateId]);
 
   /**
    * The face, and the one case the guest list cannot answer: a ticket minted since the last
@@ -501,6 +548,19 @@ export function useGate(params: UseGateParams): UseGateResult {
     setAdmittedAt(Date.now());
   }, [context.state]);
 
+  /**
+   * A manual approval that landed is a person through the door too — `manualOverride` writes the
+   * check-in and emits `CheckedIn` (Ticket.sol:420-427). It is counted here rather than with the
+   * admits above because the machine deliberately does not call it `admit`: the chain watch
+   * matches a tap by its nonce and this one carries `bytes32(0)`, so nothing will ever confirm
+   * it the way a tap is confirmed. A filed request is not counted — nobody went in.
+   */
+  useEffect(() => {
+    if (context.override?.status !== 'approved') return;
+    setEntriesCount((count) => count + 1);
+    setAdmittedAt(Date.now());
+  }, [context.override?.status]);
+
   useEffect(() => {
     if (context.state !== 'confirming') {
       setElapsedMs(0);
@@ -516,10 +576,110 @@ export function useGate(params: UseGateParams): UseGateResult {
     [],
   );
 
+  /**
+   * Opens the dialog, and asks the chain who is holding the phone.
+   *
+   * The read is fired here rather than at mount for two reasons: it costs two `eth_call`s that
+   * almost every shift never needs, and an answer read at 18:00 is not an answer about 22:00 —
+   * an organizer can promote or demote a manager between doors. `canApprove` drops to `false`
+   * first, so a second opening never shows the previous staff member's rights.
+   */
+  const openOverride = useCallback(() => {
+    setCanApprove(false);
+    machine.onOverride();
+    void (async () => {
+      try {
+        const account = await getStaffAccount();
+        const authority = await readOverrideAuthority({ orgId, account: account.address });
+        setCanApprove(authority.route === 'manualOverride');
+      } catch (error) {
+        // Unreadable rights are not rights. The dialog then offers to file a request, which is
+        // the smaller of the two claims and the one the chain is most likely to accept.
+        warn('gate', 'could not read override rights', error);
+        setCanApprove(false);
+      }
+    })();
+  }, [machine, orgId]);
+
+  /**
+   * One manual approval, start to finish. Nothing here decides anything: the PIN decides whether
+   * the dialog may act at all, and `Organizers` decides which call goes out and whether one goes
+   * out. What this function owns is the **order**, and it is the same shape as a tap's — every
+   * cheap local refusal happens before the operation, so a wrong PIN costs nothing, and the
+   * passkey prompt (the moment a person rather than a terminal stands behind the door) is the
+   * last thing that happens.
+   *
+   * It never throws. A dialog that swallowed an error would leave a staff member pressing a
+   * button that does nothing in front of a queue, so every ending is a sentence.
+   */
+  const submitOverride = useCallback(
+    async (pin: string, reason: OverrideReason): Promise<void> => {
+      const fail = (detail: string, extra: Partial<OverrideOutcome> = {}): void =>
+        machine.onOverrideResult({ status: 'failed', reason, detail, ...extra });
+
+      // `manualOverride(tokenId, …)` needs a ticket, and the only ticket this screen knows is
+      // the one the guest list matched on the tap that is on screen. No tap, nothing to approve.
+      const tokenId = machine.snapshot().ticket?.tokenId;
+      if (tokenId === undefined) {
+        fail(copy.override.noTicket);
+        return;
+      }
+
+      machine.onOverrideResult({ status: 'sending', reason });
+
+      const verdict = await checkPin(pin);
+      if (!verdict.ok) {
+        if (verdict.reason === 'UNSET') fail(copy.override.pinUnset);
+        else if (verdict.reason === 'LOCKED') fail(overrideNotice.pinLocked(copy, verdict.retryInMs));
+        else fail(overrideNotice.pinWrong(copy, verdict.triesLeft));
+        return;
+      }
+
+      let submission;
+      try {
+        submission = await sendOverride({ orgId, gateId, tokenId: BigInt(tokenId), reason });
+      } catch (error) {
+        warn('gate', 'override was not sent', error);
+        fail((error as Error).message === 'OVERRIDE_DENIED' ? copy.override.denied : copy.override.failed);
+        return;
+      }
+
+      const filed: OverrideOutcome = {
+        status: 'sending',
+        reason,
+        route: submission.route,
+        role: submission.role,
+        approver: submission.approver,
+      };
+      machine.onOverrideResult(filed);
+
+      const receipt = await submission.wait(CHECK_IN_WAIT_MS).catch(() => undefined);
+      if (receipt === undefined || receipt.revertReason === 'TIMEOUT') {
+        // The operation is still out there, exactly as a slow check-in is (spec §7.3). Saying
+        // "실패" here would be a lie a staff member would act on by sending a second one.
+        return;
+      }
+      if (!receipt.success) {
+        fail(mapRevertToDenyCode(receipt.revertReason).detail, {
+          route: submission.route,
+          role: submission.role,
+          approver: submission.approver,
+        });
+        return;
+      }
+      machine.onOverrideResult({
+        ...filed,
+        status: submission.route === 'manualOverride' ? 'approved' : 'requested',
+      });
+    },
+    [copy, gateId, machine, orgId],
+  );
+
   const retry = useCallback(() => {
     setPhoto(undefined);
     setPrecheck(undefined);
     setDeviceChangedRecently(false);
+    setCanApprove(false);
     clearTapPendingRef.current();
     machine.reset();
   }, [machine]);
@@ -543,6 +703,10 @@ export function useGate(params: UseGateParams): UseGateResult {
     parkedCount: queueDepth.parked,
     queueError,
     gateOpen,
+    gateOpenStale,
+    canApprove,
+    openOverride,
+    submitOverride,
     handleResponse,
     retry,
   };
