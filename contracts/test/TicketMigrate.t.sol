@@ -43,9 +43,8 @@ contract TicketMigrateTest is MontiTest {
         otherTokenId = ticket.claim(otherEventId, 0, "");
     }
 
-    function _attesterSig(uint256 tokenId_, bytes32 commitment, address to) internal pure returns (bytes memory) {
-        bytes32 digest = keccak256(abi.encode(tokenId_, commitment, to));
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(ATTESTER_PK, digest);
+    function _attesterSig(uint256 tokenId_, bytes32 commitment, address to) internal view returns (bytes memory) {
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(ATTESTER_PK, ticket.offerDigest(tokenId_, commitment, to));
         return abi.encodePacked(r, s, v);
     }
 
@@ -280,9 +279,10 @@ contract TicketMigrateTest is MontiTest {
         ticket.revoke(offered, 2);
 
         _member(BOB, 0xB0B0);
+        bytes memory sig = _attesterSig(offered, commitment, BOB);
         vm.prank(BOB);
         vm.expectRevert(Ticket.TicketRevoked.selector);
-        ticket.acceptOffer(offered, _attesterSig(offered, commitment, BOB));
+        ticket.acceptOffer(offered, sig);
         assertEq(ticket.ownerOf(offered), ALICE);
     }
 

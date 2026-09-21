@@ -5,6 +5,7 @@ import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {Base64} from "@openzeppelin/contracts/utils/Base64.sol";
 import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {LibString} from "solady/utils/LibString.sol";
 import {P256} from "solady/utils/P256.sol";
 import {IIdentity} from "./interfaces/IIdentity.sol";
@@ -14,7 +15,7 @@ import {ITicket} from "./interfaces/ITicket.sol";
 /// @title Ticket
 /// @notice ERC-721 where every transfer rule lives in one _update override and every admission is an
 ///         append-only CheckIn record. The chain is the authority for the ADMIT decision (spec 7.4).
-contract Ticket is ERC721, ITicket {
+contract Ticket is ERC721, EIP712, ITicket {
     using Strings for uint256;
 
     struct EventMeta {
@@ -80,6 +81,13 @@ contract Ticket is ERC721, ITicket {
     /// @notice 스펙 12 의 오프라인 큐가 살 수 있는 시간. 큐에 담긴 코드는 개장 이 시간 전부터
     ///         유효하고, 큐는 폐장 이 시간 뒤까지 흘릴 수 있다. 현장 창(CODE_WINDOW)과 무관하다.
     uint256 public constant LATE_WINDOW = 12 hours;
+
+    /// @dev I8: 양도 승인 서명에 도메인을 묶는다. 이게 없으면 같은 서명이 테스트넷·메인넷·모든
+    ///      재배포본에서 유효하고, 어테스터가 접두 없는 메시지 계열 두 개(이것과 오프라인
+    ///      스냅샷)에 서명하는 상태가 된다. 도메인 분리자는 OZ EIP712 가 들고 있고, chainid 가
+    ///      캐시와 다르면 스스로 다시 계산하므로 포크에서도 맞다.
+    bytes32 private constant _TRANSFER_APPROVAL_TYPEHASH =
+        keccak256("TransferApproval(uint256 tokenId,bytes32 recipientCommitment,address recipient)");
 
     /// @notice 6.3 T11: 어테스터가 계정을 바꾼 뒤 티켓이 따라가기까지 본인에게 주는 유예.
     ///         본인은 Identity.cancelRotation() 으로 그 안에 되돌릴 수 있다.
@@ -169,7 +177,7 @@ contract Ticket is ERC721, ITicket {
     error NothingToMigrate();
     error RotationPending();
 
-    constructor(address identity_, address organizers_) ERC721("MONTI Ticket", "MONTI") {
+    constructor(address identity_, address organizers_) ERC721("MONTI Ticket", "MONTI") EIP712("MONTI Ticket", "1") {
         identity = IIdentity(identity_);
         organizers = IOrganizers(organizers_);
     }
@@ -298,6 +306,20 @@ contract Ticket is ERC721, ITicket {
         return _offers[tokenId];
     }
 
+    /// @notice acceptOffer 가 검증하는 그 값. 어테스터(02)가 자기 서명을 교차검증하는 데 쓴다.
+    /// @dev    만료나 nonce 를 넣지 않는다: 어테스터가 서명하는 사실은 "이 계정이 그 핸들의
+    ///         주인이다"이고 그건 지속되는 사실이며, 오퍼의 만료는 이미 온체인 Offer.expiresAt
+    ///         이 강제한다. 같은 세 값에 대한 재사용은 같은 사람에게만 유효하므로 피해가 없다.
+    function offerDigest(uint256 tokenId, bytes32 recipientCommitment, address recipient)
+        public
+        view
+        returns (bytes32)
+    {
+        return _hashTypedDataV4(
+            keccak256(abi.encode(_TRANSFER_APPROVAL_TYPEHASH, tokenId, recipientCommitment, recipient))
+        );
+    }
+
     /// @notice Spec 5.4: the sender picks a recipient by phone number or nickname. The commitment is a
     ///         hash of that handle; the attester later signs "this account is that handle's owner".
     function createOffer(uint256 tokenId, bytes32 recipientCommitment, uint64 expiresAt) external {
@@ -329,7 +351,7 @@ contract Ticket is ERC721, ITicket {
         if (o.from != ownerOf(tokenId)) revert NoOffer();
         if (block.timestamp > o.expiresAt) revert OfferExpired();
 
-        bytes32 digest = keccak256(abi.encode(tokenId, o.recipientCommitment, msg.sender));
+        bytes32 digest = offerDigest(tokenId, o.recipientCommitment, msg.sender);
         if (ECDSA.recover(digest, attesterSig) != identity.attester()) revert BadAttesterSig();
 
         delete _offers[tokenId];
