@@ -174,6 +174,11 @@ class ApduStateMachine(
         if (selected != Selected.NDEF) return ApduStatus.respond(sw = ApduStatus.SW_SECURITY)
         val lc = if (apdu.size > 4) apdu[4].toInt() and 0xFF else 0
         if (apdu.size < 5 + lc) return ApduStatus.respond(sw = ApduStatus.SW_WRONG_LENGTH)
+        // Lc = 0 은 "0바이트를 쓴다"는 뜻이다. 9000 으로 답하면 리더는 저장됐다고 읽지만 저장된
+        // 것은 없다 — Task 3 이 UPDATE BINARY 스텁을 뺀 것과 같은 거짓말이다. 오프셋 0(NLEN)은
+        // 아래 `lc < 2` 가 걸러 내지만 본문 오프셋에는 그 문이 없었다. Lc 바이트 자체가 없는
+        // 4바이트 APDU 는 바로 위 `apdu.size < 5 + lc` 가 이미 6700 으로 돌려보낸다.
+        if (lc == 0) return ApduStatus.respond(sw = ApduStatus.SW_WRONG_LENGTH)
         val offset = ((apdu[2].toInt() and 0xFF) shl 8) or (apdu[3].toInt() and 0xFF)
         val data = apdu.copyOfRange(5, 5 + lc)
 
@@ -225,6 +230,15 @@ class ApduStateMachine(
         onMessage(message)
     }
 
+    /**
+     * [writeBuffer] 는 **일부러 그대로 둔다**. 지난 탭이 남긴 바이트는 [writtenBytes] 가 전부
+     * false 라 읽힐 수 없고, [emitIfComplete] 는 [completePrefix] 가 선언 길이에 닿기 전에는
+     * 아무것도 내보내지 않는다 — 즉 내보내는 바이트는 언제나 **이번 탭에 실제로 쓰인** 것이다.
+     * 2046바이트를 탭마다 0으로 미는 비용을 그 표가 대신 진다.
+     *
+     * 이 안전은 커버리지 표에 **전적으로** 기대고 있다. 완성 판정을 high-water 로 되돌리면
+     * 같은 줄 하나 바꾸지 않고도 지난 탭의 바이트가 다음 메시지에 섞여 나간다.
+     */
     private fun resetWriteState() {
         declaredLength = 0
         completePrefix = 0

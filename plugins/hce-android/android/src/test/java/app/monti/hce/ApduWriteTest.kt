@@ -345,4 +345,29 @@ class ApduWriteTest {
         // NLEN 은 두 바이트다. 한 바이트짜리 오프셋 0 쓰기는 NLEN 이 될 수 없다.
         assertStatus(ApduStatus.SW_WRONG_LENGTH, updateBinary(0, bytes(0x00)))
     }
+
+    @Test
+    fun anUpdateBinaryCarryingNoBodyIsWrongLength() {
+        openNdefFile()
+        // Lc = 0 은 "0바이트를 쓴다"다. 9000 으로 답하면 리더는 저장됐다고 읽고 다음 단계로 간다.
+        assertStatus(ApduStatus.SW_WRONG_LENGTH, machine.process(bytes(0x00, 0xD6, 0x00, 0x02, 0x00)))
+        assertStatus(ApduStatus.SW_WRONG_LENGTH, machine.process(bytes(0x00, 0xD6, 0x00, 0x00, 0x00)))
+        // 거절이 상태를 더럽히지 않는다: 정상 쓰기가 그대로 된다.
+        write(bytes(0x11, 0x22, 0x33))
+        assertEquals(1, written.size)
+        assertArrayEquals(bytes(0x11, 0x22, 0x33), written[0])
+    }
+
+    @Test
+    fun aMessageFinishedByItsLastBodyChunkFiresTooWhenTheLengthCameFirst() {
+        openNdefFile()
+        // 길이를 먼저 적는 리더. 이벤트는 handleUpdateBinary 의 **본문** 갈래에서 난다 —
+        // 표준 순서가 쓰는 NLEN 갈래와는 다른 자리다. 두 자리 모두 살아 있어야 한다.
+        assertStatus(ApduStatus.SW_OK, updateBinary(0, nlen(3)))
+        assertStatus(ApduStatus.SW_OK, updateBinary(2, bytes(0xAA)))
+        assertTrue("본문이 아직 모자라다", written.isEmpty())
+        assertStatus(ApduStatus.SW_OK, updateBinary(3, bytes(0xBB, 0xCC)))
+        assertEquals(1, written.size)
+        assertArrayEquals(bytes(0xAA, 0xBB, 0xCC), written[0])
+    }
 }

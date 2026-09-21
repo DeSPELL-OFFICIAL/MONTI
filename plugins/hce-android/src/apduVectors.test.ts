@@ -244,6 +244,7 @@ class ReferenceStateMachine {
     if (this.selected !== 'NDEF') return respond(EMPTY, SW.SECURITY);
     const lc = apdu.length > 4 ? at(apdu, 4) : 0;
     if (apdu.length < 5 + lc) return respond(EMPTY, SW.WRONG_LENGTH);
+    if (lc === 0) return respond(EMPTY, SW.WRONG_LENGTH); // 0바이트 쓰기에 9000 은 거짓말이다
     const offset = (at(apdu, 2) << 8) | at(apdu, 3);
     const data = apdu.slice(5, 5 + lc);
 
@@ -607,6 +608,34 @@ describe('the write an attendee phone performs (UPDATE BINARY)', () => {
     expectOneMessage(m, RESPONSE_RECORD);
   });
 
+  it('fires from the NLEN branch when the reader writes the length last', () => {
+    // 표준 순서(NLEN 0 → 본문 → 진짜 NLEN)에서는 **마지막 NLEN** 이 이벤트를 낸다 —
+    // 즉 handleUpdateBinary 의 offset == 0 갈래에 있는 emitIfComplete() 다.
+    const m = machine();
+    openNdefFile(m);
+    run(m, [
+      [updateBinary(0, nlen(0)), '9000'],
+      [updateBinary(2, fromHex('AABBCC')), '9000'],
+    ]);
+    expect(m.messages).toHaveLength(0); // 본문이 다 왔는데도 아직이다
+    run(m, [[updateBinary(0, nlen(3)), '9000']]);
+    expectOneMessage(m, fromHex('AABBCC'));
+  });
+
+  it('fires from the body branch when the reader writes the length first', () => {
+    // 길이를 먼저 적는 리더에서는 **마지막 본문 조각** 이 이벤트를 낸다 — 같은 함수의
+    // 본문 갈래에 있는 두 번째 emitIfComplete() 다. 두 자리 모두 살아 있어야 한다.
+    const m = machine();
+    openNdefFile(m);
+    run(m, [
+      [updateBinary(0, nlen(3)), '9000'],
+      [updateBinary(2, fromHex('AA')), '9000'],
+    ]);
+    expect(m.messages).toHaveLength(0);
+    run(m, [[updateBinary(3, fromHex('BBCC')), '9000']]);
+    expectOneMessage(m, fromHex('AABBCC'));
+  });
+
   it('fires twice for two writes in one session, once each', () => {
     const m = machine();
     openNdefFile(m);
@@ -754,6 +783,21 @@ describe('what the state machine refuses', () => {
       [updateBinary(0, nlen(MAX_NDEF_SIZE)), '9000'],
     ]);
     expect(m.messages).toHaveLength(0);
+  });
+
+  it('refuses an UPDATE BINARY that carries no body at all', () => {
+    // Lc = 0 은 "0바이트를 쓴다"다. 9000 으로 답하면 리더는 저장됐다고 읽고 다음 단계로 간다.
+    const m = machine();
+    openNdefFile(m);
+    run(m, [
+      ['00D6000200', '6700'], // 본문 오프셋에 Lc = 0
+      ['00D6000000', '6700'], // NLEN 자리에 Lc = 0
+      ['00D60002', '6700'], // Lc 바이트 자체가 없는 4바이트 APDU
+      ['00D60000', '6700'],
+    ]);
+    // 그리고 아무것도 기다리는 상태가 되지 않았다: 정상 쓰기가 그대로 된다.
+    writeMessage(m, fromHex('112233'));
+    expectOneMessage(m, fromHex('112233'));
   });
 
   it('refuses an UPDATE BINARY that claims more than it carries', () => {
@@ -1040,6 +1084,9 @@ const pins: ReadonlyArray<readonly [keyof typeof scope, string, string]> = [
   ['handleUpdateBinary', 'a body write outside the file is 6A86', 'if (bodyOffset < 0 || bodyOffset + lc > Type4Files.MAX_NDEF_SIZE) { return ApduStatus.respond(sw = ApduStatus.SW_WRONG_P1P2) }'],
   ['handleUpdateBinary', 'a chunk lands where its offset says', 'data.copyInto(writeBuffer, bodyOffset) markWritten(bodyOffset, lc)'],
   ['handleUpdateBinary', 'every accepted write is acknowledged 9000, complete or not', 'emitIfComplete() return ApduStatus.respond(sw = ApduStatus.SW_OK)'],
+  ['handleUpdateBinary', 'a write carrying no body at all is 6700', 'if (lc == 0) return ApduStatus.respond(sw = ApduStatus.SW_WRONG_LENGTH)'],
+  ['handleUpdateBinary', 'the NLEN branch emits, so a length written last finishes the message', 'if (lc > 2) { data.copyInto(writeBuffer, 0, 2, lc) markWritten(0, lc - 2) } emitIfComplete()'],
+  ['handleUpdateBinary', 'the body branch emits too, so a length written first finishes the message', 'data.copyInto(writeBuffer, bodyOffset) markWritten(bodyOffset, lc) emitIfComplete()'],
 
   ['markWritten', 'every byte of the window is marked', 'for (i in from until from + length) writtenBytes[i] = true'],
   ['markWritten', 'the prefix stops at the first hole', 'while (completePrefix < writtenBytes.size && writtenBytes[completePrefix]) completePrefix += 1'],
@@ -1071,6 +1118,15 @@ describe('the Kotlin the vectors stand for', () => {
     const assemblies = (machineSource.match(/ApduStatus\.respond\(/g) ?? []).length;
     expect(assemblies).toBeGreaterThanOrEqual(20);
     expect(words).toBe(assemblies);
+  });
+
+  it('emits from both write paths, not just whichever one a pin happened to match', () => {
+    // 리더는 두 순서 중 하나로 쓴다: 길이를 마지막에(표준) 또는 먼저. 갈래마다 하나씩,
+    // 정확히 두 곳에서 이벤트가 난다. 하나를 지워도 남은 하나가 toContain 핀을 만족시키므로
+    // 개수를 센다 — 지워진 갈래로 쓰는 리더는 영영 이벤트를 받지 못한다.
+    const calls = squeeze(scope.handleUpdateBinary).split('emitIfComplete()').length - 1;
+    expect(calls).toBe(2);
+    expect((machineSource.match(/emitIfComplete\(\)/g) ?? []).length).toBe(3); // 선언 하나 + 부르는 곳 둘
   });
 
   it('swaps the payload in exactly the three places a session can begin or end', () => {
