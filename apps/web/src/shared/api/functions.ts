@@ -213,4 +213,20 @@ export const api = {
   >('getPhotoForGate'),
   // Defined by this sub-plan, see the Interfaces block.
   pinMessage: call<{ eventId: string; msgId: string; pinned: boolean }, { ok: true }>('pinMessage'),
+  // The web never holds a pinning token. The organiser sends the cover picture and the two
+  // readable fields; the server checks that this caller may create events for `orgId`, pins
+  // the picture, then pins `{ name, description, image: "ipfs://<imageCid>" }` and answers
+  // with both CIDs. `metadataCid` is what goes into `EventMeta.imageCid` — the document
+  // `shared/envio/ipfs.ts` reads a title and a picture out of.
+  // Refusals worth their own sentence: `permission-denied` (not this caller's organisation),
+  // `invalid-argument` with `IMAGE_TOO_LARGE` or `BAD_MIME`.
+  // See functions/src/functions/organizer.ts (sub-plan 02, task C5).
+  pinEventMetadata: call<
+    {
+      orgId: string;
+      image: { base64: string; mime: string };
+      meta: { name: string; description: string };
+    },
+    { imageCid: string; metadataCid: string }
+  >('pinEventMetadata'),
 };

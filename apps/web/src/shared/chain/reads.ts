@@ -182,6 +182,21 @@ const GATE_INFO_FIELDS = [
 // mirrored point and every check-in would read as a bad device signature.
 const ACTIVE_DEVICE_FIELDS = ['x', 'y'] as const satisfies readonly (keyof DeviceKeyPoint)[];
 
+/**
+ * The same pin, for the structs this app **sends**. `Ticket.createEvent` takes an `EventMeta`
+ * and a `Tier[]` as calldata, and viem encodes an object positionally out of the ABI's
+ * components exactly as it decodes one: a field sub-plan 01 reordered would be encoded into
+ * the neighbouring slot at the same width, with no error on the way — an event published with
+ * its sale window where its schedule should be. `abis.test.ts` pins both lists, reading the
+ * function's *inputs* rather than its outputs.
+ *
+ * The two lists are the same ones the reads use, so a struct can never drift between the
+ * screen that writes it and the screen that reads it back.
+ */
+export const STRUCT_INPUT_SHAPES = {
+  Ticket: { createEvent: { meta: EVENT_META_FIELDS, tiers_: TIER_FIELDS } },
+} as const;
+
 export const STRUCT_SHAPES = {
   Ticket: {
     eventMeta: EVENT_META_FIELDS, tiers: TIER_FIELDS, checkInOf: CHECK_IN_FIELDS,

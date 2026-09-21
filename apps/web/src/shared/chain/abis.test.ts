@@ -12,7 +12,7 @@ import {
   ticketAbi,
   type UsedContract,
 } from './abis';
-import { STRUCT_SHAPES } from './reads';
+import { STRUCT_INPUT_SHAPES, STRUCT_SHAPES } from './reads';
 
 /**
  * The guard the usage manifest exists for. `USED_ABI` names every function the app calls and
@@ -117,6 +117,33 @@ function decodedFieldNames(abi: readonly unknown[], functionName: string): strin
   const params = single?.components ?? outputs;
   return params.map((param) => param.name ?? '');
 }
+
+/** The field names viem encodes from, in ABI order, for one named input of a function. */
+function inputFieldNames(abi: readonly unknown[], functionName: string, inputName: string): string[] {
+  const entry = abi.find(
+    (item): item is { type: 'function'; name: string; inputs: readonly AbiParam[] } =>
+      (item as { type?: string }).type === 'function' && (item as { name?: string }).name === functionName,
+  );
+  if (!entry) throw new Error(`${functionName} is missing from the generated ABI`);
+  const input = entry.inputs.find((param) => param.name === inputName);
+  if (!input) throw new Error(`${functionName} takes no argument named ${inputName}`);
+  return (input.components ?? []).map((param) => param.name ?? '');
+}
+
+describe('the struct fields the wizard encodes positionally', () => {
+  for (const contract of Object.keys(STRUCT_INPUT_SHAPES) as Array<keyof typeof STRUCT_INPUT_SHAPES>) {
+    const functions: Readonly<Record<string, Readonly<Record<string, readonly string[]>>>> =
+      STRUCT_INPUT_SHAPES[contract];
+
+    for (const [functionName, inputs] of Object.entries(functions)) {
+      for (const [inputName, fields] of Object.entries(inputs)) {
+        it(`${contract}.${functionName}(${inputName}) takes exactly ${fields.join(', ')} in that order`, () => {
+          expect(inputFieldNames(ABI_BY_CONTRACT[contract], functionName, inputName)).toEqual([...fields]);
+        });
+      }
+    }
+  }
+});
 
 describe('the struct fields reads.ts decodes positionally', () => {
   for (const contract of Object.keys(STRUCT_SHAPES) as Array<keyof typeof STRUCT_SHAPES>) {

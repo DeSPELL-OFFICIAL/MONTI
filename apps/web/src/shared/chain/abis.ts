@@ -34,6 +34,7 @@ export const USED_ABI = {
     checkInOf: 1, eventMeta: 1, tiers: 1, offerOf: 1,
     claim: 3, safeTransferFrom: 3,
     createOffer: 3, cancelOffer: 1, acceptOffer: 2,
+    createEvent: 2,
   },
 } as const satisfies Record<UsedContract, Readonly<Record<string, number>>>;
 

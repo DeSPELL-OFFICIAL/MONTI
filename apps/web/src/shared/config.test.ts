@@ -13,7 +13,6 @@ const BASE = {
   VITE_ENVIO_URL: 'https://indexer.example/v1/graphql',
   VITE_RP_ID: 'monti.app',
   VITE_IPFS_GATEWAY: 'https://gateway.pinata.cloud/ipfs/',
-  VITE_PINATA_JWT: 'jwt',
 };
 
 afterEach(() => {
@@ -38,10 +37,11 @@ describe('getConfig', () => {
     expect(() => getConfig()).toThrow('VITE_ADDR_TICKET');
   });
 
-  it('boots without a Pinata token: the attendee app never pins', () => {
+  // Pinning is a backend callable (`pinEventMetadata`), so no build of this app carries a
+  // pinning token — see `organizer/wizard/pinata.test.ts`, which greps for the variable.
+  it('carries no pinning token at all', () => {
     for (const [key, value] of Object.entries(BASE)) vi.stubEnv(key, value);
-    vi.stubEnv('VITE_PINATA_JWT', '');
-    expect(getConfig().pinataJwt).toBe('');
+    expect(Object.keys(getConfig())).not.toContain('pinataJwt');
   });
 
   it('never hardcodes the chain id in logic', () => {
