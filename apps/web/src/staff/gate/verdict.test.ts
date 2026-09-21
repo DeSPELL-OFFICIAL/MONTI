@@ -14,7 +14,7 @@ vi.mock('../../shared/chain/subscribeLogs', () => ({ subscribeLogs }));
 const checkInOf = vi.fn();
 vi.mock('../../shared/chain/reads', () => ({ readTicket: () => ({ checkInOf }) }));
 
-import type { Verdict } from './machine';
+import type { Verdict, WatchFactory } from './machine';
 
 const { checkedInTopics, nonceHashOf, watchCheckedIn } = await import('./verdict');
 const { createGateMachine } = await import('./machine');
@@ -23,6 +23,8 @@ const NONCE = `0x${'ab'.repeat(32)}` as Hex;
 const OTHER_NONCE = `0x${'cd'.repeat(32)}` as Hex;
 const TOKEN_ID = 7n;
 const TOKEN_TOPIC = numberToHex(TOKEN_ID, { size: 32 });
+/** The tap the watch is opened for — exactly the `TapId` the machine holds. */
+const TAP = { tokenId: TOKEN_ID, nonce: NONCE };
 
 const CHECKED_IN = toEventSelector('CheckedIn(uint256,uint256,uint256,bytes32,uint64)');
 /** 01b's own signature, so a log of the shape the redeploy adds can be fed in today. */
@@ -93,8 +95,15 @@ describe('checkedInTopics', () => {
 });
 
 describe('the chain verdict', () => {
+  /** The machine hands this function into its `watch` slot and owns the handle it gets back.
+   *  A drift in either signature is a type error here rather than a gate that never listens. */
+  it('is the WatchFactory the machine holds', () => {
+    const factory: WatchFactory = watchCheckedIn;
+    expect(factory).toBe(watchCheckedIn);
+  });
+
   it('subscribes to the Ticket contract for this ticket alone', () => {
-    watchCheckedIn({ tokenId: TOKEN_ID, nonce: NONCE, onVerdict: () => {} });
+    watchCheckedIn(TAP, () => {});
     const args = subscribeLogs.mock.calls[0]?.[0] as { address: Hex; topics: unknown[] };
     expect(args.address).toBe(TICKET);
     expect(args.topics).toEqual([[CHECKED_IN], TOKEN_TOPIC]);
@@ -102,12 +111,8 @@ describe('the chain verdict', () => {
 
   it('turns a speculative log into an unfinalized admit and the finalized repeat into a final one', () => {
     const seen: Array<[string, boolean | undefined, Hex]> = [];
-    watchCheckedIn({
-      tokenId: TOKEN_ID,
-      nonce: NONCE,
-      onVerdict: (verdict) =>
-        seen.push([verdict.kind, verdict.kind === 'admit' ? verdict.finalized : undefined, verdict.nonce]),
-    });
+    watchCheckedIn(TAP, (verdict) =>
+        seen.push([verdict.kind, verdict.kind === 'admit' ? verdict.finalized : undefined, verdict.nonce]));
     feed(checkedInLog(nonceHashOf(NONCE)));
     feed(checkedInLog(nonceHashOf(NONCE), { stage: 'finalized' }));
     // The verdict names the tap by its nonce, not by the hash: that is the identity the machine
@@ -125,7 +130,7 @@ describe('the chain verdict', () => {
    */
   it('ignores a CheckedIn for this ticket that answers a different code', () => {
     const onVerdict = vi.fn();
-    watchCheckedIn({ tokenId: TOKEN_ID, nonce: NONCE, onVerdict });
+    watchCheckedIn(TAP, onVerdict);
     feed(checkedInLog(nonceHashOf(OTHER_NONCE)));
     expect(onVerdict).not.toHaveBeenCalled();
   });
@@ -133,7 +138,7 @@ describe('the chain verdict', () => {
   /** A manual override writes `bytes32(0)` (`Ticket.sol:420`) — it answers no code at all. */
   it('ignores a manual check-in, whose nonceHash is zero', () => {
     const onVerdict = vi.fn();
-    watchCheckedIn({ tokenId: TOKEN_ID, nonce: NONCE, onVerdict });
+    watchCheckedIn(TAP, onVerdict);
     feed(checkedInLog(`0x${'00'.repeat(32)}` as Hex));
     expect(onVerdict).not.toHaveBeenCalled();
   });
@@ -145,7 +150,7 @@ describe('the chain verdict', () => {
    */
   it('never admits on a CheckedInLate, which carries no nonceHash', () => {
     const onVerdict = vi.fn();
-    watchCheckedIn({ tokenId: TOKEN_ID, nonce: NONCE, onVerdict });
+    watchCheckedIn(TAP, onVerdict);
     feed({
       topics: [CHECKED_IN_LATE, TOKEN_TOPIC, numberToHex(3n, { size: 32 })],
       data: encodeAbiParameters([{ type: 'uint64' }, { type: 'uint64' }], [1_790_000_000n, 1_790_000_100n]),
@@ -161,11 +166,7 @@ describe('the chain verdict', () => {
    */
   it('reads the block number whether it arrives as a hex quantity or a bigint', () => {
     const blocks: Array<bigint | undefined> = [];
-    watchCheckedIn({
-      tokenId: TOKEN_ID,
-      nonce: NONCE,
-      onVerdict: (verdict) => blocks.push(verdict.kind === 'admit' ? verdict.blockNumber : undefined),
-    });
+    watchCheckedIn(TAP, (verdict) => blocks.push(verdict.kind === 'admit' ? verdict.blockNumber : undefined));
     feed(checkedInLog(nonceHashOf(NONCE)));
     feed(checkedInLog(nonceHashOf(NONCE), { blockNumber: 100n }));
     feed(checkedInLog(nonceHashOf(NONCE), { blockNumber: null }));
@@ -174,7 +175,7 @@ describe('the chain verdict', () => {
 
   it('stops the log subscription and answers nothing more once it is stopped', () => {
     const onVerdict = vi.fn();
-    const stop = watchCheckedIn({ tokenId: TOKEN_ID, nonce: NONCE, onVerdict });
+    const stop = watchCheckedIn(TAP, onVerdict);
     stop();
     expect(stopLogs).toHaveBeenCalledTimes(1);
     feed(checkedInLog(nonceHashOf(NONCE)));
@@ -184,7 +185,7 @@ describe('the chain verdict', () => {
 
 describe('the one-shot checkInOf read, for a subscription that opened late', () => {
   it('reads this ticket exactly once when the watch opens', async () => {
-    watchCheckedIn({ tokenId: TOKEN_ID, nonce: NONCE, onVerdict: () => {} });
+    watchCheckedIn(TAP, () => {});
     await flush();
     expect(checkInOf).toHaveBeenCalledTimes(1);
     expect(checkInOf).toHaveBeenCalledWith(TOKEN_ID);
@@ -198,7 +199,7 @@ describe('the one-shot checkInOf read, for a subscription that opened late', () 
   it('admits from storage when the stored check-in answers this code', async () => {
     checkInOf.mockResolvedValue({ gateId: 3n, ts: 1_790_000_000n, nonceHash: nonceHashOf(NONCE), manual: false });
     const onVerdict = vi.fn();
-    watchCheckedIn({ tokenId: TOKEN_ID, nonce: NONCE, onVerdict });
+    watchCheckedIn(TAP, onVerdict);
     await flush();
     expect(onVerdict).toHaveBeenCalledWith({
       kind: 'admit', nonce: NONCE, blockNumber: undefined, finalized: true,
@@ -211,14 +212,14 @@ describe('the one-shot checkInOf read, for a subscription that opened late', () 
       gateId: 3n, ts: 1_790_000_000n, nonceHash: nonceHashOf(OTHER_NONCE), manual: false,
     });
     const onVerdict = vi.fn();
-    watchCheckedIn({ tokenId: TOKEN_ID, nonce: NONCE, onVerdict });
+    watchCheckedIn(TAP, onVerdict);
     await flush();
     expect(onVerdict).not.toHaveBeenCalled();
   });
 
   it('does not admit the zero struct an unchecked ticket reads back as', async () => {
     const onVerdict = vi.fn();
-    watchCheckedIn({ tokenId: TOKEN_ID, nonce: NONCE, onVerdict });
+    watchCheckedIn(TAP, onVerdict);
     await flush();
     expect(onVerdict).not.toHaveBeenCalled();
   });
@@ -226,7 +227,7 @@ describe('the one-shot checkInOf read, for a subscription that opened late', () 
   it('swallows a failed read — the gate is offline, not refused', async () => {
     checkInOf.mockRejectedValue(new Error('ECONNREFUSED'));
     const onVerdict = vi.fn();
-    expect(() => watchCheckedIn({ tokenId: TOKEN_ID, nonce: NONCE, onVerdict })).not.toThrow();
+    expect(() => watchCheckedIn(TAP, onVerdict)).not.toThrow();
     await flush();
     expect(onVerdict).not.toHaveBeenCalled();
   });
@@ -234,7 +235,7 @@ describe('the one-shot checkInOf read, for a subscription that opened late', () 
   it('says nothing once the watch has been stopped, even if the read was already in flight', async () => {
     checkInOf.mockResolvedValue({ gateId: 3n, ts: 1_790_000_000n, nonceHash: nonceHashOf(NONCE), manual: false });
     const onVerdict = vi.fn();
-    watchCheckedIn({ tokenId: TOKEN_ID, nonce: NONCE, onVerdict })();
+    watchCheckedIn(TAP, onVerdict)();
     await flush();
     expect(onVerdict).not.toHaveBeenCalled();
   });
@@ -249,13 +250,13 @@ describe('what the verdict does to the gate machine (Task 23)', () => {
   it('turns a machine that already timed out green', () => {
     const machine = createGateMachine({ gateId: 3n, eventId: 42n, orgId: 1n });
     machine.onReady();
-    machine.onResponse({ nonce: NONCE });
-    machine.onSent({ nonce: NONCE, userOpHash: `0x${'fe'.repeat(32)}` });
+    machine.onResponse(TAP);
+    machine.onSent({ ...TAP, userOpHash: `0x${'fe'.repeat(32)}` });
     machine.onTimeout(NONCE);
     expect(machine.state()).toBe('confirming');
     expect(machine.snapshot().retapHint).toBe(true);
 
-    watchCheckedIn({ tokenId: TOKEN_ID, nonce: NONCE, onVerdict: (verdict) => machine.onVerdict(verdict) });
+    watchCheckedIn(TAP, (verdict) => machine.onVerdict(verdict));
     feed(checkedInLog(nonceHashOf(NONCE), { stage: 'finalized' }));
 
     expect(machine.state()).toBe('admit');
@@ -265,8 +266,38 @@ describe('what the verdict does to the gate machine (Task 23)', () => {
 
   it('hands over a Verdict the machine already accepts, unchanged', () => {
     const verdicts: Verdict[] = [];
-    watchCheckedIn({ tokenId: TOKEN_ID, nonce: NONCE, onVerdict: (verdict) => verdicts.push(verdict) });
+    watchCheckedIn(TAP, (verdict) => verdicts.push(verdict));
     feed(checkedInLog(nonceHashOf(NONCE)));
     expect(verdicts).toEqual([{ kind: 'admit', nonce: NONCE, blockNumber: 99n, finalized: false }]);
+  });
+});
+
+/**
+ * Two sources answer this watch and they can land in either order: the storage read resolves in
+ * one round trip while the subscription's first log is still `speculative`. Task 24 review V4 —
+ * the read cannot be skipped, so it must at least not undo what the log already said.
+ */
+describe('the two sources never step backwards', () => {
+  it('does not take a finalized admit back to speculative', async () => {
+    checkInOf.mockResolvedValue({ gateId: 3n, ts: 1_790_000_000n, nonceHash: nonceHashOf(NONCE), manual: false });
+    const seen: boolean[] = [];
+    watchCheckedIn(TAP, (verdict) => {
+      if (verdict.kind === 'admit') seen.push(verdict.finalized);
+    });
+    await flush();
+    // The storage read has answered `finalized`; the subscription's speculative log is late.
+    feed(checkedInLog(nonceHashOf(NONCE)));
+    expect(seen).toEqual([true]);
+  });
+
+  it('still upgrades speculative to finalized, which is the direction that matters', () => {
+    const seen: boolean[] = [];
+    watchCheckedIn(TAP, (verdict) => {
+      if (verdict.kind === 'admit') seen.push(verdict.finalized);
+    });
+    feed(checkedInLog(nonceHashOf(NONCE)));
+    feed(checkedInLog(nonceHashOf(NONCE), { stage: 'finalized' }));
+    feed(checkedInLog(nonceHashOf(NONCE)));
+    expect(seen).toEqual([false, true]);
   });
 });

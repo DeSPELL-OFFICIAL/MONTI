@@ -23,18 +23,15 @@ export { GATE_KEY_ALIAS } from '../shared/deviceKey/types';
 /** How often the gate re-pulls the signed entry snapshot while a door is open. */
 export const SNAPSHOT_REFRESH_MS = 600_000;
 /**
- * Two 2-second clocks that are **not the same clock**, split apart after the Tasks 19–23 review
- * found one constant carrying both meanings. They are equal today and nothing says they must
- * stay equal: shortening the label threshold is a rendering decision, shortening the green hold
- * is a decision about how long a staff member has to read a verdict before the next attendee.
+ * How long a tap may be silent before the gate says "확인 중" (spec §7.3, `gate/machine.ts`).
+ * It is a label threshold and never a state change — the operation is alive on both sides of it.
  *
- * - {@link CHECKING_LABEL_MS} — how long a tap may be silent before the gate says "확인 중"
- *   (spec §7.3, `gate/machine.ts`). It is a label threshold, never a state change.
- * - {@link GREEN_HOLD_MS} — how long the gate keeps a settled verdict on screen before it goes
- *   back to waiting for the next attendee.
+ * It used to be called `CONFIRM_SPINNER_MS` and was documented as the *green hold* while being
+ * used as this; the Tasks 19–23 review split the two names apart. The green hold constant went
+ * with the Task 24 review: nothing holds a verdict on a timer, because the machine has no
+ * transition that clears one — a staff member does, by pressing on.
  */
 export const CHECKING_LABEL_MS = 2000;
-export const GREEN_HOLD_MS = 2000;
 /** Silence this long after a tap starts is a failed tap: the screen asks for a re-tap. */
 export const RETAP_PROMPT_MS = 5000;
 

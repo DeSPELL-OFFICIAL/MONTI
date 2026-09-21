@@ -15,9 +15,7 @@ describe('staff constants match the spec parameter table (§7.3, §11)', () => {
     expect(C.CODE_WINDOW_SECONDS).toBe(60);
     expect(C.CLOCK_SKEW_SECONDS).toBe(5);
     expect(C.SNAPSHOT_REFRESH_MS).toBe(600_000);
-    // Two separate clocks that happen to be equal — the review found one constant doing both.
     expect(C.CHECKING_LABEL_MS).toBe(2000);
-    expect(C.GREEN_HOLD_MS).toBe(2000);
     expect(C.RETAP_PROMPT_MS).toBe(5000);
   });
 

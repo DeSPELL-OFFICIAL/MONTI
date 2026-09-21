@@ -24,10 +24,13 @@ import { USED_EVENTS, eventTopic } from '../../shared/chain/abis';
 import { readTicket } from '../../shared/chain/reads';
 import { subscribeLogs, type ChainLog } from '../../shared/chain/subscribeLogs';
 import { getConfig } from '../../shared/config';
-import type { Verdict } from './machine';
+import type { TapId, Verdict } from './machine';
 
-/** What `subscribeLogs` hands back: stop listening. */
-export type LogSubscription = () => void;
+/**
+ * What `subscribeLogs` hands back: stop listening. Derived rather than re-declared, so there is
+ * one spelling of this type and it cannot drift from the function that produces it.
+ */
+export type LogSubscription = ReturnType<typeof subscribeLogs>;
 
 const BYTES32 = /^0x[0-9a-fA-F]{64}$/;
 
@@ -104,17 +107,11 @@ function blockNumberOf(value: unknown): bigint | undefined {
   return undefined;
 }
 
-export interface WatchCheckedInParams {
-  /** `CheckedIn`'s first indexed parameter — what the topic filter narrows to. */
-  tokenId: bigint;
-  /** The nonce of the gate code this tap answered. What the verdict is matched on. */
-  nonce: Hex;
-  /** Feed it straight to `GateMachine.onVerdict`; the `Verdict` already names its tap. */
-  onVerdict: (verdict: Verdict) => void;
-}
-
 /**
- * Watches for this tap's admission and answers at most once per stage.
+ * Watches for one tap's admission. Its shape is `GateMachine`'s `WatchFactory`, so the machine
+ * passes this function itself and owns the handle — the screen that opens a watch cannot know
+ * when the tap is done with it, and a gate leaking one subscription per attendee runs out of
+ * socket long before the queue runs out of people.
  *
  * Monad reports the same log at each commit stage, so the gate turns green on `speculative`
  * (~0.7 s) and hardens when `finalized` repeats it (~1.3 s, spec §7.2 step 8) — the machine
@@ -122,12 +119,20 @@ export interface WatchCheckedInParams {
  * silences anything still in flight, so a watch left over from the previous attendee cannot
  * answer onto this one's screen.
  */
-export function watchCheckedIn({ tokenId, nonce, onVerdict }: WatchCheckedInParams): LogSubscription {
+export function watchCheckedIn(tap: TapId, onVerdict: (verdict: Verdict) => void): LogSubscription {
+  const { tokenId, nonce } = tap;
   const expected = nonceHashOf(nonce).toLowerCase();
   let live = true;
+  let finalizedAnswered = false;
 
   const admit = (finalized: boolean, blockNumber?: bigint): void => {
     if (!live) return;
+    // Never step backwards. Two sources answer here and they can land in either order: the
+    // storage read says `finalized` about a check-in already written, while the subscription's
+    // first log is `speculative`. Letting the second overwrite the first would take a settled
+    // entry back to "still settling" on the staff screen.
+    if (finalizedAnswered && !finalized) return;
+    finalizedAnswered ||= finalized;
     onVerdict({ kind: 'admit', nonce, blockNumber, finalized });
   };
 
@@ -148,6 +153,14 @@ export function watchCheckedIn({ tokenId, nonce, onVerdict }: WatchCheckedInPara
   // without a block number, because storage does not say which block wrote it. The live
   // speculative → finalized transition belongs to the subscription, the only source that can
   // observe it. A failed read is silence: the gate is offline, which is not a refusal.
+  //
+  // It runs on every watch, which is one `eth_call` per tap (Task 24 review V4). There is no
+  // signal to skip it on: `subscribeLogs` returns before its socket subscription is open, so
+  // "already live" is not a thing this side can ask. And the case it covers is the real ordering
+  // — the wiring sends the check-in and only then opens the watch — where the alternative is a
+  // green that never arrives at all. One extra read next to a sponsored user operation is not a
+  // cost worth a guess. It is started *after* `subscribeLogs`, so the window it has to cover is
+  // as small as it can be, and Task 26 must not read the same slot a second time.
   void Promise.resolve()
     .then(() => readTicket().checkInOf(tokenId))
     .then((checkIn) => {
