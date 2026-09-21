@@ -7,7 +7,8 @@
  * declared `numeric!` while a variable filtering `id` is declared `String!` — and why every
  * `numeric` column is typed `string` below and compared as a string, never as a number.
  *
- * Only columns that exist in indexer/schema.graphql are selected.
+ * Only columns that exist in indexer/schema.graphql are selected. The 내 티켓 tab's own two
+ * round trips live in ./ticketQueries.ts and reuse the row types below.
  */
 
 /** Ticket.EventStatusChanged, carried as the enum's name. */
@@ -87,11 +88,4 @@ export const EVENT_QUERY = `
     Tier(where: { eventId: { _eq: $eventId } }, order_by: { idx: asc }) {
       id eventId idx name priceUsdCents supply minted maxPerWallet seated
     }
-  }`;
-
-export const MY_TICKETS_QUERY = `
-  query MyTickets($owner: String!) {
-    Ticket(where: { owner: { _eq: $owner } }) { id eventId tier owner transfers revoked }
-    CheckIn { id gateId ts manual txHash block }
-    Offer(where: { from: { _eq: $owner } }) { id from commitment expiresAt status }
   }`;

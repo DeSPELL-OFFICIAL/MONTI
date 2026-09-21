@@ -3,8 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { keccak256, toBytes } from 'viem';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetConfig } from '../../shared/config';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // The indexer is not deployed yet, so both sides of the data path are mocked: the GraphQL
 // transport and the gateway read. Every assertion below is about what the screen does with
@@ -16,18 +15,7 @@ vi.mock('../../shared/envio/ipfs', () => ({ fetchEventMetadata }));
 
 const { Discover } = await import('./Discover');
 const { EventDetail } = await import('./EventDetail');
-
-// getConfig() is fail-fast on every VITE_* variable, and a Pinata token is the one a working
-// copy is free to leave blank. Supplying it here keeps these tests independent of .env.local.
-beforeAll(() => {
-  vi.stubEnv('VITE_PINATA_JWT', 'test-jwt');
-  resetConfig();
-});
-
-afterAll(() => {
-  vi.unstubAllEnvs();
-  resetConfig();
-});
+const { METADATA_CONCURRENCY, mapWithPool } = await import('./useEvents');
 
 const NOW_SECONDS = Math.floor(Date.now() / 1000);
 const IN_TWO_DAYS = String(NOW_SECONDS + 2 * 86_400);
@@ -158,6 +146,65 @@ describe('Discover', () => {
   });
 });
 
+describe('gateway fan-out', () => {
+  const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+  it('runs at most the pool width at once and still answers in input order', async () => {
+    const waiting: Array<() => void> = [];
+    let inFlight = 0;
+    let peak = 0;
+    let settled = false;
+
+    const doubled = mapWithPool([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 4, async (value: number) => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await new Promise<void>((resolve) => waiting.push(resolve));
+      inFlight -= 1;
+      return value * 2;
+    });
+    void doubled.then(() => {
+      settled = true;
+    });
+
+    await tick();
+    expect(waiting).toHaveLength(4);
+    expect(peak).toBe(4);
+
+    // Finish the started work newest-first, so completion order never matches input order.
+    for (let round = 0; round < 20 && !settled; round += 1) {
+      for (const resolve of waiting.splice(0, waiting.length).reverse()) resolve();
+      await tick();
+    }
+
+    await expect(doubled).resolves.toEqual([2, 4, 6, 8, 10, 12, 14, 16, 18, 20]);
+    expect(peak).toBe(4);
+  });
+
+  it('never opens the whole page of gateway reads at once', async () => {
+    const page = Array.from({ length: 12 }, (_, index) => ({
+      ...EVENT_ONE,
+      id: String(index + 1),
+      imageCid: `cid-${index}`,
+    }));
+    gql.mockResolvedValue({ Event: page });
+
+    let inFlight = 0;
+    let peak = 0;
+    fetchEventMetadata.mockImplementation(async () => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await new Promise<void>((resolve) => setTimeout(resolve, 5));
+      inFlight -= 1;
+      return META_A;
+    });
+
+    renderDiscover();
+    expect(await screen.findAllByRole('link')).toHaveLength(12);
+    expect(peak).toBeGreaterThan(1);
+    expect(peak).toBeLessThanOrEqual(METADATA_CONCURRENCY);
+  });
+});
+
 describe('EventDetail', () => {
   it('shows the gateway metadata and the tiers', async () => {
     gql.mockResolvedValue({ Event: [EVENT_ONE], Tier: TIERS });
@@ -182,6 +229,30 @@ describe('EventDetail', () => {
     renderDetail();
     expect(await screen.findByText('취소된 행사예요.')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: '티켓 받기' })).toBeNull();
+  });
+
+  it('hides the share button where the phone has no share sheet', async () => {
+    gql.mockResolvedValue({ Event: [EVENT_ONE], Tier: TIERS });
+    renderDetail();
+    await screen.findByRole('heading', { name: '재즈 나이트' });
+    expect(screen.queryByRole('button', { name: '공유' })).toBeNull();
+  });
+
+  it('swallows the rejection a dismissed share sheet throws', async () => {
+    const share = vi.fn(async () => {
+      throw Object.assign(new Error('dismissed'), { name: 'AbortError' });
+    });
+    Object.defineProperty(navigator, 'share', { value: share, configurable: true, writable: true });
+    try {
+      gql.mockResolvedValue({ Event: [EVENT_ONE], Tier: TIERS });
+      renderDetail();
+      await screen.findByRole('heading', { name: '재즈 나이트' });
+      await userEvent.click(screen.getByRole('button', { name: '공유' }));
+      expect(share).toHaveBeenCalledWith({ url: window.location.href });
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    } finally {
+      Reflect.deleteProperty(navigator, 'share');
+    }
   });
 
   it('shows an error state when the event cannot be read', async () => {

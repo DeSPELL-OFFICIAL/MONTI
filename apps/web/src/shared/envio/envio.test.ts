@@ -1,22 +1,10 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EnvioError, gql } from './client';
-import { EVENTS_QUERY, EVENT_QUERY, MY_TICKETS_QUERY } from './queries';
+import { EVENTS_QUERY, EVENT_QUERY } from './queries';
 import { clearMetadataCache, fetchEventMetadata, gatewayUrl, normalizeMetadata } from './ipfs';
-import { getConfig, resetConfig } from '../config';
+import { getConfig } from '../config';
 
 const fetchMock = vi.fn();
-// getConfig() is fail-fast on every VITE_* variable, and a Pinata token is the one a working
-// copy is free to leave blank. Supplying it here keeps these tests independent of .env.local.
-beforeAll(() => {
-  vi.stubEnv('VITE_PINATA_JWT', 'test-jwt');
-  resetConfig();
-});
-
-afterAll(() => {
-  vi.unstubAllEnvs();
-  resetConfig();
-});
-
 
 function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
   return new Response(JSON.stringify(body), {
@@ -81,7 +69,6 @@ describe('queries', () => {
   it('declares every eventId variable as the Hasura numeric scalar', () => {
     expect(EVENT_QUERY).toContain('$eventId: numeric!');
     expect(EVENT_QUERY).not.toMatch(/\$eventId:\s*String!/);
-    expect(MY_TICKETS_QUERY).not.toMatch(/\$(eventId|tokenId):\s*String!/);
   });
 
   it('selects only columns that exist in the indexer schema', () => {

@@ -22,6 +22,9 @@ export interface DiscoverItem {
 
 /** One page is fetched and then narrowed in the browser, so it has to be generous. */
 const PAGE_SIZE = 100;
+/** A public gateway rate-limits a burst of a hundred reads, so the page is read a few at a
+ * time: one CID answering 429 or timing out then costs its own event a title, nothing more. */
+export const METADATA_CONCURRENCY = 4;
 const STORAGE_KEY = 'monti.discover.filters';
 const DAY_MS = 86_400_000;
 
@@ -116,6 +119,29 @@ export function formatEventDate(startsAt: string, locale: string): string {
 }
 
 /**
+ * `Promise.all` over a page would open one request per row at once. This runs at most `limit`
+ * of them, each worker taking the next index as it frees up, and writes every answer back at
+ * its own index — so results keep the page's order however the requests interleave.
+ */
+export async function mapWithPool<In, Out>(
+  items: readonly In[],
+  limit: number,
+  work: (item: In, index: number) => Promise<Out>,
+): Promise<Out[]> {
+  const results = new Array<Out>(items.length) as Out[];
+  let next = 0;
+  const workers = Array.from({ length: Math.min(Math.max(limit, 1), items.length) }, async () => {
+    while (next < items.length) {
+      const index = next;
+      next += 1;
+      results[index] = await work(items[index] as In, index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+/**
  * One page of published events with each one's metadata document beside it. A document that
  * fails to load becomes null instead of failing the page: an event nobody can name is still an
  * event somebody is looking for.
@@ -125,12 +151,10 @@ export function useEvents() {
     queryKey: ['events', 'published'],
     queryFn: async (): Promise<DiscoverItem[]> => {
       const { Event } = await gql<{ Event: EnvioEvent[] }>(EVENTS_QUERY, { limit: PAGE_SIZE });
-      return Promise.all(
-        Event.map(async (event) => ({
-          event,
-          metadata: await fetchEventMetadata(event.imageCid).catch(() => null),
-        })),
-      );
+      return mapWithPool(Event, METADATA_CONCURRENCY, async (event) => ({
+        event,
+        metadata: await fetchEventMetadata(event.imageCid).catch(() => null),
+      }));
     },
   });
 }

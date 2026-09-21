@@ -10,6 +10,23 @@ import { formatEventDate } from './useEvents';
 
 const CANCELLED = 'Cancelled';
 
+/**
+ * Most desktops have no share sheet, so the button only appears where one exists rather than
+ * doing nothing when pressed.
+ */
+function canOpenShareSheet(): boolean {
+  return typeof navigator.share === 'function';
+}
+
+async function shareThisPage(): Promise<void> {
+  try {
+    await navigator.share({ url: window.location.href });
+  } catch {
+    // Dismissing the sheet rejects with AbortError, and a share that fails any other way has
+    // nothing to tell the attendee either — the address is still in the bar.
+  }
+}
+
 export function EventDetail() {
   const copy = useCopy();
   const locale = useLocale();
@@ -50,6 +67,7 @@ export function EventDetail() {
   }
 
   const { event, tiers, metadata } = data;
+  const canShare = canOpenShareSheet();
   const record = `${getConfig().explorerUrl}/address/${getConfig().addresses.ticket}`;
 
   return (
@@ -88,9 +106,11 @@ export function EventDetail() {
         </Link>
       )}
 
-      <Button variant="ghost" onClick={() => void navigator.share?.({ url: window.location.href })}>
-        {copy.discover.share}
-      </Button>
+      {canShare ? (
+        <Button variant="ghost" onClick={() => void shareThisPage()}>
+          {copy.discover.share}
+        </Button>
+      ) : null}
 
       <p className="muted">
         <a href={record}>{copy.discover.publicRecord}</a>
