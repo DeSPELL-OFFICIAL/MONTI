@@ -6,6 +6,7 @@ export { getPhotoForGate, issueSnapshot } from './functions/snapshot.js';
 export { listAttendees } from './functions/listAttendees.js';
 export { lockDevice, startDeviceChange } from './functions/device.js';
 export { loginChallenge, loginVerify } from './functions/login.js';
+export { reconcilePending } from './functions/reconcilePending.js';
 export { registerIdentity } from './functions/registerIdentity.js';
 export { registerPasskey } from './functions/registerPasskey.js';
 export { resolveRecipient } from './functions/resolveRecipient.js';

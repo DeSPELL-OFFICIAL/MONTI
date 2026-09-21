@@ -129,6 +129,9 @@ describe('deploy bundle', () => {
       'registerIdentity',
       'issueSnapshot',
       'resolveRecipient',
+      'listAttendees',
+      'tenderlyWebhook',
+      'reconcilePending',
     ]) {
       expect(exported).toContain(name);
     }
