@@ -206,4 +206,26 @@ contract TicketTransferTest is MontiTest {
         ticket.migrate(tokenId);
         assertEq(ticket.ownerOf(tokenId), CAROL);
     }
+
+    /// @dev T1-3 리뷰 지적. 취소된 행사의 티켓으로는 문을 통과할 수 없으므로(checkIn 의
+    ///      EventCancelled) 그것을 남에게 넘기는 것은 쓸모없는 것을 떠넘기는 일이다.
+    function test_aCancelledEventsTicketCannotBeTransferred() public {
+        vm.prank(ORG_OWNER);
+        ticket.cancelEvent(eventId);
+
+        vm.prank(ALICE);
+        vm.expectRevert(Ticket.EventCancelled.selector);
+        ticket.transferFrom(ALICE, BOB, tokenId);
+        assertEq(ticket.ownerOf(tokenId), ALICE, "the ticket stays where it was");
+        assertEq(ticket.transfersOf(tokenId), 0);
+    }
+
+    /// @dev 끝난 행사는 취소된 행사가 아니다. 양도를 닫는 것은 이미 transferCutoff 이고,
+    ///      새 줄은 Cancelled 하나만 본다 — Ended 로 번지지 않았음을 고정한다.
+    function test_anEndedEventIsNotCancelledSoTheCutoffIsStillTheOnlyBar() public {
+        vm.warp(T0 + 3 days);
+        vm.prank(ALICE);
+        vm.expectRevert(Ticket.TransferCutoffPassed.selector);
+        ticket.transferFrom(ALICE, BOB, tokenId);
+    }
 }

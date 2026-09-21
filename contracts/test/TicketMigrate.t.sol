@@ -339,4 +339,18 @@ contract TicketMigrateTest is MontiTest {
     function test_theUndoWindowAndTheMigrateTimelockAreTheSameLength() public view {
         assertEq(ticket.MIGRATE_DELAY(), identity.ROTATION_UNDO_WINDOW());
     }
+
+    /// @dev 취소된 행사의 티켓은 평범한 양도로는 못 움직이지만(_update 의 EventCancelled) 계정
+    ///      복구는 행사 상태와 무관하다. _internalMove 가 그 가드 블록 전체를 건너뛴다.
+    function test_migrateStillWorksOnACancelledEvent() public {
+        vm.prank(ORG_OWNER);
+        ticket.cancelEvent(eventId);
+
+        _rotateAliceTo(BOB);
+        vm.prank(BOB);
+        ticket.migrate(tokenId);
+
+        assertEq(ticket.ownerOf(tokenId), BOB, "account recovery does not depend on the event");
+        assertEq(ticket.transfersOf(tokenId), 0, "migrate is not a transfer");
+    }
 }

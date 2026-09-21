@@ -459,6 +459,10 @@ contract Ticket is ERC721, EIP712, ITicket {
         if (!exists && !organizers.hasPermission(orgId, msg.sender, PERM_APPROVE_OVERRIDE)) revert Unauthorized();
 
         if (_revoked[tokenId]) revert TicketRevoked();
+        // manualOverride 와 같은 기준이다: 승인할 수 없는 요청은 올라가지 않는다(Minor 5).
+        EventStatus status = eventStatus(eventId);
+        if (status == EventStatus.Ended) revert EventEnded();
+        if (status == EventStatus.Cancelled) revert EventCancelled();
         (uint256 gateEventId,,,,,) = organizers.gateInfo(gateId);
         if (gateEventId != eventId) revert GateMismatch();
         emit OverrideRequested(tokenId, gateId, msg.sender, reason);
@@ -632,6 +636,11 @@ contract Ticket is ERC721, EIP712, ITicket {
 
                 EventMeta storage m = _events[eventId];
                 if (_revoked[tokenId]) revert TicketRevoked();
+                // 취소된 행사의 티켓으로는 문을 통과할 수 없으므로(checkIn 의 EventCancelled),
+                // 그것을 남에게 넘기는 것은 쓸모없는 것을 떠넘기는 일이다. Ended 는 보지 않는다 —
+                // 끝난 행사의 양도는 이미 transferCutoff 가 훨씬 앞에서 닫는다. migrate 는 이
+                // 블록 자체를 건너뛰므로(_internalMove) 계정 복구는 행사 상태와 무관하다.
+                if (_status[eventId] == EventStatus.Cancelled) revert EventCancelled();
                 if (!m.transferable) revert TransfersDisabled();
                 if (_checkIns[tokenId].ts != 0) revert AlreadyCheckedIn();
                 if (block.timestamp + m.transferCutoffSeconds >= m.startsAt) revert TransferCutoffPassed();

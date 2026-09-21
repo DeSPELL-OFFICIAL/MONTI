@@ -274,4 +274,19 @@ contract TicketOfferTest is MontiTest {
             "packages/shared/src/encoding.hash.test.ts pins the same hex"
         );
     }
+
+    /// @dev 오퍼가 서 있는 동안 행사가 취소되면 수락은 _update 에서 막힌다. 어테스터 서명은
+    ///      멀쩡하므로 이 줄이 없으면 취소된 행사의 티켓이 그대로 넘어간다.
+    function test_acceptOfferIsRefusedOnACancelledEvent() public {
+        vm.prank(ALICE);
+        ticket.createOffer(tokenId, COMMITMENT, T0 + 1 hours);
+        vm.prank(ORG_OWNER);
+        ticket.cancelEvent(eventId);
+
+        bytes memory sig = _sig(tokenId, COMMITMENT, BOB);
+        vm.prank(BOB);
+        vm.expectRevert(Ticket.EventCancelled.selector);
+        ticket.acceptOffer(tokenId, sig);
+        assertEq(ticket.ownerOf(tokenId), ALICE);
+    }
 }
