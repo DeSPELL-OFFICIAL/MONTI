@@ -89,22 +89,54 @@ contract TicketMigrateTest is MontiTest {
         assertEq(ticket.ownerOf(tokenId), BOB);
     }
 
+    /// @dev Both halves of the name. The transfer leg runs on an event that permits a handoff, so the
+    ///      void flag is the only thing in the way (setUp's event has maxTransfers 0 and would refuse
+    ///      the move regardless); the admission leg uses the override door, which needs no passkey.
+    ///      The NFC tap itself is covered by TicketCheckIn.t.sol's test_revokedTicketRejected.
     function test_revokeBlocksTransferAndCheckIn() public {
+        uint256 offered = _offerableTicket();
+        uint256 gateId = _openGate();
+        _member(CAROL, 0xCACA);
+
         vm.expectEmit(true, false, false, true);
-        emit Revoked(tokenId, 2);
+        emit Revoked(offered, 2);
+        vm.prank(ORG_OWNER);
+        ticket.revoke(offered, 2);
         vm.prank(ORG_OWNER);
         ticket.revoke(tokenId, 2);
 
-        _member(CAROL, 0xCACA);
         vm.prank(ALICE);
         vm.expectRevert(Ticket.TicketRevoked.selector);
-        ticket.transferFrom(ALICE, CAROL, tokenId);
+        ticket.transferFrom(ALICE, CAROL, offered);
+
+        vm.prank(ORG_OWNER);
+        vm.expectRevert(Ticket.TicketRevoked.selector);
+        ticket.manualOverride(tokenId, gateId, 3);
     }
 
+    /// @dev A stranger is the easy case; the one that catches a wrong bitmask is an admin of this very
+    ///      organizer who holds a different permission. Both must be refused.
     function test_onlyCreateEventPermissionRevokes() public {
         vm.prank(BOB);
         vm.expectRevert(Ticket.Unauthorized.selector);
         ticket.revoke(tokenId, 1);
+
+        // Read both bits first: an argument that is itself a call would eat the prank below.
+        uint32 gateBit = organizers.PERM_MANAGE_GATES();
+        uint32 createBit = organizers.PERM_CREATE_EVENT();
+
+        address gateAdmin = address(0x6AD3);
+        vm.prank(ORG_OWNER);
+        organizers.setAdmin(orgId, gateAdmin, gateBit);
+        vm.prank(gateAdmin);
+        vm.expectRevert(Ticket.Unauthorized.selector);
+        ticket.revoke(tokenId, 1);
+
+        vm.prank(ORG_OWNER);
+        organizers.setAdmin(orgId, gateAdmin, createBit);
+        vm.prank(gateAdmin);
+        ticket.revoke(tokenId, 1);
+        assertTrue(ticket.isRevoked(tokenId), "the right bit does revoke");
     }
 
     function test_revokeRejectsUnknownTicket() public {

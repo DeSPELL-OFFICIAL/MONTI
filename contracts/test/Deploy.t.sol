@@ -75,6 +75,15 @@ contract DeployTest is Test {
         assertEq(address(paymaster.identity()), address(identity), "paymaster.identity");
         assertEq(address(paymaster.organizers()), address(organizers), "paymaster.organizers");
         assertTrue(paymaster.allowedSelector(CHECK_IN), "checkIn is sponsored");
+        // One selector proves the constructor ran; a second one over a different ArgKind proves the
+        // whole table was seeded rather than its first few rows.
+        assertEq(uint8(paymaster.argKindOf(CHECK_IN)), uint8(MontiPaymaster.ArgKind.TokenId), "checkIn kind");
+        assertTrue(paymaster.allowedSelector(Organizers.openGate.selector), "openGate is sponsored");
+        assertEq(
+            uint8(paymaster.argKindOf(Organizers.openGate.selector)),
+            uint8(MontiPaymaster.ArgKind.Platform),
+            "openGate kind"
+        );
     }
 
     /// @notice `Organizers.setTicket` may be called once and never again, so the script has to hand it a
@@ -116,7 +125,13 @@ contract DeployTest is Test {
     function test_runRecordsEverythingTheOtherSubPlansRead() public {
         if (vm.exists(PATH)) vm.removeFile(PATH);
 
+        uint256 deployerBefore = deployer.balance;
         deployScript.run();
+
+        // The stake and the deposit leave the broadcasting key, not the script contract. On chain that
+        // is the whole funding requirement: a deployer holding less than STAKE + DEPOSIT + gas reverts
+        // inside `addStake`, which is exactly how the first testnet rehearsal failed.
+        assertEq(deployerBefore - deployer.balance, STAKE + DEPOSIT, "the deployer funds stake and deposit");
 
         // `run` records only under `--broadcast`, and neither `forge test` nor a dry run is that.
         // Without this gate a `forge script --rpc-url <monad>` rehearsal would overwrite the tracked

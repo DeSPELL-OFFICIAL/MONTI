@@ -45,7 +45,7 @@ contracts/
   foundry.toml                     solc 0.8.31, evm_version osaka, optimizer, rpc aliases 10143/143
   remappings.txt                   @openzeppelin, solady, account-abstraction, smart-wallet, forge-std
   .gitignore                       out/ cache/ broadcast/ .env
-  .env.example                     MONAD_TESTNET_RPC, MONAD_MAINNET_RPC, DEPLOYER_PK, ATTESTER
+  .env.example                     MONAD_TESTNET_RPC, MONAD_MAINNET_RPC, DEPLOYER_PK, ATTESTER_ADDRESS
   lib/                             git submodules (forge install)
   src/
     Identity.sol                   personId ↔ account ↔ active device key, 7-day cooldowns, lock
@@ -185,8 +185,9 @@ MONAD_TESTNET_RPC=https://testnet-rpc.monad.xyz
 MONAD_MAINNET_RPC=https://rpc.monad.xyz
 # Deployer EOA private key (0x-prefixed). Testnet only.
 DEPLOYER_PK=0x0000000000000000000000000000000000000000000000000000000000000000
-# Attester EOA address. Production key lives in Cloud KMS, never here.
-ATTESTER=0x0000000000000000000000000000000000000000
+# Attester EOA address. MVP: the key itself lives in Secret Manager as a raw EOA (ATTESTER_PK), never
+# here; KMS signing is the production path.
+ATTESTER_ADDRESS=0x0000000000000000000000000000000000000000
 # EntryPoint v0.6 (Coinbase Smart Wallet v1)
 ENTRYPOINT=0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789
 EOF
@@ -2403,7 +2404,6 @@ contract Ticket is ERC721, ITicket {
     error WrongEvent();
     error CodeExpired();
     error DeviceLocked();
-    error NoActiveDevice();
     error BadDeviceSignature();
     error NoOffer();
     error OfferExpired();
@@ -3641,11 +3641,11 @@ import {P256} from "solady/utils/P256.sol";
 
         if (!organizers.isOpenGate(eventId, msg.sender)) revert GateNotOpen();
         if (organizers.gateOf(msg.sender) != g.gateId) revert GateMismatch();
-        if (block.timestamp < g.issuedAt || block.timestamp - g.issuedAt > CODE_WINDOW) revert CodeExpired();
+        if (g.issuedAt > block.timestamp + CLOCK_SKEW) revert CodeExpired();
+        if (uint256(g.issuedAt) + CODE_WINDOW < block.timestamp) revert CodeExpired();
 
         if (identity.isLocked(holder)) revert DeviceLocked();
         (bytes32 x, bytes32 y) = identity.activeDevice(holder);
-        if (x == bytes32(0) && y == bytes32(0)) revert NoActiveDevice();
 
         bytes32 h = sha256(abi.encode(tokenId, g.gateId, g.eventId, g.nonce, g.issuedAt));
         (bytes32 r, bytes32 s) = abi.decode(deviceSig, (bytes32, bytes32));

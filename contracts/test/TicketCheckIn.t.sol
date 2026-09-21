@@ -178,6 +178,17 @@ contract TicketCheckInTest is MontiTest {
         ticket.checkIn(tokenId, _code(gateAId), new bytes(63));
     }
 
+    /// @dev T2 (spec 6.3): the nonce is inside the signed digest, so a valid signature captured at the
+    ///      door does not travel to a freshly issued number. Without that binding this would admit.
+    function test_T2_validSignatureWithAMutatedNonceRejected() public {
+        Ticket.GateCode memory replayed = _code(gateAId);
+        replayed.nonce = keccak256("a number the phone never signed");
+        vm.prank(GATE_A);
+        vm.expectRevert(Ticket.BadDeviceSignature.selector);
+        ticket.checkIn(tokenId, replayed, _sigA());
+        assertEq(ticket.checkInOf(tokenId).ts, 0);
+    }
+
     function test_T12_doubleCheckInRejected() public {
         vm.prank(GATE_A);
         ticket.checkIn(tokenId, _code(gateAId), _sigA());

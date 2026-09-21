@@ -112,6 +112,10 @@ contract Deploy is Script {
     ///         existing value is read back and carried over instead of being overwritten with a zero.
     ///         Public, and called by `run` only under a broadcast, so the tests can write the file on
     ///         their own chain id without a dry run ever reaching the tracked one.
+    ///         `block` is `block.number` as the *simulation* saw it, which under `--broadcast` is the
+    ///         latest block at simulation time, a few blocks before the transactions land. Indexers
+    ///         should treat it as a safe lower bound to start from, not as the deployment block; the
+    ///         exact number is in the broadcast receipt if anyone needs it.
     function record() public {
         string memory path = string.concat("deployments/", vm.toString(block.chainid), ".json");
 

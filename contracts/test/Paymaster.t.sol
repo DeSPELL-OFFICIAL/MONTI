@@ -200,6 +200,25 @@ contract PaymasterTest is MontiTest {
         assertFalse(paymaster.allowedSelector(bytes4(keccak256("createOrganizer(address)"))));
     }
 
+    /// @dev The gate, override, migrate and revoke selectors named by the compiler rather than by a
+    ///      hand-typed signature string, so a parameter list that drifts breaks the build instead of
+    ///      quietly falling out of the allowlist. `revoke` is the organizer's own admin action and is
+    ///      deliberately outside the sponsored set (master plan allowlist), so it is pinned false.
+    function test_doorSelectorsAreSponsoredAndRevokeIsNot() public view {
+        assertTrue(paymaster.allowedSelector(Ticket.checkIn.selector), "checkIn");
+        assertTrue(paymaster.allowedSelector(Ticket.requestOverride.selector), "requestOverride");
+        assertTrue(paymaster.allowedSelector(Ticket.manualOverride.selector), "manualOverride");
+        assertTrue(paymaster.allowedSelector(Ticket.migrate.selector), "migrate");
+        assertFalse(paymaster.allowedSelector(Ticket.revoke.selector), "revoke is not sponsored");
+
+        // All four name a tokenId in the first word, which is how the paying project is found.
+        assertEq(uint8(paymaster.argKindOf(Ticket.checkIn.selector)), uint8(MontiPaymaster.ArgKind.TokenId));
+        assertEq(uint8(paymaster.argKindOf(Ticket.requestOverride.selector)), uint8(MontiPaymaster.ArgKind.TokenId));
+        assertEq(uint8(paymaster.argKindOf(Ticket.manualOverride.selector)), uint8(MontiPaymaster.ArgKind.TokenId));
+        assertEq(uint8(paymaster.argKindOf(Ticket.migrate.selector)), uint8(MontiPaymaster.ArgKind.TokenId));
+        assertEq(uint8(paymaster.argKindOf(Ticket.revoke.selector)), uint8(MontiPaymaster.ArgKind.None));
+    }
+
     function test_argKindTableNamesWhereEachIdSits() public view {
         assertEq(
             uint8(paymaster.argKindOf(bytes4(keccak256("claim(uint256,uint8,bytes)")))),

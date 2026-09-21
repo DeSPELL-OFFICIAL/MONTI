@@ -34,6 +34,13 @@ for name in Identity Organizers Ticket MontiPaymaster CoinbaseSmartWalletFactory
     echo "missing $src -- run forge build" >&2
     exit 1
   }
+  # Validate before writing: a half-written or wrong-shaped artifact (a stale `out/` from an aborted
+  # build, a name that resolved to something that is not a contract) would otherwise land in
+  # packages/shared as `null` and only fail inside viem at runtime.
+  jq -e '(.abi | type) == "array" and (.abi | length) > 0' "$src" >/dev/null || {
+    echo "malformed artifact: $src has no non-empty .abi array -- run forge build --force" >&2
+    exit 1
+  }
   jq '.abi' "$src" >"$OUT/$name.json"
   entries=$(jq 'length' "$OUT/$name.json")
   echo "$name -> $OUT/$name.json ($entries entries)"

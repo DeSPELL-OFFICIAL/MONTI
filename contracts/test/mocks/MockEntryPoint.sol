@@ -33,6 +33,9 @@ contract MockEntryPoint {
         require(unstakeDelaySec >= unstakeDelayOf[msg.sender], "cannot decrease unstake time");
         uint256 stake = stakeOf[msg.sender] + msg.value;
         require(stake > 0, "no stake specified");
+        // v0.6 keeps the stake in a uint112; without this the mock would silently truncate in
+        // getDepositInfo where the real EntryPoint reverts.
+        require(stake <= type(uint112).max, "stake overflow");
         stakeOf[msg.sender] = stake;
         unstakeDelayOf[msg.sender] = unstakeDelaySec;
         withdrawTimeOf[msg.sender] = 0;
