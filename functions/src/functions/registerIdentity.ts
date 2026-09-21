@@ -1,11 +1,11 @@
 import { FieldValue } from 'firebase-admin/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
-import { getAddress } from 'viem';
 import { identityAbi, type Hex, type PersonStatus } from '@monti/shared';
 import { ATTESTER_PK } from '../config.js';
 import { sendSerialized } from '../lib/attesterLock.js';
 import { awaitFinalized, deployment, publicClient, sendAttesterTx } from '../lib/chain.js';
-import { DEVICES, PERSONS, USERS, assertStatusTransition, authAdmin, db } from '../lib/db.js';
+import { mintSessionClaims } from '../lib/claims.js';
+import { DEVICES, PERSONS, USERS, assertStatusTransition, db } from '../lib/db.js';
 
 const B32_RE = /^0x[0-9a-fA-F]{64}$/;
 const PLATFORMS = ['ios', 'android', 'web'] as const;
@@ -33,19 +33,6 @@ export type RegisterIdentityResult = {
   alreadyRegistered?: true;
   claimsUpdated: true;
 };
-
-/**
- * 가입을 마친 세션에 `personId`·`account` 를 심는다. 전화번호로 만든 uid 의 토큰은 아직
- * 이 둘을 모르는데 보안 규칙이 그 클레임을 읽으므로, 심어 주지 않으면 사람은 가입을 끝내고도
- * 자기 문서를 못 읽는다. 모양은 `loginVerify` 가 만드는 커스텀 토큰과 **정확히 같다**
- * (`{ personId, account }`, 주소는 체크섬, 개인정보 없음) — 토큰 두 개가 갈라지면 규칙이 갈라진다.
- *
- * 성공으로 돌아가는 모든 경로가 이 함수를 지난다. 다시 불러도 같은 값을 덮어쓸 뿐이라 싸다.
- * 반대로 체인 전송이 실패하거나 되돌아간 경로는 예외로 끝나므로 여기까지 오지 않는다.
- */
-async function mintSessionClaims(uid: string, personId: Hex, account: Hex): Promise<void> {
-  await authAdmin.setCustomUserClaims(uid, { personId, account: getAddress(account) as Hex });
-}
 
 /** 체인에 올라간 뒤의 마무리. 성공 경로와 "이미 보낸 트랜잭션" 경로가 같이 쓴다. */
 async function settle(input: {

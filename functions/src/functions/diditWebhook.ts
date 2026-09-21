@@ -1,11 +1,12 @@
 import { FieldValue } from 'firebase-admin/firestore';
 import { onRequest } from 'firebase-functions/v2/https';
-import { identityAbi, type Hex, type PersonStatus } from '@monti/shared';
+import type { Hex, PersonStatus } from '@monti/shared';
 import { ATTESTER_PK, DIDIT_WEBHOOK_SECRET } from '../config.js';
-import { awaitFinalized, deployment, publicClient, sendAttesterTx } from '../lib/chain.js';
+import { awaitFinalized, publicClient } from '../lib/chain.js';
 import { KYC_SESSIONS, PERSONS, assertStatusTransition, db } from '../lib/db.js';
 import { redactDiditPayload, verifyDiditSignature } from '../lib/didit.js';
 import { encryptField, piiAad } from '../lib/kms.js';
+import { sendSetKycLevel } from '../lib/kycLevel.js';
 
 const PERSON_ID_RE = /^0x[0-9a-fA-F]{64}$/;
 const TERMINAL = ['Approved', 'Declined', 'Expired', 'Abandoned'];
@@ -49,8 +50,9 @@ function rejectionReason(status: string, faceSearch: string | null): string {
  *  3. 사람 문서(`status:'kyc_ok'` + `kyc.sessionId` + PII 봉투)와 세션 도장을 **한 트랜잭션**에서
  *     쓴다. 둘 다 있거나 둘 다 없다 — "처리됨" 도장만 남고 복구 지점이 없는 창이 사라진다.
  *  4. 체인 호출은 커밋 **뒤에** 한다. 여기서 죽거나 터져도 사람은 `kyc_ok` 로 남고,
- *     `reconcilePending` 이 `status === 'kyc_ok'` 이면서 체인의 `kycLevel` 이 0 인 사람을
- *     다시 보낸다(`Identity.setKycLevel` 은 단순 대입이라 재전송이 안전하다).
+ *     `reconcilePending` 이 `status === 'kyc_ok'` 이면서 `chain.kycLevelTx` 가 **없는** 사람을
+ *     골라 같은 `sendSetKycLevel` 로 다시 보낸다(단순 대입이라 재전송이 안전하다).
+ *     아래 revert 경로가 해시를 일부러 버리는 것도 그래서다 — 해시가 없어야 복구가 집어 간다.
  *  5. finalized 된 다음에만 `active` / `kycLevel: 1` / `chain.kycLevelTx` 를 쓴다(스펙 §10.4 규칙 3).
  */
 export const diditWebhook = onRequest(
@@ -227,12 +229,7 @@ export const diditWebhook = onRequest(
     }
 
     // 여기부터 실패해도 사람은 `kyc_ok` 로 남는다 — reconcilePending 이 주워 간다.
-    const txHash = await sendAttesterTx({
-      address: deployment().identity,
-      abi: identityAbi,
-      functionName: 'setKycLevel',
-      args: [personId, 1],
-    });
+    const txHash = await sendSetKycLevel(personId);
     const receipt = await publicClient().waitForTransactionReceipt({ hash: txHash, timeout: 30_000 });
     if (receipt.status !== 'success') {
       // 되돌린 해시를 `chain.kycLevelTx` 로 남기면 reconcilePending 이 "이미 보냈다"로 읽는다.

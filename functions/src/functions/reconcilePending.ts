@@ -1,18 +1,20 @@
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { error } from 'firebase-functions/logger';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
-import { getAddress } from 'viem';
+import { TransactionReceiptNotFoundError } from 'viem';
 import { identityAbi, type Hex, type PersonStatus } from '@monti/shared';
+import { ATTESTER_PK } from '../config.js';
 import { deployment, publicClient } from '../lib/chain.js';
+import { mintSessionClaims } from '../lib/claims.js';
 import {
   AUTH_CHALLENGES,
   PERSONS,
   TRANSFER_INVITES,
   USERS,
   assertStatusTransition,
-  authAdmin,
   db,
 } from '../lib/db.js';
+import { sendSetKycLevel } from '../lib/kycLevel.js';
 
 const ZERO = '0x0000000000000000000000000000000000000000';
 /** 이보다 오래 그대로인 문서만 본다. 살아 있는 호출이 마무리 중인 문서는 건드리지 않는다. */
@@ -28,35 +30,106 @@ type PublicClient = ReturnType<typeof publicClient>;
 type Doc = FirebaseFirestore.QueryDocumentSnapshot;
 
 /**
- * 가입을 마친 세션에 `personId`·`account` 를 심는다. 모양은 `registerIdentity` 와
- * `loginVerify` 가 만드는 것과 **정확히 같다**(`{ personId, account }`, 주소는 체크섬,
- * 개인정보 없음) — 토큰 두 개가 갈라지면 보안 규칙이 갈라진다.
+ * 고칠 수 없는 문서를 **질의의 꼬리로 돌린다**. persons 질의는 `updatedAt` 에 부등호가 걸려
+ * 있어 Firestore 가 오름차순으로 암묵 정렬한다. 포기한 문서가 `updatedAt` 을 그대로 두면
+ * 영원히 앞 200칸을 점유해, 그런 문서가 200개를 넘는 순간 새로 낀 사람은 영영 복구되지 않는다.
  *
- * 등록 도중 인스턴스가 죽으면 체인에는 계정이 올라갔는데 클레임만 없는 사람이 남는다.
- * 그 사람은 가입을 끝내고도 자기 문서를 못 읽는다. 여기가 그 구멍을 메우는 유일한 곳이다.
- * uid 는 `registerIdentity` 가 묶어 둔 `users/{uid}.personId` 를 거꾸로 찾아 쓴다
- * (`loginVerify` 와 같은 질의). 묶인 uid 가 없으면 심을 세션도 없으니 조용히 넘어간다.
+ * 상태도 새 필드도 만들지 않는다 — `persons.updatedAt` 을 읽는 곳은 이 질의뿐이고,
+ * 2분 컷오프가 바로 다음 실행의 중복 방문도 막아 준다.
  */
-async function mintSessionClaims(personId: Hex, account: Hex): Promise<void> {
+async function rotate(doc: Doc): Promise<void> {
+  await doc.ref.set({ updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+}
+
+/**
+ * 영수증을 읽되 **"없다"는 답만** 드롭으로 읽는다. 네트워크 오류·타임아웃·429 까지 드롭으로
+ * 오독하면 RPC 가 한 번 흔들릴 때 한 실행이 살아 있는 해시 200개를 지우고,
+ * `registerIdentity` 의 멱등 ① 이 읽을 해시가 사라져 `register` 가 두 번 나간다.
+ * 그 밖의 오류는 그대로 올려 문서별 catch 가 로그만 남기고 문서는 손대지 않게 한다.
+ */
+async function receiptOrDropped(pc: PublicClient, hash: Hex) {
+  try {
+    return await pc.getTransactionReceipt({ hash });
+  } catch (cause) {
+    if (cause instanceof TransactionReceiptNotFoundError) return null;
+    throw cause;
+  }
+}
+
+/** 사람의 계정 주소를 체인에서 읽는다. 등록 전이면 0 주소가 돌아온다. */
+async function accountOnChain(pc: PublicClient, identity: Hex, personId: Hex): Promise<Hex> {
+  return (await pc.readContract({
+    address: identity,
+    abi: identityAbi,
+    functionName: 'accountOf',
+    args: [personId],
+  })) as Hex;
+}
+
+/**
+ * 복구한 사람의 세션에 클레임을 심는다. uid 는 `registerIdentity` 가 묶어 둔
+ * `users/{uid}.personId` 를 거꾸로 찾아 쓴다(`loginVerify` 와 같은 질의).
+ * 묶인 uid 가 없으면 심을 세션 자체가 없다 — 기록만 남기고 넘어간다.
+ */
+async function mintClaimsForPerson(personId: Hex, account: Hex): Promise<void> {
   const users = await db.collection(USERS).where('personId', '==', personId).limit(1).get();
   const uid = users.docs[0]?.id;
-  if (!uid) return;
-  await authAdmin.setCustomUserClaims(uid, { personId, account: getAddress(account) as Hex });
+  if (!uid) {
+    error('reconcile.claims.noUser', { personId });
+    return;
+  }
+  await mintSessionClaims(uid, personId, account);
+}
+
+/**
+ * `kyc_ok` 인데 해시가 없는 사람에게 `setKycLevel` 을 **다시 보낸다**.
+ *
+ * `diditWebhook` 은 성공했을 때만 `chain.kycLevelTx` 를 쓰고 그때 `status` 도 `active` 로
+ * 올리므로, 운영에 남는 멈춘 `kyc_ok` 은 셋 다 해시가 없다 — 커밋 후 전송 전 사망,
+ * revert(해시를 일부러 버린다), 전송 후 finalize 전 사망. 여기가 그 셋의 유일한 복구 경로다.
+ *
+ * 보낸 해시만 적고 이번 실행은 끝낸다. 방금 보낸 트랜잭션의 영수증은 아직 없어서
+ * 바로 이어 읽으면 드롭으로 오독해 그 해시를 도로 지운다. 다음 실행(2분 컷오프 뒤)이
+ * 기존 영수증 경로로 `active` 까지 끌고 간다.
+ */
+async function resendKycLevel(doc: Doc): Promise<void> {
+  const personId = doc.id as Hex;
+  let txHash: Hex;
+  try {
+    txHash = await sendSetKycLevel(personId);
+  } catch (cause) {
+    // 전송 실패는 여기서 끝이다. 사람은 `kyc_ok` 그대로 남아 다음 실행이 다시 집는다.
+    error('reconcile.kycLevel.send', { personId, reason: (cause as Error).message });
+    await rotate(doc);
+    return;
+  }
+  await doc.ref.set(
+    {
+      chain: { kycLevelTx: txHash, kycLevelError: FieldValue.delete() },
+      updatedAt: FieldValue.serverTimestamp(),
+    },
+    { merge: true },
+  );
 }
 
 /**
  * `kyc_ok` = Didit 이 승인했지만 `setKycLevel` 이 아직 확정되지 않은 중간 상태
- * (diditWebhook 4번 주석). 그 트랜잭션 하나만 따라간다.
+ * (diditWebhook 4번 주석). 해시가 있으면 따라가고, 없으면 다시 보낸다.
  */
 async function reconcileKycLevel(doc: Doc, pc: PublicClient): Promise<void> {
   const levelTx = doc.get('chain.kycLevelTx') as Hex | undefined;
-  // 보낸 적이 없으면 따라갈 해시도 없다. 재전송은 어테스터 키가 필요한 별도 작업이다.
-  if (!levelTx) return;
+  if (!levelTx) {
+    await resendKycLevel(doc);
+    return;
+  }
 
-  const receipt = await pc.getTransactionReceipt({ hash: levelTx }).catch(() => null);
+  const receipt = await receiptOrDropped(pc, levelTx);
   if (!receipt) {
-    // 드롭된 트랜잭션. 해시를 지워 "이미 보냈다" 로 읽히지 않게 한다.
-    await doc.ref.set({ chain: { kycLevelTx: FieldValue.delete() } }, { merge: true });
+    // 드롭된 트랜잭션. 해시를 지우면 다음 실행이 재전송 경로로 집어 간다.
+    await doc.ref.set(
+      { chain: { kycLevelTx: FieldValue.delete() }, updatedAt: FieldValue.serverTimestamp() },
+      { merge: true },
+    );
     return;
   }
   if (receipt.status !== 'success') {
@@ -96,10 +169,11 @@ async function reconcileRegistration(
   identity: Hex,
   status: PersonStatus,
 ): Promise<void> {
+  const personId = doc.id as Hex;
   const txHash = doc.get('chain.registerTx') as Hex | undefined;
 
   if (txHash) {
-    const receipt = await pc.getTransactionReceipt({ hash: txHash }).catch(() => null);
+    const receipt = await receiptOrDropped(pc, txHash);
     if (!receipt) {
       // 드롭된 트랜잭션. 해시와 딱지를 함께 풀어야 클라이언트가 다시 보낼 수 있다.
       await doc.ref.set(
@@ -109,6 +183,7 @@ async function reconcileRegistration(
             registerPending: FieldValue.delete(),
             registerPendingAt: FieldValue.delete(),
           },
+          updatedAt: FieldValue.serverTimestamp(),
         },
         { merge: true },
       );
@@ -123,6 +198,7 @@ async function reconcileRegistration(
             registerPendingAt: FieldValue.delete(),
             lastFailedTx: txHash,
           },
+          updatedAt: FieldValue.serverTimestamp(),
         },
         { merge: true },
       );
@@ -131,29 +207,38 @@ async function reconcileRegistration(
     const finalized = await pc.getBlock({ blockTag: 'finalized' });
     if ((finalized.number ?? 0n) < receipt.blockNumber) return;
 
+    // 클레임을 **상태보다 먼저** 심는다. 순서가 뒤집히면 `setCustomUserClaims` 가 던졌을 때
+    // 문서는 이미 `active` 라 질의에서 빠지고, 클레임 없는 사람이 영구히 남는다 —
+    // 이 복구가 메우려던 바로 그 구멍이다. 다시 심어도 같은 값을 덮어쓸 뿐이라 재실행이 안전하다.
+    const account =
+      (doc.get('account') as Hex | undefined) ?? (await accountOnChain(pc, identity, personId));
+    if (account && account !== ZERO) await mintClaimsForPerson(personId, account);
+    else error('reconcile.claims.noAccount', { personId });
+
     assertStatusTransition(status, 'active');
     await doc.ref.set(
-      { status: 'active', chain: { block: Number(receipt.blockNumber) }, updatedAt: FieldValue.serverTimestamp() },
+      {
+        status: 'active',
+        chain: { block: Number(receipt.blockNumber) },
+        updatedAt: FieldValue.serverTimestamp(),
+      },
       { merge: true },
     );
-    const account = doc.get('account') as Hex | undefined;
-    if (account) await mintSessionClaims(doc.id as Hex, account);
     return;
   }
 
   // 트랜잭션 기록이 없어도 체인이 이미 알고 있으면 DB 를 맞춘다.
-  const onChain = (await pc.readContract({
-    address: identity,
-    abi: identityAbi,
-    functionName: 'accountOf',
-    args: [doc.id as Hex],
-  })) as Hex;
-  if (onChain === ZERO) return;
+  const onChain = await accountOnChain(pc, identity, personId);
+  if (onChain === ZERO) {
+    // 고칠 것이 없다. 앞줄을 비켜 준다.
+    await rotate(doc);
+    return;
+  }
 
+  // 계정 주소의 원본은 체인이다 — DB 에 `account` 가 없어도 세션을 살릴 수 있다.
+  await mintClaimsForPerson(personId, onChain);
   assertStatusTransition(status, 'active');
   await doc.ref.set({ status: 'active', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-  // 계정 주소의 원본은 체인이다 — DB 에 `account` 가 없어도 여기서 세션을 살릴 수 있다.
-  await mintSessionClaims(doc.id as Hex, onChain);
 }
 
 /** 2분 넘게 `pending`·`kyc_ok` 에 멈춘 사람을 체인과 대조해 고친다(스펙 §10.4 규칙 3). */
@@ -237,9 +322,11 @@ async function sweepAuthChallenges(): Promise<void> {
  *
  * 스윕은 서로 독립이다. 하나가 터져도 나머지는 돌고, **스케줄러 밖으로는 절대 던지지 않는다** —
  * 여기서 던지면 Cloud Scheduler 가 같은 실행을 재시도해 이미 고친 문서를 다시 훑는다.
+ *
+ * 어테스터 키가 필요한 이유는 하나뿐이다: 멈춘 `kyc_ok` 의 `setKycLevel` 재전송.
  */
 export const reconcilePending = onSchedule(
-  { schedule: SCHEDULE, timeZone: 'Asia/Seoul', timeoutSeconds: 300 },
+  { schedule: SCHEDULE, timeZone: 'Asia/Seoul', timeoutSeconds: 300, secrets: [ATTESTER_PK] },
   async () => {
     const sweeps = [
       ['persons', sweepPersons],
