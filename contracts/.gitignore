@@ -3,3 +3,7 @@ cache/
 broadcast/
 .env
 node_modules/
+
+# Written by Deploy.t.sol when the script runs on the local chain (id 31337).
+# The record that ships is deployments/10143.json.
+deployments/31337.json
