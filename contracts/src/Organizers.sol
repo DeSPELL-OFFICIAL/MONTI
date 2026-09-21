@@ -112,6 +112,40 @@ contract Organizers {
         return (m.exists, m.canApprove);
     }
 
+    /// @notice Spec 7.1: the staff device creates a gate account from its hardware key, an admin puts
+    ///         that account on the event's gate allowlist. A gate starts closed.
+    function registerGate(uint256 eventId, address gateAccount, bytes32 kx, bytes32 ky)
+        external
+        returns (uint256 gateId)
+    {
+        if (ticket == address(0)) revert TicketNotSet();
+        if (gateAccount == address(0)) revert ZeroAddress();
+        if (_gateOf[gateAccount] != 0) revert GateAccountInUse();
+
+        uint256 orgId = ITicket(ticket).eventOrg(eventId);
+        if (orgId == 0) revert UnknownOrganizer();
+        if (!hasPermission(orgId, msg.sender, PERM_MANAGE_GATES)) revert Unauthorized();
+
+        gateId = _nextGateId++;
+        _gates[gateId] = Gate({eventId: eventId, account: gateAccount, kx: kx, ky: ky, open: false, revoked: false});
+        _gateOf[gateAccount] = gateId;
+
+        emit GateRegistered(gateId, eventId, gateAccount, kx, ky);
+    }
+
+    function gateOf(address gateAccount) external view returns (uint256) {
+        return _gateOf[gateAccount];
+    }
+
+    function gateInfo(uint256 gateId)
+        external
+        view
+        returns (uint256 eventId, address account, bytes32 kx, bytes32 ky, bool open, bool revoked)
+    {
+        Gate storage g = _gates[gateId];
+        return (g.eventId, g.account, g.kx, g.ky, g.open, g.revoked);
+    }
+
     /// @notice The owner implicitly holds every bit; an admin holds exactly the bits set for them.
     function hasPermission(uint256 orgId, address account, uint32 bit) public view returns (bool) {
         if (account == address(0)) return false;
