@@ -7,7 +7,6 @@ import { getAddress } from 'viem';
 import { AUTH_CHALLENGE_TTL_SECONDS, type Hex } from '@monti/shared';
 import { RP_ID, expectedOrigins } from '../config.js';
 import { AUTH_CHALLENGES, PASSKEYS, PERSONS, USERS, authAdmin, db } from '../lib/db.js';
-import { decryptField, piiAad } from '../lib/kms.js';
 import { CHALLENGE_RE, challengeFromClientData } from '../lib/webauthn.js';
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
@@ -132,8 +131,14 @@ export const loginVerify = onCall(
 
     const personId = credential.get('personId') as Hex;
     const person = await db.collection(PERSONS).doc(personId).get();
-    // `rotated` 는 종착 상태다 — 계정이 이미 새 계정으로 넘어갔으므로 옛 패스키로 세션을 만들면 안 된다.
-    if (person.get('status') === 'rotated') throw new HttpsError('failed-precondition', 'BAD_SIGNUP_STATE');
+    /**
+     * `rotated` 는 종착 상태고(계정이 이미 새 계정으로 넘어갔다), `rejected` 는 거절된 사람이다.
+     * 둘 다 옛 패스키로 세션을 만들어 주면 안 된다.
+     */
+    const status = person.get('status') as string | undefined;
+    if (status === 'rotated' || status === 'rejected') {
+      throw new HttpsError('failed-precondition', 'BAD_SIGNUP_STATE');
+    }
     const stored = person.get('account') as string | undefined;
     if (!stored || !ADDRESS_RE.test(stored)) throw new HttpsError('failed-precondition', 'NO_ACCOUNT');
     const account = getAddress(stored) as Hex;
@@ -145,15 +150,18 @@ export const loginVerify = onCall(
     const uid = userDoc.id;
 
     /**
-     * `phone_number` 까지 실어야 startDeviceChange / pendingOffers / getSignupStatus 가 패스키 세션에서도 돈다.
-     * 번호 평문은 `users/{uid}.phoneEnc`(KMS 봉투)에만 있으므로 여기서 풀어서 클레임에 싣는다 —
-     * 전화 로그인 세션이 주는 `phone_number` 클레임과 같은 값이라야 아래 함수들이 두 세션을 구분하지 않는다.
+     * 카운터는 한 번 올라가면 내려오지 않는다. 0 을 보고하는 인증기(애플 패스키) 하나가
+     * 물려 있다고 해서 눈금을 0 으로 되돌리면 그 뒤로 1..N 이 전부 다시 통과한다.
      */
-    const phoneEnc = userDoc.get('phoneEnc') as string | undefined;
-    const phoneNumber = phoneEnc ? await decryptField(phoneEnc, piiAad(personId, 'phoneE164')) : '';
-
-    await credentialRef.update({ counter: newCounter, lastUsedAt: FieldValue.serverTimestamp() });
-    const token = await authAdmin.createCustomToken(uid, { personId, account, phone_number: phoneNumber });
+    await credentialRef.update({
+      counter: Math.max(storedCounter, newCounter),
+      lastUsedAt: FieldValue.serverTimestamp(),
+    });
+    /**
+     * 클레임은 `personId` 와 `account` 뿐이다. 커스텀 토큰은 클라이언트가 읽을 수 있으므로 개인정보를 싣지 않는다 —
+     * 번호가 필요한 함수는 호출자를 `personId`·`account` 로 찾고 `users/{uid}.phoneHmac` 색인을 읽는다.
+     */
+    const token = await authAdmin.createCustomToken(uid, { personId, account });
     return { token, personId, account };
   },
 );

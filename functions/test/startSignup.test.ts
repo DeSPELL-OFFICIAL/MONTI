@@ -123,6 +123,8 @@ describe('startSignup', () => {
     expect(user.get('personId')).toBe(result.personId);
     expect(user.get('locale')).toBe('ko');
     expect(user.get('chatOrder')).toEqual([]);
+    // 색인 문서 id 와 같은 값이라야 번호를 풀지 않고도 phoneIndex 로 갈 수 있다.
+    expect(user.get('phoneHmac')).toBe(hmacPhone(PHONE, KEY));
 
     const index = snapshot(`${PHONE_INDEX}/${hmacPhone(PHONE, KEY)}`);
     expect(index.get('personId')).toBe(result.personId);
@@ -142,6 +144,8 @@ describe('startSignup', () => {
     expect(everythingWritten).not.toContain(PHONE);
     expect(everythingWritten).not.toContain('821011112222');
     expect(snapshot(`${USERS}/uid-1`).get('phoneE164')).toBeUndefined();
+
+    expect(snapshot(`${USERS}/uid-1`).get('phoneHmac')).toMatch(/^[0-9a-f]{64}$/);
 
     const envelope = snapshot(`${USERS}/uid-1`).get('phoneEnc') as string;
     expect(typeof envelope).toBe('string');

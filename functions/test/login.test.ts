@@ -9,7 +9,7 @@ const RP = 'monti.app';
 const ORIGIN = `https://${RP}`;
 const PERSON_ID = `0x${'aa'.repeat(32)}`;
 const ACCOUNT = '0x9999999999999999999999999999999999999999';
-const PHONE = '+821011112222';
+const PHONE_HMAC = 'f'.repeat(64);
 const CREDENTIAL_ID = 'cred-1';
 
 /**
@@ -72,7 +72,9 @@ function collectionRef(name: string) {
   };
 }
 
-const createCustomToken = vi.fn(async (uid: string) => `token:${uid}`);
+const createCustomToken = vi.fn(
+  async (uid: string, _claims?: Record<string, unknown>) => `token:${uid}`,
+);
 
 vi.mock('../src/lib/db.js', () => ({
   PERSONS: 'persons',
@@ -104,21 +106,6 @@ vi.mock('../src/lib/db.js', () => ({
   },
 }));
 
-/** DEK 를 'W' 한 바이트로 감싸는 가짜 KMS. 봉투 암복호 자체는 진짜 코드가 돈다. */
-vi.mock('@google-cloud/kms', () => ({
-  KeyManagementServiceClient: class {
-    async encrypt({ plaintext }: { plaintext: Buffer }) {
-      return [{ ciphertext: Buffer.concat([Buffer.from('W'), Buffer.from(plaintext)]) }];
-    }
-    async decrypt({ ciphertext }: { ciphertext: Buffer }) {
-      const buf = Buffer.from(ciphertext);
-      if (buf[0] !== 'W'.charCodeAt(0)) throw new Error('FAKE_KMS_BAD_WRAP');
-      return [{ plaintext: buf.subarray(1) }];
-    }
-  },
-}));
-
-const { encryptField, piiAad } = await import('../src/lib/kms.js');
 const { loginChallenge, loginVerify } = await import('../src/functions/login.js');
 const functionsTest = (await import('firebase-functions-test')).default();
 const challengeFn = functionsTest.wrap(loginChallenge);
@@ -204,7 +191,7 @@ function login(assertion: unknown) {
   return verifyFn({ data: { assertion } } as never);
 }
 
-beforeEach(async () => {
+beforeEach(() => {
   docs.clear();
   directWrites = 0;
   transactions = 0;
@@ -217,10 +204,7 @@ beforeEach(async () => {
     rpId: RP,
   });
   docs.set(`persons/${PERSON_ID}`, { status: 'active', account: ACCOUNT });
-  docs.set('users/uid-1', {
-    personId: PERSON_ID,
-    phoneEnc: await encryptField(PHONE, piiAad(PERSON_ID as `0x${string}`, 'phoneE164')),
-  });
+  docs.set('users/uid-1', { personId: PERSON_ID, phoneHmac: PHONE_HMAC });
 });
 
 describe('loginChallenge', () => {
@@ -264,15 +248,13 @@ describe('loginVerify', () => {
     expect(snapshot(`authChallenges/${challenge}`).get('usedAt')).toBeDefined();
   });
 
-  it('puts personId, account and the decrypted phone number into the custom token claims', async () => {
+  it('puts personId and account into the custom token claims, and nothing else', async () => {
     const challenge = await issue();
     await login(makeAssertion({ challenge, counter: 5 }));
 
-    expect(createCustomToken).toHaveBeenCalledWith('uid-1', {
-      personId: PERSON_ID,
-      account: ACCOUNT,
-      phone_number: PHONE,
-    });
+    expect(createCustomToken).toHaveBeenCalledWith('uid-1', { personId: PERSON_ID, account: ACCOUNT });
+    // 커스텀 토큰은 클라이언트가 읽는다. 전화번호 같은 개인정보는 클레임에 싣지 않는다.
+    expect(Object.keys(createCustomToken.mock.calls[0]?.[1] ?? {})).toEqual(['personId', 'account']);
   });
 
   it('signs in with the person existing uid and never mints a new one', async () => {
@@ -301,7 +283,7 @@ describe('loginVerify', () => {
   });
 
   it('accepts a counter that stays at zero — apple passkeys never count', async () => {
-    docs.set(`passkeys/${CREDENTIAL_ID}`, { ...docs.get(`passkeys/${CREDENTIAL_ID}`), counter: 0 });
+    write(`passkeys/${CREDENTIAL_ID}`, { counter: 0 }, { merge: true });
     const challenge = await issue();
     const result = (await login(makeAssertion({ challenge, counter: 0 }))) as { token: string };
 
@@ -309,10 +291,27 @@ describe('loginVerify', () => {
     expect(snapshot(`passkeys/${CREDENTIAL_ID}`).get('counter')).toBe(0);
   });
 
-  it('rejects a replayed counter', async () => {
+  it('keeps the counter high-water mark when an authenticator reports zero', async () => {
+    write(`passkeys/${CREDENTIAL_ID}`, { counter: 5 }, { merge: true });
+    const challenge = await issue();
+    const result = (await login(makeAssertion({ challenge, counter: 0 }))) as { token: string };
+
+    // 0 을 보고하는 인증기 하나 때문에 눈금을 0 으로 되돌리면 1..5 가 전부 다시 통과한다.
+    expect(result.token).toBe('token:uid-1');
+    expect(snapshot(`passkeys/${CREDENTIAL_ID}`).get('counter')).toBe(5);
+  });
+
+  it('rejects a replayed counter and one that went backwards', async () => {
     const challenge = await issue();
     await expect(login(makeAssertion({ challenge, counter: 3 }))).rejects.toThrow('COUNTER_REPLAY');
     expect(snapshot(`passkeys/${CREDENTIAL_ID}`).get('counter')).toBe(3);
+
+    write(`passkeys/${CREDENTIAL_ID}`, { counter: 5 }, { merge: true });
+    const backwards = await issue();
+    await expect(login(makeAssertion({ challenge: backwards, counter: 3 }))).rejects.toThrow(
+      'COUNTER_REPLAY',
+    );
+    expect(snapshot(`passkeys/${CREDENTIAL_ID}`).get('counter')).toBe(5);
     expect(createCustomToken).not.toHaveBeenCalled();
   });
 
@@ -397,17 +396,18 @@ describe('loginVerify', () => {
     expect(transactions).toBe(0);
   });
 
-  it('refuses an unknown credential, a rotated person, a person with no account and a missing user', async () => {
+  it('refuses an unknown credential, a dead person status, a person with no account and a missing user', async () => {
     const unknown = await issue();
     await expect(login(makeAssertion({ challenge: unknown, credentialId: 'cred-2' }))).rejects.toThrow(
       'CREDENTIAL_NOT_FOUND',
     );
 
-    docs.set(`persons/${PERSON_ID}`, { status: 'rotated', account: ACCOUNT });
-    const rotated = await issue();
-    await expect(login(makeAssertion({ challenge: rotated, counter: 5 }))).rejects.toThrow(
-      'BAD_SIGNUP_STATE',
-    );
+    // `rotated` 는 계정이 넘어간 사람, `rejected` 는 거절된 사람이다. 둘 다 세션을 받지 못한다.
+    for (const status of ['rotated', 'rejected']) {
+      docs.set(`persons/${PERSON_ID}`, { status, account: ACCOUNT });
+      const challenge = await issue();
+      await expect(login(makeAssertion({ challenge, counter: 5 }))).rejects.toThrow('BAD_SIGNUP_STATE');
+    }
 
     docs.set(`persons/${PERSON_ID}`, { status: 'pending' });
     const noAccount = await issue();
@@ -430,6 +430,5 @@ describe('loginVerify', () => {
     expect(everythingWritten).not.toContain(assertion.response.clientDataJSON);
     expect(everythingWritten).not.toContain(assertion.response.signature);
     expect(everythingWritten).not.toContain(assertion.response.authenticatorData);
-    expect(everythingWritten).not.toContain(PHONE);
   });
 });

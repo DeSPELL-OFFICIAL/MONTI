@@ -14,6 +14,7 @@ import { phoneIndexRef, upsertPhoneIndex } from '../lib/phoneIndex.js';
  * 개인정보: 번호 평문은 **어디에도 저장하지 않는다.** 두 가지 파생물만 남는다.
  *  - `phoneIndex/{hmacPhone}` — 키 없이는 못 되돌리는 HMAC 색인. 한 번호당 한 계정을 강제한다.
  *  - `users/{uid}.phoneEnc` — `personId:phoneE164` 로 묶인 KMS 봉투. 다른 문서로 옮겨 붙이면 안 열린다.
+ *  - `users/{uid}.phoneHmac` — 위 색인 문서 id 와 같은 값. 번호를 풀지 않고도 색인을 찾아갈 수 있다.
  */
 export const startSignup = onCall(
   { secrets: [PHONE_INDEX_KEY] },
@@ -56,6 +57,8 @@ export const startSignup = onCall(
       tx.set(userRef, {
         personId: newPersonId,
         phoneEnc,
+        // `phoneIndex/{hmac}` 문서 id 와 같은 값. 번호가 필요한 함수는 봉투를 풀지 않고 이 색인으로 간다.
+        phoneHmac: indexRef.id,
         locale: 'ko',
         chatOrder: [],
         createdAt: FieldValue.serverTimestamp(),
