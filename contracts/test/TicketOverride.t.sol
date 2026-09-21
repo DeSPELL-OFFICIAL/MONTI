@@ -211,6 +211,21 @@ contract TicketOverrideTest is MontiTest {
         assertEq(ticket.checkInOf(tokenId).ts, 0);
     }
 
+    /// @dev A voided ticket cannot be waved in by hand either, and there is nothing to ask about
+    ///      once it is voided, so both paths report the same DENY (Task 23).
+    function test_revokedTicketRejectedForBothPaths() public {
+        vm.prank(ORG_OWNER);
+        ticket.revoke(tokenId, 2);
+
+        vm.prank(MANAGER_NO);
+        vm.expectRevert(Ticket.TicketRevoked.selector);
+        ticket.requestOverride(tokenId, gateId, 3);
+        vm.prank(MANAGER_YES);
+        vm.expectRevert(Ticket.TicketRevoked.selector);
+        ticket.manualOverride(tokenId, gateId, 3);
+        assertEq(ticket.checkInOf(tokenId).ts, 0);
+    }
+
     /// @dev An override is a human decision, not a tap, so a closed door of this event still counts.
     function test_closedGateOfTheSameEventIsAccepted() public {
         vm.expectEmit(true, true, true, true);

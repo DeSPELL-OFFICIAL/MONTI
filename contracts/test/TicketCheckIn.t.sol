@@ -230,4 +230,14 @@ contract TicketCheckInTest is MontiTest {
         vm.expectRevert(Ticket.EventCancelled.selector);
         ticket.checkIn(tokenId, _code(gateAId), _sigA());
     }
+
+    /// @dev A voided ticket is a DENY at the door even with a perfect tap (Task 23).
+    function test_revokedTicketRejected() public {
+        vm.prank(ORG_OWNER);
+        ticket.revoke(tokenId, 2);
+        vm.prank(GATE_A);
+        vm.expectRevert(Ticket.TicketRevoked.selector);
+        ticket.checkIn(tokenId, _code(gateAId), _sigA());
+        assertEq(ticket.checkInOf(tokenId).ts, 0);
+    }
 }

@@ -366,6 +366,7 @@ contract Ticket is ERC721, ITicket {
         (bool exists,) = organizers.managerOf(orgId, msg.sender);
         if (!exists && !organizers.hasPermission(orgId, msg.sender, PERM_APPROVE_OVERRIDE)) revert Unauthorized();
 
+        if (_revoked[tokenId]) revert TicketRevoked();
         (uint256 gateEventId,,,,,) = organizers.gateInfo(gateId);
         if (gateEventId != eventId) revert GateMismatch();
         emit OverrideRequested(tokenId, gateId, msg.sender, reason);
@@ -408,6 +409,43 @@ contract Ticket is ERC721, ITicket {
 
         emit ManualOverride(tokenId, gateId, msg.sender, role, reason);
         emit CheckedIn(tokenId, eventId, gateId, bytes32(0), uint64(block.timestamp));
+    }
+
+    /// @notice Spec 5.5: an organizer voids a ticket and the chain keeps why. The reason code is the
+    ///         organizer's own (chargeback, fraud, duplicate); the contract only records it. Voiding is
+    ///         a state, not a toggle, so repeating it is not an error — it files a fresh reason — and a
+    ///         ticket that already walked in can still be voided, because the record is the point.
+    function revoke(uint256 tokenId, uint8 reason) external {
+        if (_ownerOf(tokenId) == address(0)) revert NoSuchTicket();
+        _requireEventPermission(_eventOf[tokenId], PERM_CREATE_EVENT);
+        _revoked[tokenId] = true;
+        emit Revoked(tokenId, reason);
+    }
+
+    /// @notice Spec 5.5: the attester rotated this person's account, so the ticket follows the person.
+    ///         Transfer rules do not apply — nobody else is receiving anything, so the cutoff, the
+    ///         transfer limit and maxPerWallet are all beside the point and transfersOf stays put.
+    ///         Two checks survive anyway: a voided ticket must never move, and a spent one has nowhere
+    ///         to go. Identity enforces the 7-day cooldown, so this only reads the result.
+    function migrate(uint256 tokenId) external {
+        address holder = _ownerOf(tokenId);
+        if (holder == address(0)) revert NoSuchTicket();
+
+        bytes32 personId = identity.personOf(holder);
+        if (personId == bytes32(0)) revert NotMember();
+        address current = identity.accountOf(personId);
+        if (current != msg.sender) revert NotRotatedAccount();
+        if (current == holder) revert NothingToMigrate();
+
+        if (_revoked[tokenId]) revert TicketRevoked();
+        if (_checkIns[tokenId].ts != 0) revert AlreadyCheckedIn();
+
+        // _update clears any pending offer on the way through, so the old account's handoff dies here.
+        _internalMove = true;
+        _update(msg.sender, tokenId, address(0));
+        _internalMove = false;
+
+        emit Migrated(tokenId, holder, msg.sender);
     }
 
     function _requireEventPermission(uint256 eventId, uint32 bit) private view {
