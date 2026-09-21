@@ -196,10 +196,12 @@ class FakeRes extends EventEmitter {
 }
 
 interface MontiLog {
-  raw: { topics: readonly string[]; data: string };
+  raw: { address?: string; topics: readonly string[]; data: string };
 }
 
+/** Tenderly 가 보내는 로그 한 줄. `address` 는 그 로그를 낸 컨트랙트다(소문자로 온다). */
 function montiLog(
+  address: string,
   abi: typeof ticketAbi,
   eventName: string,
   indexed: Record<string, unknown>,
@@ -208,6 +210,7 @@ function montiLog(
 ): MontiLog {
   return {
     raw: {
+      address: address.toLowerCase(),
       topics: encodeEventTopics({ abi, eventName, args: indexed } as never) as string[],
       data: params ? encodeAbiParameters(parseAbiParameters(params), values as never) : '0x',
     },
@@ -215,30 +218,45 @@ function montiLog(
 }
 
 const checkedIn = (tokenId: bigint) =>
-  montiLog(ticketAbi, 'CheckedIn', { tokenId, eventId: 11n, gateId: 3n }, 'bytes32 nonceHash, uint64 ts', [
+  montiLog(TICKET, ticketAbi, 'CheckedIn', { tokenId, eventId: 11n, gateId: 3n }, 'bytes32 nonceHash, uint64 ts', [
     `0x${'11'.repeat(32)}`,
     1_789_862_400n,
   ]);
 const registered = (personId: Hex, account: Hex) =>
-  montiLog(identityAbi, 'Registered', { personId, account });
+  montiLog(IDENTITY, identityAbi, 'Registered', { personId, account });
 const nicknameSet = (account: Hex, nickname: string) =>
-  montiLog(identityAbi, 'NicknameSet', { account, nicknameHash: `0x${'cc'.repeat(32)}` }, 'string nickname', [
+  montiLog(IDENTITY, identityAbi, 'NicknameSet', { account, nicknameHash: `0x${'cc'.repeat(32)}` }, 'string nickname', [
     nickname,
   ]);
-const transfer = (from: Hex, to: Hex, tokenId: bigint) =>
-  montiLog(ticketAbi, 'Transfer', { from, to, tokenId });
+const transfer = (from: Hex, to: Hex, tokenId: bigint, address: string = TICKET) =>
+  montiLog(address, ticketAbi, 'Transfer', { from, to, tokenId });
 const offerAccepted = (tokenId: bigint) =>
-  montiLog(ticketAbi, 'OfferAccepted', { tokenId, from: OWNER, to: OTHER });
+  montiLog(TICKET, ticketAbi, 'OfferAccepted', { tokenId, from: OWNER, to: OTHER });
 const eventStatusChanged = (eventId: bigint, status: number) =>
-  montiLog(ticketAbi, 'EventStatusChanged', { eventId }, 'uint8 status', [status]);
-const adminSet = (orgId: bigint, admin: Hex) =>
-  montiLog(organizersAbi, 'AdminSet', { orgId, admin }, 'uint32 bits', [31]);
+  montiLog(TICKET, ticketAbi, 'EventStatusChanged', { eventId }, 'uint8 status', [status]);
+const adminSet = (orgId: bigint, admin: Hex, bits = 31) =>
+  montiLog(ORGANIZERS, organizersAbi, 'AdminSet', { orgId, admin }, 'uint32 bits', [bits]);
+const managerSet = (orgId: bigint, manager: Hex, exists = true) =>
+  montiLog(ORGANIZERS, organizersAbi, 'ManagerSet', { orgId, manager }, 'bool exists, bool canApprove', [
+    exists,
+    true,
+  ]);
+const gateRegistered = (gateId: bigint, eventId: bigint) =>
+  montiLog(
+    ORGANIZERS,
+    organizersAbi,
+    'GateRegistered',
+    { gateId, eventId, gateAccount: OTHER },
+    'bytes32 kx, bytes32 ky',
+    [`0x${'dd'.repeat(32)}`, `0x${'ee'.repeat(32)}`],
+  );
 
 interface Delivery {
   raw?: string;
   signature?: string;
   date?: string;
   secret?: string;
+  method?: string;
 }
 
 async function deliver(logs: MontiLog[], override: Delivery = {}): Promise<FakeRes> {
@@ -252,7 +270,7 @@ async function deliver(logs: MontiLog[], override: Delivery = {}): Promise<FakeR
     date,
   };
   const req = {
-    method: 'POST',
+    method: override.method ?? 'POST',
     headers,
     rawBody: Buffer.from(raw, 'utf8'),
     get: (name: string) => headers[name.toLowerCase()],
@@ -307,8 +325,8 @@ describe('tenderlyWebhook', () => {
     write(`${PERSONS}/${PERSON}`, { status: 'pending' });
     const res = await deliver([
       registered(PERSON, OWNER),
-      // MONTI 컨트랙트의 것이 아닌 로그는 세지 않는다.
-      { raw: { topics: [`0x${'ab'.repeat(32)}`], data: '0x' } },
+      // 우리 주소에서 나왔어도 우리 ABI 의 이벤트가 아니면 세지 않는다.
+      { raw: { address: TICKET.toLowerCase(), topics: [`0x${'ab'.repeat(32)}`], data: '0x' } },
     ]);
     expect(res.statusCode).toBe(200);
     expect(res.body).toBe('ok:1');
@@ -429,10 +447,10 @@ describe('tenderlyWebhook', () => {
   });
 
   it('marks the accepted organizer invite done on AdminSet, and is idempotent', async () => {
-    write(`${INVITES}/a1`, { orgId: '5', status: 'accepted', acceptedBy: OWNER.toLowerCase() });
-    write(`${INVITES}/a2`, { orgId: '5', status: 'accepted', acceptedBy: OTHER });
-    write(`${INVITES}/a3`, { orgId: '6', status: 'accepted', acceptedBy: OWNER });
-    write(`${INVITES}/a4`, { orgId: '5', status: 'sent', acceptedBy: OWNER });
+    write(`${INVITES}/a1`, { orgId: '5', role: 'admin', status: 'accepted', acceptedBy: OWNER.toLowerCase() });
+    write(`${INVITES}/a2`, { orgId: '5', role: 'admin', status: 'accepted', acceptedBy: OTHER });
+    write(`${INVITES}/a3`, { orgId: '6', role: 'admin', status: 'accepted', acceptedBy: OWNER });
+    write(`${INVITES}/a4`, { orgId: '5', role: 'admin', status: 'sent', acceptedBy: OWNER });
 
     await deliver([adminSet(5n, OWNER)]);
     // 체인 인자는 체크섬, 저장된 값은 소문자일 수 있다 — 대소문자를 가리지 않고 맞춘다.
@@ -444,6 +462,99 @@ describe('tenderlyWebhook', () => {
     const again = await deliver([adminSet(5n, OWNER)]);
     expect(again.statusCode).toBe(200);
     expect(snapshot(`${INVITES}/a1`).get('status')).toBe('done');
+  });
+
+  it('refuses any method but POST with 405, before it looks at the signature', async () => {
+    chain.ownerOf.set('7', OWNER);
+    write(`${DEVICES}/${OWNER}`, { pushToken: 'fcm-1' });
+
+    for (const method of ['GET', 'PUT', 'DELETE', 'PATCH']) {
+      const res = await deliver([checkedIn(7n)], { method });
+      expect(res.statusCode).toBe(405);
+      expect(res.body).toBe('method not allowed');
+    }
+    expect(send).not.toHaveBeenCalled();
+    expect(readContract).not.toHaveBeenCalled();
+  });
+
+  it('ignores a foreign ERC-721 Transfer riding in the same transaction', async () => {
+    const foreign = '0x9999999999999999999999999999999999999999';
+    chain.eventOf.set('7', 11n);
+    chain.balanceOfEvent.set(`${OWNER.toLowerCase()}:11`, 0n);
+    write(`${EVENT_CHATS}/11/members/uid-1`, { account: OWNER });
+
+    // 같은 이벤트 서명(`Transfer(address,address,uint256)`)이라 우리 ABI 로도 디코드된다.
+    // 주소를 보지 않으면 남의 토큰 이동이 우리 채팅 멤버를 지운다.
+    const res = await deliver([transfer(OWNER, OTHER, 7n, foreign)]);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe('ok:0');
+    expect(readContract).not.toHaveBeenCalled();
+    expect(snapshot(`${EVENT_CHATS}/11/members/uid-1`).exists).toBe(true);
+
+    // 우리 Ticket 주소에서 온 같은 로그는 그대로 처리된다.
+    const ours = await deliver([transfer(OWNER, OTHER, 7n)]);
+    expect(ours.body).toBe('ok:1');
+    expect(snapshot(`${EVENT_CHATS}/11/members/uid-1`).exists).toBe(false);
+  });
+
+  it('closes the manager invite on ManagerSet, and leaves it alone when the manager is removed', async () => {
+    write(`${INVITES}/m1`, { orgId: '5', role: 'manager', status: 'accepted', acceptedBy: OWNER });
+
+    // 권한을 거두는 이벤트(`exists:false`)는 초대장을 닫지 않는다 —
+    // 아직 실행되지 않은 calldata 를 여기서 잃으면 다시 받을 길이 없다.
+    await deliver([managerSet(5n, OWNER, false)]);
+    expect(snapshot(`${INVITES}/m1`).get('status')).toBe('accepted');
+
+    await deliver([managerSet(5n, OWNER, true)]);
+    expect(snapshot(`${INVITES}/m1`).get('status')).toBe('done');
+  });
+
+  it('leaves the admin invite alone when AdminSet strips every permission bit', async () => {
+    write(`${INVITES}/a1`, { orgId: '5', role: 'admin', status: 'accepted', acceptedBy: OWNER });
+
+    await deliver([adminSet(5n, OWNER, 0)]);
+    expect(snapshot(`${INVITES}/a1`).get('status')).toBe('accepted');
+
+    await deliver([adminSet(5n, OWNER, 1)]);
+    expect(snapshot(`${INVITES}/a1`).get('status')).toBe('done');
+  });
+
+  it('closes only the invite for the role that was set when one person holds both', async () => {
+    // 세 필드(orgId·acceptedBy·status)가 똑같은 두 장. role 을 보지 않으면 둘 다 닫힌다.
+    write(`${INVITES}/both-admin`, { orgId: '5', role: 'admin', status: 'accepted', acceptedBy: OWNER });
+    write(`${INVITES}/both-manager`, { orgId: '5', role: 'manager', status: 'accepted', acceptedBy: OWNER });
+
+    await deliver([adminSet(5n, OWNER)]);
+    expect(snapshot(`${INVITES}/both-admin`).get('status')).toBe('done');
+    expect(snapshot(`${INVITES}/both-manager`).get('status')).toBe('accepted');
+
+    await deliver([managerSet(5n, OWNER)]);
+    expect(snapshot(`${INVITES}/both-manager`).get('status')).toBe('done');
+  });
+
+  it('only logs on GateRegistered — pendingGates belongs to Task 43', async () => {
+    const res = await deliver([gateRegistered(9n, 11n)]);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe('ok:1');
+    // 체인도 읽지 않고 문서도 만들지 않는다.
+    expect(readContract).not.toHaveBeenCalled();
+    expect(docs.size).toBe(0);
+  });
+
+  it('skips an event status code it does not know instead of throwing', async () => {
+    const res = await deliver([eventStatusChanged(11n, 7)]);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe('ok:1');
+    expect(snapshot(`${EVENT_CHATS}/11`).exists).toBe(false);
+    expect(readContract).not.toHaveBeenCalled();
+  });
+
+  it('refuses a transition the table blocks and leaves the person untouched', async () => {
+    // `rotated` 는 되살아나지 않는다. 던진 것은 바깥 루프가 잡아 기록만 남긴다.
+    write(`${PERSONS}/${PERSON}`, { status: 'rotated' });
+    const res = await deliver([registered(PERSON, OWNER)]);
+    expect(res.statusCode).toBe(200);
+    expect(snapshot(`${PERSONS}/${PERSON}`).get('status')).toBe('rotated');
   });
 
   it('keeps going when one event blows up, and still answers 200', async () => {

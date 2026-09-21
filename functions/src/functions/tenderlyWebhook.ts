@@ -1,9 +1,18 @@
 import { getMessaging } from 'firebase-admin/messaging';
 import { onRequest } from 'firebase-functions/v2/https';
-import { EVENT_STATUS_BY_CODE, identityAbi, ticketAbi, type Hex } from '@monti/shared';
+import { EVENT_STATUS_BY_CODE, identityAbi, ticketAbi, type Hex, type PersonStatus } from '@monti/shared';
 import { TENDERLY_WEBHOOK_SECRET } from '../config.js';
 import { deployment, publicClient } from '../lib/chain.js';
-import { DEVICES, EVENT_CHATS, INVITES, PERSONS, TRANSFER_INVITES, USERS, db } from '../lib/db.js';
+import {
+  DEVICES,
+  EVENT_CHATS,
+  INVITES,
+  PERSONS,
+  TRANSFER_INVITES,
+  USERS,
+  assertStatusTransition,
+  db,
+} from '../lib/db.js';
 import { decodeMontiLogs, verifyTenderlySignature, type TenderlyLog } from '../lib/tenderly.js';
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
@@ -40,11 +49,17 @@ async function pushCheckedIn(tokenId: bigint): Promise<void> {
   }
 }
 
-/** 웹훅 입력으로 사람 문서를 만들지 않는다. 이미 있는 문서의 진행 표시만 올린다. */
+/**
+ * 웹훅 입력으로 사람 문서를 만들지 않는다. 이미 있는 문서의 진행 표시만 올린다.
+ * 전이는 `diditWebhook` 과 같은 표를 지난다 — 막힌 전이는 던지고, 바깥 루프가 기록만 남긴다.
+ */
 async function markRegistered(personId: Hex): Promise<void> {
   const ref = db.collection(PERSONS).doc(personId);
   const person = await ref.get();
-  if (!person.exists || person.get('status') === 'active') return;
+  if (!person.exists) return;
+  const current = person.get('status') as PersonStatus | undefined;
+  if (current === 'active') return;
+  assertStatusTransition(current ?? 'pending', 'active');
   await ref.set({ status: 'active' }, { merge: true });
 }
 
@@ -91,16 +106,23 @@ async function dropChatMemberIfTicketless(from: Hex, tokenId: bigint): Promise<v
 }
 
 /**
- * 역할이 체인에 올라간 순간 초대장을 닫는다. `acceptInvite` 가 `accepted` 로 두고 간 것만
- * `done` 이 된다 — 다시 배달돼도 고를 문서가 없어 멱등이다.
+ * 역할이 체인에 올라간 순간 **그 역할의** 초대장을 닫는다. `acceptInvite` 가 `accepted` 로
+ * 두고 간 것만 `done` 이 된다 — 다시 배달돼도 고를 문서가 없어 멱등이다.
+ *
+ * `role` 까지 맞춰야 한다. 한 사람이 같은 조직에 admin·manager 두 장을 받아 두면 세 필드
+ * (`orgId`·`acceptedBy`·`status`)가 똑같아서, 먼저 오는 이벤트가 **둘 다** 닫아 버린다.
+ * `done` 이 된 초대장은 `acceptInvite` 가 `INVITE_NOT_OPEN` 으로 막으므로, 아직 체인에
+ * 올리지 않은 역할의 calldata 를 다시 받을 길이 영영 사라진다(`invites.ts`).
+ *
  * 체인 인자는 체크섬 주소고 저장된 값은 그렇지 않을 수 있으므로 대소문자를 가리지 않고 맞춘다.
  */
-async function markOrganizerInviteDone(orgId: bigint, account: Hex): Promise<void> {
+async function markOrganizerInviteDone(orgId: bigint, account: Hex, role: 'admin' | 'manager'): Promise<void> {
   const invites = await db.collection(INVITES).where('orgId', '==', String(orgId)).get();
   const wanted = account.toLowerCase();
   const mine = invites.docs.filter(
     (doc) =>
       doc.get('status') === 'accepted' &&
+      doc.get('role') === role &&
       String(doc.get('acceptedBy') ?? '').toLowerCase() === wanted,
   );
   await Promise.all(mine.map((doc) => doc.ref.update({ status: 'done' })));
@@ -177,8 +199,13 @@ async function applyEvent(event: { name: string; args: Record<string, unknown> }
       // 그 역할을 올려 준 초대장을 닫는다.
       const orgId = event.args.orgId as bigint;
       log({ cacheInvalidate: event.name, args: String(orgId ?? '') });
-      const account = (event.args.admin ?? event.args.manager) as Hex | undefined;
-      if (account) await markOrganizerInviteDone(orgId, account);
+      const isAdmin = event.name === 'AdminSet';
+      // 같은 이벤트가 **권한을 거둘 때도** 나온다(`setManager(..., false, false)` /
+      // `setAdmin(..., 0)`). 그때 초대장을 닫으면 아직 실행되지 않은 calldata 를 잃는다.
+      const removal = isAdmin ? Number(event.args.bits) === 0 : event.args.exists === false;
+      if (removal) break;
+      const account = (isAdmin ? event.args.admin : event.args.manager) as Hex | undefined;
+      if (account) await markOrganizerInviteDone(orgId, account, isAdmin ? 'admin' : 'manager');
       break;
     }
     case 'GateRegistered':
@@ -193,9 +220,10 @@ async function applyEvent(event: { name: string; args: Record<string, unknown> }
 /**
  * Tenderly 알림을 받아 MONTI 쪽 부수효과로 옮긴다.
  *
- *  1. `X-Tenderly-Signature` 를 `req.rawBody` 바이트 + `Date` 헤더에 대해 상수 시간으로 맞춰 본다.
- *  2. Tenderly 가 붙인 이벤트 이름은 믿지 않는다. 로그를 **우리 ABI 로 직접** 디코드하고,
- *     MONTI 컨트랙트의 것이 아니면 조용히 버린다.
+ *  1. POST 가 아니면 405. 그다음 `X-Tenderly-Signature` 를 `req.rawBody` 바이트 + `Date`
+ *     헤더에 대해 상수 시간으로 맞춰 본다.
+ *  2. Tenderly 가 붙인 이벤트 이름은 믿지 않는다. **우리 세 컨트랙트 주소에서 나온** 로그만
+ *     골라 **우리 ABI 로 직접** 디코드하고, 어느 ABI 에도 맞지 않으면 조용히 버린다.
  *  3. 이벤트 하나가 터져도 나머지는 계속 돈다. 응답은 언제나 200 이다 —
  *     2xx 가 아니면 Tenderly 가 같은 페이로드를 통째로 재배달해 **이미 끝난 이벤트까지 다시 돈다.**
  *
@@ -205,6 +233,12 @@ async function applyEvent(event: { name: string; args: Record<string, unknown> }
 export const tenderlyWebhook = onRequest(
   { secrets: [TENDERLY_WEBHOOK_SECRET], cors: false, invoker: 'public' },
   async (req, res) => {
+    // 웹훅은 POST 하나뿐이다. 본문 없는 메서드로 빈 문자열에 서명을 맞춰 보는 길 자체를 막는다.
+    if (req.method !== 'POST') {
+      res.status(405).send('method not allowed');
+      return;
+    }
+
     const raw = req.rawBody?.toString('utf8') ?? '';
     const ok = verifyTenderlySignature({
       raw,
@@ -225,7 +259,13 @@ export const tenderlyWebhook = onRequest(
       return;
     }
 
-    const events = decodeMontiLogs(body.transaction?.logs ?? []);
+    // 알림 페이로드에는 그 트랜잭션의 로그가 전부 실려 온다. 우리 세 컨트랙트에서 나온 것만 본다.
+    const contracts = deployment();
+    const events = decodeMontiLogs(body.transaction?.logs ?? [], [
+      contracts.ticket,
+      contracts.identity,
+      contracts.organizers,
+    ]);
     for (const event of events) {
       try {
         await applyEvent(event);

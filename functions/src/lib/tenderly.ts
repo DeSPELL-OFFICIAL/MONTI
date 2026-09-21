@@ -21,15 +21,26 @@ export function verifyTenderlySignature(input: {
 }
 
 export interface TenderlyLog {
-  raw: { topics: readonly string[]; data: string };
+  raw: { address?: string; topics: readonly string[]; data: string };
 }
 
-/** Tenderly가 붙인 이름을 믿지 않고 로그를 우리 ABI로 직접 디코드한다. */
+/**
+ * Tenderly가 붙인 이름을 믿지 않고 로그를 우리 ABI로 직접 디코드한다.
+ *
+ * `addresses` 를 주면 **그 주소에서 나온 로그만** 본다. 알림 페이로드에는 그 트랜잭션의
+ * 로그가 전부 실려 오므로, 같은 트랜잭션에 낀 남의 ERC-721 `Transfer` 는 우리 ABI 로도
+ * 그대로 디코드된다 — 주소를 보지 않으면 남의 토큰 이동이 우리 채팅 멤버를 건드린다.
+ * 주소 집합을 준 호출에서 `raw.address` 가 없는 로그는 버린다(fail-closed).
+ * 인자를 주지 않으면 주소를 보지 않는다 — 순수한 디코더로 단위 테스트할 수 있다.
+ */
 export function decodeMontiLogs(
   logs: readonly TenderlyLog[],
+  addresses?: readonly string[],
 ): Array<{ name: string; args: Record<string, unknown> }> {
+  const allowed = addresses ? new Set(addresses.map((address) => address.toLowerCase())) : undefined;
   const out: Array<{ name: string; args: Record<string, unknown> }> = [];
   for (const log of logs) {
+    if (allowed && !allowed.has(String(log.raw.address ?? '').toLowerCase())) continue;
     for (const abi of [ticketAbi, identityAbi, organizersAbi]) {
       try {
         const decoded = decodeEventLog({
