@@ -18,6 +18,9 @@
   },
   "files": ["dist"],
   "scripts": {
+    "sync:deployments": "node scripts/sync-deployments.mjs",
+    "prebuild": "pnpm sync:deployments",
+    "pretest": "pnpm sync:deployments",
     "build": "tsup",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"

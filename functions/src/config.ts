@@ -1,11 +1,6 @@
 import { setGlobalOptions } from 'firebase-functions/v2';
 import { defineSecret, defineString } from 'firebase-functions/params';
-
-// TODO(02-T2): Task 2가 `@monti/shared`에 이 상수들을 실으면 아래 로컬 정의를 지우고
-// `import { FIREBASE_REGION, MONAD_TESTNET_CHAIN_ID, MONAD_TESTNET_RPC_URL } from '@monti/shared';`로 교체한다.
-const FIREBASE_REGION = 'asia-northeast3'; // TODO(02-T2)
-const MONAD_TESTNET_CHAIN_ID = 10143; // TODO(02-T2)
-const MONAD_TESTNET_RPC_URL = 'https://testnet-rpc.monad.xyz'; // TODO(02-T2)
+import { FIREBASE_REGION, MONAD_TESTNET_CHAIN_ID, MONAD_TESTNET_RPC_URL } from '@monti/shared';
 
 export const REGION = FIREBASE_REGION;
 
