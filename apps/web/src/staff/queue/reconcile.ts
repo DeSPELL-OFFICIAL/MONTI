@@ -31,10 +31,9 @@ import { readTicket, type CheckInStruct } from '../../shared/chain/reads';
 import { mapRevertToDenyCode } from '../gate/denyMap';
 import { nonceHashOf } from '../gate/verdict';
 import { staffDb } from '../snapshot/store';
-import type { DenyCode, Hex } from '../types';
+import { RESEND_EXHAUSTED, type DenyCode, type Hex } from '../types';
 import {
   QUEUE_STORE,
-  RESEND_EXHAUSTED,
   drainQueue,
   type DrainParams,
   type StoredQueueEntry,

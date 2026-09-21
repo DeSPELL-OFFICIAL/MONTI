@@ -112,7 +112,7 @@ describe('online watcher', () => {
       watcher.stop();
     });
 
-    it('never opens a second request while the first is still out, and counts that tick as a failure', async () => {
+    it('never opens a second request while the first is still out, and counts that metronome tick as a failure', async () => {
       // Nothing downstream can be aborted — the fallback transport drops the `signal` — so an
       // abandoned probe can live 48 s against a hung endpoint. Opening one per tick would put
       // ten dead sockets in flight and starve the snapshot reads of the browser's six per host.
@@ -310,6 +310,52 @@ describe('online watcher', () => {
       document.dispatchEvent(new Event('visibilitychange'));
       await vi.advanceTimersByTimeAsync(0);
       expect(request).not.toHaveBeenCalled();
+      watcher.stop();
+    });
+
+    it('books no failure when its tick lands on a probe still inside its own deadline', async () => {
+      // The screen coming back ticks immediately, so this tick can land microseconds after a
+      // perfectly healthy probe went out. A staff member glancing at the phone, or a radio
+      // flapping at the edge of the house Wi-Fi, must not be able to talk the gate onto the
+      // offline path while the network is fine. Two events, because OFFLINE_AFTER_FAILURES is
+      // 2: if either tick booked a failure the watcher would already have flipped.
+      request.mockReturnValue(hang());
+      const watcher = watch();
+
+      await vi.advanceTimersByTimeAsync(PROBE_IDLE_MS);
+      expect(request).toHaveBeenCalledTimes(1);
+
+      stubVisibility('visible');
+      // Both events stay at t=30 000 — past the probe's own 32 000 deadline its legitimate
+      // failure would land too, and the reading would no longer be about this tick.
+      document.dispatchEvent(new Event('visibilitychange'));
+      await vi.advanceTimersByTimeAsync(0);
+      document.dispatchEvent(new Event('visibilitychange'));
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(watcher.online()).toBe(true);
+      expect(request).toHaveBeenCalledTimes(1);
+      watcher.stop();
+    });
+
+    it('still books a failure when its tick lands on a probe already past that deadline', async () => {
+      // The age is the whole distinction: an endpoint that has now had its full 2 s and stayed
+      // silent has answered the question, and waiting for the metronome would hold a green
+      // badge for the rest of the cadence over a venue that is already gone.
+      request.mockReturnValue(hang());
+      const watcher = watch();
+
+      await vi.advanceTimersByTimeAsync(PROBE_IDLE_MS + PROBE_TIMEOUT_MS);
+      // The deadline at 32 000 booked failure one, and one miss is still a dropped packet.
+      expect(watcher.online()).toBe(true);
+
+      stubVisibility('visible');
+      document.dispatchEvent(new Event('visibilitychange'));
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(watcher.online()).toBe(false);
+      // Failure two, and still exactly one socket ever outstanding.
+      expect(request).toHaveBeenCalledTimes(1);
       watcher.stop();
     });
 

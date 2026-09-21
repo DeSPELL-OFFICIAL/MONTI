@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Screen, Spinner } from '../../shared/ui';
 import { useCopy } from '../../shared/i18n';
 import { api } from '../../shared/api/functions';
+import { safeReturnTo } from '../../shared/returnTo';
 import {
   KYC_WEB_MARKER,
   KYC_WEB_MARKER_DONE,
@@ -16,17 +17,12 @@ import {
 const POLL_INTERVAL_MS = 2_000;
 const POLL_LIMIT = 45; // 90 seconds
 
-/** Only an in-app path is a return target; anything else goes to the profile. */
-function safeReturnTo(raw: string | null): string {
-  return raw !== null && raw.startsWith('/') && !raw.startsWith('//') ? raw : '/me';
-}
-
 export function VerifyIdentity() {
   const copy = useCopy();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [params, setSearchParams] = useSearchParams();
-  const returnTo = safeReturnTo(params.get('returnTo'));
+  const returnTo = safeReturnTo(params.get('returnTo'), '/me');
   const returnedOnWeb = params.get(KYC_WEB_MARKER) === KYC_WEB_MARKER_DONE;
   const [error, setError] = useState('');
   const [polling, setPolling] = useState(false);

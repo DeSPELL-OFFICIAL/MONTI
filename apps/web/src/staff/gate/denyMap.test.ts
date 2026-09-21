@@ -95,9 +95,30 @@ describe('a reason this build cannot read', () => {
  * these red instead.
  */
 describe('the map is pinned to the generated ABI and covers every screen', () => {
-  it('maps every one of the twelve frozen check-in error names', () => {
+  /**
+   * Both directions, and each one is a different bug. A name in `CHECK_IN_ERRORS` with no entry
+   * here is an error the contracts raise and this build has no screen for — the gap Task 34
+   * found. An entry here with no name in the ABI is a screen nobody can reach, which is how a
+   * rename hides: the old key keeps compiling and the new selector matches nothing.
+   */
+  it('has exactly one screen per derived error name', () => {
     expect(Object.keys(CHECK_IN_DENY).sort()).toEqual([...CHECK_IN_ERRORS].sort());
     expect(MAPPED_SELECTORS).toHaveLength(CHECK_IN_ERRORS.length);
+  });
+
+  /**
+   * The two the frozen twelve never had. Neither is about the attendee: one says this terminal
+   * is not on the organizer's team, the other that it may not make this call. Both are
+   * `TX_FAILED` with a sentence pointing at whoever can fix it, exactly like `EventNotPublished`
+   * — showing a ticket-holder a red refusal for somebody else's setup sends a paying customer
+   * away while the fix is one action on another phone.
+   */
+  it.each([['NotMember()'], ['Unauthorized()']])('%s is a TX_FAILED about the terminal', (signature) => {
+    const result = mapRevertToDenyCode(revert(signature));
+    expect(result.code).toBe('TX_FAILED');
+    expect(result.detail).toContain('단말기');
+    expect(result.detail).toContain('주최자');
+    expect(result.detail).not.toBe(DENY_LABELS.TX_FAILED);
   });
 
   it('derives each selector from the ABI’s own parameter types', () => {

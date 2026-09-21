@@ -16,8 +16,8 @@
 // the next one slide under their thumb.
 import { fmt, useLocale } from '../../shared/i18n';
 import { Alert, Button, Screen } from '../../shared/ui';
-import { useStaffQueueCopy, type StaffQueueCopy } from './copy';
-import { DRY_RUN_MARK, LATE_WINDOW_ELAPSED, RESEND_EXHAUSTED } from './opQueue';
+import { useStaffCopy, type StaffCopy } from '../copy';
+import { DRY_RUN_MARK, LATE_WINDOW_ELAPSED, RESEND_EXHAUSTED } from '../types';
 import type { ReconciledEntry } from './reconcile';
 
 export interface QueueScreenProps {
@@ -53,7 +53,7 @@ const REASON_BY_MARK: Record<string, ParkReason> = {
   [RESEND_EXHAUSTED]: 'exhausted',
 };
 
-const REASON_LINE: Record<ParkReason, keyof StaffQueueCopy> = {
+const REASON_LINE: Record<ParkReason, keyof StaffCopy['queue']> = {
   late: 'reasonLateWindow',
   notDeployed: 'reasonNotDeployed',
   exhausted: 'reasonResendExhausted',
@@ -65,7 +65,7 @@ function parkReason(entry: ReconciledEntry): ParkReason {
 }
 
 export function QueueScreen({ entries, onReconcile, onRetry, busy = false, retrying }: QueueScreenProps) {
-  const copy = useStaffQueueCopy();
+  const copy = useStaffCopy().queue;
   const locale = useLocale() === 'en' ? 'en-US' : 'ko-KR';
 
   // `sent` is counted as waiting: an operation whose receipt never arrived is as unaccounted for

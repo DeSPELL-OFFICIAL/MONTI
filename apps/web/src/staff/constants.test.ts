@@ -16,7 +16,7 @@ describe('staff constants match the spec parameter table (§7.3, §11)', () => {
     expect(C.CLOCK_SKEW_SECONDS).toBe(5);
     expect(C.SNAPSHOT_REFRESH_MS).toBe(600_000);
     expect(C.CHECKING_LABEL_MS).toBe(2000);
-    expect(C.RETAP_PROMPT_MS).toBe(5000);
+    expect(C.WAIT_HINT_MS).toBe(5000);
   });
 
   it('keeps the gate key alias distinct from the attendee device key', () => {

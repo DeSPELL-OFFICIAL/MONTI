@@ -30,7 +30,14 @@ import type { SponsoredOpReceipt } from '../../shared/chain/sendSponsoredOp';
 import { sendCheckIn, type CheckInFunction } from '../gate/checkInOp';
 import { warn } from '../log';
 import { staffDb } from '../snapshot/store';
-import type { GateCodeWire, GateResponseWire, Hex, QueueEntry } from '../types';
+import {
+  DRY_RUN_MARK,
+  LATE_WINDOW_ELAPSED,
+  type GateCodeWire,
+  type GateResponseWire,
+  type Hex,
+  type QueueEntry,
+} from '../types';
 
 /**
  * The object store one queued check-in lives in, keyed by {@link QueueEntry.id}. The database
@@ -84,18 +91,6 @@ export const QUEUE_WAIT_TIMEOUT_MS = 20_000;
 
 /** The 01b entry point the queue drains through. */
 export const LATE_CHECK_IN_FUNCTION = 'checkInLate' as const;
-
-/** `lastError` on an entry the drain declined to send because the ABI has no `checkInLate`. */
-export const DRY_RUN_MARK = 'CHECK_IN_LATE_UNAVAILABLE';
-/** `lastError` on an entry parked because the event's deadline passed. See {@link DrainParams.endsAt}. */
-export const LATE_WINDOW_ELAPSED = 'LATE_WINDOW_ELAPSED';
-/**
- * `lastError` on an entry Task 29 re-armed its limit of times and the chain still has no record
- * of. A queue mark, deliberately **not** a `DenyCode`: `GATE_DENY_CODES` is the refusal
- * vocabulary both apps read, and nothing on chain refused this — the operation simply never
- * arrived. Only a person can take it from here.
- */
-export const RESEND_EXHAUSTED = 'RESEND_EXHAUSTED';
 
 /**
  * The name, typed for `sendCheckIn`. `USED_ABI.Ticket` (the app's usage manifest) does not list

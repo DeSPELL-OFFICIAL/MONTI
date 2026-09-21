@@ -33,7 +33,43 @@ export const SNAPSHOT_REFRESH_MS = 600_000;
  */
 export const CHECKING_LABEL_MS = 2000;
 /** Silence this long after a tap starts is a failed tap: the screen asks for a re-tap. */
-export const RETAP_PROMPT_MS = 5000;
+export const WAIT_HINT_MS = 5000;
+
+/**
+ * How long the gate waits on one check-in before it stops watching the bundler.
+ *
+ * It is not a deadline for the attendee: a `wait()` that gives up leaves the operation running
+ * and the screen `confirming`, and a `CheckedIn` at thirty seconds still turns the tap green
+ * (spec §7.3). What it bounds is how long one tap holds the poll loop — past this the chain
+ * watch is the cheaper way to hear the same answer.
+ */
+export const CHECK_IN_WAIT_MS = 20_000;
+
+/**
+ * Spec §13: a phone replaced inside this window puts an amber note on the admit card. A
+ * handed-over ticket and a genuinely new phone look identical on chain, and the only person who
+ * can tell them apart is the one standing in front of the attendee.
+ */
+export const DEVICE_CHANGE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * How often a running gate re-asks `Organizers.isOpenGate`.
+ *
+ * Registration is permanent but *permission* is not: an organizer closes a gate when a door
+ * shuts, and revokes one when a phone is lost. Neither emits anything this device subscribes to,
+ * and a terminal that learned it was open at 19:00 would keep taking taps that can now only
+ * revert `GateNotOpen` — one refusal per attendee, each costing a sponsored operation. A minute
+ * is short enough that a closed door empties within one queue length and long enough to be one
+ * `eth_call` a minute.
+ */
+export const GATE_OPEN_RECHECK_MS = 60_000;
+
+/**
+ * How often the gate refreshes the three numbers in its header — guest-list age, entries waiting
+ * to be sent, entries parked. None of them is a verdict, so they are polled rather than pushed;
+ * they are read from IndexedDB, so polling them is free.
+ */
+export const GATE_STATUS_POLL_MS = 10_000;
 
 /**
  * How often the setup screen asks the chain whether the organizer has registered this device.

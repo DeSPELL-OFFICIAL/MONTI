@@ -2,9 +2,7 @@ import { useState, type ReactElement } from 'react';
 
 import { Button } from '../../shared/ui';
 import { useStaffCopy, type StaffCopy } from '../copy';
-
-/** 스펙이 인정하는 네 가지 사유. 숫자는 결재 기록에 그대로 남으므로 순서를 바꾸지 않는다. */
-export type OverrideReason = 1 | 2 | 3 | 4;
+import type { OverrideReason } from '../types';
 
 const REASONS: ReadonlyArray<readonly [OverrideReason, keyof StaffCopy['override']]> = [
   [1, 'reason1'],

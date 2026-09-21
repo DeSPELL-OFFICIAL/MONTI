@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { toQrPayload, type GateResponseWire } from '@monti/shared';
 
 import { encodeGateResponseMessage } from '../../shared/nfc/ndef';
+// `../copy` has no mocked dependency of its own, so it comes in statically like any other module.
+import { staffEn, staffKo } from '../copy';
 
 const scan = vi.fn();
 const checkPermissions = vi.fn();
@@ -21,8 +23,7 @@ vi.mock('@capacitor/core', async (importOriginal) => ({
   Capacitor: { isNativePlatform },
 }));
 
-const { SCAN_ERROR, ScanCancelled, ScanError, scanGateResponse } = await import('./scan');
-const { scanFailureText, staffQrEn, staffQrKo } = await import('./copy');
+const { SCAN_ERROR, ScanCancelled, ScanError, scanFailureText, scanGateResponse } = await import('./scan');
 const { RESPONSE_ERROR, ResponseDecodeError, decodeTapResponse } = await import('../gate/decodeResponse');
 
 /**
@@ -130,19 +131,18 @@ describe('scanGateResponse', () => {
 
 describe('scan copy', () => {
   it('says nothing when the staff member closed the camera on purpose', () => {
-    expect(scanFailureText(staffQrKo, new ScanCancelled())).toBeNull();
+    expect(scanFailureText(staffKo.qr, new ScanCancelled())).toBeNull();
   });
 
   it('leaves the gate’s own vocabulary to the gate', () => {
-    expect(scanFailureText(staffQrKo, new ResponseDecodeError(RESPONSE_ERROR.badTag))).toBeNull();
+    expect(scanFailureText(staffKo.qr, new ResponseDecodeError(RESPONSE_ERROR.badTag))).toBeNull();
   });
 
   it('has a line for every failure a staff member can see, in both locales', () => {
     const showable = [SCAN_ERROR.permissionDenied, SCAN_ERROR.notGateCode, SCAN_ERROR.unavailable, SCAN_ERROR.failed];
     for (const code of showable) {
-      expect(scanFailureText(staffQrKo, new ScanError(code))).toBeTruthy();
-      expect(scanFailureText(staffQrEn, new ScanError(code))).toBeTruthy();
+      expect(scanFailureText(staffKo.qr, new ScanError(code))).toBeTruthy();
+      expect(scanFailureText(staffEn.qr, new ScanError(code))).toBeTruthy();
     }
-    expect(Object.keys(staffQrEn)).toEqual(Object.keys(staffQrKo));
   });
 });

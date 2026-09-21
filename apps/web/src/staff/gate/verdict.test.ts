@@ -254,7 +254,7 @@ describe('what the verdict does to the gate machine (Task 23)', () => {
     machine.onSent({ ...TAP, userOpHash: `0x${'fe'.repeat(32)}` });
     machine.onTimeout(NONCE);
     expect(machine.state()).toBe('confirming');
-    expect(machine.snapshot().retapHint).toBe(true);
+    expect(machine.snapshot().waitHint).toBe(true);
 
     watchCheckedIn(TAP, (verdict) => machine.onVerdict(verdict));
     feed(checkedInLog(nonceHashOf(NONCE), { stage: 'finalized' }));

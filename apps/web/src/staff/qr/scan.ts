@@ -18,11 +18,12 @@ import { Capacitor } from '@capacitor/core';
 
 import { QR_PREFIX, type GateResponseWire } from '@monti/shared';
 
+import type { StaffQrCopy } from '../copy';
 import { decodeQrResponse } from '../gate/decodeResponse';
 
 /**
- * Failure codes, never copy — the same division `NfcError` keeps. `copy.ts` beside this file
- * owns the sentences, in both locales.
+ * Failure codes, never copy — the same division `NfcError` keeps. The `qr` branch of the one
+ * staff copy table owns the sentences, in both locales.
  */
 export const SCAN_ERROR = {
   /** The staff member closed the camera. Not a failure: the gate says nothing and stays ready. */
@@ -121,4 +122,31 @@ export async function scanGateResponse(): Promise<GateResponseWire> {
     throw new ScanError(SCAN_ERROR.notGateCode);
   }
   return decodeQrResponse(entryCode);
+}
+
+/**
+ * One line per failure the staff member can act on, keyed by every code this module can throw —
+ * so a code added to `SCAN_ERROR` above without a sentence here does not compile.
+ * `SCAN_CANCELLED` maps to nothing on purpose: see below.
+ *
+ * The table lives beside the codes rather than beside the sentences because `StaffQrCopy` is a
+ * type: reading staff copy never pulls the camera plugin in behind it.
+ */
+const SCAN_FAILURE_TEXT: Record<ScanErrorCode, keyof StaffQrCopy | null> = {
+  [SCAN_ERROR.cancelled]: null,
+  [SCAN_ERROR.permissionDenied]: 'cameraDenied',
+  [SCAN_ERROR.notGateCode]: 'notGateCode',
+  [SCAN_ERROR.unavailable]: 'unavailable',
+  [SCAN_ERROR.failed]: 'failed',
+};
+
+/**
+ * What to show after a scan that did not produce an answer — and `null` where showing anything
+ * would be wrong: a staff member who closed the camera did not fail at something, and a
+ * `ResponseDecodeError` is the gate's own refusal, already spoken by the gate's own screen.
+ */
+export function scanFailureText(copy: StaffQrCopy, cause: unknown): string | null {
+  if (!(cause instanceof ScanError)) return null;
+  const line = SCAN_FAILURE_TEXT[cause.code];
+  return line === null ? null : copy[line];
 }

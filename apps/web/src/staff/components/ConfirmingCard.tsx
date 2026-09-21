@@ -5,7 +5,7 @@ import { useStaffCopy } from '../copy';
 export interface ConfirmingCardProps {
   /** `GateContext.checking` — 2초. 아직 판정이 아니라 "붙잡고 있다"는 표시다. */
   checking: boolean;
-  /** `GateContext.retapHint` — 5초. 기계는 옛 이름을 쓰고, 화면은 기다리라고만 말한다. */
+  /** `GateContext.waitHint` — 5초. 기계는 옛 이름을 쓰고, 화면은 기다리라고만 말한다. */
   waitHint: boolean;
 }
 

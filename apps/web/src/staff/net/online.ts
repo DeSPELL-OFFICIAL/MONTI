@@ -31,8 +31,12 @@
 // eat the browser's six-per-host budget out from under the snapshot and the check-in reads.
 //
 // The rule that fixes it without a second URL list: **never open a second request while the
-// first is still out.** A tick that finds the previous probe unanswered *is* the evidence — it
-// counts as a failure and opens nothing. A hung endpoint therefore still reaches offline on
+// first is still out.** What such a tick *counts*, though, depends on how old that request is.
+// `visibilitychange` and `online` tick immediately rather than on the cadence, so a tick can
+// land microseconds after a probe was opened, and a probe that is 3 ms old has not been silent
+// about anything yet: a tick that finds one still inside its own deadline opens nothing and
+// counts nothing. Once the outstanding probe is past that deadline the silence is the reading
+// again and the tick counts as a failure. A hung endpoint therefore still reaches offline on
 // schedule (fire at 30 s → deadline at 32 s is failure one → the 60 s tick is failure two) with
 // exactly one socket ever outstanding.
 import { getPublicClient } from '../../shared/chain/client';
@@ -99,6 +103,9 @@ export function createOnlineWatcher(params: OnlineWatcherParams = {}): OnlineWat
   /** The request on the wire, cleared whenever it finally answers — which can be long after its
    *  own deadline passed. Non-undefined means: do not open another one. */
   let pending: Promise<unknown> | undefined;
+  /** When that request went out, so a tick can tell a probe that has merely not answered *yet*
+   *  from one that has already missed its own deadline. Moves in lockstep with `pending`. */
+  let pendingSince: number | undefined;
   let lastProbeAt = Date.now();
   /** When the next probe is owed, as a clock time rather than a delay — a cadence change has to
    *  compare against it, and a delay left in a `setTimeout` cannot be read back. */
@@ -184,9 +191,14 @@ export function createOnlineWatcher(params: OnlineWatcherParams = {}): OnlineWat
   const probe = async (): Promise<void> => {
     if (stopped) return;
     if (pending !== undefined) {
-      // Last tick's request is still out there. Opening another would stack sockets on an
-      // endpoint that has already shown it cannot answer, and nothing downstream can be
-      // aborted. The silence is the reading.
+      // A request is still out there, so this tick opens nothing either way: stacking sockets on
+      // an endpoint that has not answered would only spend the browser's six-per-host budget on
+      // something nothing downstream can abort. Whether it also *counts* is the age question.
+      // `visibilitychange` and `online` tick the moment they fire, so this can be microseconds
+      // after the probe went out — charging a failure to a request that has not yet had its own
+      // deadline to answer would let a staff member glancing at the phone talk a healthy gate
+      // onto the offline path. Past that deadline the silence is the reading again.
+      if (pendingSince !== undefined && Date.now() - pendingSince < probeTimeoutMs) return;
       fail();
       return;
     }
@@ -195,8 +207,12 @@ export function createOnlineWatcher(params: OnlineWatcherParams = {}): OnlineWat
     // below is what actually bounds it.
     const inflight = getPublicClient().request({ method: 'eth_chainId' });
     pending = inflight;
+    pendingSince = Date.now();
     const release = (): void => {
-      if (pending === inflight) pending = undefined;
+      if (pending === inflight) {
+        pending = undefined;
+        pendingSince = undefined;
+      }
     };
     // Both arms, so a late rejection is handled here rather than surfacing as unhandled.
     inflight.then(release, release);
@@ -259,6 +275,8 @@ export function createOnlineWatcher(params: OnlineWatcherParams = {}): OnlineWat
       if (deadline !== undefined) clearTimeout(deadline);
       timer = undefined;
       deadline = undefined;
+      pending = undefined;
+      pendingSince = undefined;
       dom?.removeEventListener('offline', onOffline);
       dom?.removeEventListener('online', onOnline);
       doc?.removeEventListener('visibilitychange', onVisibility);

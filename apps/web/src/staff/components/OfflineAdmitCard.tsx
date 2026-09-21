@@ -47,7 +47,7 @@ export function OfflineAdmitCard({
         <p className="gate-card__name">{displayName}</p>
         {detail === '' ? null : <p className="gate-card__detail">{detail}</p>}
         <p className="gate-card__line">{copy.offlineAdmit.note}</p>
-        <p className="gate-card__line">{fmt(copy.offlineAdmit.queued, { count: queuedCount })}</p>
+        <p className="gate-card__line">{fmt(copy.queue.pending, { count: queuedCount })}</p>
       </div>
       {onDone === undefined ? null : (
         <div className="gate-card__actions">

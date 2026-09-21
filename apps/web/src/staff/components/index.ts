@@ -13,7 +13,7 @@ import './console.css';
 
 export { StaffShell, type StaffShellProps } from './StaffShell';
 export { TapPrompt, type TapPromptProps } from './TapPrompt';
-export { ReceivedCard, type ReceivedCardProps, type PrecheckResult } from './ReceivedCard';
+export { ReceivedCard, type ReceivedCardProps } from './ReceivedCard';
 export { ConfirmingCard, type ConfirmingCardProps } from './ConfirmingCard';
 export { AdmitCard, type AdmitCardProps } from './AdmitCard';
 export { OfflineAdmitCard, type OfflineAdmitCardProps } from './OfflineAdmitCard';
@@ -22,4 +22,4 @@ export { RefusedToast, type RefusedToastProps } from './RefusedToast';
 export { LastTapChip, type LastTapChipProps } from './LastTapChip';
 export { OfflineBadge, type OfflineBadgeProps } from './OfflineBadge';
 export { QueueBanner, type QueueBannerProps } from './QueueBanner';
-export { OverrideDialog, type OverrideDialogProps, type OverrideReason } from './OverrideDialog';
+export { OverrideDialog, type OverrideDialogProps } from './OverrideDialog';

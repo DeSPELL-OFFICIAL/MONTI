@@ -1,6 +1,6 @@
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useSearchParams } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { GateRegistration } from './useGateRegistration';
@@ -38,8 +38,8 @@ function registration(overrides: Partial<GateRegistration> = {}): GateRegistrati
 
 /** Stands in for the attendee phone screen, and reports the return target it was handed. */
 function SignInProbe() {
-  const { state } = useLocation();
-  return <div data-testid="sign-in">{(state as { returnTo?: string } | null)?.returnTo ?? ''}</div>;
+  const [params] = useSearchParams();
+  return <div data-testid="sign-in">{params.get('returnTo') ?? ''}</div>;
 }
 
 /**
@@ -158,7 +158,8 @@ describe('gate setup screen', () => {
 
     await user.click(screen.getByRole('button', { name: staffSetupKo.signIn }));
     // The attendee phone step, which is the only sign-in this app ships, plus the target that
-    // brings the staff member back to the gate instead of into the attendee app.
+    // brings the staff member back to the gate instead of into the attendee app. It travels as
+    // `?returnTo=`, the one spelling of that rule this codebase has.
     expect(await screen.findByTestId('sign-in')).toHaveTextContent(STAFF_SETUP_PATH);
   });
 

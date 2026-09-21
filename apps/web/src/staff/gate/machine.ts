@@ -9,13 +9,15 @@
 //
 // So the five-second mark is advice, not a decision. The operation stays alive, the state stays
 // `confirming`, and a `CheckedIn` that arrives at six seconds still admits (spec §7.3). What
-// changes at two and five seconds is only what the screen says — `checking`, then `retapHint`.
+// changes at two and five seconds is only what the screen says — `checking`, then `waitHint`,
+// which is a request to wait and never a request to tap again: the machine refuses a second
+// tap while the first is confirming, so asking for one would be asking for a refusal.
 //
 // The second invariant, added after the Task 24 review: **one tap at a time, start to finish.**
 // A physical gate admits one person at a time, and the machine now says so — a tap arriving
 // while another is confirming is refused rather than allowed to displace it. Everything about
 // identity below exists because the alternative is an answer landing on the wrong attendee.
-import { CHECKING_LABEL_MS, RETAP_PROMPT_MS } from '../constants';
+import { CHECKING_LABEL_MS, WAIT_HINT_MS } from '../constants';
 import type { DenyCode, GateContext, GateState, Hex, PreflightResult, SnapshotTicket } from '../types';
 
 /**
@@ -117,6 +119,20 @@ export interface GateMachine {
   /** Task 27's offline path let this tap through. Carries its tap for the same reason a
    *  verdict does: an admit landing on the wrong attendee is a person through the wrong door. */
   onOfflineAdmit(tap: TapId, pendingCount: number): void;
+  /**
+   * What Task 26's connectivity watcher currently believes, pushed in.
+   *
+   * Pushed rather than pulled because there is exactly **one** watcher on the device, owned by
+   * the wiring and shared with the queue drain: a machine that created its own would be a second
+   * RPC probe loop, and two loops disagreeing about whether the gate is online is a gate that
+   * sends a check-in on one screen and queues it on the next.
+   *
+   * It moves no state and settles nothing — it only changes what the header and the badge say.
+   * The online/offline branch per tap is the wiring's, read once at the moment the tap is taken,
+   * because a connection that drops mid-operation must not retroactively turn a sent check-in
+   * into a queued one.
+   */
+  setOnline(online: boolean): void;
   onOverride(): void;
   /** Clears the verdict and goes back to waiting for the next attendee. */
   reset(): void;
@@ -145,7 +161,7 @@ const CLEARED = {
   blockNumber: undefined,
   finalized: false,
   checking: false,
-  retapHint: false,
+  waitHint: false,
 } as const;
 
 export function createGateMachine(deps: GateMachineDeps): GateMachine {
@@ -226,7 +242,7 @@ export function createGateMachine(deps: GateMachineDeps): GateMachine {
     clearTimers();
     // A refusal is final — there is no second stage to wait for, unlike a speculative admit.
     closeWatch();
-    emit({ state: 'deny', deny, denyDetail, ticket: ticket ?? context.ticket, checking: false, retapHint: false });
+    emit({ state: 'deny', deny, denyDetail, ticket: ticket ?? context.ticket, checking: false, waitHint: false });
   };
 
   const applyVerdict = (verdict: Verdict): void => {
@@ -251,7 +267,7 @@ export function createGateMachine(deps: GateMachineDeps): GateMachine {
         deny: undefined,
         denyDetail: undefined,
         checking: false,
-        retapHint: false,
+        waitHint: false,
       });
       return;
     }
@@ -297,7 +313,7 @@ export function createGateMachine(deps: GateMachineDeps): GateMachine {
       clearTimers();
       refusal = undefined;
       tap = next;
-      emit({ state: 'received', checking: false, retapHint: false });
+      emit({ state: 'received', checking: false, waitHint: false });
       return true;
     },
 
@@ -324,12 +340,12 @@ export function createGateMachine(deps: GateMachineDeps): GateMachine {
       // queue does.
       closeWatch();
       stopWatching = deps.watch?.(tap, applyVerdict);
-      emit({ state: 'confirming', checking: false, retapHint: false });
+      emit({ state: 'confirming', checking: false, waitHint: false });
       timers = [
         setTimeout(() => emit({ checking: true }), CHECKING_LABEL_MS),
         // Five seconds with no answer. The screen asks for another tap and the operation keeps
         // running: this is the line that would become a soft approval if it emitted a state.
-        setTimeout(() => emit({ retapHint: true }), RETAP_PROMPT_MS),
+        setTimeout(() => emit({ waitHint: true }), WAIT_HINT_MS),
       ];
     },
 
@@ -343,7 +359,7 @@ export function createGateMachine(deps: GateMachineDeps): GateMachine {
       if (settled()) return;
       if (!isCurrentTap(nonce)) return;
       clearTimers();
-      emit({ state: 'confirming', checking: true, retapHint: true });
+      emit({ state: 'confirming', checking: true, waitHint: true });
     },
 
     onOfflineAdmit(next: TapId, pendingCount: number) {
@@ -358,14 +374,19 @@ export function createGateMachine(deps: GateMachineDeps): GateMachine {
       if (!isCurrentTap(next.nonce)) return;
       clearTimers();
       closeWatch();
-      emit({ state: 'offlineAdmit', online: false, pendingCount, checking: false, retapHint: false });
+      emit({ state: 'offlineAdmit', online: false, pendingCount, checking: false, waitHint: false });
+    },
+
+    setOnline(next: boolean) {
+      if (next === context.online) return;
+      emit({ online: next });
     },
 
     onOverride() {
       // A staff button press. It is inherently about whoever is on screen, so it names no tap.
       clearTimers();
       closeWatch();
-      emit({ state: 'override', checking: false, retapHint: false });
+      emit({ state: 'override', checking: false, waitHint: false });
     },
 
     reset() {

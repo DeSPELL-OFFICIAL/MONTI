@@ -1,9 +1,7 @@
 import type { ReactElement } from 'react';
 
 import { useStaffCopy, type StaffCopy } from '../copy';
-
-/** 명단만으로 답할 수 있었던 것. `'unknown'` 은 명단이 모르는 표라는 뜻이지 거절이 아니다. */
-export type PrecheckResult = 'ok' | 'unknown' | 'fail';
+import type { PrecheckResult } from '../types';
 
 const PRECHECK_LINE: Record<PrecheckResult, keyof StaffCopy['received']> = {
   ok: 'precheckOk',

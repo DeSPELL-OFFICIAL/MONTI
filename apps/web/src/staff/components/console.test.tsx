@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { act } from 'react';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -6,8 +9,16 @@ import { describe, expect, it, vi } from 'vitest';
 import { fmt, setLocale } from '../../shared/i18n';
 import { staffEn, staffKo } from '../copy';
 import { TAP_REFUSAL, type SettledTap } from '../gate/machine';
-import { DRY_RUN_MARK, LATE_WINDOW_ELAPSED } from '../queue/opQueue';
-import { DENY_CODES, GATE_STATES, type GateContext, type GateState, type SnapshotTicket } from '../types';
+import {
+  DENY_CODES,
+  DRY_RUN_MARK,
+  GATE_STATES,
+  LATE_WINDOW_ELAPSED,
+  RESEND_EXHAUSTED,
+  type GateContext,
+  type GateState,
+  type SnapshotTicket,
+} from '../types';
 import { GateConsole, type GateConsoleProps } from '../Console';
 import {
   AdmitCard,
@@ -53,7 +64,7 @@ function context(overrides: Partial<GateContext> = {}): GateContext {
     orgId: 2n,
     finalized: false,
     checking: false,
-    retapHint: false,
+    waitHint: false,
     pendingCount: 0,
     snapshotAgeMs: 0,
     online: true,
@@ -279,7 +290,7 @@ describe('OfflineAdmitCard', () => {
   it('says how many entries are still waiting to be sent', () => {
     render(<OfflineAdmitCard displayName={ATTENDEE} queuedCount={2} />);
     expect(screen.getByText(staffKo.offlineAdmit.note)).toBeInTheDocument();
-    expect(screen.getByText(fmt(staffKo.offlineAdmit.queued, { count: 2 }))).toBeInTheDocument();
+    expect(screen.getByText(fmt(staffKo.queue.pending, { count: 2 }))).toBeInTheDocument();
   });
 
   it('draws the same photo or initial the online card does', () => {
@@ -437,11 +448,25 @@ describe('QueueBanner', () => {
     expect(screen.getByText(staffKo.queue.lateUnavailable)).toBeInTheDocument();
   });
 
+  it('sends a row that was re-sent to its limit to a person, not back to the connection', () => {
+    render(<QueueBanner pendingCount={0} parkedCount={1} lastError={RESEND_EXHAUSTED} />);
+    expect(screen.getByText(staffKo.queue.reasonResendExhausted)).toBeInTheDocument();
+    expect(screen.queryByText(staffKo.queue.sending)).not.toBeInTheDocument();
+  });
+
   it('stays quiet about a send failure that will simply be retried', () => {
     render(<QueueBanner pendingCount={1} parkedCount={0} lastError="HTTP 503" />);
     expect(screen.queryByText(staffKo.queue.lateWindowElapsed)).not.toBeInTheDocument();
     expect(screen.queryByText(staffKo.queue.lateUnavailable)).not.toBeInTheDocument();
     expect(screen.getByText(staffKo.queue.sending)).toBeInTheDocument();
+  });
+
+  // The marks the banner reads live in `staff/types.ts`, not in `queue/opQueue.ts`: importing a
+  // value from `queue/` drags IndexedDB, viem and the generated ABI into a barrel of pure cards.
+  // Vitest runs with `apps/web` as its root, the anchor `noReaderMode.test.ts` scans from too.
+  it('names the queue marks without pulling the queue in behind them', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/staff/components/QueueBanner.tsx'), 'utf8');
+    expect(source).not.toMatch(/from '\.\.\/queue\//);
   });
 });
 
@@ -536,25 +561,75 @@ describe('GateConsole', () => {
   });
 
   it('passes the two §7.3 clocks through to the confirming card', () => {
-    renderConsole({ state: 'confirming', checking: true, retapHint: false });
+    renderConsole({ state: 'confirming', checking: true, waitHint: false });
     expect(screen.queryByText(staffKo.confirming.wait)).not.toBeInTheDocument();
     cleanup();
-    renderConsole({ state: 'confirming', checking: true, retapHint: true });
+    renderConsole({ state: 'confirming', checking: true, waitHint: true });
     expect(screen.getByText(staffKo.confirming.wait)).toBeInTheDocument();
   });
 
-  it('falls back to an unreadable reason rather than an empty refusal', () => {
+  /**
+   * The console used to render `deny ?? 'UNKNOWN_REVERT'`, which put a reason on screen that the
+   * gate had never been given. The person reading that line over the staff member's shoulder is
+   * the one who was just turned away, and "이유를 읽지 못했어요" is a different claim from
+   * "this build has a bug". The machine sets `deny` on every path into this state, so the
+   * combination is unreachable — and where it is unreachable the honest thing is to say nothing
+   * rather than to invent the one sentence that sounds most plausible.
+   */
+  it('never invents a refusal the gate was not given', () => {
     renderConsole({ state: 'deny', denyDetail: '0xbeef' });
+    expect(screen.queryByText(staffKo.deny.UNKNOWN_REVERT)).not.toBeInTheDocument();
+    expect(screen.queryByText(staffKo.denyTitle)).not.toBeInTheDocument();
+    expect(screen.queryByText('0xbeef')).not.toBeInTheDocument();
+  });
+
+  it('still reads an unreadable reason the gate really was given', () => {
+    renderConsole({ state: 'deny', deny: 'UNKNOWN_REVERT', denyDetail: '0xbeef' });
     expect(screen.getByText(staffKo.deny.UNKNOWN_REVERT)).toBeInTheDocument();
     expect(screen.getByText('0xbeef')).toBeInTheDocument();
   });
 
-  // `offlineAdmit.queued` and `queue.pending` are the same sentence, and the banner is on screen
-  // beside the card, so this one is scoped to the card rather than to the whole console.
+  /**
+   * `RefusedToast` is a `role="status"` — an implicit live region — and the verdict area is an
+   * `aria-live` + `aria-atomic` region of its own. Nesting them makes the whole outer region
+   * re-announce whenever the inner one changes, so a staff member hears "잠시만 기다려 주세요"
+   * and the previous attendee's verdict read out as one run-on sentence.
+   */
+  it('keeps the refusal out of the verdict’s live region', () => {
+    renderConsole({ state: 'confirming', checking: true }, { refusal: TAP_REFUSAL.confirming });
+    const toast = screen.getByRole('status');
+    expect(toast).toHaveTextContent(staffKo.refusal.confirming);
+    expect(verdict()).not.toContainElement(toast);
+  });
+
+  /**
+   * Spec §12: the face on the card is the one the attester signed into the guest list. The
+   * wiring overrides it in exactly one case — a ticket minted since the last refresh, whose
+   * photo had to be asked for separately.
+   */
+  it('prefers the photo the wiring fetched over the snapshot’s', () => {
+    renderConsole({ state: 'admit', ticket: ticket({ photoJpegB64: 'FROM-LIST' }) });
+    expect(screen.getByRole('img')).toHaveAttribute('src', expect.stringContaining('FROM-LIST'));
+    cleanup();
+    renderConsole({ state: 'admit', ticket: ticket({ photoJpegB64: '' }) }, { photo: 'FETCHED' });
+    expect(screen.getByRole('img')).toHaveAttribute('src', expect.stringContaining('FETCHED'));
+  });
+
+  it('takes the entry number and the device note from the wiring', () => {
+    renderConsole(
+      { state: 'admit', ticket: ticket() },
+      { entriesCount: 7, deviceChangedRecently: true },
+    );
+    expect(screen.getByText(fmt(staffKo.admit.entryValue, { count: 7 }))).toBeInTheDocument();
+    expect(screen.getByText(staffKo.admit.deviceChanged)).toBeInTheDocument();
+  });
+
+  // The card and the banner both say `queue.pending` — one sentence, one key — and both are on
+  // screen at once, so this one is scoped to the card rather than to the whole console.
   it('counts the queued entries on the offline card', () => {
     renderConsole({ state: 'offlineAdmit', ticket: ticket(), pendingCount: 3, online: false });
     expect(
-      within(verdict()).getByText(fmt(staffKo.offlineAdmit.queued, { count: 3 })),
+      within(verdict()).getByText(fmt(staffKo.queue.pending, { count: 3 })),
     ).toBeInTheDocument();
   });
 

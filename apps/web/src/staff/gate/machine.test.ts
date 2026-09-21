@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { SnapshotTicket } from '@monti/shared';
 
-import { CHECKING_LABEL_MS, RETAP_PROMPT_MS } from '../constants';
+import { CHECKING_LABEL_MS, WAIT_HINT_MS } from '../constants';
 import { GATE_STATES, type Hex } from '../types';
 import { TAP_REFUSAL, createGateMachine, type TapId, type Verdict } from './machine';
 
@@ -107,13 +107,13 @@ describe('the two clocks, and the soft approval that must never happen', () => {
     vi.advanceTimersByTime(1);
     expect(machine.snapshot().checking).toBe(true);
     expect(machine.state()).toBe('confirming');
-    expect(machine.snapshot().retapHint).toBe(false);
+    expect(machine.snapshot().waitHint).toBe(false);
   });
 
   it('asks for another tap at five seconds and stays confirming — no state, no verdict', () => {
     const machine = inFlight();
-    vi.advanceTimersByTime(RETAP_PROMPT_MS);
-    expect(machine.snapshot().retapHint).toBe(true);
+    vi.advanceTimersByTime(WAIT_HINT_MS);
+    expect(machine.snapshot().waitHint).toBe(true);
     expect(machine.state()).toBe('confirming');
     expect(machine.snapshot().deny).toBeUndefined();
     expect(machine.snapshot().denyDetail).toBeUndefined();
@@ -130,11 +130,11 @@ describe('the two clocks, and the soft approval that must never happen', () => {
   /** The reason the hint is a flag and not a state: the chain can still answer, and it decides. */
   it('a late CheckedIn after the hint still turns the tap green', () => {
     const machine = inFlight();
-    vi.advanceTimersByTime(RETAP_PROMPT_MS + 3_000);
-    expect(machine.snapshot().retapHint).toBe(true);
+    vi.advanceTimersByTime(WAIT_HINT_MS + 3_000);
+    expect(machine.snapshot().waitHint).toBe(true);
     machine.onVerdict({ kind: 'admit', nonce: A.nonce, blockNumber: 101n, finalized: true });
     expect(machine.state()).toBe('admit');
-    expect(machine.snapshot().retapHint).toBe(false);
+    expect(machine.snapshot().waitHint).toBe(false);
     expect(machine.snapshot().checking).toBe(false);
   });
 
@@ -146,7 +146,7 @@ describe('the two clocks, and the soft approval that must never happen', () => {
     const machine = inFlight();
     machine.onTimeout(A.nonce);
     expect(machine.state()).toBe('confirming');
-    expect(machine.snapshot().retapHint).toBe(true);
+    expect(machine.snapshot().waitHint).toBe(true);
     expect(machine.snapshot().deny).toBeUndefined();
     // And the verdict that arrives after it still decides.
     machine.onVerdict({ kind: 'admit', nonce: A.nonce, blockNumber: 7n, finalized: false });
@@ -156,9 +156,9 @@ describe('the two clocks, and the soft approval that must never happen', () => {
   it('drops the clocks once a verdict lands, so they cannot fire over it', () => {
     const machine = inFlight();
     machine.onVerdict({ kind: 'admit', nonce: A.nonce, blockNumber: 99n, finalized: true });
-    vi.advanceTimersByTime(RETAP_PROMPT_MS * 2);
+    vi.advanceTimersByTime(WAIT_HINT_MS * 2);
     expect(machine.snapshot().checking).toBe(false);
-    expect(machine.snapshot().retapHint).toBe(false);
+    expect(machine.snapshot().waitHint).toBe(false);
     expect(machine.state()).toBe('admit');
   });
 });
@@ -306,9 +306,9 @@ describe('one tap at a time, and the answer that belongs to it', () => {
 
     machine.onSent(B);
     machine.onTimeout(A.nonce);
-    expect(machine.snapshot().retapHint).toBe(false);
+    expect(machine.snapshot().waitHint).toBe(false);
     machine.onTimeout(B.nonce);
-    expect(machine.snapshot().retapHint).toBe(true);
+    expect(machine.snapshot().waitHint).toBe(true);
   });
 
   it('carries the userOpHash the send learned without matching on it', () => {
@@ -345,7 +345,7 @@ describe('the states that are not admit', () => {
 describe('going back to waiting', () => {
   it('reset clears the verdict, the ticket and both hints', () => {
     const machine = inFlight();
-    vi.advanceTimersByTime(RETAP_PROMPT_MS);
+    vi.advanceTimersByTime(WAIT_HINT_MS);
     machine.onVerdict({ kind: 'deny', nonce: A.nonce, code: 'ALREADY_USED', detail: '이미 입장' });
     machine.reset();
 
@@ -357,7 +357,7 @@ describe('going back to waiting', () => {
       blockNumber: undefined,
       finalized: false,
       checking: false,
-      retapHint: false,
+      waitHint: false,
     });
   });
 
@@ -389,6 +389,77 @@ describe('going back to waiting', () => {
     machine.reset();
     expect(machine.snapshot().pendingCount).toBe(4);
     expect(machine.snapshot().online).toBe(false);
+  });
+});
+
+/**
+ * Task 26's connectivity watcher, pushed in. There is one watcher on the device, owned by the
+ * wiring and shared with the queue drain, so the machine is told rather than asking — a second
+ * probe loop would be a second opinion about whether the door is online.
+ */
+describe('what the header says about the connection', () => {
+  it('starts online and takes the watcher’s answer', () => {
+    const machine = createGateMachine(deps);
+    expect(machine.snapshot().online).toBe(true);
+    machine.setOnline(false);
+    expect(machine.snapshot().online).toBe(false);
+    machine.setOnline(true);
+    expect(machine.snapshot().online).toBe(true);
+  });
+
+  it('tells its listeners, once per change and not once per call', () => {
+    const machine = createGateMachine(deps);
+    const seen: boolean[] = [];
+    machine.subscribe((context) => seen.push(context.online));
+    machine.setOnline(true); // already true
+    machine.setOnline(false);
+    machine.setOnline(false);
+    machine.setOnline(true);
+    expect(seen).toEqual([false, true]);
+  });
+
+  /**
+   * The line that matters: it is a label, not a decision. A watcher answering mid-operation must
+   * not settle, cancel or reroute the tap that is already in flight — the online/offline branch
+   * was taken when the tap was accepted, and a check-in already handed to the bundler does not
+   * become a queued one because the badge turned red.
+   */
+  it('moves no state and settles nothing', () => {
+    const machine = inFlight();
+    machine.setOnline(false);
+    expect(machine.state()).toBe('confirming');
+    machine.setOnline(true);
+    expect(machine.state()).toBe('confirming');
+
+    // And the verdict for that tap still lands, on the tap it was always about.
+    machine.onVerdict({ kind: 'admit', nonce: A.nonce, blockNumber: 99n, finalized: true });
+    expect(machine.state()).toBe('admit');
+    expect(machine.snapshot().online).toBe(true);
+  });
+
+  /** A verdict on screen is not wiped by the radio coming back. */
+  it('does not clear a verdict the staff member has not read', () => {
+    const machine = inFlight();
+    machine.onVerdict({ kind: 'deny', nonce: A.nonce, code: 'ALREADY_USED' });
+    machine.setOnline(false);
+    expect(machine.state()).toBe('deny');
+    expect(machine.snapshot().deny).toBe('ALREADY_USED');
+  });
+
+  /**
+   * `onOfflineAdmit` sets the flag itself, because that card is *about* the connection being
+   * gone. The watcher may then say the signal is back while the card is still up — which is
+   * true, and the queued entry is still queued: the card is driven by the state, not the badge.
+   */
+  it('lets the watcher correct an offline admit’s badge without touching the card', () => {
+    const machine = createGateMachine(deps);
+    machine.onReady();
+    machine.onResponse(A);
+    machine.onOfflineAdmit(A, 2);
+    expect(machine.snapshot().online).toBe(false);
+    machine.setOnline(true);
+    expect(machine.state()).toBe('offlineAdmit');
+    expect(machine.snapshot().pendingCount).toBe(2);
   });
 });
 

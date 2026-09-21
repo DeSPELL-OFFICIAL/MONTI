@@ -6,6 +6,10 @@ import { Phone } from './attendee/signup/Phone';
 import { Verify } from './attendee/signup/Verify';
 import { initI18n } from './shared/i18n';
 import { StaffRoutes } from './staff/StaffRoutes';
+// The attendee build pulls the tokens in from `App.tsx`; this build has no `App.tsx`. Today they
+// arrive through `staff/components/index.ts`, which the setup and signup screens do not import —
+// so without this line those screens render with no `--bg`, `--text`, `--accent` or `.btn`.
+import './shared/theme.css';
 
 // The staff APK is a single-purpose kiosk: it boots straight into the gate console and has no
 // address bar to type a different path into. MemoryRouter rather than BrowserRouter because a

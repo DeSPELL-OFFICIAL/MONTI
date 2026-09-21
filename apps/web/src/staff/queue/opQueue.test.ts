@@ -24,8 +24,6 @@ vi.mock('../../shared/chain/abis', () => ({ ticketAbi }));
 // hoisted above the `vi.fn()`s the factories close over.
 const {
   BACKOFF_CAP_MS,
-  DRY_RUN_MARK,
-  LATE_WINDOW_ELAPSED,
   MAX_ATTEMPTS,
   QUEUE_STORE,
   allEntries,
@@ -37,6 +35,7 @@ const {
   pendingCount,
 } = await import('./opQueue');
 const { staffDb } = await import('../snapshot/store');
+const { DRY_RUN_MARK, LATE_WINDOW_ELAPSED } = await import('../types');
 
 /** 01b's `checkInLate(uint256,(uint256,uint256,uint64,bytes32),bytes)`, name only — the gate
  *  looks the name up and nothing else. */

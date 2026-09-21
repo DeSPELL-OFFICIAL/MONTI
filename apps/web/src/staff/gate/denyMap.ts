@@ -1,11 +1,17 @@
 // A revert, turned into a sentence a staff member can say out loud.
 //
-// The map is keyed on `Ticket.sol`'s error NAMES and the selectors are derived from the
-// generated ABI — never from a signature string typed here. That is the whole design of this
-// file: a selector spelled by hand goes on matching nothing the day sub-plan 01 renames an
-// error, and a selector that matches nothing falls through to a generic failure, so the gate
-// would quietly start showing the wrong screen instead of failing a test. Here, a rename makes
-// `CHECK_IN_ERRORS` disagree with the ABI and `types.test.ts` goes red first.
+// Nothing about the contracts is spelled by hand here. The NAMES come from the ABI
+// (`CHECK_IN_ERRORS`, derived in `staff/types.ts`) and the four-byte selectors are computed from
+// the ABI's own parameter types — never from a signature string typed in this file. That is the
+// whole design: a selector spelled by hand goes on matching nothing the day sub-plan 01 renames
+// an error, and a selector that matches nothing falls through to a generic failure, so the gate
+// would quietly start showing the wrong screen instead of failing a test.
+//
+// The screens are the one thing a person still writes, in {@link CHECK_IN_DENY}, and the test
+// beside this file holds them to the derived list: an error the contracts add arrives here as a
+// red test rather than as a wrong screen at a door. That is how `NotMember` was missing —
+// `manualOverride` reverts it, the frozen twelve had never heard of it, and the terminal showed
+// the attendee a send failure for a permission problem of its own (Task 34).
 //
 // Nothing in this file can produce an admit. Every path out of `mapRevertToDenyCode` is a DENY
 // — including the one for a revert whose selector this build has never seen, because a gate
@@ -34,9 +40,18 @@ export const DENY_LABELS: Record<DenyCode, string> = {
 };
 
 /**
- * The twelve check-in errors the master plan froze (Task 14), each to the screen it becomes.
- * Keyed by `CheckInError`, so an error added to that list without a screen here does not
- * compile — which is the point: a new revert reason must not be able to arrive as a surprise.
+ * Each error the gate can be handed, to the screen it becomes.
+ *
+ * The keys are `CHECK_IN_ERRORS`' — the ABI's — and `denyMap.test.ts` asserts the two sets are
+ * equal in both directions: a name the contracts add with no screen here is a red test, and a
+ * name here the contracts no longer declare is a screen nobody can reach.
+ *
+ * The last three are not about the attendee at all. `EventNotPublished` is an event still in
+ * draft, `NotMember` a terminal the organizer has not put on their team, `Unauthorized` a call
+ * this account is not allowed to make — three configuration mistakes, none of them a bad
+ * ticket. They map to `TX_FAILED` and earn their own sentence below, because showing a red
+ * refusal to a ticket-holder whose only problem is somebody else's setup sends a paying
+ * customer away while the fix is one action on another phone.
  */
 export const CHECK_IN_DENY: Record<CheckInError, DenyCode> = {
   AlreadyCheckedIn: 'ALREADY_USED',
@@ -48,9 +63,11 @@ export const CHECK_IN_DENY: Record<CheckInError, DenyCode> = {
   GateMismatch: 'GATE_MISMATCH',
   DeviceLocked: 'DEVICE_LOCKED',
   BadDeviceSignature: 'DEVICE_MISMATCH',
-  EventNotPublished: 'TX_FAILED',
   EventEnded: 'EVENT_ENDED',
   EventCancelled: 'EVENT_CANCELLED',
+  EventNotPublished: 'TX_FAILED',
+  NotMember: 'TX_FAILED',
+  Unauthorized: 'TX_FAILED',
 };
 
 /**
@@ -63,6 +80,8 @@ const DENY_DETAILS: Partial<Record<CheckInError, string>> = {
   EventNotPublished: '아직 공개되지 않은 공연입니다. 주최자에게 문의하세요.',
   GateMismatch: '이 단말기는 다른 게이트로 등록돼 있습니다. 설정을 확인하세요.',
   DeviceLocked: '관객 기기 키가 잠겨 있습니다. 관객에게 앱 재설정을 안내하세요.',
+  NotMember: '이 단말기가 주최 팀에 등록돼 있지 않습니다. 관객 잘못이 아니니 주최자에게 문의하세요.',
+  Unauthorized: '이 단말기에게 그 권한이 없습니다. 관객 잘못이 아니니 주최자에게 문의하세요.',
 };
 
 /** `name` → 4-byte selector, computed from the generated ABI's own parameter types. */
@@ -90,14 +109,20 @@ export interface DenyVerdict {
 const TABLE: Record<string, DenyVerdict> = Object.fromEntries(
   CHECK_IN_ERRORS.flatMap((name) => {
     const selector = SELECTOR_BY_NAME.get(name);
-    // A name the ABI no longer declares is a red `types.test.ts`, not a crash at the door.
+    // Cannot happen — the names come from the same ABI these selectors do — but the list is
+    // derived now, so this is a skipped row rather than a crash at a door.
     if (!selector) return [];
     const code = CHECK_IN_DENY[name];
+    // A name with no screen is a red test. At runtime it is still read as far as it can be: the
+    // reason is named in the detail so the field report says which error to write a screen for.
+    if (!code) {
+      return [[selector, { code: 'UNKNOWN_REVERT', detail: `${DENY_LABELS.UNKNOWN_REVERT} (${name})` }] as const];
+    }
     return [[selector, { code, detail: DENY_DETAILS[name] ?? DENY_LABELS[code] }] as const];
   }),
 );
 
-/** The selectors this build can name, for the test that checks the set is the frozen twelve. */
+/** The selectors this build can name, for the test that checks the set is the ABI's. */
 export const MAPPED_SELECTORS: readonly string[] = Object.keys(TABLE);
 
 /**

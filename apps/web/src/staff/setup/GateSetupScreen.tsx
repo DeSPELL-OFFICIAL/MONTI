@@ -13,6 +13,8 @@ const DIGITS_ONLY = /\D/g;
 /** Where this screen sends a signed-out staff member, and where they come back to. */
 export const PHONE_SIGN_IN_PATH = '/signup/phone';
 export const STAFF_SETUP_PATH = '/staff/setup';
+/** The door, once the chain says this device is a gate. Relative: the staff routes are a subtree. */
+const GATE_PATH = '../gate';
 
 /** Each typed failure gets its own sentence; none of them is "something went wrong". */
 const ERROR_LINE: Record<GateSetupError, keyof StaffSetupCopy> = {
@@ -106,7 +108,15 @@ export function GateSetupScreen() {
           <dt>{copy.orgIdLabel}</dt>
           <dd>{String(registration.orgId)}</dd>
         </dl>
-        {registration.open ? null : <Alert tone="warn">{copy.notOpen}</Alert>}
+        {registration.open ? (
+          // The hand-off. It is a press rather than a redirect because this panel is the only
+          // confirmation a staff member ever gets that the organizer approved *this* device for
+          // *this* event — three numbers they can read back over the phone — and a screen that
+          // vanished on its own would make the one moment that has to be checked unmissable.
+          <Button onClick={() => navigate(GATE_PATH)}>{copy.openGate}</Button>
+        ) : (
+          <Alert tone="warn">{copy.notOpen}</Alert>
+        )}
       </Screen>
     );
   }
@@ -157,7 +167,11 @@ export function GateSetupScreen() {
         // The one failure this phone can fix by itself, so it gets the way to fix it. The
         // staff member signs in on the attendee phone screen this app already ships; the
         // return target brings them back here rather than into the attendee app.
-        <Button onClick={() => navigate(PHONE_SIGN_IN_PATH, { state: { returnTo: STAFF_SETUP_PATH } })}>
+        //
+        // `?returnTo=` rather than router state because that is this codebase's convention
+        // (`shared/returnTo.ts`), and because it costs the web build nothing: `router.tsx`
+        // already mounts `/staff/*` next to `/signup/phone`, so the same link works there.
+        <Button onClick={() => navigate(`${PHONE_SIGN_IN_PATH}?returnTo=${encodeURIComponent(STAFF_SETUP_PATH)}`)}>
           {copy.signIn}
         </Button>
       ) : null}

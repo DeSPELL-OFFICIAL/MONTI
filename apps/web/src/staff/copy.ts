@@ -2,7 +2,8 @@ import { useLocale } from '../shared/i18n';
 import type { DenyCode } from './types';
 
 /**
- * **모든 스태프 문장이 사는 한 곳.** 설치 화면(T15)과 게이트 콘솔(T31)이 여기서 갈라져 나온다.
+ * **모든 스태프 문장이 사는 한 곳.** 설치 화면(T15)과 게이트 콘솔(T31), 대기·충돌 화면, QR 대체
+ * 경로가 전부 여기서 갈라져 나온다.
  *
  * 이 모듈이 생기기 전에는 설치 문구가 `staff/setup/copy.ts` 에 따로 있었고, 그 파일은 자기 주석에
  * "`copy-lint` 는 `staff` 디렉터리를 건너뛴다 — 관객에게 금지된 낱말이 스태프에게는 그냥 일하는
@@ -34,6 +35,7 @@ export const staffKo = {
     resubmit: '다시 요청',
     registeredTitle: '등록됐어요',
     registeredBody: '이제 이 단말기로 입장을 받을 수 있어요.',
+    openGate: '입장 받기 시작',
     gateIdLabel: '게이트 번호',
     orgIdLabel: '주최 번호',
     notOpen: '관리자가 아직 이 게이트의 문을 열지 않았어요.',
@@ -74,6 +76,19 @@ export const staffKo = {
   ready: {
     tap: '여기에 대주세요',
     hint: '휴대폰 뒷면을 화면 가운데에 대주세요.',
+  },
+
+  /**
+   * NFC 로 답을 돌려주지 못하는 휴대폰을 위한 QR 대체 경로. 스태프 앱에서 카메라를 두고 하는 말은
+   * 이 다섯 줄뿐이고, 줄마다 다음에 할 일을 적는다 — 이 폰을 든 스태프는 줄 선 사람들이 보고
+   * 있어서, "읽지 못했어요"만 띄우면 사람이 그 자리에 멈춘다.
+   */
+  qr: {
+    scanButton: 'QR로 확인',
+    cameraDenied: '카메라를 쓸 수 없어요. 설정에서 카메라 권한을 켜고 다시 누르세요.',
+    notGateCode: '입장 QR이 아니에요. 관객 화면의 QR을 비춰 주세요.',
+    unavailable: '이 단말기에서는 QR을 읽을 수 없어요. NFC로 받아 주세요.',
+    failed: 'QR을 읽지 못했어요. 다시 누르세요.',
   },
 
   /** 표를 받았고, 아직 보내기 전. */
@@ -117,7 +132,6 @@ export const staffKo = {
   offlineAdmit: {
     title: '연결 없이 입장',
     note: '연결이 돌아오면 기록할게요',
-    queued: '보낼 입장 {{count}}건',
   },
 
   /** 스펙 §13 거절 사유. 코드 하나에 문장 하나, 열세 개 전부. */
@@ -155,13 +169,36 @@ export const staffKo = {
     none: '아직 없어요',
   },
 
-  /** 아직 보내지 못한 입장 기록(`queue/opQueue.ts`). */
+  /**
+   * 아직 보내지 못한 입장 기록(`queue/opQueue.ts`). 콘솔 배너는 몇 건이 남았고 왜 멈췄는지만
+   * 말하고, 대기·충돌 화면(`queue/QueueScreen.tsx`)이 그 기록을 한 줄씩 펼친다. 충돌 줄이 고칠
+   * 방법을 권하지 않는 이유는 그런 방법이 없기 때문이다 — 이미 들어간 사람은 되돌릴 수 없으니,
+   * 스태프가 소리 내어 읽을 수 있는 기록으로 쓴다.
+   */
   queue: {
     pending: '보낼 입장 {{count}}건',
     parked: '멈춘 입장 {{count}}건',
     sending: '연결이 돌아오면 저절로 보내요',
     lateWindowElapsed: '입장 기록을 보낼 수 있는 시간이 지났어요. 남은 기록을 관리자에게 전달하세요.',
     lateUnavailable: '이 단말기로는 늦은 입장 기록을 보낼 수 없어요. 앱을 새로 받아 주세요.',
+    title: '대기 · 충돌',
+    counts: '대기 {{waiting}}건 · 기록 완료 {{done}}건 · 충돌 {{conflicts}}건 · 멈춤 {{parked}}건',
+    empty: '대기 중인 입장 기록이 없어요.',
+    reconcile: '지금 맞춰 보기',
+    reconciling: '맞춰 보는 중',
+    conflictsTitle: '충돌',
+    conflictsHint: '같은 티켓이 이미 들어온 것으로 기록돼 있어요. 들어온 사람을 되돌릴 수는 없고, 아래는 그 기록이에요.',
+    conflictLine: '티켓 {{tokenId}} · {{gateId}}번 게이트가 {{time}}에 먼저 받았어요',
+    conflictLineManual: '티켓 {{tokenId}} · {{gateId}}번 게이트에서 {{time}}에 수동 승인됐어요',
+    parkedTitle: '멈춘 기록',
+    parkedHint: '여러 번 보내지 못해 멈춰 있어요. 신호가 돌아왔으면 하나씩 다시 보내세요.',
+    ticket: '티켓 {{tokenId}}',
+    retry: '다시 보내기',
+    retrying: '보내는 중',
+    reasonLateWindow: '행사 마감이 지나서 보내지 못했어요.',
+    reasonNotDeployed: '이 단말기 버전으로는 아직 보낼 수 없어요. 앱을 업데이트한 뒤 다시 보내세요.',
+    reasonResendExhausted: '여러 번 다시 보냈는데도 기록되지 않았어요. 주최자에게 알리세요.',
+    reasonOther: '보내지 못했어요.',
   },
 
   /** 수동 승인 창. 이 태스크는 껍데기만 만든다 — 승인 자체는 04 T32. */
@@ -198,6 +235,7 @@ export const staffEn: typeof staffKo = {
     resubmit: 'Request again',
     registeredTitle: 'Registered',
     registeredBody: 'This device can now take people in.',
+    openGate: 'Start taking people in',
     gateIdLabel: 'Gate number',
     orgIdLabel: 'Organizer number',
     notOpen: 'The organizer has not opened this gate yet.',
@@ -236,6 +274,14 @@ export const staffEn: typeof staffKo = {
     hint: 'Hold the back of the phone against the middle of this screen.',
   },
 
+  qr: {
+    scanButton: 'Check with QR',
+    cameraDenied: 'The camera is not available. Turn the camera permission on in Settings and press again.',
+    notGateCode: 'That is not an entry code. Point the camera at the QR on the attendee’s screen.',
+    unavailable: 'This device cannot read QR codes. Take the tap over NFC instead.',
+    failed: 'The code could not be read. Press again.',
+  },
+
   received: {
     title: 'Ticket received',
     ticketLabel: 'Ticket number',
@@ -264,7 +310,6 @@ export const staffEn: typeof staffKo = {
   offlineAdmit: {
     title: 'Admitted offline',
     note: 'It will be recorded once the connection is back',
-    queued: '{{count}} entries to send',
   },
 
   deny: {
@@ -304,6 +349,24 @@ export const staffEn: typeof staffKo = {
     sending: 'They go out by themselves once the connection is back',
     lateWindowElapsed: 'The window for sending entry records has passed. Hand the rest to the organizer.',
     lateUnavailable: 'This device cannot send late entry records. Please install the new app.',
+    title: 'Waiting · Conflicts',
+    counts: 'Waiting {{waiting}} · Recorded {{done}} · Conflicts {{conflicts}} · Stopped {{parked}}',
+    empty: 'Nothing is waiting.',
+    reconcile: 'Check now',
+    reconciling: 'Checking',
+    conflictsTitle: 'Conflicts',
+    conflictsHint: 'The same ticket is already recorded as admitted. Nobody already inside can be sent back — what follows is the record.',
+    conflictLine: 'Ticket {{tokenId}} · gate {{gateId}} took it first at {{time}}',
+    conflictLineManual: 'Ticket {{tokenId}} · approved by hand at gate {{gateId}} at {{time}}',
+    parkedTitle: 'Stopped',
+    parkedHint: 'These could not be sent after several tries. If the signal is back, send them again one at a time.',
+    ticket: 'Ticket {{tokenId}}',
+    retry: 'Send again',
+    retrying: 'Sending',
+    reasonLateWindow: 'The event deadline passed before this could be sent.',
+    reasonNotDeployed: 'This device version cannot send it yet. Update the app, then send it again.',
+    reasonResendExhausted: 'Sent again several times and still not recorded. Tell the organizer.',
+    reasonOther: 'Could not be sent.',
   },
 
   override: {
@@ -323,6 +386,13 @@ export const staffEn: typeof staffKo = {
 };
 
 export type StaffCopy = typeof staffKo;
+
+/**
+ * QR 대체 경로의 가지. `qr/scan.ts` 가 실패 코드마다 문장이 있는지 컴파일 타임에 확인하려고
+ * 이 이름을 **타입으로만** 가져간다 — 값 하나라도 가져가면 카피를 읽는 모든 모듈이 카메라
+ * 플러그인을 함께 끌고 들어온다.
+ */
+export type StaffQrCopy = StaffCopy['qr'];
 
 /** 관객 화면과 같은 로케일을 따른다 — 한 단말기는 한 언어로 말한다. */
 export function useStaffCopy(): StaffCopy {

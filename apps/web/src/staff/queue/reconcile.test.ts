@@ -28,7 +28,8 @@ vi.mock('../../shared/api/functions', () => ({ issueSnapshot: vi.fn(), getPhotoF
 // Imported after the mocks, as the rest of this sub-plan's tests do: a static import would be
 // hoisted above the `vi.fn()`s the factories close over.
 const { MAX_REARMS, REARM_AFTER_MS, reconcileQueue } = await import('./reconcile');
-const { QUEUE_STORE, RESEND_EXHAUSTED, allEntries, retryEntry } = await import('./opQueue');
+const { QUEUE_STORE, allEntries, retryEntry } = await import('./opQueue');
+const { RESEND_EXHAUSTED } = await import('../types');
 const { staffDb } = await import('../snapshot/store');
 
 /**
