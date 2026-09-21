@@ -7,7 +7,7 @@ import {ITicket} from "./interfaces/ITicket.sol";
 /// @title Organizers
 /// @notice The on-chain allowlist (spec 9.4). A role that is not in here does not exist. Nothing in
 ///         this contract is cached off-chain for authorisation; the indexer reads it for lists only.
-contract Organizers {
+contract Organizers is IOrganizers {
     uint32 public constant PERM_CREATE_EVENT = 1;
     uint32 public constant PERM_MANAGE_GATES = 2;
     uint32 public constant PERM_APPROVE_OVERRIDE = 4;
@@ -61,6 +61,7 @@ contract Organizers {
     error UnknownGate();
     error GateAccountInUse();
     error GateIsRevoked();
+    error InvalidGateKey();
 
     constructor() {
         deployer = msg.sender;
@@ -107,7 +108,7 @@ contract Organizers {
         emit ManagerSet(orgId, manager, exists, exists && canApprove);
     }
 
-    function managerOf(uint256 orgId, address account) external view returns (bool exists, bool canApprove) {
+    function managerOf(uint256 orgId, address account) external view override returns (bool exists, bool canApprove) {
         Manager storage m = _managers[orgId][account];
         return (m.exists, m.canApprove);
     }
@@ -120,6 +121,7 @@ contract Organizers {
     {
         if (ticket == address(0)) revert TicketNotSet();
         if (gateAccount == address(0)) revert ZeroAddress();
+        if (kx == 0 && ky == 0) revert InvalidGateKey();
         if (_gateOf[gateAccount] != 0) revert GateAccountInUse();
 
         uint256 orgId = ITicket(ticket).eventOrg(eventId);
@@ -133,21 +135,55 @@ contract Organizers {
         emit GateRegistered(gateId, eventId, gateAccount, kx, ky);
     }
 
-    function gateOf(address gateAccount) external view returns (uint256) {
+    function gateOf(address gateAccount) external view override returns (uint256) {
         return _gateOf[gateAccount];
     }
 
     function gateInfo(uint256 gateId)
         external
         view
+        override
         returns (uint256 eventId, address account, bytes32 kx, bytes32 ky, bool open, bool revoked)
     {
         Gate storage g = _gates[gateId];
         return (g.eventId, g.account, g.kx, g.ky, g.open, g.revoked);
     }
 
+    function openGate(uint256 gateId) external {
+        _mutateGate(gateId).open = true;
+        emit GateOpened(gateId);
+    }
+
+    function closeGate(uint256 gateId) external {
+        _mutateGate(gateId).open = false;
+        emit GateClosed(gateId);
+    }
+
+    function revokeGate(uint256 gateId) external {
+        Gate storage g = _mutateGate(gateId);
+        g.revoked = true;
+        g.open = false;
+        emit GateRevoked(gateId);
+    }
+
+    /// @notice The single question Ticket.checkIn asks: is msg.sender a live gate of this event?
+    function isOpenGate(uint256 eventId, address gateAccount) external view override returns (bool) {
+        uint256 gateId = _gateOf[gateAccount];
+        if (gateId == 0) return false;
+        Gate storage g = _gates[gateId];
+        return g.eventId == eventId && g.open && !g.revoked;
+    }
+
+    function _mutateGate(uint256 gateId) private view returns (Gate storage g) {
+        g = _gates[gateId];
+        if (g.account == address(0)) revert UnknownGate();
+        if (g.revoked) revert GateIsRevoked();
+        uint256 orgId = ITicket(ticket).eventOrg(g.eventId);
+        if (!hasPermission(orgId, msg.sender, PERM_MANAGE_GATES)) revert Unauthorized();
+    }
+
     /// @notice The owner implicitly holds every bit; an admin holds exactly the bits set for them.
-    function hasPermission(uint256 orgId, address account, uint32 bit) public view returns (bool) {
+    function hasPermission(uint256 orgId, address account, uint32 bit) public view override returns (bool) {
         if (account == address(0)) return false;
         if (account == _owners[orgId]) return true;
         return (_adminBits[orgId][account] & bit) == bit && bit != 0;
@@ -157,7 +193,7 @@ contract Organizers {
         return _adminBits[orgId][admin];
     }
 
-    function ownerOf(uint256 orgId) external view returns (address) {
+    function ownerOf(uint256 orgId) external view override returns (address) {
         return _owners[orgId];
     }
 }

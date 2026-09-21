@@ -19,6 +19,9 @@ contract OrganizersGatesTest is Test {
     event GateRegistered(
         uint256 indexed gateId, uint256 indexed eventId, address indexed gateAccount, bytes32 kx, bytes32 ky
     );
+    event GateOpened(uint256 indexed gateId);
+    event GateClosed(uint256 indexed gateId);
+    event GateRevoked(uint256 indexed gateId);
 
     function setUp() public {
         orgs = new Organizers();
@@ -73,5 +76,69 @@ contract OrganizersGatesTest is Test {
         vm.prank(OWNER);
         vm.expectRevert(Organizers.TicketNotSet.selector);
         fresh.registerGate(7, GATE_ACCOUNT, KX, KY);
+    }
+
+    function test_registerGateRejectsAllZeroKey() public {
+        vm.prank(GATEKEEPER);
+        vm.expectRevert(Organizers.InvalidGateKey.selector);
+        orgs.registerGate(7, GATE_ACCOUNT, bytes32(0), bytes32(0));
+    }
+
+    function _registered() internal returns (uint256 gateId) {
+        vm.prank(GATEKEEPER);
+        gateId = orgs.registerGate(7, GATE_ACCOUNT, KX, KY);
+    }
+
+    function test_openAndCloseFlipIsOpenGate() public {
+        uint256 gateId = _registered();
+        assertFalse(orgs.isOpenGate(7, GATE_ACCOUNT));
+
+        vm.expectEmit(true, false, false, false);
+        emit GateOpened(gateId);
+        vm.prank(GATEKEEPER);
+        orgs.openGate(gateId);
+        assertTrue(orgs.isOpenGate(7, GATE_ACCOUNT));
+
+        vm.expectEmit(true, false, false, false);
+        emit GateClosed(gateId);
+        vm.prank(GATEKEEPER);
+        orgs.closeGate(gateId);
+        assertFalse(orgs.isOpenGate(7, GATE_ACCOUNT));
+    }
+
+    function test_isOpenGateIsFalseForAnotherEvent() public {
+        uint256 gateId = _registered();
+        vm.prank(GATEKEEPER);
+        orgs.openGate(gateId);
+        assertFalse(orgs.isOpenGate(8, GATE_ACCOUNT), "gate belongs to event 7 only");
+    }
+
+    function test_isOpenGateIsFalseForAnUnknownAccount() public {
+        uint256 gateId = _registered();
+        vm.prank(GATEKEEPER);
+        orgs.openGate(gateId);
+        assertFalse(orgs.isOpenGate(7, STRANGER), "T14: a fake gate is not on the allowlist");
+    }
+
+    function test_revokedGateStopsBeingOpen() public {
+        uint256 gateId = _registered();
+        vm.startPrank(GATEKEEPER);
+        orgs.openGate(gateId);
+        vm.expectEmit(true, false, false, false);
+        emit GateRevoked(gateId);
+        orgs.revokeGate(gateId);
+        vm.stopPrank();
+
+        assertFalse(orgs.isOpenGate(7, GATE_ACCOUNT));
+        vm.prank(GATEKEEPER);
+        vm.expectRevert(Organizers.GateIsRevoked.selector);
+        orgs.openGate(gateId);
+    }
+
+    function test_strangerCannotOpenGate() public {
+        uint256 gateId = _registered();
+        vm.prank(STRANGER);
+        vm.expectRevert(Organizers.Unauthorized.selector);
+        orgs.openGate(gateId);
     }
 }
