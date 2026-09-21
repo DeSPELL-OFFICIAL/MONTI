@@ -120,6 +120,23 @@ describe('deployments', () => {
     expect(() => parseDeployment({ ...good, block: undefined })).toThrow('BAD_DEPLOYMENT_FIELD:block');
   });
 
+  it('rejects a deployment whose body disagrees with the chain key it is filed under', () => {
+    const filedUnder10143 = {
+      chainId: 143,
+      identity: '0x1111111111111111111111111111111111111111',
+      organizers: '0x2222222222222222222222222222222222222222',
+      ticket: '0x3333333333333333333333333333333333333333',
+      paymaster: '0x4444444444444444444444444444444444444444',
+      attester: '0x6666666666666666666666666666666666666666',
+      coinbaseFactory: '0x5555555555555555555555555555555555555555',
+      entryPoint: '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789',
+      block: 1,
+    };
+    expect(() => parseDeployment(filedUnder10143, 10143)).toThrow('DEPLOYMENT_CHAIN_MISMATCH:10143');
+    // 키를 넘기지 않으면 모양 검증만 한다 — loadDeployment 만 교차 확인을 강제한다.
+    expect(parseDeployment(filedUnder10143).chainId).toBe(143);
+  });
+
   it('loads the synced testnet deployment lazily and rejects an unknown chain', () => {
     const deployment = loadDeployment(10143);
     expect(deployment.chainId).toBe(10143);

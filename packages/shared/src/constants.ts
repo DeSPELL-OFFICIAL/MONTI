@@ -104,7 +104,12 @@ const ADDRESS_FIELDS = [
   'entryPoint',
 ] as const;
 
-export function parseDeployment(raw: unknown): Deployment {
+/**
+ * `expectedChainId`를 넘기면 파일 본문의 `chainId`가 그 키와 같은지까지 확인한다.
+ * `10143.json` 안에 `chainId: 143`이 들어 있는 식의 잘못 묶인 배포는 조용히 통과하지 않고
+ * `DEPLOYMENT_CHAIN_MISMATCH:<요청한 chainId>` 로 크게 실패한다. 폴백은 없다.
+ */
+export function parseDeployment(raw: unknown, expectedChainId?: number): Deployment {
   if (typeof raw !== 'object' || raw === null) throw new Error('BAD_DEPLOYMENT');
   const value = raw as Record<string, unknown>;
   if (typeof value.chainId !== 'number') throw new Error('BAD_DEPLOYMENT_FIELD:chainId');
@@ -119,7 +124,11 @@ export function parseDeployment(raw: unknown): Deployment {
     }
     out[field] = address as Hex;
   }
-  return out as unknown as Deployment;
+  const deployment = out as unknown as Deployment;
+  if (expectedChainId !== undefined && deployment.chainId !== expectedChainId) {
+    throw new Error(`DEPLOYMENT_CHAIN_MISMATCH:${expectedChainId}`);
+  }
+  return deployment;
 }
 
 const RAW_DEPLOYMENTS: Record<number, unknown> = {
@@ -135,8 +144,8 @@ export function loadDeployment(chainId: number = DEFAULT_CHAIN_ID): Deployment {
   const cached = parsed.get(chainId);
   if (cached) return cached;
   const raw = RAW_DEPLOYMENTS[chainId];
-  if (!raw) throw new Error(`NO_DEPLOYMENT:${chainId}`);
-  const deployment = parseDeployment(raw);
+  if (raw === undefined) throw new Error(`NO_DEPLOYMENT:${chainId}`);
+  const deployment = parseDeployment(raw, chainId);
   parsed.set(chainId, deployment);
   return deployment;
 }
