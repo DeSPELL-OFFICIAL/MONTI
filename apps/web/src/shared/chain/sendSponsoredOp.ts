@@ -24,25 +24,28 @@ export interface UserOperationV06 {
 }
 
 export interface SponsoredCall { to: Hex; data: Hex; value?: bigint }
-export interface SponsoredOpReceipt { success: boolean; txHash: Hex; blockNumber: bigint; revertReason?: Hex }
+/** `revertReason` is the on-chain reason for a real revert, or the sentinel `'TIMEOUT'`
+ * when `wait` gave up before the op landed. Callers (see `sendOp`) treat any
+ * `success: false` as a failure; the sentinel lets them tell "reverted" from "never landed". */
+export interface SponsoredOpReceipt { success: boolean; txHash: Hex; blockNumber: bigint; revertReason?: Hex | 'TIMEOUT' }
 export interface SponsoredOpHandle {
   userOpHash: Hex;
   wait(timeoutMs?: number): Promise<SponsoredOpReceipt>;
 }
 export interface SendSponsoredOpArgs { account: SmartAccount; calls: SponsoredCall[]; orgId: bigint }
 
-/** Callers distinguish "not landed yet" from "reverted": only the latter is a user-facing failure. */
-export class SponsoredOpTimeout extends Error {
-  constructor(readonly userOpHash: Hex, readonly timeoutMs: number) {
-    super(`SponsoredOpTimeout: ${userOpHash} did not land within ${timeoutMs}ms`);
-    this.name = 'SponsoredOpTimeout';
-  }
-}
-
 export const DEFAULT_WAIT_TIMEOUT_MS = 15_000;
 const RECEIPT_POLL_INTERVAL_MS = 300;
+/** Sentinel that wins the poll race when the deadline elapses first. */
+const TIMED_OUT = Symbol('sponsored-op-timeout');
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+interface RawReceipt {
+  success: boolean;
+  reason?: Hex;
+  receipt: { transactionHash: Hex; blockNumber: Hex };
+}
 
 export async function sendSponsoredOp({ account, calls, orgId }: SendSponsoredOpArgs): Promise<SponsoredOpHandle> {
   if (calls.length === 0) throw new Error('sendSponsoredOp needs at least one call');
@@ -102,21 +105,46 @@ export async function sendSponsoredOp({ account, calls, orgId }: SendSponsoredOp
     userOpHash,
     async wait(timeoutMs = DEFAULT_WAIT_TIMEOUT_MS): Promise<SponsoredOpReceipt> {
       const deadline = Date.now() + timeoutMs;
+
       while (Date.now() < deadline) {
-        const receipt = await bundlerRequest<{
-          success: boolean; reason?: Hex; receipt: { transactionHash: Hex; blockNumber: Hex };
-        } | null>('eth_getUserOperationReceipt', [userOpHash]);
-        if (receipt) {
+        const remaining = deadline - Date.now();
+
+        // Race the poll against the remaining wall-clock time. The bundler transport
+        // has a 30s timeout, so without this a single stalled poll could overrun
+        // wait(15_000) to ~60s at a venue gate. The timer is cleared on settle.
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const deadlineRace = new Promise<typeof TIMED_OUT>((resolve) => {
+          timer = setTimeout(() => resolve(TIMED_OUT), remaining);
+        });
+
+        // A flaky poll (dropped connection on venue wifi) must not reject the whole
+        // wait: swallow it to null and retry. This also keeps the losing branch of the
+        // race harmless if the deadline wins first.
+        const poll = bundlerRequest<RawReceipt | null>('eth_getUserOperationReceipt', [userOpHash]).catch(
+          () => null,
+        );
+
+        const result = await Promise.race([poll, deadlineRace]);
+        clearTimeout(timer);
+
+        if (result === TIMED_OUT) break;
+        if (result) {
           return {
-            success: receipt.success,
-            txHash: receipt.receipt.transactionHash,
-            blockNumber: hexToBigInt(receipt.receipt.blockNumber),
-            revertReason: receipt.reason,
+            success: result.success,
+            txHash: result.receipt.transactionHash,
+            blockNumber: hexToBigInt(result.receipt.blockNumber),
+            revertReason: result.reason,
           };
         }
-        await sleep(RECEIPT_POLL_INTERVAL_MS);
+
+        // Not landed yet: pause a poll interval, but never past the deadline.
+        const untilNext = Math.min(RECEIPT_POLL_INTERVAL_MS, deadline - Date.now());
+        if (untilNext > 0) await sleep(untilNext);
       }
-      throw new SponsoredOpTimeout(userOpHash, timeoutMs);
+
+      // The op never landed within the deadline. Not a revert, but the caller must be
+      // unblocked; sendOp() maps success:false -> OpReverted with this sentinel reason.
+      return { success: false, txHash: '0x', blockNumber: 0n, revertReason: 'TIMEOUT' };
     },
   };
 }

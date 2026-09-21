@@ -28,7 +28,7 @@ const account = {
   signUserOperation: vi.fn(async () => '0xsig' as const),
 } as never;
 
-const { applyGasBuffer, encodePaymasterAndData, sendSponsoredOp, SponsoredOpTimeout } = await import('./sendSponsoredOp');
+const { applyGasBuffer, encodePaymasterAndData, sendSponsoredOp } = await import('./sendSponsoredOp');
 
 // restoreMocks only restores spies; a bare vi.fn() keeps its call history between tests.
 beforeEach(() => {
@@ -76,13 +76,41 @@ describe('sendSponsoredOp', () => {
     await expect(handle.wait()).resolves.toEqual({ success: true, txHash: '0xtx', blockNumber: 42n });
   });
 
-  it('rejects with SponsoredOpTimeout when the receipt never appears', async () => {
-    bundlerRequest
-      .mockResolvedValueOnce({ callGasLimit: '0x1', verificationGasLimit: '0x1', preVerificationGas: '0x1' })
-      .mockResolvedValueOnce('0xlost')
-      .mockResolvedValue(null);
-    const handle = await sendSponsoredOp({ account, orgId: 1n, calls: [{ to: `0x${'33'.repeat(20)}`, data: '0x01' }] });
-    await expect(handle.wait(1)).rejects.toBeInstanceOf(SponsoredOpTimeout);
+  it('resolves a TIMEOUT receipt at the deadline instead of overrunning a slow poll', async () => {
+    // The receipt poll never settles (models the 30s bundler transport timeout).
+    // wait(15_000) must still resolve by the 15s deadline, not ~60s later.
+    vi.useFakeTimers();
+    try {
+      bundlerRequest
+        .mockResolvedValueOnce({ callGasLimit: '0x1', verificationGasLimit: '0x1', preVerificationGas: '0x1' })
+        .mockResolvedValueOnce('0xslow')
+        .mockReturnValue(new Promise(() => {}));
+      const handle = await sendSponsoredOp({ account, orgId: 1n, calls: [{ to: `0x${'33'.repeat(20)}`, data: '0x01' }] });
+      const waited = handle.wait(15_000);
+      await vi.advanceTimersByTimeAsync(15_000);
+      await expect(waited).resolves.toEqual({ success: false, txHash: '0x', blockNumber: 0n, revertReason: 'TIMEOUT' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps polling through a transient RPC error and resolves the eventual receipt', async () => {
+    // A single failed poll (flaky venue wifi) must not reject the whole wait.
+    vi.useFakeTimers();
+    try {
+      bundlerRequest
+        .mockResolvedValueOnce({ callGasLimit: '0x1', verificationGasLimit: '0x1', preVerificationGas: '0x1' })
+        .mockResolvedValueOnce('0xflaky')
+        .mockRejectedValueOnce(new Error('transient 502'))
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ success: true, receipt: { transactionHash: '0xtx', blockNumber: '0x2a' } });
+      const handle = await sendSponsoredOp({ account, orgId: 1n, calls: [{ to: `0x${'33'.repeat(20)}`, data: '0x01' }] });
+      const waited = handle.wait(15_000);
+      await vi.advanceTimersByTimeAsync(1_000); // two poll intervals (~600ms), well under the deadline
+      await expect(waited).resolves.toEqual({ success: true, txHash: '0xtx', blockNumber: 42n });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('batches two calls through the account encoder', async () => {

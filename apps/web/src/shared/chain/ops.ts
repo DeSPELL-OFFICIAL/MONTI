@@ -4,9 +4,10 @@ import { getConfig } from '../config';
 import { identityAbi, organizersAbi, ticketAbi } from './abis';
 import { sendSponsoredOp, type SponsoredOpReceipt } from './sendSponsoredOp';
 
-/** The user operation landed but the contract reverted — a real, user-facing failure. */
+/** The operation did not succeed — the contract reverted, or `wait` timed out before it
+ * landed (`revertReason` is then the `'TIMEOUT'` sentinel). Either way, user-facing failure. */
 export class OpReverted extends Error {
-  constructor(readonly functionName: string, readonly revertReason?: Hex) {
+  constructor(readonly functionName: string, readonly revertReason?: Hex | 'TIMEOUT') {
     super(`OpReverted: ${functionName}${revertReason ? ` (${revertReason})` : ''}`);
     this.name = 'OpReverted';
   }
