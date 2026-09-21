@@ -17,13 +17,13 @@
 import { openDB, type IDBPDatabase } from 'idb';
 import type { Address } from 'viem';
 
-import type { SnapshotWire } from '@monti/shared';
+import { SNAPSHOT_TTL_SECONDS, type SnapshotWire } from '@monti/shared';
 
 import { getPhotoForGate, issueSnapshot } from '../../shared/api/functions';
 import { SNAPSHOT_REFRESH_MS, STAFF_DB_NAME, STAFF_DB_VERSION } from '../constants';
 import type { SnapshotStore } from '../gate/preflight';
 import { deviceKeyIn, lookupIn, type DeviceKey, type SnapshotLookup } from './lookup';
-import { SnapshotError, snapshotFitsCaps, verifySnapshot } from './verify';
+import { SnapshotError, snapshotBody, snapshotFitsCaps, verifySnapshot } from './verify';
 
 interface StoredSnapshot {
   eventId: string;
@@ -32,12 +32,19 @@ interface StoredSnapshot {
   fetchedAt: number;
 }
 
-/** One face, for a ticket the snapshot did not carry. Keyed by token, never by person. */
+/**
+ * One face, for a ticket the snapshot did not carry. Keyed by token, never by person.
+ *
+ * `expiresAt` is unix **seconds**, the same clock and the same meaning as `SnapshotWire.expiresAt`:
+ * the attester put a twelve-hour life on the guest list it signed, and a face this terminal
+ * fetched separately does not get to outlive it.
+ */
 interface StoredPhoto {
   tokenId: string;
   photoJpegB64: string;
   displayName: string;
   fetchedAt: number;
+  expiresAt: number;
 }
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
@@ -74,6 +81,14 @@ export function staffDb(): Promise<IDBPDatabase> {
  */
 let held: SnapshotWire | undefined;
 
+/**
+ * Bumped by every clear. A fetch that was already in flight when the gate closed compares the
+ * era it started in against this before it writes anything — otherwise a request made *before*
+ * the teardown would quietly put the faces back milliseconds after they were erased, and no
+ * test would ever catch it because the erase itself did happen.
+ */
+let era = 0;
+
 /** The snapshot every tap is judged against, or `undefined` before the first one lands. */
 export function current(): SnapshotWire | undefined {
   return held;
@@ -98,11 +113,27 @@ export function snapshotStore(): SnapshotStore {
   return { current } satisfies SnapshotStore;
 }
 
-/** Reads the stored snapshot, and makes it the one the gate is running on. */
+const nowSeconds = (): number => Math.floor(Date.now() / 1000);
+
+/**
+ * Reads the stored snapshot, and makes it the one the gate is running on.
+ *
+ * An expired one is **deleted rather than served**. `expiresAt` is what the attester signed, so
+ * a snapshot past it is an expired credential: serving it would let a terminal that has been off
+ * the network for half a day keep admitting people — and keep holding their faces — on a list
+ * nobody has stood behind since yesterday.
+ */
 export async function loadSnapshot(eventId: string): Promise<SnapshotWire | undefined> {
-  const row = (await (await staffDb()).get('snapshots', eventId)) as StoredSnapshot | undefined;
-  if (row) held = row.snapshot;
-  return row?.snapshot;
+  const started = era;
+  const db = await staffDb();
+  const row = (await db.get('snapshots', eventId)) as StoredSnapshot | undefined;
+  if (!row) return undefined;
+  if (row.snapshot.expiresAt <= nowSeconds()) {
+    await db.delete('snapshots', eventId);
+    return undefined;
+  }
+  if (started === era) held = row.snapshot;
+  return row.snapshot;
 }
 
 /** How stale the guest list is. `Infinity` before the first sync — never `0`, which reads as fresh. */
@@ -112,13 +143,61 @@ export async function snapshotAgeMs(eventId: string, now = Date.now()): Promise<
 }
 
 /**
- * Forgets everything this device holds about any event: the stored snapshots, the cached faces
- * and the one in memory. What a sign-out does — the faces are other people's.
+ * Forgets every face and every guest list this device holds: the stored snapshots, the cached
+ * photos and the one in memory. The queue is **not** touched — an entry in it is a person who
+ * already walked through the door, and losing that is worse than keeping it.
+ *
+ * Called when the gate closes (`startSnapshotRefresh`'s disposer), which is the moment the
+ * terminal stops needing other people's faces.
  */
-export async function clearSnapshots(): Promise<void> {
+export async function clearSnapshotData(): Promise<void> {
   held = undefined;
+  era += 1;
   const db = await staffDb();
   await Promise.all([db.clear('snapshots'), db.clear('photos')]);
+}
+
+/**
+ * Everything, queue and settings included. This is sign-out: a phone handed to the next shift,
+ * or one being wiped.
+ *
+ * It drops unsent check-ins, so whatever wires this up flushes the queue first if there is any
+ * signal at all — the alternative is a phone that keeps a stranger's face because a check-in
+ * could not be sent.
+ */
+export async function clearAll(): Promise<void> {
+  held = undefined;
+  era += 1;
+  const db = await staffDb();
+  await Promise.all([
+    db.clear('snapshots'),
+    db.clear('photos'),
+    db.clear('queue'),
+    db.clear('settings'),
+  ]);
+}
+
+/**
+ * Faces and guest lists this terminal no longer has a reason to hold, dropped on every successful
+ * refresh — the one moment it is provably safe to let go of a cached face.
+ *
+ * **Every** `photos` row goes, and the two cases are why. A token the fresh list now carries has
+ * its face in the list itself, so the cached copy is a second place for it to rot. A token the
+ * list still does not carry is revoked, transferred, or another event's — a face for someone who
+ * is not coming through this door. Both answers are "delete", so the rule is simply: the photo
+ * cache holds only what has been fetched since the last refresh, at most ten minutes of faces.
+ *
+ * Stored snapshots are dropped once past the `expiresAt` the attester signed. The one just
+ * written is fresh by construction, so this only ever reaps other events and old sessions.
+ */
+async function prune(db: IDBPDatabase, now: number): Promise<void> {
+  const snapshots = (await db.getAll('snapshots')) as StoredSnapshot[];
+  await Promise.all([
+    db.clear('photos'),
+    ...snapshots
+      .filter((row) => row.snapshot.expiresAt <= now)
+      .map((row) => db.delete('snapshots', row.eventId)),
+  ]);
 }
 
 /**
@@ -132,15 +211,30 @@ export async function clearSnapshots(): Promise<void> {
  * backend is refused without first hashing megabytes of it.
  */
 export async function refreshSnapshot(eventId: string, gateAccount: Address): Promise<SnapshotWire> {
-  const snapshot = (await issueSnapshot({ eventId, gateAccount })) as SnapshotWire;
-  if (!snapshotFitsCaps(snapshot)) throw new SnapshotError('SNAPSHOT_TOO_LARGE');
+  const started = era;
+  const snapshot = await issueSnapshot({ eventId, gateAccount });
+  // Measured on the unsigned body, which is what the issuer measured (`snapshot.ts`): including
+  // the ~150 bytes of `attesterSig` would make this side stricter than the side that decides.
+  if (!snapshotFitsCaps(snapshotBody(snapshot))) throw new SnapshotError('SNAPSHOT_TOO_LARGE');
   if (!(await verifySnapshot(snapshot))) throw new SnapshotError('SNAPSHOT_BAD_SIG');
-  await (await staffDb()).put('snapshots', {
+  const db = await staffDb();
+  // The gate closed while this was in the air. It is a valid snapshot for a door nobody is
+  // standing at, so it is returned to the caller and written nowhere. Checked again after the
+  // write, because the write itself is an await: a clear landing inside it would otherwise be
+  // undone by the assignment on the next line, and the faces would be back.
+  if (started !== era) return snapshot;
+  await db.put('snapshots', {
     eventId,
     snapshot,
     fetchedAt: Date.now(),
   } satisfies StoredSnapshot);
+  if (started !== era) {
+    await db.delete('snapshots', eventId);
+    return snapshot;
+  }
   held = snapshot;
+  // After the store, so a prune can never be what leaves the gate with nothing.
+  await prune(db, nowSeconds());
   return snapshot;
 }
 
@@ -151,6 +245,11 @@ export async function refreshSnapshot(eventId: string, gateAccount: Address): Pr
  *
  * Every refresh's failure is swallowed **here and only here**: this is a background timer with
  * nobody to tell. What a staff member sees instead is the snapshot's age, which stops moving.
+ *
+ * **The disposer erases the faces.** Closing the gate is the end of the terminal's reason to hold
+ * other people's photographs, and the guest list is where most of them are. The cost is real and
+ * chosen: a gate closed and reopened with no signal has to wait for one. Nothing is lost that a
+ * single successful refresh does not bring back, and a face kept past a shift is not recoverable.
  */
 export function startSnapshotRefresh(eventId: string, gateAccount: Address): () => void {
   void loadSnapshot(eventId).catch(() => undefined);
@@ -158,7 +257,10 @@ export function startSnapshotRefresh(eventId: string, gateAccount: Address): () 
   const timer = setInterval(() => {
     void refreshSnapshot(eventId, gateAccount).catch(() => undefined);
   }, SNAPSHOT_REFRESH_MS);
-  return () => clearInterval(timer);
+  return () => {
+    clearInterval(timer);
+    void clearSnapshotData().catch(() => undefined);
+  };
 }
 
 /**
@@ -178,10 +280,22 @@ export async function photoFor(
     return { photoJpegB64: known.ticket.photoJpegB64, displayName: known.ticket.displayName };
   }
   const db = await staffDb();
+  const now = nowSeconds();
   const cached = (await db.get('photos', tokenId)) as StoredPhoto | undefined;
-  if (cached) return { photoJpegB64: cached.photoJpegB64, displayName: cached.displayName };
+  if (cached && cached.expiresAt > now) {
+    return { photoJpegB64: cached.photoJpegB64, displayName: cached.displayName };
+  }
+  if (cached) await db.delete('photos', tokenId);
 
   const fetched = await getPhotoForGate({ tokenId, gateAccount });
-  await db.put('photos', { tokenId, ...fetched, fetchedAt: Date.now() } satisfies StoredPhoto);
+  // The life of the guest list this face was fetched against. With no list to borrow from — the
+  // very first tap of a session — it gets the attester's own TTL and no more.
+  const expiresAt = held?.expiresAt ?? now + SNAPSHOT_TTL_SECONDS;
+  await db.put('photos', {
+    tokenId,
+    ...fetched,
+    fetchedAt: Date.now(),
+    expiresAt,
+  } satisfies StoredPhoto);
   return fetched;
 }
