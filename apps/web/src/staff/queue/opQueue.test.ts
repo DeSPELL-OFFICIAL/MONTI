@@ -33,6 +33,7 @@ const {
   drainQueue,
   enqueueCheckIn,
   hasLateCheckIn,
+  parkedCount,
   pendingCount,
 } = await import('./opQueue');
 const { staffDb } = await import('../snapshot/store');
@@ -51,11 +52,11 @@ const NOW = 1_700_000_000_000;
 /** Codes are issued in seconds; this one is one minute old at {@link NOW}. */
 const ISSUED_AT = NOW / 1000 - 60;
 
-const code = (nonce: string) => ({
+const code = (nonce: string, issuedAt: number = ISSUED_AT) => ({
   v: 1 as const,
   gateId: '7',
   eventId: '42',
-  issuedAt: ISSUED_AT,
+  issuedAt,
   nonce: `0x${nonce.repeat(32)}` as const,
   kx: `0x${'11'.repeat(32)}` as const,
   ky: `0x${'22'.repeat(32)}` as const,
@@ -69,8 +70,10 @@ const response = (tokenId: string, nonce: string) => ({
   deviceSig: `0x${'ef'.repeat(64)}` as const,
 });
 
-const tap = (tokenId: string, nonce: string) =>
-  enqueueCheckIn({ code: code(nonce), response: response(tokenId, nonce), orgId: 5n });
+const tap = (tokenId: string, nonce: string, issuedAt?: number) =>
+  enqueueCheckIn({ code: code(nonce, issuedAt), response: response(tokenId, nonce), orgId: 5n });
+
+const HOUR = 3_600_000;
 
 const landed = () => ({
   userOpHash: '0xfeed' as const,
@@ -263,13 +266,62 @@ describe('durable check-in queue', () => {
       expect(sendCheckIn).toHaveBeenCalledTimes(MAX_ATTEMPTS);
     });
 
-    it('parks a code older than the 12 h late window instead of spending gas on a certain revert', async () => {
-      const entry = await tap('784', '4d');
+    it('parks the whole queue once the chain\'s deadline — event end + 12 h — has passed', async () => {
+      const endsAt = NOW / 1000;
+      const due = await tap('784', '4d');
+      const notDue = await tap('785', '4e');
+      // One of the two is not even due for a retry. The deadline is the event's, not the
+      // entry's, so it is just as dead.
+      sendCheckIn.mockRejectedValueOnce(new Error('bundler unreachable'));
+      await drainQueue({ orgId: 5n, now: due.nextAttemptAt });
+      sendCheckIn.mockReset();
 
-      const after = await drainQueue({ orgId: 5n, now: entry.createdAt + 43_200_001 });
+      const after = await drainQueue({ orgId: 5n, now: NOW + 12 * HOUR + 1, endsAt });
 
       expect(sendCheckIn).not.toHaveBeenCalled();
-      expect(after.find((e) => e.id === entry.id)).toMatchObject({ status: 'failed', lastError: LATE_WINDOW_ELAPSED });
+      for (const id of [due.id, notDue.id]) {
+        expect(after.find((e) => e.id === id)).toMatchObject({ status: 'failed', lastError: LATE_WINDOW_ELAPSED });
+      }
+      expect(await parkedCount()).toBe(2);
+      expect(await pendingCount()).toBe(0);
+    });
+
+    it('still flushes a code far older than 12 h while that deadline has not passed', async () => {
+      // Taps at 20:00, event ends at 23:00, the gate reconnects at 09:00 the next morning. The
+      // code is thirteen hours old and `Ticket.sol:437` does not care — it anchors on the event
+      // start — while `Ticket.sol:419` takes the submission until 11:00.
+      const endsAt = NOW / 1000 + 3 * 3600;
+      const entry = await tap('786', '5f');
+      sendCheckIn.mockResolvedValueOnce(landed());
+
+      const after = await drainQueue({ orgId: 5n, now: NOW + 13 * HOUR, endsAt });
+
+      expect(sendCheckIn).toHaveBeenCalledTimes(1);
+      expect(after.find((e) => e.id === entry.id)?.status).toBe('confirmed');
+    });
+
+    it('parks nothing pre-emptively when the event end is not known', async () => {
+      const entry = await tap('787', '6a');
+      sendCheckIn.mockResolvedValueOnce(landed());
+
+      const after = await drainQueue({ orgId: 5n, now: NOW + 100 * 24 * HOUR });
+
+      expect(sendCheckIn).toHaveBeenCalledTimes(1);
+      expect(after.find((e) => e.id === entry.id)?.status).toBe('confirmed');
+    });
+
+    it('counts parked entries separately from the ones still on their way', async () => {
+      const parked = await tap('788', '6b');
+      sendCheckIn.mockRejectedValue(new Error('bundler unreachable'));
+      let at = parked.nextAttemptAt;
+      for (let i = 0; i < MAX_ATTEMPTS; i += 1) {
+        const after = await drainQueue({ orgId: 5n, now: at });
+        at = (after.find((e) => e.id === parked.id)?.nextAttemptAt ?? at) + 1;
+      }
+      await tap('789', '6c');
+
+      expect(await parkedCount()).toBe(1);
+      expect(await pendingCount()).toBe(1);
     });
   });
 
@@ -290,6 +342,31 @@ describe('durable check-in queue', () => {
       });
       expect(warn).toHaveBeenCalledTimes(1);
       warn.mockRestore();
+    });
+
+    it('marks a dry run once instead of rewriting the queue on every drain', async () => {
+      ticketAbi.length = 0;
+      const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const entry = await tap('790', '7f');
+
+      const originalPut = IDBObjectStore.prototype.put;
+      let puts = 0;
+      IDBObjectStore.prototype.put = function patched(this: IDBObjectStore, ...args: Parameters<IDBObjectStore['put']>) {
+        puts += 1;
+        return originalPut.apply(this, args);
+      } as IDBObjectStore['put'];
+      try {
+        await drainQueue({ orgId: 5n, now: entry.nextAttemptAt });
+        expect(puts).toBe(1);
+        // Nothing about the row changed, so nothing is written again.
+        await drainQueue({ orgId: 5n, now: entry.nextAttemptAt + 1 });
+        expect(puts).toBe(1);
+      } finally {
+        IDBObjectStore.prototype.put = originalPut;
+      }
+
+      expect(warned).toHaveBeenCalledTimes(2);
+      warned.mockRestore();
     });
 
     it('is the generated ABI and not a flag: this fails the day 01b redeploys', async () => {

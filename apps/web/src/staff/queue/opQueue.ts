@@ -21,6 +21,7 @@
 import { ticketAbi } from '../../shared/chain/abis';
 import type { SponsoredOpReceipt } from '../../shared/chain/sendSponsoredOp';
 import { sendCheckIn, type CheckInFunction } from '../gate/checkInOp';
+import { warn } from '../log';
 import { staffDb } from '../snapshot/store';
 import type { GateCodeWire, GateResponseWire, Hex, QueueEntry } from '../types';
 
@@ -50,12 +51,21 @@ export const BACKOFF_CAP_MS = 60_000;
 export const MAX_ATTEMPTS = 20;
 
 /**
- * `Ticket.LATE_WINDOW()` — 43,200 s, 12 h (`MONTI-01b/contracts/docs/abi-delta-01b.md:48`).
- * It bounds both ends: a code issued more than this before the submission is refused, so an
- * entry older than the window cannot be flushed by `checkInLate` either and re-sending it is
- * the organizer's paymaster budget spent on a certain `CodeExpired`.
+ * `Ticket.LATE_WINDOW()` — 43,200 s, 12 h (`abi-delta-01b.md:48`).
+ *
+ * Read the contract for what it bounds, because the obvious reading is wrong. It is **not** a
+ * rolling twelve hours from the tap:
+ *
+ * - `Ticket.sol:437` — `g.issuedAt + LATE_WINDOW < m.startsAt` refuses a code issued more than
+ *   the window **before doors**. It is anchored on the event's start, so a code issued at or
+ *   after doors never ages out of this check, however late the flush.
+ * - `Ticket.sol:419` — `block.timestamp > m.endsAt + LATE_WINDOW` refuses the submission. This
+ *   is the only deadline the queue can be sure of: **event end + 12 h**.
+ *
+ * A gate that parked on `now - issuedAt > 12 h` would throw away work the chain still accepts —
+ * taps at 20:00 for an event that ends at 23:00 are good until 11:00 the next morning.
  */
-export const LATE_WINDOW_MS = 43_200_000;
+export const LATE_WINDOW_SECONDS = 43_200;
 
 /**
  * How long the drain waits on one op before moving to the next entry. Longer than the online
@@ -70,7 +80,7 @@ export const LATE_CHECK_IN_FUNCTION = 'checkInLate' as const;
 
 /** `lastError` on an entry the drain declined to send because the ABI has no `checkInLate`. */
 export const DRY_RUN_MARK = 'CHECK_IN_LATE_UNAVAILABLE';
-/** `lastError` on an entry parked because its code aged out of {@link LATE_WINDOW_MS}. */
+/** `lastError` on an entry parked because the event's deadline passed. See {@link DrainParams.endsAt}. */
 export const LATE_WINDOW_ELAPSED = 'LATE_WINDOW_ELAPSED';
 
 /**
@@ -156,14 +166,25 @@ export async function allEntries(): Promise<StoredQueueEntry[]> {
 }
 
 /**
- * How many check-ins the chain has not confirmed — `sent` counts as well as `pending`.
+ * How many check-ins are **still on their way to the chain**: `pending` (waiting for a send) and
+ * `sent` (sent, receipt never seen). An op whose receipt never arrived is as unaccounted for as
+ * one that has not left, and counting only `pending` would quietly tell a staff member the
+ * queue is empty while someone is still missing from it.
  *
- * The status bar reads this as "people who are inside that the chain does not know about". An
- * op that was sent and whose receipt never arrived is exactly that, and counting only `pending`
- * would quietly tell a staff member the queue is empty while someone is still unaccounted for.
+ * Parked entries are deliberately **not** in this number — {@link parkedCount} has them. The two
+ * ask different things of a staff member: this one drains by itself, that one does not.
  */
 export async function pendingCount(): Promise<number> {
   return (await allEntries()).filter((entry) => entry.status === 'pending' || entry.status === 'sent').length;
+}
+
+/**
+ * How many entries the queue has stopped trying: the attempt limit, or the event's deadline.
+ * They are still people who walked through the door — nothing is deleted, and Task 29 settles
+ * each of them against the chain.
+ */
+export async function parkedCount(): Promise<number> {
+  return (await allEntries()).filter((entry) => entry.status === 'failed').length;
 }
 
 export interface DrainParams {
@@ -175,6 +196,16 @@ export interface DrainParams {
    * import a file another task owns.
    */
   isOnline?: () => boolean;
+  /**
+   * `Ticket.eventMeta(eventId).endsAt`, in **seconds**. Past `endsAt + LATE_WINDOW` every entry
+   * reverts `EventEnded` for good ({@link LATE_WINDOW_SECONDS}), so the queue parks them rather
+   * than spending twenty sponsored sends each on a certain revert.
+   *
+   * Omitted — today's snapshot does not carry the event's end — **nothing is parked early** and
+   * the attempt limit decides. That is the safe direction to be wrong in: a queue that parks
+   * eagerly throws away check-ins the chain would still have taken.
+   */
+  endsAt?: number;
 }
 
 /**
@@ -193,25 +224,33 @@ export async function drainQueue(params: DrainParams): Promise<StoredQueueEntry[
 
   const db = await staffDb();
   const lateAvailable = hasLateCheckIn();
+  const pastDeadline = params.endsAt !== undefined && now > (params.endsAt + LATE_WINDOW_SECONDS) * 1000;
   let announced = false;
 
   for (const entry of await allEntries()) {
-    if (entry.status !== 'pending' || entry.nextAttemptAt > now) continue;
+    if (entry.status !== 'pending') continue;
 
-    if (now - entry.gateCode.issuedAt * 1000 > LATE_WINDOW_MS) {
+    // The deadline is the event's, not the entry's, so it parks the whole queue at once —
+    // including entries whose backoff has not elapsed, which are just as dead.
+    if (pastDeadline) {
       await db.put(QUEUE_STORE, { ...entry, status: 'failed', lastError: LATE_WINDOW_ELAPSED });
       continue;
     }
 
+    if (entry.nextAttemptAt > now) continue;
+
     if (!lateAvailable) {
       if (!announced) {
         announced = true;
-        console.warn(
-          `[queue] ${DRY_RUN_MARK}: the deployed Ticket ABI has no ${LATE_CHECK_IN_FUNCTION}; ` +
+        warn(
+          'queue',
+          `${DRY_RUN_MARK}: the deployed Ticket ABI has no ${LATE_CHECK_IN_FUNCTION}; ` +
             'entries are kept and will flush after the 01b redeploy.',
         );
       }
-      await db.put(QUEUE_STORE, { ...entry, lastError: DRY_RUN_MARK });
+      // Marked once. Re-writing an unchanged row on every drain is a whole queue rewritten per
+      // pass for no state change.
+      if (entry.lastError !== DRY_RUN_MARK) await db.put(QUEUE_STORE, { ...entry, lastError: DRY_RUN_MARK });
       continue;
     }
 
