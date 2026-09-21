@@ -1,0 +1,13 @@
+{
+  "name": "monti-functions",
+  "private": true,
+  "type": "module",
+  "engines": { "node": "22" },
+  "scripts": { "test": "vitest run" },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^4.0.1",
+    "@types/node": "^22.7.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

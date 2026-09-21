@@ -1,0 +1,75 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function changedOnly(fields) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
+    }
+
+    // 푸시 토큰만 본인이 갱신한다. 문서 생성·삭제·읽기는 Functions 전용.
+    match /devices/{account} {
+      allow read, create, delete: if false;
+      allow update: if signedIn()
+        && request.auth.token.account == account
+        && changedOnly(['pushToken']);
+    }
+
+    // 사용자가 직접 쓸 수 있는 유일한 세 필드.
+    match /users/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow create, delete: if false;
+      allow update: if signedIn()
+        && request.auth.uid == uid
+        && changedOnly(['nickname', 'locale', 'chatOrder'])
+        && (!('locale' in request.resource.data.diff(resource.data).affectedKeys())
+            || request.resource.data.locale in ['en', 'ko'])
+        && (!('nickname' in request.resource.data.diff(resource.data).affectedKeys())
+            || (request.resource.data.nickname is string && request.resource.data.nickname.size() <= 24))
+        && (!('chatOrder' in request.resource.data.diff(resource.data).affectedKeys())
+            || (request.resource.data.chatOrder is list && request.resource.data.chatOrder.size() <= 200));
+    }
+
+    match /eventChats/{eventId} {
+      function isChatMember() {
+        return signedIn()
+          && exists(/databases/$(database)/documents/eventChats/$(eventId)/members/$(request.auth.uid));
+      }
+      function chatOpen() {
+        return get(/databases/$(database)/documents/eventChats/$(eventId)).data.closed == false;
+      }
+
+      allow read: if isChatMember();
+      allow write: if false;
+
+      match /members/{uid} {
+        allow read: if isChatMember();
+        allow write: if false;
+      }
+
+      match /messages/{msgId} {
+        allow read: if isChatMember();
+        // keys().hasOnly 가 `pinned` 를 막는다. 고정은 서버(pinMessage)만 쓴다.
+        allow create: if isChatMember()
+          && chatOpen()
+          && request.resource.data.keys().hasAll(['uid', 'text', 'createdAt', 'reported'])
+          && request.resource.data.keys().hasOnly(['uid', 'text', 'createdAt', 'reported'])
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 500
+          && request.resource.data.reported == 0;
+        allow update, delete: if false;
+      }
+    }
+
+    // persons, passkeys, kycSessions, invites, phoneIndex, transferInvites, authChallenges 포함 전부 거부.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
