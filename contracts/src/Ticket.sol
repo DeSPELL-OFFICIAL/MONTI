@@ -480,8 +480,11 @@ contract Ticket is ERC721, ITicket {
         EventMeta storage m = _events[eventId];
         Tier storage t = _tiers[eventId][_tierOf[tokenId]];
 
+        // 5.8: 행사가 취소되면 그 행사의 티켓은 전부 취소됨이다. 일괄 revoke 루프는 티켓 수만큼
+        // 가스가 드는 무한 확장이라 애초에 선택지가 아니므로, 상태를 만들지 않고 파생한다.
+        // 우선순위는 무효(티켓 단위) -> 취소(행사 단위) -> 입장 완료 -> 입장 전이다.
         string memory status = unicode"입장 전";
-        if (_revoked[tokenId]) {
+        if (_revoked[tokenId] || eventStatus(eventId) == EventStatus.Cancelled) {
             status = unicode"취소됨";
         } else if (_checkIns[tokenId].ts != 0) {
             status = unicode"입장 완료";
