@@ -167,6 +167,8 @@ export const ko = {
     someone: '참석자',
     joinFailed: '대화방에 들어가지 못했어요. 잠시 뒤 다시 시도해 주세요.',
     noTicket: '이 행사 티켓을 가진 사람만 들어갈 수 있어요.',
+    unavailable: '아직 대화를 열지 않은 행사예요.',
+    sendFailed: '메시지를 보내지 못했어요. 다시 시도해 주세요.',
   },
   me: {
     title: '프로필', nickname: '별명', nicknameHint: '영문 소문자, 숫자, 밑줄 3~20자',

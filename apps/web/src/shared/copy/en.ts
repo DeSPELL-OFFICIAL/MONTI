@@ -169,6 +169,8 @@ export const en: typeof ko = {
     someone: 'Attendee',
     joinFailed: 'Could not open this chat. Please try again in a moment.',
     noTicket: 'Only people holding a ticket for this event can join.',
+    unavailable: 'This event has not opened its chat.',
+    sendFailed: 'Could not send that message. Please try again.',
   },
   me: {
     title: 'Profile', nickname: 'Nickname', nicknameHint: '3-20 lowercase letters, digits or underscore',

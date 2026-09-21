@@ -1,6 +1,7 @@
 import { act, render, renderHook, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import userEvent from '@testing-library/user-event';
 import { ko } from '../../shared/copy/index';
 import type { MyTicket } from '../tickets/useTickets';
 
@@ -20,7 +21,7 @@ const loadChatRoom = vi.fn();
 vi.mock('../../shared/api/firestore', () => ({ loadChatRoom: (id: string) => loadChatRoom(id) }));
 
 const { useChatList, moveInOrder, CHAT_ORDER_STORAGE_KEY } = await import('./useChats');
-const { ChatList } = await import('./ChatList');
+const { ChatList, DRAG_ACTIVATION } = await import('./ChatList');
 
 beforeEach(() => {
   localStorage.clear();
@@ -119,5 +120,32 @@ describe('ChatList', () => {
     tickets = [];
     renderList();
     expect(await screen.findByText(ko.chats.empty)).toBeInTheDocument();
+  });
+
+  it('does not claim the list is empty while the tickets are still on their way', async () => {
+    useMyTickets.mockImplementation(() => ({ data: undefined, isLoading: true }));
+    renderList();
+    await waitFor(() => expect(screen.getByText(ko.chats.title)).toBeInTheDocument());
+    expect(screen.queryByText(ko.chats.empty)).not.toBeInTheDocument();
+  });
+
+  it('waits out a press before it treats a touch as a drag, so a tap is still a tap', async () => {
+    // The whole row carries the drag listeners and the whole row is the link. Without this
+    // delay dnd-kit claims the first pointer-down and the tap never reaches the room.
+    expect(DRAG_ACTIVATION).toEqual({ delay: 200, tolerance: 5 });
+
+    render(
+      <MemoryRouter initialEntries={['/chats']}>
+        <Routes>
+          <Route path="/chats" element={<ChatList />} />
+          <Route path="/chats/:eventId" element={<p>room open</p>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const first = (await screen.findAllByRole('link'))[0] as HTMLElement;
+    await userEvent.click(first);
+    expect(await screen.findByText('room open')).toBeInTheDocument();
+    // A plain click is not a reorder, so nothing was written to storage either.
+    expect(localStorage.getItem(CHAT_ORDER_STORAGE_KEY)).toBeNull();
   });
 });

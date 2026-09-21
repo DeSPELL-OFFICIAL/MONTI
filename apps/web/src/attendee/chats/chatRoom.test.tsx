@@ -35,15 +35,19 @@ vi.mock('../../shared/api/functions', async (orig) => ({
 // the name it is given and never the uid it was keyed by.
 vi.mock('./useChatNames', () => ({ useChatNames: () => ({ u1: 'organizer_kim', u2: 'alice' }) }));
 
+// The route reuses one component instance across params, so the test has to be able to move
+// between rooms the way the router does.
+let routeEventId = '5';
 vi.mock('react-router-dom', async (orig) => ({
   ...(await orig<typeof import('react-router-dom')>()),
-  useParams: () => ({ eventId: '5' }),
+  useParams: () => ({ eventId: routeEventId }),
 }));
 
 const { CallableError } = await import('../../shared/api/functions');
 const { ChatRoom } = await import('./ChatRoom');
 
 beforeEach(() => {
+  routeEventId = '5';
   calls.length = 0;
   subscribeError = null;
   room = { closed: false, endsAt: 0 };
@@ -120,6 +124,39 @@ describe('ChatRoom', () => {
     expect(screen.getByPlaceholderText(ko.chats.placeholder)).toBeDisabled();
   });
 
+  it('says a draft event has no room, instead of telling them to try again', async () => {
+    joinEventChat.mockImplementation(async () => {
+      throw new CallableError('failed-precondition', 'EVENT_NOT_PUBLISHED');
+    });
+    render(<ChatRoom />);
+    expect(await screen.findByText(ko.chats.unavailable)).toBeInTheDocument();
+    expect(screen.queryByText(ko.chats.joinFailed)).not.toBeInTheDocument();
+  });
+
+  it('carries nothing from a refused room into the next one', async () => {
+    joinEventChat.mockImplementationOnce(async () => {
+      throw new CallableError('permission-denied', 'NO_TICKET_FOR_EVENT');
+    });
+    const { rerender } = render(<ChatRoom />);
+    expect(await screen.findByText(ko.chats.noTicket)).toBeInTheDocument();
+
+    routeEventId = '6';
+    rerender(<ChatRoom />);
+    expect(await screen.findByText('안녕하세요')).toBeInTheDocument();
+    expect(screen.queryByText(ko.chats.noTicket)).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText(ko.chats.placeholder)).toBeEnabled();
+    expect(joinEventChat).toHaveBeenLastCalledWith({ eventId: '6' });
+  });
+
+  it('leaves the previous room messages and report markers behind', async () => {
+    render(<ChatRoom />).unmount();
+    messageRows = [{ id: 'm7', uid: 'u2', text: '다른 방', createdAt: 7, reported: 0 }];
+    routeEventId = '6';
+    render(<ChatRoom />);
+    expect(await screen.findByText('다른 방')).toBeInTheDocument();
+    expect(screen.queryByText('안녕하세요')).not.toBeInTheDocument();
+  });
+
   it('falls back to one sentence for a join failure it does not know', async () => {
     joinEventChat.mockImplementation(async () => {
       throw new CallableError('internal', 'UNKNOWN');
@@ -155,6 +192,16 @@ describe('ChatRoom', () => {
     expect(reportMessage).toHaveBeenCalledWith({ eventId: '5', msgId: 'm2' });
     expect(await screen.findByText(ko.chats.reported)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: ko.chats.report })).not.toBeInTheDocument();
+  });
+
+  it('says so when the send did not go through, and gives the words back', async () => {
+    sendChatMessage.mockRejectedValue(new Error('offline'));
+    render(<ChatRoom />);
+    const box = await screen.findByPlaceholderText(ko.chats.placeholder);
+    await userEvent.type(box, '안녕');
+    await userEvent.click(screen.getByRole('button', { name: ko.chats.send }));
+    expect(await screen.findByText(ko.chats.sendFailed)).toBeInTheDocument();
+    expect(box).toHaveValue('안녕');
   });
 
   it('sends the trimmed draft and clears the box', async () => {

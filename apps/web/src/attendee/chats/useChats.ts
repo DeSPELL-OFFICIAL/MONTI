@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { loadChatRoom } from '../../shared/api/firestore';
 import { useMyTickets } from '../tickets/useTickets';
+import type { TicketState } from '../tickets/ticketState';
 
 export interface ChatEntry {
   eventId: string;
@@ -20,7 +21,7 @@ export const CHAT_ORDER_STORAGE_KEY = 'monti.chatOrder';
 const CLOSED_GRACE_SECONDS = 24 * 60 * 60;
 
 /** A ticket in one of these states is no longer held, and `joinEventChat` refuses the room. */
-const NOT_HELD: ReadonlySet<string> = new Set(['transferred', 'cancelled']);
+const NOT_HELD: ReadonlySet<TicketState> = new Set<TicketState>(['transferred', 'cancelled']);
 
 export function readChatOrder(): string[] {
   try {

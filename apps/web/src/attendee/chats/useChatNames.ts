@@ -30,6 +30,8 @@ export function useChatNames(eventId: string, enabled: boolean): Record<string, 
   const [names, setNames] = useState<Record<string, string>>({});
 
   useEffect(() => {
+    // A name from the previous room must never key a uid in this one.
+    setNames({});
     if (!enabled || !eventId) return undefined;
     let cancelled = false;
 

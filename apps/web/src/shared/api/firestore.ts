@@ -36,12 +36,26 @@ const CHAT_PAGE_SIZE = 200;
 
 /**
  * `createdAt` is written with serverTimestamp(), so a snapshot carries a Timestamp — and, for
- * the writer's own pending message, null. Views are typed on milliseconds and get milliseconds.
+ * the writer's own pending message, null until the server stamps it. Views are typed on
+ * milliseconds and get milliseconds; 0 means "not stamped yet", which {@link sortByCreatedAt}
+ * reads as the newest message there is.
  */
 function toMillis(value: unknown): number {
   if (typeof value === 'number') return value;
   const timestamp = value as { toMillis?: () => number } | null;
   return typeof timestamp?.toMillis === 'function' ? timestamp.toMillis() : 0;
+}
+
+/**
+ * Oldest first, with an unstamped message last. Firestore orders a pending serverTimestamp as
+ * the smallest value there is, so under `orderBy('createdAt', 'desc')` the sender's own message
+ * comes back at the end of the page — and reversing that page would throw it to the very top of
+ * the room, above messages sent hours ago. It belongs at the bottom, where they just typed it.
+ */
+function sortByCreatedAt(messages: ChatMessage[]): ChatMessage[] {
+  const rank = (message: ChatMessage): number =>
+    message.createdAt === 0 ? Number.MAX_SAFE_INTEGER : message.createdAt;
+  return [...messages].sort((left, right) => rank(left) - rank(right));
 }
 
 /**
@@ -64,13 +78,15 @@ export function watchChatMessages(
     messages,
     (snapshot) => {
       onChange(
-        snapshot.docs
-          .map((document) => {
-            const data = document.data() as Omit<ChatMessage, 'id'>;
+        // The query takes the newest 200; the view reads oldest first. `estimate` gives the
+        // sender's own pending message a local timestamp instead of null, so it is dated
+        // roughly right on screen while the server's stamp is still on its way.
+        sortByCreatedAt(
+          snapshot.docs.map((document) => {
+            const data = document.data({ serverTimestamps: 'estimate' }) as Omit<ChatMessage, 'id'>;
             return { ...data, id: document.id, createdAt: toMillis(data.createdAt) };
-          })
-          // The query takes the newest 200; the view reads oldest first.
-          .reverse(),
+          }),
+        ),
       );
     },
     (error) => onError?.(error),

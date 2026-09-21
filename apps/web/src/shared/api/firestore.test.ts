@@ -95,6 +95,30 @@ describe('watchChatMessages', () => {
       { id: 'b', uid: 'u2', text: 'second', createdAt: 2000, reported: 0 },
     ]);
   });
+
+  it('puts the sender own message last while its timestamp is still pending', () => {
+    const received: Array<Array<{ id: string }>> = [];
+    watchChatMessages('3', (messages) => received.push(messages));
+    const handler = onSnapshot.mock.calls[0]?.[1] as (snapshot: { docs: unknown[] }) => void;
+    // Firestore orders an unstamped serverTimestamp smallest, so it arrives at the end of a
+    // `desc` page — exactly where a plain reverse would turn it into the oldest message.
+    handler({
+      docs: [
+        docOf('b', { uid: 'u2', text: 'second', createdAt: { toMillis: () => 2000 }, reported: 0 }),
+        docOf('a', { uid: 'u1', text: 'first', createdAt: { toMillis: () => 1000 }, reported: 0 }),
+        docOf('mine', { uid: 'uid-1', text: 'just now', createdAt: null, reported: 0 }),
+      ],
+    });
+    expect(received[0]?.map((message) => message.id)).toEqual(['a', 'b', 'mine']);
+  });
+
+  it('asks for an estimate so a pending message is not dated 1970 on screen', () => {
+    watchChatMessages('3', () => undefined);
+    const handler = onSnapshot.mock.calls[0]?.[1] as (snapshot: { docs: unknown[] }) => void;
+    const data = vi.fn(() => ({ uid: 'u1', text: 'hi', createdAt: 1000, reported: 0 }));
+    handler({ docs: [{ id: 'a', data }] });
+    expect(data).toHaveBeenCalledWith({ serverTimestamps: 'estimate' });
+  });
 });
 
 describe('watchChatRoom', () => {
