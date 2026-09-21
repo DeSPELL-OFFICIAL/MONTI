@@ -20,10 +20,10 @@ vi.mock('../../shared/deviceKey', async (orig) => ({
   signWithDeviceKey,
 }));
 
-const writeGateResponse = vi.fn<() => Promise<void>>();
-vi.mock('../../shared/nfc', async (orig) => ({
-  ...(await orig<typeof import('../../shared/nfc')>()),
-  writeGateResponse,
+const verifyGate = vi.fn<() => Promise<{ ok: boolean; reason?: string }>>();
+vi.mock('./verifyGate', async (orig) => ({
+  ...(await orig<typeof import('./verifyGate')>()),
+  verifyGate,
 }));
 
 const activeDevice = vi.fn();
@@ -35,8 +35,11 @@ vi.mock('../../shared/config', () => ({
 
 vi.mock('../../shared/session', () => ({ getSession: () => ({ status: 'signedIn', account: ACCOUNT }) }));
 
-const { buildGateResponse, deviceSigDigest, deviceSigMessage, handOverSignature } = await import('./buildResponse');
+const { GateRefused, buildGateResponse, deviceSigDigest, deviceSigMessage, tapFailure, tapSigner } = await import(
+  './buildResponse'
+);
 const { ATTENDEE_KEY_ALIAS, DeviceKeyUnavailable, DEVICE_KEY_ERROR } = await import('../../shared/deviceKey');
+const { NFC_ERROR, NfcError } = await import('../../shared/nfc');
 
 /**
  * The contracts' own vector, so this file and `contracts/test/` cannot drift:
@@ -87,25 +90,28 @@ async function newDeviceKey() {
 
 let device: Awaited<ReturnType<typeof newDeviceKey>>;
 
-function states(): { setState: (u: (prev: ArmState) => ArmState) => void; seen: ArmState[] } {
+function session(over: Partial<{ armedAt: number; isCurrent: (armedAt: number) => boolean }> = {}) {
   const seen: ArmState[] = [];
-  let current: ArmState = { phase: 'verifying', error: '', armedAt: 1 };
-  return {
+  let current: ArmState = { phase: 'reading', error: '', armedAt: 1 };
+  const codes: GateCodeWire[] = [];
+  const sign = tapSigner({
+    tokenId: TOKEN_ID,
     setState: (update) => {
       current = update(current);
       seen.push(current);
     },
-    seen,
-  };
+    armedAt: 1,
+    isCurrent: (armedAt: number) => armedAt === 1,
+    onGateCode: (code) => codes.push(code),
+    ...over,
+  });
+  return { sign, seen, codes };
 }
-
-const live = { armedAt: 1, isCurrent: (armedAt: number) => armedAt === 1 };
-const stale = { armedAt: 1, isCurrent: () => false };
 
 beforeEach(async () => {
   device = await newDeviceKey();
   signWithDeviceKey.mockReset().mockImplementation(async () => device.sign(deviceSigMessage({ tokenId: TOKEN_ID, gateCode: GATE_CODE })));
-  writeGateResponse.mockReset().mockResolvedValue(undefined);
+  verifyGate.mockReset().mockResolvedValue({ ok: true });
   activeDevice.mockReset().mockResolvedValue({ x: device.x, y: device.y });
 });
 
@@ -175,85 +181,98 @@ describe('buildGateResponse', () => {
   });
 });
 
-describe('handOverSignature', () => {
-  it('signs, then writes, then waits — in that order', async () => {
-    const { setState, seen } = states();
-    await handOverSignature({ tokenId: TOKEN_ID, gateCode: GATE_CODE, setState, ...live });
-    expect(seen.map((state) => state.phase)).toEqual(['signing', 'writing', 'waiting']);
-    expect(signWithDeviceKey.mock.invocationCallOrder[0] as number).toBeLessThan(
-      writeGateResponse.mock.invocationCallOrder[0] as number,
+describe('tapSigner — the body of the one NFC session', () => {
+  it('verifies, signs and hands the bytes back, in that order', async () => {
+    const { sign, seen, codes } = session();
+    const wire = await sign(GATE_CODE);
+    expect(codes).toEqual([GATE_CODE]);
+    expect(seen.map((state) => state.phase)).toEqual(['verifying', 'signing', 'writing']);
+    expect(verifyGate.mock.invocationCallOrder[0] as number).toBeLessThan(
+      signWithDeviceKey.mock.invocationCallOrder[0] as number,
     );
-    // ECDSA is randomised, so the wire is compared against THIS run's signature, not a rebuilt one.
-    const { r, s } = await signWithDeviceKey.mock.results[0]?.value;
-    expect(writeGateResponse).toHaveBeenCalledWith({ v: 1, tokenId: TOKEN_ID, deviceSig: `${r}${s.slice(2)}` });
+    const { r, s: low } = await signWithDeviceKey.mock.results[0]?.value;
+    expect(wire).toEqual({ v: 1, tokenId: TOKEN_ID, deviceSig: `${r}${low.slice(2)}` });
+    // The primitive writes exactly these bytes to the tag it read.
+    expect(decodeGateResponse(encodeGateResponse(wire))).toEqual(wire);
   });
 
-  it('writes nothing when the signature does not match the registered device', async () => {
+  it('never prompts inside the session — it only signs with the key already armed', async () => {
+    const { sign } = session();
+    await sign(GATE_CODE);
+    expect(signWithDeviceKey).toHaveBeenCalledWith(V1_DIGEST, { alias: ATTENDEE_KEY_ALIAS });
+  });
+
+  it('tears the session down without signing when the gate is refused', async () => {
+    verifyGate.mockResolvedValue({ ok: false, reason: 'gateClosed' });
+    const { sign, seen } = session();
+    await expect(sign(GATE_CODE)).rejects.toMatchObject({ reason: 'gateClosed' });
+    expect(signWithDeviceKey).not.toHaveBeenCalled();
+    expect(seen.map((state) => state.phase)).toEqual(['verifying']);
+  });
+
+  it('hands nothing back once the arm window has closed under it', async () => {
+    const { sign, seen, codes } = session({ isCurrent: () => false });
+    await expect(sign(GATE_CODE)).rejects.toBeInstanceOf(NfcError);
+    expect(verifyGate).not.toHaveBeenCalled();
+    expect(signWithDeviceKey).not.toHaveBeenCalled();
+    expect(codes).toEqual([]);
+    expect(seen).toEqual([]);
+  });
+
+  it('hands nothing back when the window closes between the signature and the write', async () => {
+    let open = true;
+    signWithDeviceKey.mockImplementation(async () => {
+      open = false;
+      return device.sign(deviceSigMessage({ tokenId: TOKEN_ID, gateCode: GATE_CODE }));
+    });
+    const { sign, seen } = session({ isCurrent: () => open });
+    await expect(sign(GATE_CODE)).rejects.toBeInstanceOf(NfcError);
+    expect(seen.map((state) => state.phase)).toEqual(['verifying', 'signing']);
+  });
+
+  it('refuses to hand back a signature the registered device key does not verify', async () => {
     const other = await newDeviceKey();
     activeDevice.mockResolvedValue({ x: other.x, y: other.y });
-    const { setState, seen } = states();
-    await handOverSignature({ tokenId: TOKEN_ID, gateCode: GATE_CODE, setState, ...live });
-    expect(writeGateResponse).not.toHaveBeenCalled();
-    expect(seen.at(-1)).toMatchObject({ phase: 'failed', error: 'deviceMismatch' });
+    const { sign } = session();
+    await expect(sign(GATE_CODE)).rejects.toMatchObject({ reason: 'deviceMismatch' });
+  });
+});
+
+describe('tapFailure — the QR is a fallback, never the default', () => {
+  it('offers the code when a session that had read one died before the write', () => {
+    expect(tapFailure(new NfcError(NFC_ERROR.cancelled), true)).toEqual({ phase: 'qr', error: 'writeFailed' });
+    expect(tapFailure(new NfcError(NFC_ERROR.timeout), true)).toEqual({ phase: 'qr', error: 'writeFailed' });
+    expect(tapFailure(new NfcError(NFC_ERROR.readFailed), true)).toEqual({ phase: 'qr', error: 'writeFailed' });
   });
 
-  it('falls back to the code after one failed write', async () => {
-    writeGateResponse.mockRejectedValue(new Error('no tag'));
-    const { setState, seen } = states();
-    await handOverSignature({ tokenId: TOKEN_ID, gateCode: GATE_CODE, setState, ...live });
-    expect(writeGateResponse).toHaveBeenCalledTimes(1);
-    expect(seen.at(-1)).toMatchObject({ phase: 'qr', error: 'writeFailed' });
+  it('keeps the sentence and the button when the session died before any code arrived', () => {
+    expect(tapFailure(new NfcError(NFC_ERROR.cancelled), false)).toEqual({ phase: 'failed', error: 'tapCancelled' });
+    expect(tapFailure(new NfcError(NFC_ERROR.timeout), false)).toEqual({ phase: 'failed', error: 'tapTimeout' });
+    expect(tapFailure(new NfcError(NFC_ERROR.noGateRecord), false)).toEqual({ phase: 'failed', error: 'tapFailed' });
   });
 
-  it('sends a lapsed arm window back to the start, and never re-arms', async () => {
-    signWithDeviceKey.mockRejectedValue(Object.assign(new Error('x'), { code: DEVICE_KEY_ERROR.userCancelled }));
-    const { setState, seen } = states();
-    await handOverSignature({ tokenId: TOKEN_ID, gateCode: GATE_CODE, setState, ...live });
-    expect(seen.at(-1)).toMatchObject({ phase: 'idle', error: 'expired', armedAt: 0 });
-    expect(writeGateResponse).not.toHaveBeenCalled();
-  });
-
-  it('names a key the chip destroyed rather than calling it a failed tap', async () => {
-    signWithDeviceKey.mockRejectedValue(Object.assign(new Error('x'), { code: DEVICE_KEY_ERROR.keyInvalidated }));
-    const { setState, seen } = states();
-    await handOverSignature({ tokenId: TOKEN_ID, gateCode: GATE_CODE, setState, ...live });
-    expect(seen.at(-1)).toMatchObject({ phase: 'failed', error: 'keyInvalidated' });
-  });
-
-  it('offers the code when this phone has no hardware key', async () => {
-    signWithDeviceKey.mockRejectedValue(new DeviceKeyUnavailable());
-    const { setState, seen } = states();
-    await handOverSignature({ tokenId: TOKEN_ID, gateCode: GATE_CODE, setState, ...live });
-    expect(seen.at(-1)).toMatchObject({ phase: 'qr', error: 'deviceUnavailable' });
-  });
-
-  it('reports anything else as a failed signature', async () => {
-    signWithDeviceKey.mockRejectedValue(new Error('bridge died'));
-    const { setState, seen } = states();
-    await handOverSignature({ tokenId: TOKEN_ID, gateCode: GATE_CODE, setState, ...live });
-    expect(seen.at(-1)).toMatchObject({ phase: 'failed', error: 'signFailed' });
-  });
-
-  it('writes nothing once the arm window has closed under it', async () => {
-    const { setState, seen } = states();
-    await handOverSignature({ tokenId: TOKEN_ID, gateCode: GATE_CODE, setState, ...stale });
-    expect(writeGateResponse).not.toHaveBeenCalled();
-    expect(seen.map((state) => state.phase)).toEqual(['signing']);
-  });
-
-  it('does not move to waiting when the window closed during the write', async () => {
-    let open = true;
-    const { setState, seen } = states();
-    writeGateResponse.mockImplementation(async () => {
-      open = false;
+  it('offers the code to a phone that cannot tap at all', () => {
+    expect(tapFailure(new NfcError(NFC_ERROR.unavailable), false)).toEqual({
+      phase: 'qr',
+      error: 'deviceUnavailable',
     });
-    await handOverSignature({
-      tokenId: TOKEN_ID,
-      gateCode: GATE_CODE,
-      setState,
-      armedAt: 1,
-      isCurrent: () => open,
-    });
-    expect(seen.map((state) => state.phase)).toEqual(['signing', 'writing']);
+  });
+
+  it('sends a lapsed arm window back to the start, and never re-arms', () => {
+    const lapsed = Object.assign(new Error('x'), { code: DEVICE_KEY_ERROR.userCancelled });
+    expect(tapFailure(lapsed, true)).toEqual({ phase: 'idle', error: 'expired' });
+  });
+
+  it('names a key the chip destroyed rather than calling it a failed tap', () => {
+    const gone = Object.assign(new Error('x'), { code: DEVICE_KEY_ERROR.keyInvalidated });
+    expect(tapFailure(gone, true)).toEqual({ phase: 'failed', error: 'keyInvalidated' });
+  });
+
+  it('offers the code when this phone has no hardware key', () => {
+    expect(tapFailure(new DeviceKeyUnavailable(), false)).toEqual({ phase: 'qr', error: 'deviceUnavailable' });
+  });
+
+  it('keeps a gate refusal as its own sentence', () => {
+    expect(tapFailure(new GateRefused('wrongEvent'), true)).toEqual({ phase: 'failed', error: 'wrongEvent' });
   });
 });

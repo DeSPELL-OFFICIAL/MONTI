@@ -1,19 +1,23 @@
-// Entry, step 1: arm, count down, read the gate code, prove the gate is real.
+// Entry: one tap, one NFC session.
 //
-// Everything past `verifying` — signing the digest, writing the answer back, the QR fallback and
-// the result — is Tasks 25 and 26. Those phases exist in `EnterPhase` and are rendered as
-// placeholders here so the state machine is whole; nothing in this file signs anything.
+// The ordering is the security property and the usability one at once. The biometric is raised
+// on the person's click and BEFORE the session opens: iOS puts its reader sheet over
+// everything, so a prompt behind it is a dead screen, and a gate code read by a phone that then
+// refuses to sign is a code burned for nothing. Once the session is open nothing may prompt —
+// `readThenWrite` reads the gate's record, hands it to the signer, and writes the answer back
+// to the same tag before the session ends, all while the two phones are still touching.
+//
+// Everything past the write — the green, the chain subscription — is Task 26.
 import { useCallback, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import type { GateCodeWire } from '@monti/shared';
 import { Alert, Button, Countdown, Screen, Spinner } from '../../shared/ui';
 import { fmt, useCopy } from '../../shared/i18n';
 import type { Copy } from '../../shared/copy/index';
-import { nfcCapability, readGateCode } from '../../shared/nfc';
-import { IDLE, tapEnding, useArm, type EnterPhase } from './useArm';
-import { handOverSignature } from './buildResponse';
+import { nfcCapability, readThenWrite } from '../../shared/nfc';
+import { IDLE, useArm, type EnterPhase } from './useArm';
+import { tapFailure, tapSigner } from './buildResponse';
 import { Qr } from './Qr';
-import { verifyGate, type GateVerdict } from './verifyGate';
 
 /** The phases that hold the armed window open, and so show the countdown. */
 const ARMED_PHASES: readonly EnterPhase[] = ['armed', 'reading', 'verifying', 'signing', 'writing'];
@@ -50,8 +54,8 @@ export function Enter() {
   // Held from the read onwards: the QR fallback answers the same code the tap read, and there
   // is no second chance to get it — the reader has already rotated by the time it is needed.
   const [gateCode, setGateCode] = useState<GateCodeWire | null>(null);
-  // The open reader session, so the countdown can take it back. iOS keeps its sheet up for its
-  // own 60 s, which always outlasts the arm window because the read starts after the biometric.
+  // The open session, so the countdown can take it back rather than leave a sheet up over a
+  // window the secure chip has already closed.
   const tap = useRef<AbortController | null>(null);
 
   const expire = useCallback((): void => {
@@ -63,7 +67,6 @@ export function Enter() {
   }, [setState]);
 
   async function start(): Promise<void> {
-    // Arming first, always: the biometric belongs to this tap, not to a reader sheet already up.
     const armedAt = await arm();
     if (!armedAt) return;
     if (nfcCapability() === 'none') {
@@ -72,40 +75,40 @@ export function Enter() {
     }
 
     setGateCode(null);
+    // Local, because `gateCode` state is not readable from inside this closure and the failure
+    // taxonomy turns on whether a code was ever read.
+    let read: GateCodeWire | null = null;
     const controller = new AbortController();
     tap.current = controller;
-    setState((prev) => ({ ...prev, phase: 'reading' }));
-    let wire: GateCodeWire;
+    setState((prev) => ({ ...prev, phase: 'reading', error: '' }));
+
     try {
-      wire = await readGateCode({ signal: controller.signal });
+      await readThenWrite(
+        tapSigner({
+          tokenId,
+          setState,
+          armedAt,
+          isCurrent,
+          onGateCode: (code) => {
+            read = code;
+            setGateCode(code);
+          },
+        }),
+        { signal: controller.signal },
+      );
     } catch (cause) {
-      // An expiry aborts the read, so its rejection arrives on a window that is already gone.
       if (!isCurrent(armedAt)) return;
-      setState((prev) => ({ ...prev, ...tapEnding(cause) }));
+      setState((prev) => ({ ...prev, ...tapFailure(cause, read !== null) }));
       return;
     } finally {
       if (tap.current === controller) tap.current = null;
     }
     if (!isCurrent(armedAt)) return;
-    setGateCode(wire);
 
-    setState((prev) => ({ ...prev, phase: 'verifying' }));
-    let verdict: GateVerdict;
-    try {
-      verdict = await verifyGate(wire, { tokenId });
-    } catch {
-      // Not the network — `verifyGate` answers those itself. A read that broke for any other
-      // reason is this app's problem, and saying so beats inventing a verdict.
-      if (!isCurrent(armedAt)) return;
-      setState((prev) => ({ ...prev, phase: 'failed', error: '' }));
-      return;
-    }
-    if (!isCurrent(armedAt)) return;
-    if (!verdict.ok) {
-      setState((prev) => ({ ...prev, phase: 'failed', error: verdict.reason }));
-      return;
-    }
-    await handOverSignature({ tokenId, gateCode: wire, setState, armedAt, isCurrent });
+    // The session ended AFTER the write landed, which is the success: spec §7.2 step 4 wants one
+    // buzz here and nothing more. Whether the entry was granted comes from the chain (Task 26).
+    if (navigator.vibrate) navigator.vibrate(60);
+    setState((prev) => ({ ...prev, phase: 'waiting', error: '' }));
   }
 
   const secondsLeft = state.armedAt
@@ -146,7 +149,7 @@ export function Enter() {
         </>
       ) : null}
 
-      {/* Task 25/26 own these; they are here so no phase renders an empty screen. */}
+      {/* Task 26 owns these; they are here so no phase renders an empty screen. */}
       {state.phase === 'waiting' ? <p>{copy.enter.resultWaiting}</p> : null}
       {state.phase === 'done' ? <p>{copy.enter.done}</p> : null}
 

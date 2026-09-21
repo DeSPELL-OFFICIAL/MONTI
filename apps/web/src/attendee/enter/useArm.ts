@@ -75,18 +75,22 @@ export const IDLE: ArmState = { phase: 'idle', error: '', armedAt: 0 };
 
 export function useArm(): Arm {
   const [state, setRenderState] = useState<ArmState>(IDLE);
-  const armedAtRef = useRef(0);
+  // The state as the tap's async steps see it. React applies a queued updater when it next
+  // renders, which is one or more microtasks after the call — far too late for the step that
+  // is about to ask whether its window is still open. So the next state is computed here,
+  // eagerly, and React is handed the finished value.
+  const stateRef = useRef<ArmState>(IDLE);
 
-  // Every write goes through here, so the ref cannot fall behind the state it mirrors.
   const setState = useCallback<Dispatch<SetStateAction<ArmState>>>((update) => {
-    setRenderState((prev) => {
-      const next = typeof update === 'function' ? (update as (value: ArmState) => ArmState)(prev) : update;
-      armedAtRef.current = next.armedAt;
-      return next;
-    });
+    const next = typeof update === 'function' ? (update as (value: ArmState) => ArmState)(stateRef.current) : update;
+    stateRef.current = next;
+    setRenderState(next);
   }, []);
 
-  const isCurrent = useCallback((armedAt: number): boolean => armedAt !== 0 && armedAtRef.current === armedAt, []);
+  const isCurrent = useCallback(
+    (armedAt: number): boolean => armedAt !== 0 && stateRef.current.armedAt === armedAt,
+    [],
+  );
 
   const arm = useCallback(async (): Promise<number> => {
     setState({ phase: 'arming', error: '', armedAt: 0 });

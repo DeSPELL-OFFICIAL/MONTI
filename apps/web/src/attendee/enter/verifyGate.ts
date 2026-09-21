@@ -183,10 +183,29 @@ function isTransportFailure(cause: unknown): boolean {
   return false;
 }
 
+/**
+ * How long the registration read may hold the NFC session open. The whole verify-and-sign path
+ * runs while the two phones are touching — Android's HCE tag is gone the moment they part — so
+ * a slow RPC must not be waited on. Past this, the last chain answer we cached for this gate is
+ * the answer, exactly as it is for a phone with no signal at all.
+ */
+export const CHAIN_READ_BUDGET_MS = 1_500;
+
+/** Rejects with the same shape a dead transport does, so the cache path below picks it up. */
+function withBudget<T>(work: Promise<T>, budgetMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new TimeoutError({ body: {}, url: 'gateInfo' })), budgetMs);
+  });
+  return Promise.race([work, deadline]).finally(() => clearTimeout(timer)) as Promise<T>;
+}
+
 export interface GateCheckInput {
   tokenId: string;
   /** Unix seconds; defaults to this phone's clock. Passed in by tests and by a caller that froze it. */
   nowSeconds?: number;
+  /** Defaults to {@link CHAIN_READ_BUDGET_MS}. */
+  budgetMs?: number;
 }
 
 /**
@@ -198,7 +217,10 @@ export async function verifyGate(wire: GateCodeWire, input: GateCheckInput): Pro
   const now = input.nowSeconds ?? Math.floor(Date.now() / 1000);
   if (!isGateCodeFresh(wire, now)) return fail('codeExpired');
 
-  const registration = await verifyGateRegistered(wire, input.tokenId).catch((cause: unknown): null => {
+  const registration = await withBudget(
+    verifyGateRegistered(wire, input.tokenId),
+    input.budgetMs ?? CHAIN_READ_BUDGET_MS,
+  ).catch((cause: unknown): null => {
     if (!isTransportFailure(cause)) throw cause;
     return null;
   });

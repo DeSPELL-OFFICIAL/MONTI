@@ -1,25 +1,37 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { GateCodeWire, Hex } from '@monti/shared';
-import type { ArmState } from './useArm';
+import { encodeGateResponse, type GateCodeWire, type GateResponseWire, type Hex } from '@monti/shared';
 import { ko } from '../../shared/copy/index';
 import { fmt } from '../../shared/i18n';
 
 // Partial mocks throughout: the real `DeviceKeyUnavailable`, `NfcError` and `NFC_ERROR` stay,
 // because the screen tells one ending from another by those classes and codes.
 const armDeviceKey = vi.fn();
+const signWithDeviceKey = vi.fn(async () => ({
+  r: `0x${'11'.repeat(32)}` as Hex,
+  // Comfortably inside the low half of the curve order, which `buildGateResponse` requires.
+  s: `0x${'22'.repeat(32)}` as Hex,
+}));
 vi.mock('../../shared/deviceKey', async (orig) => ({
   ...(await orig<typeof import('../../shared/deviceKey')>()),
   armDeviceKey,
+  signWithDeviceKey,
 }));
 
 const nfcCapability = vi.fn<() => 'native' | 'webnfc' | 'none'>(() => 'native');
-const readGateCode = vi.fn();
+/**
+ * The one session. Its default stands in for a whole tap: the session opens, a gate record
+ * arrives, the callback verifies and signs, and the primitive writes what that returns to the
+ * same tag before ending. `written` is what reached the tag; `session` counts the open/close.
+ */
+const readThenWrite = vi.fn<
+  (sign: (code: GateCodeWire) => Promise<GateResponseWire>, options?: { signal?: AbortSignal }) => Promise<void>
+>();
 vi.mock('../../shared/nfc', async (orig) => ({
   ...(await orig<typeof import('../../shared/nfc')>()),
   nfcCapability,
-  readGateCode,
+  readThenWrite,
 }));
 
 const verifyGate = vi.fn();
@@ -28,10 +40,10 @@ vi.mock('./verifyGate', async (orig) => ({
   verifyGate,
 }));
 
-const handOverSignature = vi.fn();
-vi.mock('./buildResponse', async (orig) => ({
-  ...(await orig<typeof import('./buildResponse')>()),
-  handOverSignature,
+// `deviceSigDigest` binds the signature to this chain and this deployment, so the screen needs
+// a config; the attendee app's own `VITE_*` are not this test's subject.
+vi.mock('../../shared/config', () => ({
+  getConfig: () => ({ chainId: 31337, addresses: { ticket: `0x${'71'.repeat(20)}` } }),
 }));
 
 vi.mock('react-router-dom', async (orig) => ({
@@ -54,12 +66,26 @@ const WIRE: GateCodeWire = {
   sig: `0x${'33'.repeat(64)}` as Hex,
 };
 
+let written: GateResponseWire | null = null;
+let opened = 0;
+let closed = 0;
+
 beforeEach(() => {
+  written = null;
+  opened = 0;
+  closed = 0;
   armDeviceKey.mockReset().mockResolvedValue(undefined);
-  readGateCode.mockReset().mockResolvedValue(WIRE);
   verifyGate.mockReset().mockResolvedValue({ ok: true });
   nfcCapability.mockReset().mockReturnValue('native');
-  handOverSignature.mockReset().mockResolvedValue(undefined);
+  signWithDeviceKey.mockClear();
+  readThenWrite.mockReset().mockImplementation(async (sign) => {
+    opened += 1;
+    try {
+      written = await sign(WIRE);
+    } finally {
+      closed += 1;
+    }
+  });
 });
 
 async function tapEnter() {
@@ -69,15 +95,14 @@ async function tapEnter() {
 }
 
 describe('<Enter /> arming', () => {
-  it('arms the attendee key before the reader session is opened', async () => {
+  it('arms the attendee key before the session is opened', async () => {
     await tapEnter();
     expect(armDeviceKey).toHaveBeenCalledWith({ alias: ATTENDEE_KEY_ALIAS });
-    expect(readGateCode).toHaveBeenCalledTimes(1);
+    expect(readThenWrite).toHaveBeenCalledTimes(1);
     // The ordering is the point, not just that both ran: a biometric raised behind the iOS
-    // reader sheet is a screen nobody can answer, and a code read by a phone that then refuses
-    // to sign is a code burned for nothing.
+    // reader sheet is a screen nobody can answer, and nothing inside the session may prompt.
     expect(armDeviceKey.mock.invocationCallOrder[0] as number).toBeLessThan(
-      readGateCode.mock.invocationCallOrder[0] as number,
+      readThenWrite.mock.invocationCallOrder[0] as number,
     );
   });
 
@@ -93,7 +118,7 @@ describe('<Enter /> arming', () => {
   it('offers the code instead of a tap when this phone has no hardware key', async () => {
     armDeviceKey.mockRejectedValue(new DeviceKeyUnavailable());
     await tapEnter();
-    expect(readGateCode).not.toHaveBeenCalled();
+    expect(readThenWrite).not.toHaveBeenCalled();
     expect(screen.getByText(ko.enter.qrTitle)).toBeInTheDocument();
     expect(screen.getByText(ko.enter.deviceUnavailable)).toBeInTheDocument();
   });
@@ -101,7 +126,7 @@ describe('<Enter /> arming', () => {
   it('reports any other arming failure instead of opening a session', async () => {
     armDeviceKey.mockRejectedValue(new Error('biometry failed'));
     await tapEnter();
-    expect(readGateCode).not.toHaveBeenCalled();
+    expect(readThenWrite).not.toHaveBeenCalled();
     expect(screen.getByRole('alert')).toHaveTextContent(ko.enter.armFailed);
   });
 
@@ -109,7 +134,7 @@ describe('<Enter /> arming', () => {
     nfcCapability.mockReturnValue('none');
     await tapEnter();
     expect(armDeviceKey).toHaveBeenCalledTimes(1);
-    expect(readGateCode).not.toHaveBeenCalled();
+    expect(readThenWrite).not.toHaveBeenCalled();
     expect(screen.getByText(ko.enter.qrTitle)).toBeInTheDocument();
   });
 
@@ -128,79 +153,6 @@ describe('<Enter /> arming', () => {
     const left = Number(screen.getByRole('timer').textContent);
     expect(left).toBeLessThan(ARM_WINDOW_SECONDS);
     expect(screen.getByText(fmt(ko.enter.armed, { seconds: left }))).toBeInTheDocument();
-  });
-
-  it('drops a read that lands after the window closed', async () => {
-    vi.useFakeTimers();
-    let land!: (wire: GateCodeWire) => void;
-    readGateCode.mockReturnValue(
-      new Promise<GateCodeWire>((resolve) => {
-        land = resolve;
-      }),
-    );
-    render(<Enter />);
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: ko.enter.cta }));
-    });
-    for (let second = 0; second <= ARM_WINDOW_SECONDS; second += 1) {
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(1_000);
-      });
-    }
-    expect(screen.getByText(ko.enter.expired)).toBeInTheDocument();
-
-    // The secure chip closed the window; a code that arrives now must not restart the flow.
-    await act(async () => {
-      land(WIRE);
-    });
-    expect(verifyGate).not.toHaveBeenCalled();
-    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: ko.enter.cta })).toBeInTheDocument();
-  });
-
-  it('drops a verification that lands after the window closed', async () => {
-    vi.useFakeTimers();
-    verifyGate.mockReturnValue(new Promise(() => undefined));
-    let settle!: (verdict: { ok: boolean }) => void;
-    verifyGate.mockReturnValue(
-      new Promise<{ ok: boolean }>((resolve) => {
-        settle = resolve;
-      }),
-    );
-    render(<Enter />);
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: ko.enter.cta }));
-    });
-    for (let second = 0; second <= ARM_WINDOW_SECONDS; second += 1) {
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(1_000);
-      });
-    }
-    await act(async () => {
-      settle({ ok: true });
-    });
-    expect(screen.getByText(ko.enter.expired)).toBeInTheDocument();
-    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
-  });
-
-  it('aborts the reader session when the window closes', async () => {
-    vi.useFakeTimers();
-    readGateCode.mockReturnValue(new Promise(() => undefined));
-    render(<Enter />);
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: ko.enter.cta }));
-    });
-    const options = readGateCode.mock.calls[0]?.[0] as { signal: AbortSignal };
-    expect(options.signal.aborted).toBe(false);
-
-    for (let second = 0; second <= ARM_WINDOW_SECONDS; second += 1) {
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(1_000);
-      });
-    }
-    // Otherwise the iOS reader sheet outlives the window it belongs to, inviting a tap into a
-    // flow that can no longer sign.
-    expect(options.signal.aborted).toBe(true);
   });
 
   it('does not re-arm on its own when the window runs out', async () => {
@@ -228,6 +180,80 @@ describe('<Enter /> arming', () => {
   });
 });
 
+describe('<Enter /> one session', () => {
+  it('reads and writes inside a single session, and only then waits', async () => {
+    await tapEnter();
+    expect(opened).toBe(1);
+    expect(closed).toBe(1);
+    expect(written).toMatchObject({ v: 1, tokenId: '7' });
+    expect(written?.deviceSig).toHaveLength(2 + 128);
+    // What the primitive hands the tag is the shared encoding of exactly that wire.
+    expect(encodeGateResponse(written as GateResponseWire).byteLength).toBeGreaterThan(0);
+    expect(screen.getByText(ko.enter.resultWaiting)).toBeInTheDocument();
+  });
+
+  it('verifies the code it read before signing anything, for this ticket', async () => {
+    await tapEnter();
+    expect(verifyGate).toHaveBeenCalledWith(WIRE, { tokenId: '7' });
+    expect(verifyGate.mock.invocationCallOrder[0] as number).toBeLessThan(
+      signWithDeviceKey.mock.invocationCallOrder[0] as number,
+    );
+  });
+
+  it('hands the session a signal the countdown can abort', async () => {
+    vi.useFakeTimers();
+    readThenWrite.mockImplementation(async () => {
+      opened += 1;
+      await new Promise(() => undefined);
+    });
+    render(<Enter />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: ko.enter.cta }));
+    });
+    const options = readThenWrite.mock.calls[0]?.[1] as { signal: AbortSignal };
+    expect(options.signal.aborted).toBe(false);
+
+    for (let second = 0; second <= ARM_WINDOW_SECONDS; second += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+    }
+    // Otherwise the iOS reader sheet outlives the window it belongs to, inviting a tap into a
+    // session that can no longer sign.
+    expect(options.signal.aborted).toBe(true);
+  });
+
+  it('signs and writes nothing for a code that arrives after the window closed', async () => {
+    vi.useFakeTimers();
+    let land!: () => void;
+    readThenWrite.mockImplementation(async (sign) => {
+      opened += 1;
+      await new Promise<void>((resolve) => {
+        land = resolve;
+      });
+      written = await sign(WIRE);
+    });
+    render(<Enter />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: ko.enter.cta }));
+    });
+    for (let second = 0; second <= ARM_WINDOW_SECONDS; second += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+    }
+    expect(screen.getByText(ko.enter.expired)).toBeInTheDocument();
+
+    await act(async () => {
+      land();
+    });
+    expect(verifyGate).not.toHaveBeenCalled();
+    expect(signWithDeviceKey).not.toHaveBeenCalled();
+    expect(written).toBeNull();
+    expect(screen.getByRole('button', { name: ko.enter.cta })).toBeInTheDocument();
+  });
+});
+
 describe('<Enter /> tap endings', () => {
   const endings: Array<[string, string]> = [
     [NFC_ERROR.cancelled, ko.enter.tapCancelled],
@@ -237,8 +263,8 @@ describe('<Enter /> tap endings', () => {
   ];
 
   for (const [code, sentence] of endings) {
-    it(`turns ${code} into its own sentence`, async () => {
-      readGateCode.mockRejectedValue(new NfcError(code as never));
+    it(`turns ${code} before any code into its own sentence`, async () => {
+      readThenWrite.mockRejectedValue(new NfcError(code as never));
       await tapEnter();
       expect(screen.getByRole('alert')).toHaveTextContent(sentence);
       expect(verifyGate).not.toHaveBeenCalled();
@@ -247,25 +273,33 @@ describe('<Enter /> tap endings', () => {
   }
 
   it('sends an unsupported reader to the code, not to an error', async () => {
-    readGateCode.mockRejectedValue(new NfcError(NFC_ERROR.unavailable));
+    readThenWrite.mockRejectedValue(new NfcError(NFC_ERROR.unavailable));
     await tapEnter();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.getByText(ko.enter.qrTitle)).toBeInTheDocument();
   });
 
   it('falls back to a failed read for a rejection that is not an NfcError', async () => {
-    readGateCode.mockRejectedValue(new Error('BAD_GATE_CODE'));
+    readThenWrite.mockRejectedValue(new Error('BAD_GATE_CODE'));
     await tapEnter();
     expect(screen.getByRole('alert')).toHaveTextContent(ko.enter.tapFailed);
+  });
+
+  it('offers the code when the session dies after the read but before the write', async () => {
+    readThenWrite.mockImplementation(async (sign) => {
+      opened += 1;
+      await sign(WIRE);
+      // The phones parted, or the sheet timed out, with the answer already signed.
+      throw new NfcError(NFC_ERROR.timeout);
+    });
+    await tapEnter();
+    expect(screen.getByText(ko.enter.qrTitle)).toBeInTheDocument();
+    expect(screen.getByText(ko.enter.writeFailed)).toBeInTheDocument();
+    expect(screen.queryByText(ko.enter.tapTimeout)).not.toBeInTheDocument();
   });
 });
 
 describe('<Enter /> gate verification', () => {
-  it('verifies the code it read, for this ticket', async () => {
-    await tapEnter();
-    expect(verifyGate).toHaveBeenCalledWith(WIRE, { tokenId: '7' });
-  });
-
   const refusals: Array<[string, string]> = [
     ['codeExpired', ko.enter.codeExpired],
     ['unknownGate', ko.enter.unknownGate],
@@ -275,55 +309,15 @@ describe('<Enter /> gate verification', () => {
   ];
 
   for (const [reason, sentence] of refusals) {
-    it(`shows the ${reason} sentence and stops`, async () => {
+    it(`shows the ${reason} sentence, signs nothing and writes nothing`, async () => {
       verifyGate.mockResolvedValue({ ok: false, reason });
       await tapEnter();
       expect(screen.getByRole('alert')).toHaveTextContent(sentence);
+      expect(signWithDeviceKey).not.toHaveBeenCalled();
+      expect(written).toBeNull();
       expect(screen.queryByRole('timer')).not.toBeInTheDocument();
     });
   }
-
-  it('hands a verified gate on to the signing step with nothing signed here', async () => {
-    await tapEnter();
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-    expect(screen.getByRole('timer')).toBeInTheDocument();
-    expect(screen.getByText(ko.enter.verifying)).toBeInTheDocument();
-  });
-
-  it('hands the verified code to the signing step, inside this arm window', async () => {
-    await tapEnter();
-    expect(handOverSignature).toHaveBeenCalledTimes(1);
-    const handed = handOverSignature.mock.calls[0]?.[0] as {
-      tokenId: string;
-      gateCode: GateCodeWire;
-      armedAt: number;
-      isCurrent: (armedAt: number) => boolean;
-    };
-    expect(handed.tokenId).toBe('7');
-    expect(handed.gateCode).toEqual(WIRE);
-    expect(handed.isCurrent(handed.armedAt)).toBe(true);
-    expect(handed.isCurrent(handed.armedAt + 1)).toBe(false);
-  });
-
-  it('does not sign a gate it refused', async () => {
-    verifyGate.mockResolvedValue({ ok: false, reason: 'gateClosed' });
-    await tapEnter();
-    expect(handOverSignature).not.toHaveBeenCalled();
-  });
-
-  it('shows the code for the gate it read once the hand-over asks for it', async () => {
-    handOverSignature.mockImplementation(
-      async ({ setState }: { setState: (update: (prev: ArmState) => ArmState) => void }) => {
-        setState((prev) => ({ ...prev, phase: 'qr', error: 'writeFailed' }));
-      },
-    );
-    await tapEnter();
-    expect(screen.getByText(ko.enter.qrTitle)).toBeInTheDocument();
-    expect(screen.getByText(ko.enter.writeFailed)).toBeInTheDocument();
-    // <Qr /> is mounted for the code that was actually read. jsdom has no secure element, so
-    // what it settles on here is its own refusal — that it got that far is the wiring under test.
-    expect(await screen.findByText(ko.enter.signFailed)).toBeInTheDocument();
-  });
 
   it('comes back to the start button after a refusal', async () => {
     const user = userEvent.setup();

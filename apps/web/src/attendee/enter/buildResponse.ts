@@ -1,5 +1,6 @@
 // Entry, step 2 (spec §7.2 steps 4-6): the phone signs the gate's code and hands the answer
-// back, by NFC if it can and by a code on screen if it cannot.
+// back inside the same NFC session that read it, or — when there is no session to be had — as
+// a code on screen carrying the identical bytes.
 //
 // Two invariants hold this file together, and both are about what the chain will accept:
 //
@@ -32,11 +33,13 @@ import {
   deviceKeyErrorCode,
   signWithDeviceKey,
 } from '../../shared/deviceKey';
-import { writeGateResponse } from '../../shared/nfc';
+import { NFC_ERROR, NfcError } from '../../shared/nfc';
 import { readIdentity } from '../../shared/chain/reads';
 import { getConfig } from '../../shared/config';
 import { getSession } from '../../shared/session';
 import type { ArmState, PhaseEnding } from './useArm';
+import { tapEnding } from './useArm';
+import { verifyGate, type GateFailure } from './verifyGate';
 
 /** Every way the hand-over can end badly. Each has its own ko+en sentence. */
 export type HandOverFailure =
@@ -185,54 +188,80 @@ export function handOverEnding(cause: unknown): PhaseEnding {
   return { phase: 'failed', error: reason };
 }
 
-export interface HandOver {
+/** A gate the three Task 24 layers refused, raised out of the in-session callback. */
+export class GateRefused extends Error {
+  readonly reason: GateFailure;
+
+  constructor(reason: GateFailure) {
+    super(reason);
+    this.name = 'GateRefused';
+    this.reason = reason;
+  }
+}
+
+export interface TapSigner {
   tokenId: string;
-  gateCode: GateCodeWire;
   setState: (update: (prev: ArmState) => ArmState) => void;
-  /** The arm window this hand-over belongs to, and the question that says it is still open. */
+  /** The arm window this tap belongs to, and the question that says it is still open. */
   armedAt: number;
   isCurrent: (armedAt: number) => boolean;
+  /** Called the moment the code is read, so the QR fallback can answer the same one. */
+  onGateCode: (code: GateCodeWire) => void;
 }
 
 /**
- * Sign → check → write → wait, in that order and no other. Every await is followed by the same
- * question: is this still the window the chip opened? A signature made inside a window that has
- * since closed must not be written, and a write that lands after the countdown must not paint a
- * "waiting" screen over a flow the attendee has already been told to restart.
+ * The body of the one NFC session (spec §7.2 steps 3-5). `readThenWrite` opens the session,
+ * reads the gate's record, calls this, and writes what it returns to the **same** tag before
+ * ending the session — so everything here happens while the two phones are still touching.
+ *
+ * Which is why nothing in here may prompt: the biometric was already answered before the
+ * session opened, and `verifyGate`'s chain read carries its own budget so a slow RPC cannot
+ * eat the session. A refusal or a failed signature throws, which tears the session down
+ * without writing anything.
  */
-export async function handOverSignature({
-  tokenId,
-  gateCode,
-  setState,
-  armedAt,
-  isCurrent,
-}: HandOver): Promise<void> {
-  setState((prev) => ({ ...prev, phase: 'signing', error: '' }));
+export function tapSigner({ tokenId, setState, armedAt, isCurrent, onGateCode }: TapSigner) {
+  return async (gateCode: GateCodeWire): Promise<GateResponseWire> => {
+    const started = performance.now();
+    // The countdown may have expired while the reader was waiting for a tag. Throwing ends the
+    // session instead of signing into a window the secure chip has already closed.
+    if (!isCurrent(armedAt)) throw new NfcError(NFC_ERROR.cancelled);
+    onGateCode(gateCode);
 
-  let wire: GateResponseWire;
-  try {
-    wire = await buildGateResponse(tokenId, gateCode);
-  } catch (cause) {
-    if (!isCurrent(armedAt)) return;
-    const ending = handOverEnding(cause);
-    setState((prev) => ({ ...prev, ...ending, armedAt: ending.phase === 'idle' ? 0 : prev.armedAt }));
-    return;
+    setState((prev) => ({ ...prev, phase: 'verifying', error: '' }));
+    const verdict = await verifyGate(gateCode, { tokenId });
+    if (!verdict.ok) throw new GateRefused(verdict.reason);
+    if (!isCurrent(armedAt)) throw new NfcError(NFC_ERROR.cancelled);
+
+    setState((prev) => ({ ...prev, phase: 'signing', error: '' }));
+    const wire = await buildGateResponse(tokenId, gateCode);
+    if (!isCurrent(armedAt)) throw new NfcError(NFC_ERROR.cancelled);
+
+    setState((prev) => ({ ...prev, phase: 'writing', error: '' }));
+    if (import.meta.env.DEV && import.meta.env.MODE !== 'test') {
+      // The budget that matters: Android's HCE tag is up only while the phones touch.
+      console.info(`[enter] in-session verify+sign ${Math.round(performance.now() - started)}ms`);
+    }
+    return wire;
+  };
+}
+
+/**
+ * How a tap that did not end in a write is reported. The QR is a fallback, not a default: it is
+ * offered when this phone cannot tap at all, and when a session that had already read a code
+ * died before the write — there the code and the signature exist and a scanner can still take
+ * them. A session that died before any code arrived has nothing to show, so it keeps Task 24's
+ * sentence and the button.
+ */
+export function tapFailure(cause: unknown, hasGateCode: boolean): PhaseEnding {
+  if (cause instanceof GateRefused) return { phase: 'failed', error: cause.reason };
+  // Checked before the device-key codes: `NfcError` is how the session itself reports an
+  // ending, and `asHandOverError` would flatten every one of them into `signFailed`.
+  if (cause instanceof NfcError) {
+    const ending = tapEnding(cause);
+    return ending.phase === 'qr' || !hasGateCode ? ending : { phase: 'qr', error: 'writeFailed' };
   }
-  if (!isCurrent(armedAt)) return;
-
-  setState((prev) => ({ ...prev, phase: 'writing', error: '' }));
-  try {
-    await writeGateResponse(wire);
-  } catch {
-    // Spec §12: one failed write is the whole retry budget. The staff device is waiting and a
-    // second attempt costs more than showing a code the same reader can scan.
-    if (!isCurrent(armedAt)) return;
-    setState((prev) => ({ ...prev, phase: 'qr', error: 'writeFailed' }));
-    return;
+  if (cause instanceof HandOverError || cause instanceof DeviceKeyUnavailable || deviceKeyErrorCode(cause)) {
+    return handOverEnding(cause);
   }
-  if (!isCurrent(armedAt)) return;
-
-  // Spec §7.2 step 4: one buzz, the phone is done — the result comes from the chain, not here.
-  if (navigator.vibrate) navigator.vibrate(60);
-  setState((prev) => ({ ...prev, phase: 'waiting', error: '' }));
+  return hasGateCode ? { phase: 'qr', error: 'writeFailed' } : { phase: 'failed', error: 'tapFailed' };
 }

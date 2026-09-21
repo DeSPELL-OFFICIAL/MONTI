@@ -330,4 +330,16 @@ describe('verifyGate', () => {
       'AbiFunctionNotFoundError',
     );
   });
+
+  it('does not hold the NFC session open for a chain that will not answer', async () => {
+    const key = await newGateKey();
+    const wire = await signedBy(key);
+    cacheGate(wire, TOKEN_ID, { kx: key.kx, ky: key.ky });
+    gateInfo.mockReturnValue(new Promise(() => undefined));
+    // The two phones are touching for as long as this takes; past the budget the cached answer
+    // is the answer, the same as for a phone with no signal.
+    await expect(verifyGate(wire, { tokenId: TOKEN_ID, nowSeconds: NOW, budgetMs: 1 })).resolves.toEqual({
+      ok: true,
+    });
+  });
 });
