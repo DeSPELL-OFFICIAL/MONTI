@@ -75,7 +75,12 @@ export const en: typeof ko = {
     detailGuide: 'At the door, tap Enter and hold your phone to the reader within 60 seconds.',
     noBarcode: 'There is no code to show.',
   },
-  claim: { cta: 'Get a ticket', working: 'Getting your ticket', done: 'You got the ticket', failed: 'Could not get the ticket. Please try again shortly.' },
+  claim: {
+    cta: 'Get a ticket', working: 'Getting your ticket', done: 'You got the ticket', tierLabel: 'Ticket type',
+    failed: 'Could not get the ticket. Please try again shortly.',
+    confirming: 'Still confirming. Your ticket will show up under My tickets shortly.',
+    limitReached: 'You already have every ticket this event allows.',
+  },
   transfer: {
     title: 'Hand over', byNickname: 'Nickname', byAddress: 'Address', byPhone: 'Phone',
     countryCode: 'Country code', findCta: 'Find', notFound: 'Not found.',

@@ -73,7 +73,12 @@ export const ko = {
     detailGuide: '입구에서 입장하기를 누르고 60초 안에 단말기에 휴대폰을 대세요.',
     noBarcode: '보여줄 코드는 없어요.',
   },
-  claim: { cta: '티켓 받기', working: '받는 중이에요', done: '티켓을 받았어요', failed: '티켓을 받지 못했어요. 잠시 뒤 다시 시도해 주세요.' },
+  claim: {
+    cta: '티켓 받기', working: '받는 중이에요', done: '티켓을 받았어요', tierLabel: '티켓 종류',
+    failed: '티켓을 받지 못했어요. 잠시 뒤 다시 시도해 주세요.',
+    confirming: '아직 확인 중이에요. 잠시 뒤 내 티켓에서 확인해 주세요.',
+    limitReached: '이 행사에서 받을 수 있는 티켓을 이미 다 받았어요.',
+  },
   transfer: {
     title: '양도', byNickname: '별명', byAddress: '주소', byPhone: '전화번호',
     countryCode: '국가 번호', findCta: '찾기', notFound: '찾을 수 없어요.',
