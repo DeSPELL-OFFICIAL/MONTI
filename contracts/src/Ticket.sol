@@ -2,6 +2,7 @@
 pragma solidity 0.8.31;
 
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {IIdentity} from "./interfaces/IIdentity.sol";
 import {IOrganizers} from "./interfaces/IOrganizers.sol";
 import {ITicket} from "./interfaces/ITicket.sol";
@@ -261,6 +262,43 @@ contract Ticket is ERC721, ITicket {
 
     function offerOf(uint256 tokenId) external view returns (Offer memory) {
         return _offers[tokenId];
+    }
+
+    /// @notice Spec 5.4: the sender picks a recipient by phone number or nickname. The commitment is a
+    ///         hash of that handle; the attester later signs "this account is that handle's owner".
+    function createOffer(uint256 tokenId, bytes32 recipientCommitment, uint64 expiresAt) external {
+        if (ownerOf(tokenId) != msg.sender) revert Unauthorized();
+        EventMeta storage m = _events[_eventOf[tokenId]];
+        if (_revoked[tokenId]) revert TicketRevoked();
+        if (!m.transferable) revert TransfersDisabled();
+        if (_checkIns[tokenId].ts != 0) revert AlreadyCheckedIn();
+        if (block.timestamp + m.transferCutoffSeconds > m.startsAt) revert TransferCutoffPassed();
+        if (_transfers[tokenId] >= m.maxTransfers) revert TransferLimitReached();
+        if (expiresAt <= block.timestamp) revert OfferExpired();
+
+        _offers[tokenId] = Offer({from: msg.sender, recipientCommitment: recipientCommitment, expiresAt: expiresAt});
+        emit OfferCreated(tokenId, msg.sender, recipientCommitment, expiresAt);
+    }
+
+    function cancelOffer(uint256 tokenId) external {
+        if (ownerOf(tokenId) != msg.sender) revert Unauthorized();
+        if (_offers[tokenId].from == address(0)) revert NoOffer();
+        delete _offers[tokenId];
+        emit OfferCancelled(tokenId);
+    }
+
+    function acceptOffer(uint256 tokenId, bytes calldata attesterSig) external {
+        Offer memory o = _offers[tokenId];
+        if (o.from == address(0)) revert NoOffer();
+        if (o.from != ownerOf(tokenId)) revert NoOffer();
+        if (block.timestamp > o.expiresAt) revert OfferExpired();
+
+        bytes32 digest = keccak256(abi.encode(tokenId, o.recipientCommitment, msg.sender));
+        if (ECDSA.recover(digest, attesterSig) != identity.attester()) revert BadAttesterSig();
+
+        delete _offers[tokenId];
+        _update(msg.sender, tokenId, address(0));
+        emit OfferAccepted(tokenId, o.from, msg.sender);
     }
 
     function _requireEventPermission(uint256 eventId, uint32 bit) private view {
