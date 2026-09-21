@@ -107,3 +107,35 @@ export function readTicket() {
     tiers: (eventId: bigint) => call<readonly TierStruct[]>('tiers', [eventId]),
   };
 }
+
+/**
+ * The exact component names, in the exact order, of every value the helpers above hand back
+ * as a named object. viem fills those objects positionally out of the ABI tuple, so a field
+ * sub-plan 01 reorders or renames would land in the wrong property — same width, no error,
+ * wrong value — and `gateInfo`'s six separate outputs are destructured by index here.
+ *
+ * `abis.test.ts` pins every list below against the generated ABI, so that change breaks a
+ * test instead of a screen. `satisfies` keeps each list honest against its interface.
+ */
+const EVENT_META_FIELDS = [
+  'orgId', 'titleHash', 'descHash', 'imageCid', 'startsAt', 'endsAt', 'venueHash',
+  'saleStart', 'saleEnd', 'transferable', 'transferCutoffSeconds', 'maxTransfers',
+  'approvalRequired', 'category', 'regionCode', 'requireKyc',
+] as const satisfies readonly (keyof EventMetaStruct)[];
+
+const TIER_FIELDS = [
+  'name', 'priceUsdCents', 'supply', 'minted', 'maxPerWallet', 'seated',
+] as const satisfies readonly (keyof TierStruct)[];
+
+const CHECK_IN_FIELDS = [
+  'gateId', 'ts', 'nonceHash', 'manual',
+] as const satisfies readonly (keyof CheckInStruct)[];
+
+const GATE_INFO_FIELDS = [
+  'eventId', 'account', 'kx', 'ky', 'open', 'revoked',
+] as const satisfies readonly (keyof GateInfoStruct)[];
+
+export const STRUCT_SHAPES = {
+  Ticket: { eventMeta: EVENT_META_FIELDS, tiers: TIER_FIELDS, checkInOf: CHECK_IN_FIELDS },
+  Organizers: { gateInfo: GATE_INFO_FIELDS },
+} as const;
