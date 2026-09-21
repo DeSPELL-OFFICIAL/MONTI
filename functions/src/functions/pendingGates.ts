@@ -13,6 +13,16 @@ const ZERO_KEY = `0x${'00'.repeat(32)}`;
 /** 한 공연의 승인 대기 단말기 수 상한. 화면 하나에 담기는 양을 넘으면 큐가 아니라 쓰레기통이다. */
 export const PENDING_GATE_PAGE_SIZE = 200;
 
+/**
+ * 한 uid 가 동시에 올려 둘 수 있는 `pending` 제안 수.
+ *
+ * 이 함수는 전화 인증만 확인하고 체인 권한을 묻지 않으므로(게이트를 만든 단말기에는 스마트 계정이
+ * 없다), 로그인한 누구나 줄을 세울 수 있다. 상한이 없으면 한 사람이 관리자 화면을 통째로 덮어
+ * 진짜 단말기가 `PENDING_GATE_PAGE_SIZE` 밖으로 밀려난다. 게이트 3대는 한 사람이 한 번에 설치하는
+ * 현실적인 최대치고, 승인되거나(`registered`) 7일 뒤 만료되면(`reconcilePending`) 자리가 돌아온다.
+ */
+export const MAX_PENDING_PER_UID = 3;
+
 export interface PendingGateRow {
   gateAccount: Hex;
   kx: Hex;
@@ -78,6 +88,9 @@ async function requireGateAdmin(eventId: bigint, caller: Hex): Promise<void> {
     functionName: 'eventOrg',
     args: [eventId],
   })) as bigint;
+  // 없는 공연은 0 을 돌려준다. 그대로 이어 가면 `ownerOf(0)` 은 0 주소라 아무도 오너가 아니고,
+  // 호출자는 "권한 없음" 을 받아 자기 권한을 의심하게 된다 — 틀린 것은 공연 번호다.
+  if (orgId === 0n) throw new HttpsError('not-found', 'UNKNOWN_EVENT');
 
   const [owner, canManageGates] = await Promise.all([
     pc.readContract({
@@ -119,23 +132,45 @@ export const submitPendingGate = onCall(async (request): Promise<{ ok: true }> =
 
   // 문서 id 는 소문자 주소다. 같은 단말기가 다시 올려도 줄이 하나 더 생기지 않는다.
   const ref = db.collection(PENDING_GATES).doc(gateAccount.toLowerCase());
+  const mine = db
+    .collection(PENDING_GATES)
+    .where('submittedBy', '==', uid)
+    .where('status', '==', 'pending')
+    .limit(MAX_PENDING_PER_UID);
+
   await db.runTransaction(async (tx) => {
     const existing = await tx.get(ref);
-    if (!existing.exists) {
-      tx.set(ref, {
-        eventId,
-        kx,
-        ky,
-        submittedBy: uid,
-        status: 'pending',
-        createdAt: FieldValue.serverTimestamp(),
-      });
+
+    if (existing.exists) {
+      // **올린 사람만 고친다.** 게이트 주소는 스태프 화면에 글자로 뜨는 반공개 값이라, 이 검사가
+      // 없으면 아무 로그인 사용자나 남의 단말기 키를 덮어쓰거나 `eventId` 를 바꿔 그 줄을 원래
+      // 주최자의 목록에서 치울 수 있다. 관리자는 소유자 키와 맞지 않는 키로 게이트를 등록하게 되고,
+      // 그 게이트는 어떤 입장도 검증하지 못한다.
+      if (existing.get('submittedBy') !== uid) {
+        throw new HttpsError('permission-denied', 'NOT_YOUR_GATE');
+      }
+      // 재제출은 키만 갈아 끼운다. `status` 와 `createdAt` 은 그대로 둔다 —
+      // 이미 체인에 올라간 게이트를 다시 `pending` 으로 돌리면 `registerGate` 가 같은 계정을
+      // 두 번 받지 않으므로(`GateAccountInUse`) 승인할 수 없는 줄이 화면에 영영 남는다.
+      tx.set(ref, { eventId, kx, ky }, { merge: true });
       return;
     }
-    // 재제출은 키만 갈아 끼운다. `status` 와 `createdAt` 은 그대로 둔다 —
-    // 이미 체인에 올라간 게이트를 다시 `pending` 으로 돌리면 `registerGate` 가 같은 계정을
-    // 두 번 받지 않으므로(`GateAccountInUse`) 승인할 수 없는 줄이 화면에 영영 남는다.
-    tx.set(ref, { eventId, kx, ky, submittedBy: uid }, { merge: true });
+
+    // 등식 두 개뿐이라 복합 색인이 필요 없다(Firestore 가 단일 필드 색인을 병합한다).
+    // 상한만큼만 읽어 세면 되므로 밀린 줄이 몇 개든 읽는 양은 3건으로 고정이다.
+    const open = await tx.get(mine);
+    if (open.size >= MAX_PENDING_PER_UID) {
+      throw new HttpsError('resource-exhausted', 'TOO_MANY_PENDING');
+    }
+
+    tx.set(ref, {
+      eventId,
+      kx,
+      ky,
+      submittedBy: uid,
+      status: 'pending',
+      createdAt: FieldValue.serverTimestamp(),
+    });
   });
 
   return { ok: true };
@@ -154,10 +189,14 @@ export const listPendingGates = onCall(async (request): Promise<{ gates: Pending
   const eventId = requireEventId(raw.eventId);
   await requireGateAdmin(BigInt(eventId), caller);
 
+  // 최신 것부터. 정렬이 없으면 200칸 창이 문서 id(주소) 순으로 잘려, 방금 올린 단말기가
+  // 주소 하나 때문에 화면에서 사라진다. 등식 둘 + 다른 필드 정렬이라 복합 색인이 필요하다
+  // (`firestore.indexes.json` 의 `pendingGates (eventId, status, createdAt desc)`).
   const snapshot = await db
     .collection(PENDING_GATES)
     .where('eventId', '==', eventId)
     .where('status', '==', 'pending')
+    .orderBy('createdAt', 'desc')
     .limit(PENDING_GATE_PAGE_SIZE)
     .get();
 

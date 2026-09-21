@@ -17,7 +17,7 @@ const TX = '0xaa';
 const KYC_TX = '0xee';
 
 /**
- * persons / users / transferInvites / authChallenges / system 다섯 컬렉션만 흉내 내는
+ * persons / users / transferInvites / authChallenges / pendingGates / system 여섯 컬렉션만 흉내 내는
  * 가짜 Firestore. `pnpm test` 는 에뮬레이터 없이 돌기 때문에(vitest.config.ts)
  * registerIdentity.test.ts·eventChat.test.ts 가 쓰는 것과 같은 패턴을 그대로 쓴다.
  * 중첩 맵 merge 와 `FieldValue.delete()` 는 진짜 Firestore 와 똑같이 움직여야 한다 —
@@ -154,6 +154,7 @@ vi.mock('../src/lib/db.js', async () => {
     USERS: 'users',
     TRANSFER_INVITES: 'transferInvites',
     AUTH_CHALLENGES: 'authChallenges',
+    PENDING_GATES: 'pendingGates',
     SYSTEM: 'system',
     assertStatusTransition: real.assertStatusTransition,
     authAdmin: { setCustomUserClaims },
@@ -617,6 +618,53 @@ describe('reconcilePending — 만료된 인증 챌린지', () => {
   });
 });
 
+describe('reconcilePending — 늙은 게이트 제안', () => {
+  const GATE = '0x1234123412341234123412341234123412341234';
+  const day = 24 * 60 * 60 * 1000;
+
+  function queued(id: string, ageMs: number, status = 'pending'): void {
+    write(`pendingGates/${id}`, {
+      eventId: '11',
+      kx: `0x${'11'.repeat(32)}`,
+      ky: `0x${'22'.repeat(32)}`,
+      submittedBy: 'uid-1',
+      status,
+      createdAt: Timestamp.fromMillis(Date.now() - ageMs),
+    });
+  }
+
+  it('expires a proposal nobody approved within seven days and leaves a fresh one alone', async () => {
+    queued(GATE, 8 * day);
+    queued('0x5555555555555555555555555555555555555555', 6 * day);
+
+    await run({} as never);
+
+    expect(snapshot(`pendingGates/${GATE}`).get('status')).toBe('expired');
+    expect(snapshot('pendingGates/0x5555555555555555555555555555555555555555').get('status')).toBe('pending');
+  });
+
+  it('never touches a proposal the chain already closed', async () => {
+    // `GateRegistered` 가 닫은 줄은 체인에 올라간 게이트다. 만료로 덮으면 기록이 거짓이 된다.
+    queued(GATE, 30 * day, 'registered');
+    writes.length = 0;
+
+    await run({} as never);
+
+    expect(writes).toEqual([]);
+    expect(snapshot(`pendingGates/${GATE}`).get('status')).toBe('registered');
+  });
+
+  it('asks the index for the old ones instead of filtering the window in memory', async () => {
+    await run({} as never);
+
+    const gates = queries.find((q) => q.name === 'pendingGates');
+    expect(gates?.filters).toEqual([
+      ['status', '==', 'pending'],
+      ['createdAt', '<', expect.any(Timestamp)],
+    ]);
+  });
+});
+
 describe('reconcilePending — 스윕 격리', () => {
   it('runs the later sweeps even when an earlier one throws', async () => {
     failQuery.add('persons');
@@ -656,6 +704,7 @@ describe('reconcilePending — 스윕 격리', () => {
       ['persons', 200],
       ['transferInvites', 200],
       ['authChallenges', 200],
+      ['pendingGates', 200],
     ]);
   });
 

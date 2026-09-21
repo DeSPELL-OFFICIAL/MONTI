@@ -8,6 +8,7 @@ import { deployment, publicClient } from '../lib/chain.js';
 import { mintSessionClaims } from '../lib/claims.js';
 import {
   AUTH_CHALLENGES,
+  PENDING_GATES,
   PERSONS,
   TRANSFER_INVITES,
   USERS,
@@ -30,6 +31,12 @@ const SWEEP_LIMIT = 200;
  * 미룬 문서는 `updatedAt` 을 건드리지 않으므로 다음 5분 틱이 이들을 가장 먼저 집는다.
  */
 const MAX_KYC_RESENDS_PER_RUN = 20;
+/**
+ * 승인 없이 이만큼 지난 게이트 제안은 만료로 내린다. 스태프가 단말기를 설치하고 주최자가
+ * 승인하기까지 걸리는 시간은 길어야 공연 준비 기간이다 — 일주일이면 그 제안은 버려진 것이고,
+ * 남겨 두면 `listPendingGates` 의 200칸 창과 uid 당 상한(`MAX_PENDING_PER_UID`)을 함께 먹는다.
+ */
+const PENDING_GATE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const SCHEDULE = 'every 5 minutes';
 
 type PublicClient = ReturnType<typeof publicClient>;
@@ -391,6 +398,33 @@ async function sweepAuthChallenges(): Promise<void> {
 }
 
 /**
+ * 승인되지 않은 채 늙은 게이트 제안을 `expired` 로 내린다. 체인에는 손대지 않는다 —
+ * 게이트 허용목록의 원본은 언제나 `Organizers` 이고, 이 컬렉션은 승인 전 제안일 뿐이다.
+ *
+ * 만료 판정은 **질의가** 한다(루트 `firestore.indexes.json` 의 `pendingGates (status, createdAt)`).
+ * 메모리에서 거르면 200칸 창이 문서 id(주소) 순이라, 살아 있는 `pending` 이 창을 채우는 순간
+ * 늙은 제안이 영영 창에 들어오지 못한다. 부등호가 걸리면 Firestore 가 `createdAt` 오름차순으로
+ * 정렬해 주므로 가장 오래 매달려 있던 것부터 내려간다.
+ */
+async function sweepPendingGates(): Promise<void> {
+  const cutoff = Timestamp.fromMillis(Date.now() - PENDING_GATE_TTL_MS);
+  const snapshot = await db
+    .collection(PENDING_GATES)
+    .where('status', '==', 'pending')
+    .where('createdAt', '<', cutoff)
+    .limit(SWEEP_LIMIT)
+    .get();
+
+  for (const doc of snapshot.docs) {
+    try {
+      await doc.ref.set({ status: 'expired' }, { merge: true });
+    } catch (cause) {
+      error('reconcile.pendingGate', { gateAccount: doc.id, reason: (cause as Error).message });
+    }
+  }
+}
+
+/**
  * 5분마다 도는 대사(對査) 함수. 체인과 DB 를 함께 건드리다 중간에 죽은 작업을 주워 고친다
  * (스펙 §10.4 규칙 3의 "주기적 대사 함수").
  *
@@ -406,6 +440,7 @@ export const reconcilePending = onSchedule(
       ['persons', sweepPersons],
       ['transferInvites', sweepTransferInvites],
       ['authChallenges', sweepAuthChallenges],
+      ['pendingGates', sweepPendingGates],
     ] as const;
 
     for (const [name, sweep] of sweeps) {

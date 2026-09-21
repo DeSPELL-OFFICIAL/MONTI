@@ -88,19 +88,34 @@ function docRef(path: string) {
   };
 }
 
-function query(name: string, filters: Array<[string, unknown]>, max: number) {
+interface Order {
+  field: string;
+  direction: 'asc' | 'desc';
+}
+
+function comparable(value: unknown): number {
+  return value instanceof Timestamp ? value.toMillis() : Number(value ?? 0);
+}
+
+function query(name: string, filters: Array<[string, unknown]>, max: number, order?: Order) {
   return {
     where: (field: string, op: string, value: unknown) => {
       if (op !== '==') throw new Error(`UNSUPPORTED_OP:${op}`);
-      return query(name, [...filters, [field, value]], max);
+      return query(name, [...filters, [field, value]], max, order);
     },
-    limit: (n: number) => query(name, filters, n),
+    orderBy: (field: string, direction: 'asc' | 'desc' = 'asc') =>
+      query(name, filters, max, { field, direction }),
+    limit: (n: number) => query(name, filters, n, order),
     get: async () => {
-      const matched = [...docs.entries()]
+      const rows = [...docs.entries()]
         .filter(([path]) => path.startsWith(`${name}/`))
-        .filter(([, data]) => filters.every(([field, value]) => data[field] === value))
-        .slice(0, max)
-        .map(([path]) => snapshot(path));
+        .filter(([, data]) => filters.every(([field, value]) => data[field] === value));
+      // 정렬은 **자르기 전에** 한다. 진짜 Firestore 와 순서가 달라지면 상한 테스트가 거짓말을 한다.
+      if (order) {
+        const sign = order.direction === 'desc' ? -1 : 1;
+        rows.sort(([, a], [, b]) => sign * (comparable(a[order.field]) - comparable(b[order.field])));
+      }
+      const matched = rows.slice(0, max).map(([path]) => snapshot(path));
       return { docs: matched, size: matched.length, empty: matched.length === 0 };
     },
   };
@@ -111,14 +126,18 @@ function collection(name: string) {
 }
 
 type Ref = ReturnType<typeof docRef>;
+type Query = ReturnType<typeof query>;
+
+/** 진짜 `Transaction.get` 처럼 문서 참조도 질의도 받는다 — uid 당 상한은 트랜잭션 안에서 센다. */
 const fakeDb = {
   collection,
   runTransaction: async <T>(fn: (tx: {
-    get: (ref: Ref) => Promise<ReturnType<typeof snapshot>>;
+    get: (target: Ref | Query) => Promise<ReturnType<typeof snapshot> | Awaited<ReturnType<Query['get']>>>;
     set: (ref: Ref, data: Record<string, unknown>, options?: { merge?: boolean }) => void;
   }) => Promise<T>): Promise<T> =>
     fn({
-      get: async (ref: Ref) => snapshot(ref.path),
+      get: async (target: Ref | Query) =>
+        'path' in target ? snapshot(target.path) : await target.get(),
       set: (ref: Ref, data: Record<string, unknown>, options?: { merge?: boolean }) =>
         write(ref.path, data, options),
     }),
@@ -138,6 +157,7 @@ vi.mock('../src/lib/auth.js', async (importOriginal) => ({
 
 const { PENDING_GATES } = await import('../src/lib/db.js');
 const { PERM_MANAGE_GATES } = await import('../src/lib/auth.js');
+const { MAX_PENDING_PER_UID } = await import('../src/functions/pendingGates.js');
 const { listPendingGates, submitPendingGate } = await import('../src/functions/pendingGates.js');
 const functionsTest = (await import('firebase-functions-test')).default();
 const submit = functionsTest.wrap(submitPendingGate);
@@ -145,6 +165,8 @@ const list = functionsTest.wrap(listPendingGates);
 
 /** 스태프 단말기는 전화 인증 세션으로 부른다 — 게이트 계정은 Identity 구성원이 아니다. */
 const staff = { uid: 'uid-1', token: { phone_number: '+821011112222' } };
+/** 다른 스태프 폰. 게이트 주소는 화면에 글자로 뜨는 반공개 값이라 이쪽도 그 주소를 안다. */
+const otherStaff = { uid: 'uid-7', token: { phone_number: '+821033334444' } };
 const admin = { uid: 'uid-2', token: { account: CALLER } };
 const payload = { eventId: '11', gateAccount: GATE, kx: KX, ky: KY };
 
@@ -211,6 +233,43 @@ describe('submitPendingGate', () => {
     const doc = snapshot(`${PENDING_GATES}/${GATE.toLowerCase()}`);
     expect(doc.get('status')).toBe('registered');
     expect(doc.get('kx')).toBe(`0x${'44'.repeat(32)}`);
+  });
+
+  it('lets only the uid that queued a gate change its keys', async () => {
+    await post();
+
+    // 남의 줄에는 손대지 못한다 — 키를 덮어쓰거나 `eventId` 를 바꿔 원래 주최자 목록에서 치울 수 없다.
+    await expect(post({ ...payload, kx: `0x${'99'.repeat(32)}` }, otherStaff)).rejects.toThrow('NOT_YOUR_GATE');
+    await expect(post({ ...payload, eventId: '12' }, otherStaff)).rejects.toThrow('NOT_YOUR_GATE');
+    const doc = snapshot(`${PENDING_GATES}/${GATE.toLowerCase()}`);
+    expect(doc.get('kx')).toBe(KX);
+    expect(doc.get('eventId')).toBe('11');
+    expect(doc.get('submittedBy')).toBe('uid-1');
+
+    // 올린 uid 는 그대로 고친다.
+    await expect(post({ ...payload, kx: `0x${'99'.repeat(32)}` })).resolves.toEqual({ ok: true });
+    expect(snapshot(`${PENDING_GATES}/${GATE.toLowerCase()}`).get('kx')).toBe(`0x${'99'.repeat(32)}`);
+  });
+
+  it('caps one uid at three open proposals, and frees a slot when one is closed', async () => {
+    const address = (n: number) => getAddress(`0x${String(n).repeat(40).slice(0, 40)}`);
+    for (let i = 1; i <= MAX_PENDING_PER_UID; i += 1) {
+      await post({ ...payload, gateAccount: address(i) });
+    }
+    await expect(post({ ...payload, gateAccount: address(4) })).rejects.toThrow('TOO_MANY_PENDING');
+    expect(docs.size).toBe(MAX_PENDING_PER_UID);
+
+    // 다른 스태프의 몫은 그대로다 — 상한은 uid 마다 센다.
+    await expect(post({ ...payload, gateAccount: address(4) }, otherStaff)).resolves.toEqual({ ok: true });
+
+    // 승인(또는 만료)되면 자리가 돌아온다.
+    write(`${PENDING_GATES}/${address(1).toLowerCase()}`, { status: 'registered' }, { merge: true });
+    await expect(post({ ...payload, gateAccount: address(5) })).resolves.toEqual({ ok: true });
+
+    // 이미 올린 단말기를 다시 올리는 것은 새 줄이 아니라서 상한에 걸리지 않는다.
+    await expect(post({ ...payload, gateAccount: address(2), ky: `0x${'77'.repeat(32)}` })).resolves.toEqual({
+      ok: true,
+    });
   });
 
   it('normalizes the event id the same way the queue is read', async () => {
@@ -290,6 +349,25 @@ describe('listPendingGates', () => {
     // 이 공연의 유일한 줄은 이미 체인에 올라갔다 — 승인 화면에 남을 것이 없다.
     expect((await queue()).gates).toEqual([]);
     expect((await queue({ eventId: '12' })).gates).toHaveLength(1);
+  });
+
+  it('hands the organizer the newest submissions first', async () => {
+    await post();
+    await post({ ...payload, gateAccount: SECOND_GATE });
+    chain.canManageGates = true;
+
+    // 정렬이 없으면 200칸 창이 주소 순으로 잘려 방금 올린 단말기가 사라진다.
+    const result = await queue();
+    expect(result.gates.map((gate) => gate.gateAccount)).toEqual([SECOND_GATE, GATE]);
+    expect(Number(result.gates[0]?.submittedAt)).toBeGreaterThan(Number(result.gates[1]?.submittedAt));
+  });
+
+  it('refuses an event that no organizer owns', async () => {
+    chain.orgId = 0n;
+    chain.canManageGates = true;
+
+    // 없는 공연에 "권한 없음" 을 돌려주면 호출자가 자기 권한을 의심한다. 틀린 것은 공연 번호다.
+    await expect(queue({ eventId: '404' })).rejects.toThrow('UNKNOWN_EVENT');
   });
 
   it('refuses a malformed event id before it reads the chain', async () => {
