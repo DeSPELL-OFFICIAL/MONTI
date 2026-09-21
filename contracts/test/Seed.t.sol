@@ -10,6 +10,16 @@ import {Organizers} from "../src/Organizers.sol";
 import {Ticket} from "../src/Ticket.sol";
 import {P256Vectors} from "./utils/P256Vectors.sol";
 
+/// @notice The seed, plus the one entry point the tests need and the script must not have.
+/// @dev    `record()` writes only under a broadcast, and `forge test` is not one. This is how the tests
+///         reach the writing half without giving the script itself a public entry point that could be
+///         pointed at the tracked deployments/seed-10143.json.
+contract SeedHarness is Seed {
+    function recordAt(string memory path) external {
+        _record(path);
+    }
+}
+
 /// @notice Runs the seed against a stack the real deploy script just built in process, because what the
 ///         founder needs from this script is not that it compiles but that sub-plans 03 and 04 have
 ///         something to open on: a published event with a free tier, an open gate, and members holding
@@ -18,15 +28,6 @@ import {P256Vectors} from "./utils/P256Vectors.sol";
 ///         code path without the deployments file. The chain id is pinned to 31340 — Deploy.t.sol has
 ///         31337 and DeployCoinbaseFactory.t.sol 31338/31339 — so the files written here are the
 ///         gitignored local ones and never the tracked 10143 pair.
-contract SeedHarness is Seed {
-    /// @dev `record()` writes only under a broadcast, and `forge test` is not one. This is how the
-    ///      tests reach the writing half without giving the script itself a public entry point that
-    ///      could be pointed at the tracked deployments/seed-10143.json.
-    function recordAt(string memory path) external {
-        _record(path);
-    }
-}
-
 contract SeedTest is Test {
     EntryPoint internal entryPoint;
     Deploy internal deployScript;
