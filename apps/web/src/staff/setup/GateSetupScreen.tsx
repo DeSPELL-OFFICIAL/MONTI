@@ -5,7 +5,7 @@ import QRCode from 'qrcode';
 import { fmt } from '../../shared/i18n';
 import { Alert, Button, Field, Screen, Spinner } from '../../shared/ui';
 import { SEEDED_EVENT_ID } from '../constants';
-import { useStaffSetupCopy, type StaffSetupCopy } from './copy';
+import { useStaffSetupCopy, type StaffSetupCopy } from '../copy';
 import { gatePayloadText, useGateRegistration, type GateSetupError } from './useGateRegistration';
 
 const DIGITS_ONLY = /\D/g;

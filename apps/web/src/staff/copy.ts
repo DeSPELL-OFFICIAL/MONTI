@@ -1,0 +1,339 @@
+import { useLocale } from '../shared/i18n';
+import type { DenyCode } from './types';
+
+/**
+ * **모든 스태프 문장이 사는 한 곳.** 설치 화면(T15)과 게이트 콘솔(T31)이 여기서 갈라져 나온다.
+ *
+ * 이 모듈이 생기기 전에는 설치 문구가 `staff/setup/copy.ts` 에 따로 있었고, 그 파일은 자기 주석에
+ * "`copy-lint` 는 `staff` 디렉터리를 건너뛴다 — 관객에게 금지된 낱말이 스태프에게는 그냥 일하는
+ * 말이다"라고 적어 두었다. **그 규칙은 뒤집혔다.** 게이트 화면은 관객이 스태프 어깨 너머로 같이
+ * 보는 화면이고("이미 입장했어요"를 읽는 사람은 거절당한 그 관객이다), 스태프도 크립토를 모르는
+ * 아르바이트생이다. 그래서 `lint:copy` 가 이제 `apps/web/src/staff` 도 훑는다 — 스펙 §3.2 의
+ * 금지어는 여기서도 금지어다. "체인 확인 중"이 "확인 중입니다"가 된 이유가 그것이다.
+ *
+ * 규칙은 관객 카피(`shared/copy`)와 같다: 두 로케일, 같은 키, 문장은 여기 말고 어디에도 쓰지
+ * 않는다. 컴포넌트는 문장을 만들지 않고 고르기만 한다.
+ *
+ * The staff phone is held by someone being watched by a queue, so every line says what happened
+ * and what to do next — never just that something went wrong.
+ */
+export const staffKo = {
+  /** 게이트 단말기 등록 화면(스펙 §5.7-1). */
+  setup: {
+    title: '게이트 단말기 등록',
+    creating: '이 단말기 보안 칩에 게이트 키를 만들고 있어요.',
+    eventLabel: '행사 번호',
+    eventHint: '관리자에게 받은 행사 번호가 맞는지 확인하고 누르세요. 승인된 뒤에는 다른 행사로 옮길 수 없어요.',
+    eventInvalid: '숫자만 넣을 수 있어요.',
+    eventApply: '이 행사에 등록 요청',
+    notRequested: '아직 등록을 요청하지 않았어요. 행사 번호를 확인하고 위 단추를 누르세요.',
+    submitting: '등록을 요청하고 있어요.',
+    submitted: '등록을 요청했어요. 관리자가 승인하면 이 화면이 저절로 넘어가요.',
+    waitingUnsent: '아직 요청이 접수되지 않았어요. 아래 값을 관리자에게 직접 전달하세요.',
+    elapsed: '{{seconds}}초째 기다리는 중',
+    resubmit: '다시 요청',
+    registeredTitle: '등록됐어요',
+    registeredBody: '이제 이 단말기로 입장을 받을 수 있어요.',
+    gateIdLabel: '게이트 번호',
+    orgIdLabel: '주최 번호',
+    notOpen: '관리자가 아직 이 게이트의 문을 열지 않았어요.',
+    revoked: '이 게이트는 폐기됐어요. 관리자에게 문의하세요.',
+    fallbackTitle: '관리자가 직접 등록할 때',
+    fallbackHint: '아래 QR을 관리자 화면으로 읽히거나, 값을 그대로 읽어 주세요.',
+    accountLabel: '게이트 계정 주소',
+    kxLabel: '공개키 X',
+    kyLabel: '공개키 Y',
+    qrAlt: '게이트 등록 정보 QR',
+    errKeyUnavailable: '이 단말기에서는 게이트 키를 만들 수 없어요. 다른 단말기를 쓰세요.',
+    errAuthRequired: '로그인한 뒤에 등록을 요청할 수 있어요.',
+    signIn: '휴대폰 번호로 로그인',
+    errNotYourGate: '이 단말기는 다른 사람이 이미 등록을 요청했어요. 그 사람이 다시 요청하거나, 관리자에게 문의하세요.',
+    errTooManyPending: '승인 대기 중인 단말기가 너무 많아요. 관리자가 먼저 승인하거나 취소해야 해요.',
+    errUnknownEvent: '그런 행사 번호가 없어요. 번호를 다시 확인해 주세요.',
+    errSubmitRejected: '등록 요청을 보내지 못했어요. 아래 값을 관리자에게 직접 전달하세요.',
+    errChainUnreachable: '등록 상태를 확인하지 못했어요. 계속 다시 확인하고 있어요.',
+  },
+
+  /** 콘솔 머리글. 게이트가 지금 무엇을 믿고 문을 여는지 한 줄로 말한다. */
+  shell: {
+    staffLabel: '담당',
+    blockLabel: '블록',
+    /** 기록은 올라갔지만 아직 되돌려질 수 있는 상태(스펙 §7.2 8단계 앞쪽). */
+    stageRecording: '기록 중',
+    /** 되돌릴 수 없게 굳은 상태. */
+    stageSettled: '확정',
+    stageOffline: '연결 끊김',
+    snapshotLabel: '명단',
+    snapshotFresh: '방금 받음',
+    snapshotAge: '{{minutes}}분 전',
+    entriesLabel: '입장',
+    entriesCount: '{{count}}명',
+  },
+
+  /** 다음 관객을 기다리는 화면. */
+  ready: {
+    tap: '여기에 대주세요',
+    hint: '휴대폰 뒷면을 화면 가운데에 대주세요.',
+  },
+
+  /** 표를 받았고, 아직 보내기 전. */
+  received: {
+    title: '표를 받았어요',
+    ticketLabel: '표 번호',
+    precheckOk: '명단에서 확인했어요',
+    precheckUnknown: '명단에 없는 표예요. 지금 확인할게요',
+    precheckFail: '명단에서 문제를 찾았어요',
+  },
+
+  /**
+   * 보냈고, 답을 기다리는 중.
+   *
+   * 5초가 지나도 `wait` 는 **다시 대라는 말이 아니다**. 그 시점에도 작업은 살아 있고 6초에 온
+   * 승인은 여전히 초록이다(스펙 §7.3). 예전 문구 "다시 대세요"는 관객을 한 번 더 대게 만들어
+   * 같은 표로 두 번 보내는 일을 불렀다. 지금은 기다리라고만 말한다.
+   */
+  confirming: {
+    title: '확인 중입니다',
+    wait: '잠시만 기다려 주세요',
+  },
+
+  /** 입장. 초록은 여기에만 쓴다. */
+  admit: {
+    title: '입장',
+    entryLabel: '입장 순번',
+    entryValue: '{{count}}번째',
+    blockLabel: '블록',
+    settled: '확정됐어요',
+    recording: '기록하고 있어요',
+    deviceChanged: '24시간 안에 휴대폰을 바꿨어요',
+    photoAlt: '{{name}} 님 사진',
+    avatarAlt: '{{name}} 님 기본 그림',
+  },
+
+  /**
+   * 연결이 끊긴 채 들여보낸 입장. 초록을 쓰지 않는다 — 아직 기록되지 않은 입장을 확정된 입장과
+   * 같은 색으로 보여주면 스태프가 끝난 일로 착각한다.
+   */
+  offlineAdmit: {
+    title: '연결 없이 입장',
+    note: '연결이 돌아오면 기록할게요',
+    queued: '보낼 입장 {{count}}건',
+  },
+
+  /** 스펙 §13 거절 사유. 코드 하나에 문장 하나, 열세 개 전부. */
+  deny: {
+    ALREADY_USED: '이미 입장했어요',
+    WRONG_EVENT: '다른 행사 표예요',
+    REVOKED: '취소된 표예요',
+    EXPIRED_CODE: '시간이 지난 표시예요. 다시 대주세요',
+    NO_TICKET: '표가 없어요',
+    GATE_CLOSED: '아직 이 문을 열지 않았어요',
+    DEVICE_LOCKED: '휴대폰 잠금을 풀고 다시 대주세요',
+    DEVICE_MISMATCH: '표를 산 휴대폰이 아니에요',
+    GATE_MISMATCH: '다른 입구로 가주세요',
+    EVENT_ENDED: '행사가 끝났어요',
+    EVENT_CANCELLED: '취소된 행사예요',
+    TX_FAILED: '보내지 못했어요. 다시 대주세요',
+    UNKNOWN_REVERT: '이유를 읽지 못했어요. 관리자에게 문의하세요',
+  } satisfies Record<DenyCode, string>,
+
+  /** 거절 화면 자체를 부르는 말. 사유 문장 위에 붙는다. */
+  denyTitle: '입장 불가',
+
+  /** 탭을 받지 않은 이유(`gate/machine.ts` 의 `TAP_REFUSAL`). 관객이 아니라 게이트 사정이다. */
+  refusal: {
+    confirming: '앞사람을 확인하고 있어요. 잠시만 기다려 주세요',
+    showingVerdict: '화면을 읽고 다음을 눌러 주세요',
+  },
+
+  /** 직전 탭 슬롯. 다음 관객을 받는 중에도 방금 무슨 일이 있었는지 남긴다. */
+  lastTap: {
+    label: '직전',
+    admit: '입장',
+    offlineAdmit: '연결 없이 입장',
+    deny: '입장 불가',
+    none: '아직 없어요',
+  },
+
+  /** 아직 보내지 못한 입장 기록(`queue/opQueue.ts`). */
+  queue: {
+    pending: '보낼 입장 {{count}}건',
+    parked: '멈춘 입장 {{count}}건',
+    sending: '연결이 돌아오면 저절로 보내요',
+    lateWindowElapsed: '입장 기록을 보낼 수 있는 시간이 지났어요. 남은 기록을 관리자에게 전달하세요.',
+    lateUnavailable: '이 단말기로는 늦은 입장 기록을 보낼 수 없어요. 앱을 새로 받아 주세요.',
+  },
+
+  /** 수동 승인 창. 이 태스크는 껍데기만 만든다 — 승인 자체는 04 T32. */
+  override: {
+    title: '수동 승인',
+    pin: 'PIN',
+    reasonLabel: '사유',
+    reason1: '사진 대조',
+    reason2: '휴대폰 문제',
+    reason3: '시간이 지난 표시',
+    reason4: '기타',
+    approve: '수동 승인',
+    request: '결재 요청 보내기',
+    cancel: '취소',
+  },
+
+  /** 카드를 닫고 다음 관객을 받는다. */
+  done: '다음',
+};
+
+export const staffEn: typeof staffKo = {
+  setup: {
+    title: 'Register this gate device',
+    creating: 'Creating the gate key in this device’s secure chip.',
+    eventLabel: 'Event number',
+    eventHint: 'Check the event number the organizer gave you, then press. Once it is approved this device cannot be moved to another event.',
+    eventInvalid: 'Numbers only.',
+    eventApply: 'Request registration for this event',
+    notRequested: 'Nothing has been requested yet. Check the event number and press the button above.',
+    submitting: 'Sending the registration request.',
+    submitted: 'Request sent. This screen moves on by itself once the organizer approves it.',
+    waitingUnsent: 'The request has not arrived yet. Read the values below to the organizer.',
+    elapsed: 'Waiting for {{seconds}}s',
+    resubmit: 'Request again',
+    registeredTitle: 'Registered',
+    registeredBody: 'This device can now take people in.',
+    gateIdLabel: 'Gate number',
+    orgIdLabel: 'Organizer number',
+    notOpen: 'The organizer has not opened this gate yet.',
+    revoked: 'This gate has been revoked. Ask the organizer.',
+    fallbackTitle: 'If the organizer registers it by hand',
+    fallbackHint: 'Let them scan the code, or read the values out as they are.',
+    accountLabel: 'Gate account address',
+    kxLabel: 'Public key X',
+    kyLabel: 'Public key Y',
+    qrAlt: 'Gate registration code',
+    errKeyUnavailable: 'This device cannot create a gate key. Use a different one.',
+    errAuthRequired: 'Sign in first to request registration.',
+    signIn: 'Sign in with a phone number',
+    errNotYourGate: 'Someone else already requested registration for this device. Ask them to request it again, or ask the organizer.',
+    errTooManyPending: 'Too many devices are waiting for approval. The organizer has to approve or clear one first.',
+    errUnknownEvent: 'There is no event with that number. Check it again.',
+    errSubmitRejected: 'The request could not be sent. Read the values below to the organizer.',
+    errChainUnreachable: 'Could not check the registration. Still trying.',
+  },
+
+  shell: {
+    staffLabel: 'Staff',
+    blockLabel: 'Block',
+    stageRecording: 'Recording',
+    stageSettled: 'Settled',
+    stageOffline: 'Offline',
+    snapshotLabel: 'List',
+    snapshotFresh: 'Just now',
+    snapshotAge: '{{minutes}} min ago',
+    entriesLabel: 'Entries',
+    entriesCount: '{{count}}',
+  },
+
+  ready: {
+    tap: 'TAP HERE',
+    hint: 'Hold the back of the phone against the middle of this screen.',
+  },
+
+  received: {
+    title: 'Ticket received',
+    ticketLabel: 'Ticket number',
+    precheckOk: 'Found on the list',
+    precheckUnknown: 'Not on the list. Checking now',
+    precheckFail: 'The list says there is a problem',
+  },
+
+  confirming: {
+    title: 'Confirming',
+    wait: 'Please wait a moment',
+  },
+
+  admit: {
+    title: 'ADMIT',
+    entryLabel: 'Entry number',
+    entryValue: 'No. {{count}}',
+    blockLabel: 'Block',
+    settled: 'Settled',
+    recording: 'Recording',
+    deviceChanged: 'Phone changed in the last 24 hours',
+    photoAlt: 'Photo of {{name}}',
+    avatarAlt: 'Placeholder picture for {{name}}',
+  },
+
+  offlineAdmit: {
+    title: 'Admitted offline',
+    note: 'It will be recorded once the connection is back',
+    queued: '{{count}} entries to send',
+  },
+
+  deny: {
+    ALREADY_USED: 'Already entered',
+    WRONG_EVENT: 'Wrong event',
+    REVOKED: 'Ticket revoked',
+    EXPIRED_CODE: 'That code has expired. Tap again',
+    NO_TICKET: 'No ticket',
+    GATE_CLOSED: 'This door is not open yet',
+    DEVICE_LOCKED: 'Unlock the phone and tap again',
+    DEVICE_MISMATCH: 'Not the phone this ticket was bought on',
+    GATE_MISMATCH: 'Please use the other entrance',
+    EVENT_ENDED: 'This event has ended',
+    EVENT_CANCELLED: 'This event was cancelled',
+    TX_FAILED: 'Could not send it. Tap again',
+    UNKNOWN_REVERT: 'Could not read the reason. Ask the organizer',
+  },
+
+  denyTitle: 'No entry',
+
+  refusal: {
+    confirming: 'Still checking the person ahead. Please wait a moment',
+    showingVerdict: 'Read the screen, then press Next',
+  },
+
+  lastTap: {
+    label: 'Previous',
+    admit: 'Admitted',
+    offlineAdmit: 'Admitted offline',
+    deny: 'No entry',
+    none: 'Nothing yet',
+  },
+
+  queue: {
+    pending: '{{count}} entries to send',
+    parked: '{{count}} entries stopped',
+    sending: 'They go out by themselves once the connection is back',
+    lateWindowElapsed: 'The window for sending entry records has passed. Hand the rest to the organizer.',
+    lateUnavailable: 'This device cannot send late entry records. Please install the new app.',
+  },
+
+  override: {
+    title: 'Manual approval',
+    pin: 'PIN',
+    reasonLabel: 'Reason',
+    reason1: 'Photo check',
+    reason2: 'Phone trouble',
+    reason3: 'Expired code',
+    reason4: 'Other',
+    approve: 'Approve manually',
+    request: 'Send for approval',
+    cancel: 'Cancel',
+  },
+
+  done: 'Next',
+};
+
+export type StaffCopy = typeof staffKo;
+
+/** 관객 화면과 같은 로케일을 따른다 — 한 단말기는 한 언어로 말한다. */
+export function useStaffCopy(): StaffCopy {
+  return useLocale() === 'en' ? staffEn : staffKo;
+}
+
+/** 설치 화면이 쓰는 가지. 이름은 T15 때 그대로 두되, 문장은 위 한 곳에서만 온다. */
+export const staffSetupKo = staffKo.setup;
+export const staffSetupEn = staffEn.setup;
+export type StaffSetupCopy = StaffCopy['setup'];
+
+export function useStaffSetupCopy(): StaffSetupCopy {
+  return useStaffCopy().setup;
+}

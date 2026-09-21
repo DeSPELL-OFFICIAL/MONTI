@@ -13,7 +13,20 @@ export interface CopyLintHit {
 }
 
 const IGNORE_MARKER = 'copy-lint-ignore';
-const IGNORED_DIRS = new Set(['node_modules', 'dist', 'build', '.git', 'organizer', 'staff']);
+/**
+ * 훑지 않는 폴더. 빌드 산출물 말고 **사람이 쓴 코드 중에서는 `organizer` 하나뿐이다.**
+ *
+ * 한때 `staff` 도 여기 있었다. 근거는 "관객에게 금지된 낱말이 스태프에게는 그냥 일하는 말"이었고,
+ * 그 전제가 틀렸다. 게이트 화면은 스태프 혼자 보는 화면이 아니다 — "이미 입장했어요"를 스태프
+ * 어깨 너머로 같이 읽는 사람은 방금 거절당한 그 관객이고, 그 순간 화면에 "토큰"이 떠 있으면
+ * 관객 앱에서 한 글자도 쓰지 않으려고 들인 공이 입구에서 무너진다. 게다가 그 화면을 쥔 스태프도
+ * 엔지니어가 아니라 그날 처음 나온 아르바이트생이다. 그래서 스펙 §3.2 의 금지어는 두 앱 모두에
+ * 적용되고, `lint:copy` 가 `apps/web/src/staff` 도 훑는다.
+ *
+ * `organizer` 는 남는다: 주최자 화면은 정산·수수료·계약 주소를 다루는 사무 도구이고, 그것을
+ * 읽는 사람은 그 낱말로 일한다.
+ */
+const IGNORED_DIRS = new Set(['node_modules', 'dist', 'build', '.git', 'organizer']);
 const DEFAULT_EXTENSIONS = ['.tsx', '.ts'];
 
 // 'NFT'는 ASCII지만 부분 문자열로 매칭한다: 관객 카피에서 항상 잡아야 하는 강한 크립토 용어.
@@ -91,7 +104,7 @@ function isModuleSpecifier(node: ts.StringLiteral): boolean {
   return false;
 }
 
-// 관객에게 보이는 텍스트 노드만 모은다: 문자열/템플릿 리터럴과 JSX 텍스트.
+// 화면에 뜨는 텍스트 노드만 모은다: 문자열/템플릿 리터럴과 JSX 텍스트.
 function collectCopyNodes(sourceFile: ts.SourceFile): CopyNode[] {
   const nodes: CopyNode[] = [];
   const push = (node: ts.Node): void => {
@@ -135,7 +148,7 @@ function collectCopyNodes(sourceFile: ts.SourceFile): CopyNode[] {
   return nodes;
 }
 
-/** 단일 `.ts`/`.tsx` 소스를 파싱해 관객용 텍스트에서만 금지어를 찾는다. */
+/** 단일 `.ts`/`.tsx` 소스를 파싱해 화면에 뜨는 텍스트에서만 금지어를 찾는다. */
 export function scanFile(file: string, source: string): CopyLintHit[] {
   const scriptKind = file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
   const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, scriptKind);
@@ -190,7 +203,7 @@ async function main(): Promise<void> {
     console.error(`${hit.file}:${hit.line}:${hit.column}  banned word "${hit.word}"  ${hit.text}`);
   }
   if (hits.length > 0) {
-    console.error(`\n${hits.length} banned word(s) in attendee copy. 스펙 §3.2 위반입니다.`);
+    console.error(`\n${hits.length} banned word(s) in attendee-facing copy. 스펙 §3.2 위반입니다.`);
     process.exit(1);
   }
   console.log(`copy-lint: clean (${roots.join(', ')})`);

@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
  * The staff APK's entry point. It is a side-effecting module, so the test is what importing it
  * does — and the thing that has to happen first is `initI18n()`. Without it `useLocale()` reads
  * react-i18next's uninitialised stub, `i18n.language` is `undefined`, and every English string
- * in `staff/setup/copy.ts` is unreachable in the shipped build.
+ * in `staff/copy.ts` is unreachable in the shipped build.
  */
 const render = vi.fn();
 const initI18n = vi.fn(async () => undefined);

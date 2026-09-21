@@ -19,7 +19,7 @@ vi.mock('./useGateRegistration', async (importOriginal) => ({
 }));
 
 const { GateSetupScreen, PHONE_SIGN_IN_PATH, STAFF_SETUP_PATH } = await import('./GateSetupScreen');
-const { staffSetupKo } = await import('./copy');
+const { staffSetupKo } = await import('../copy');
 const { SEEDED_EVENT_ID } = await import('../constants');
 
 function registration(overrides: Partial<GateRegistration> = {}): GateRegistration {
@@ -201,13 +201,13 @@ describe('gate setup screen', () => {
 
 describe('staff setup copy', () => {
   it('says everything in both locales', async () => {
-    const { staffSetupEn } = await import('./copy');
+    const { staffSetupEn } = await import('../copy');
     expect(Object.keys(staffSetupEn).sort()).toEqual(Object.keys(staffSetupKo).sort());
     for (const value of Object.values(staffSetupEn)) expect(value.length).toBeGreaterThan(0);
   });
 
   it('keeps the interpolation placeholder in both', async () => {
-    const { staffSetupEn } = await import('./copy');
+    const { staffSetupEn } = await import('../copy');
     expect(staffSetupKo.elapsed).toContain('{{seconds}}');
     expect(staffSetupEn.elapsed).toContain('{{seconds}}');
   });

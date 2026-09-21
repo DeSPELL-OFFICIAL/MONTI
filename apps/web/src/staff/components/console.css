@@ -1,0 +1,443 @@
+/*
+ * 게이트 콘솔의 화면. 스태프가 한 손으로 들고, 줄 선 관객이 어깨 너머로 같이 보는 화면이다.
+ *
+ * 그래서 이 파일의 규칙은 취향이 아니라 제약에서 나왔다.
+ *
+ * **판정은 멀리서 읽혀야 한다.** 판정 제목은 40px 아래로 내려가지 않고 이름은 28px 아래로
+ * 내려가지 않는다. 문장은 15px 미만이 없다 — 스태프는 화면을 얼굴 앞까지 들어올릴 틈이 없다.
+ *
+ * **색만으로 말하지 않는다.** 초록·호박·빨강은 세 판정을 구분하는 세 신호 중 하나일 뿐이고,
+ * 나머지 둘은 글자(`admit.title` / `offlineAdmit.title` / `denyTitle`)와 `aria-hidden` 글리프
+ * (✓ / ! / ✕)다. 색각 이상인 스태프, 햇빛 아래 액정, 흑백으로 찍힌 현장 사진 — 셋 다 색을
+ * 지우지만 글자와 모양은 남는다. 그래서 `--admit` 계열과 `--offline-admit` 계열은 테두리 굵기와
+ * 선 모양까지 다르다: 방 건너편에서도 두 카드가 섞이지 않아야 한다.
+ *
+ * **세로도 가로도 쓸 수 있어야 한다.** 고정 높이를 쓰지 않고 flex 와 `vh` 상한으로만 짠다.
+ * 사진에 `max-height` 가 붙어 있는 이유가 그것이다 — 가로로 누운 폰에서 사진이 화면을 다 먹으면
+ * 이름과 '다음' 단추가 접히는 곳 아래로 밀려나고, 스태프는 판정을 읽지 못한 채 줄을 세운다.
+ *
+ * **호버로만 말하는 것은 없다.** 이 화면을 쓰는 손가락에는 호버가 없다.
+ *
+ * 색·간격·모서리는 `shared/theme.css` 의 토큰을 그대로 쓴다. 여기서 새로 만드는 것은 관객 앱에
+ * 없는 네 가지뿐이다: 초록 판정 두 값과, 초록이 아닌 입장, 그리고 거절.
+ */
+.gate {
+  /* 입장. 초록은 이 두 값 말고 어디에도 쓰지 않는다. */
+  --admit: #0f3722;
+  --admit-ink: #4ce08c;
+  /* 연결 없이 들여보낸 입장. 아직 기록되지 않았으므로 초록이 아니다. */
+  --offline-admit: #3a2b0b;
+  /* 거절. */
+  --deny: #3a151a;
+
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 100%;
+  padding: calc(env(safe-area-inset-top) + 12px) 16px calc(env(safe-area-inset-bottom) + 12px);
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* ── 머리글: 이 문이 지금 무엇을 믿고 열리는지 ───────────────────────────── */
+
+.gate__header {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.gate__gate-name {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.2;
+  font-weight: 700;
+}
+
+.gate__event,
+.gate__stage,
+.gate__list {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  font-size: 15px;
+  color: var(--muted);
+}
+
+.gate__stage-word {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.gate__list-value {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.gate__banner,
+.gate__footer {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/*
+ * 판정이 사는 곳. `aria-live` 는 여기 한 곳에만 있다 — 카드마다 live 영역을 두면 화면이 바뀔
+ * 때마다 낭독이 겹친다.
+ */
+.gate__verdict {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 12px;
+}
+
+/* ── 카드 ─────────────────────────────────────────────────────────────── */
+
+.gate-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 16px;
+  text-align: center;
+  border: 3px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+/* 판정 제목. 40px 이 바닥값이고, 넓은 화면에서는 더 커진다. */
+.gate-card__label {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: clamp(40px, 9vw, 56px);
+  line-height: 1.1;
+  font-weight: 800;
+}
+
+.gate-card__glyph {
+  font-size: 0.85em;
+  line-height: 1;
+}
+
+.gate-card__name {
+  margin: 0;
+  font-size: clamp(28px, 7vw, 40px);
+  line-height: 1.2;
+  font-weight: 700;
+  word-break: keep-all;
+}
+
+.gate-card__detail,
+.gate-card__line,
+.gate-card__hint {
+  margin: 0;
+  font-size: 16px;
+  color: var(--muted);
+}
+
+.gate-card__hint {
+  font-size: 17px;
+}
+
+.gate-card__facts {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 14px;
+}
+
+.gate-card__body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.gate-card__value {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * 사진. `max-height` 가 붙은 이유는 위 주석에 있다 — 이 한 줄이 가로 화면에서 '다음' 단추를
+ * 살린다.
+ */
+.gate-card__photo,
+.gate-card__avatar {
+  width: min(44vw, 180px);
+  aspect-ratio: 3 / 4;
+  max-height: 32vh;
+  border-radius: var(--radius);
+  border: 2px solid var(--line);
+  object-fit: cover;
+}
+
+.gate-card__avatar {
+  display: grid;
+  place-items: center;
+  font-size: clamp(40px, 12vw, 64px);
+  font-weight: 700;
+  color: var(--muted);
+  background: var(--bg);
+}
+
+.gate-card__warning {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--offline-admit);
+  color: var(--warn);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+/* 단추는 관객 앱과 같은 `.btn` 이다. 높이만 키오스크 최소치(52px) 위로 못 박는다. */
+.gate-card__actions {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gate-card__actions .btn {
+  min-height: 56px;
+}
+
+/* ── 대기 ─────────────────────────────────────────────────────────────── */
+
+.gate-card--ready {
+  gap: 16px;
+  border-style: dashed;
+}
+
+.gate-card__headline {
+  margin: 0;
+  font-size: clamp(44px, 13vw, 88px);
+  line-height: 1.05;
+  font-weight: 800;
+}
+
+/*
+ * 게이트가 코드를 내주고 있다는 장식. 문구를 대신하지 않는다 — 회전이 멈춰도 "여기에 대주세요"는
+ * 그대로 있고, 이 원은 `aria-hidden` 이라 낭독되지 않는다.
+ */
+.gate-card__pulse {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.3;
+}
+
+.gate-card__pulse[data-rotating='on'] {
+  animation: gate-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes gate-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.25; }
+  50% { transform: scale(1.3); opacity: 0.6; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gate-card__pulse[data-rotating='on'] { animation: none; }
+}
+
+/* ── 판정별 ───────────────────────────────────────────────────────────── */
+
+.gate-card--admit {
+  background: var(--admit);
+  border-color: var(--admit-ink);
+}
+
+.gate-card--admit .gate-card__label {
+  color: var(--admit-ink);
+}
+
+/*
+ * 아직 기록되지 않은 입장. 초록을 쓰지 않는 것만으로는 부족해서 테두리를 두껍고 점선으로 둔다 —
+ * 방 건너편에서 색이 아니라 모양으로 먼저 구분되게.
+ */
+.gate-card--offline-admit {
+  background: var(--offline-admit);
+  border-color: var(--warn);
+  border-width: 6px;
+  border-style: dashed;
+}
+
+.gate-card--offline-admit .gate-card__label {
+  color: var(--warn);
+}
+
+.gate-card--deny {
+  background: var(--deny);
+  border-color: var(--danger);
+}
+
+.gate-card--deny .gate-card__label {
+  color: var(--danger);
+}
+
+.gate-card--deny .gate-card__detail {
+  word-break: break-all;
+}
+
+/* ── 배너와 직전 탭 ───────────────────────────────────────────────────── */
+
+.gate-badge,
+.gate-banner,
+.gate-toast,
+.gate-last-tap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  font-size: 15px;
+}
+
+.gate-badge {
+  background: var(--offline-admit);
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.gate-banner {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.gate-banner__count {
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.gate-banner__stopped {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+/* 탭이 거절된 이유는 게이트 사정이다. 거절 카드와 색이 겹치면 안 된다. */
+.gate-toast {
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  color: var(--text);
+  font-size: 17px;
+}
+
+.gate-last-tap {
+  background: transparent;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  color: var(--muted);
+  padding: 10px 2px 0;
+}
+
+.gate-last-tap__state {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* ── 수동 승인 ────────────────────────────────────────────────────────── */
+
+.gate-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  border: 3px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.gate-dialog__title {
+  margin: 0 0 4px;
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.gate-dialog__field {
+  display: block;
+}
+
+.gate-dialog__field > span {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 15px;
+  color: var(--muted);
+}
+
+.gate-dialog__field input,
+.gate-dialog__field select {
+  width: 100%;
+  height: 56px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 20px;
+}
+
+.gate-dialog__field input {
+  letter-spacing: 0.4em;
+  font-variant-numeric: tabular-nums;
+}
+
+.gate-dialog .btn {
+  min-height: 56px;
+}
+
+/*
+ * 가로로 누운 폰. 세로 공간이 사라지는 쪽이라 사진과 글을 한 줄에 놓고, 사진 상한을 낮춰
+ * 이름·판정·단추가 화면 안에 함께 남게 한다.
+ */
+@media (orientation: landscape) and (max-height: 560px) {
+  .gate {
+    gap: 8px;
+  }
+
+  .gate-card--admit,
+  .gate-card--offline-admit {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    text-align: left;
+    gap: 16px;
+  }
+
+  .gate-card--admit .gate-card__body,
+  .gate-card--offline-admit .gate-card__body {
+    flex: 1 1 220px;
+    align-items: flex-start;
+  }
+
+  .gate-card--admit .gate-card__facts,
+  .gate-card--offline-admit .gate-card__facts {
+    justify-content: flex-start;
+  }
+
+  .gate-card__photo,
+  .gate-card__avatar {
+    width: min(26vw, 140px);
+    max-height: 56vh;
+  }
+
+  .gate-card__actions {
+    flex: 1 1 100%;
+  }
+
+  .gate-card__headline {
+    font-size: clamp(40px, 8vw, 64px);
+  }
+}
