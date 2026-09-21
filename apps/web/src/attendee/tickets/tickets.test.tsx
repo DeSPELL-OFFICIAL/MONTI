@@ -20,7 +20,7 @@ function ticket(id: string, extra: Record<string, unknown> = {}) {
   return { id, eventId: '7', tier: 0, owner: OWNER, transfers: 0, revoked: false, ...extra };
 }
 
-// One row per state: 입장 전, 입장 완료, 양도 대기, 취소됨(회수), 취소됨(행사 취소), 양도됨 —
+// One row per state: 입장 전, 입장 완료, 보내는 중, 취소됨(회수), 취소됨(행사 취소), 양도됨 —
 // plus a handed-over ticket whose own event was called off, where 취소됨 has to win.
 const OWNED = [ticket('1'), ticket('2'), ticket('3'), ticket('4', { revoked: true }), ticket('6', { eventId: '9' })];
 const OFFERS = [
@@ -76,7 +76,7 @@ describe('TicketList', () => {
     renderList();
     expect(await screen.findByRole('link', { name: '#1 · 입장 전' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '#2 · 입장 완료' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '#3 · 양도 대기' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '#3 · 보내는 중' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '#5 · 양도됨' })).toBeInTheDocument();
     // A revoked ticket, a ticket on a called-off event and a ticket handed over out of one.
     expect(screen.getAllByRole('link', { name: /취소됨/ })).toHaveLength(3);

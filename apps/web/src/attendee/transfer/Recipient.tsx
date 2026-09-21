@@ -46,7 +46,7 @@ export function TransferRecipient() {
   const [value, setValue] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  // Set when the number belongs to nobody yet. Task 23 turns this panel into the invite itself.
+  // Set when the number belongs to nobody yet: the panel below offers the invite instead.
   const [invite, setInvite] = useState<{ phoneE164: string; commitment?: Hex } | null>(null);
 
   const labels: Record<RecipientRoute, string> = {
@@ -134,6 +134,15 @@ export function TransferRecipient() {
           <h2>{copy.transfer.inviteTitle}</h2>
           <p>{copy.transfer.inviteBody}</p>
           <p className="muted">{copy.kyc.inviteKycNote}</p>
+          {/* The invite screen owns the order: the server's commitment first, the offer on
+              chain second, and only then the text the sender's own phone will send. */}
+          <Button
+            onClick={() =>
+              navigate(`/tickets/${tokenId}/transfer/invite`, { state: { phoneE164: invite.phoneE164 } })
+            }
+          >
+            {copy.transfer.inviteCta}
+          </Button>
         </section>
       ) : null}
       <Button onClick={() => void find()} disabled={busy || value.trim().length === 0}>

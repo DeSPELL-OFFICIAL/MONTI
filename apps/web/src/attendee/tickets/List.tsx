@@ -31,6 +31,9 @@ export function TicketList() {
           <Button onClick={() => void refetch()}>{copy.common.retry}</Button>
         </>
       ) : null}
+      <p>
+        <Link to="/tickets/inbox">{copy.tickets.inbox}</Link>
+      </p>
       {!isLoading && !isError && tickets.length === 0 ? <p className="muted">{copy.tickets.empty}</p> : null}
       <ul className="event-list">
         {tickets.map((ticket) => (

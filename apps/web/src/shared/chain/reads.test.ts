@@ -59,7 +59,9 @@ describe('reads', () => {
   it('exposes only reads the usage manifest declares', () => {
     expect(Object.keys(readIdentity()).sort()).toEqual(Object.keys(USED_ABI.Identity).sort());
     expect(Object.keys(readOrganizers()).sort()).toEqual(Object.keys(USED_ABI.Organizers).sort());
-    const ticketReads = Object.keys(USED_ABI.Ticket).filter((name) => name !== 'claim' && name !== 'safeTransferFrom');
+    // The manifest types the writes too (`ops.ts` reads it), and a write never shows up here.
+    const writes = ['claim', 'safeTransferFrom', 'createOffer', 'cancelOffer', 'acceptOffer'];
+    const ticketReads = Object.keys(USED_ABI.Ticket).filter((name) => !writes.includes(name));
     expect(Object.keys(readTicket()).sort()).toEqual(ticketReads.sort());
   });
 });

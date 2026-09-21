@@ -41,6 +41,7 @@ const { TransferRecipient } = await import('./Recipient');
 const { TransferConfirm } = await import('./Confirm');
 const { CallableError } = await import('../../shared/api/functions');
 const { OpReverted } = await import('../../shared/chain/ops');
+const { revertMatch, revertRule } = await import('./useTransfer');
 
 const NOW = Math.floor(Date.now() / 1000);
 const TIER = { name: '일반', priceUsdCents: 0n, supply: 100, minted: 1, maxPerWallet: 2, seated: false };
@@ -230,6 +231,19 @@ const REVERT_SENTENCES: ReadonlyArray<readonly [string, string]> = [
 ];
 
 const GENERIC = '양도하지 못했어요. 잠시 뒤 다시 시도해 주세요.';
+
+describe('reading a revert selector', () => {
+  it('answers nothing for an error name the generated ABI dropped, instead of throwing', () => {
+    // The lookup runs inside a catch. If a rename made it throw there, the screen would be
+    // left mid-send with no sentence at all rather than falling back to the generic one.
+    const reason = toFunctionSelector('TicketRevoked()');
+    const table = [['AnErrorNoAbiCarries', 'x']] as const;
+    expect(() => revertMatch(reason, table)).not.toThrow();
+    expect(revertMatch(reason, table)).toBeUndefined();
+    // The names that are really there still resolve, so the guard swallowed nothing real.
+    expect(revertRule(reason)).toBe('revoked');
+  });
+});
 
 describe('a handover the contract refuses', () => {
   for (const [signature, sentence] of REVERT_SENTENCES) {

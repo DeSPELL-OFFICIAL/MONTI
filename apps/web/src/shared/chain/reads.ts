@@ -36,6 +36,16 @@ export interface EventMetaStruct {
   requireKyc: boolean;
 }
 
+/**
+ * `Ticket.offerOf`. An absent offer is not an error: the mapping answers with the zero struct,
+ * so `from`/`recipientCommitment` at zero is how a screen reads "nothing is pending here".
+ */
+export interface OfferStruct {
+  from: Hex;
+  recipientCommitment: Hex;
+  expiresAt: bigint;
+}
+
 export interface TierStruct {
   name: string;
   priceUsdCents: bigint;
@@ -105,6 +115,7 @@ export function readTicket() {
     checkInOf: (tokenId: bigint) => call<CheckInStruct>('checkInOf', [tokenId]),
     eventMeta: (eventId: bigint) => call<EventMetaStruct>('eventMeta', [eventId]),
     tiers: (eventId: bigint) => call<readonly TierStruct[]>('tiers', [eventId]),
+    offerOf: (tokenId: bigint) => call<OfferStruct>('offerOf', [tokenId]),
   };
 }
 
@@ -131,11 +142,18 @@ const CHECK_IN_FIELDS = [
   'gateId', 'ts', 'nonceHash', 'manual',
 ] as const satisfies readonly (keyof CheckInStruct)[];
 
+const OFFER_FIELDS = [
+  'from', 'recipientCommitment', 'expiresAt',
+] as const satisfies readonly (keyof OfferStruct)[];
+
 const GATE_INFO_FIELDS = [
   'eventId', 'account', 'kx', 'ky', 'open', 'revoked',
 ] as const satisfies readonly (keyof GateInfoStruct)[];
 
 export const STRUCT_SHAPES = {
-  Ticket: { eventMeta: EVENT_META_FIELDS, tiers: TIER_FIELDS, checkInOf: CHECK_IN_FIELDS },
+  Ticket: {
+    eventMeta: EVENT_META_FIELDS, tiers: TIER_FIELDS, checkInOf: CHECK_IN_FIELDS,
+    offerOf: OFFER_FIELDS,
+  },
   Organizers: { gateInfo: GATE_INFO_FIELDS },
 } as const;

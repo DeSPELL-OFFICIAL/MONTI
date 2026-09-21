@@ -38,6 +38,9 @@ import { TicketList } from './attendee/tickets/List';
 import { TicketDetail } from './attendee/tickets/Detail';
 import { TransferRecipient } from './attendee/transfer/Recipient';
 import { TransferConfirm } from './attendee/transfer/Confirm';
+import { TransferInvite } from './attendee/transfer/Invite';
+import { InviteLanding } from './attendee/transfer/InviteLanding';
+import { Inbox } from './attendee/tickets/Inbox';
 import { Enter } from './attendee/enter/Enter';
 import { ChatList } from './attendee/chats/ChatList';
 import { ChatRoom } from './attendee/chats/ChatRoom';
@@ -57,14 +60,19 @@ export const routes: RouteObject[] = [
       { path: '/signup/passkey', element: <PasskeyStep /> },
       { path: '/signup/device', element: <DeviceStep /> },
       { path: '/signup/done', element: <Done /> },
+      // Where the link in an invite text lands. Public on purpose: the person it was sent to
+      // is usually not signed in yet, and this screen is what starts their signup.
+      { path: '/i/:inviteId', element: <InviteLanding /> },
       {
         element: <RequireSession />,
         children: [
           { path: '/claim/:eventId', element: <Claim /> },
           { path: '/tickets', element: <TicketList /> },
+          { path: '/tickets/inbox', element: <Inbox /> },
           { path: '/tickets/:tokenId', element: <TicketDetail /> },
           { path: '/tickets/:tokenId/transfer', element: <TransferRecipient /> },
           { path: '/tickets/:tokenId/transfer/confirm', element: <TransferConfirm /> },
+          { path: '/tickets/:tokenId/transfer/invite', element: <TransferInvite /> },
           { path: '/tickets/:tokenId/enter', element: <Enter /> },
           { path: '/chats', element: <ChatList /> },
           { path: '/chats/:eventId', element: <ChatRoom /> },

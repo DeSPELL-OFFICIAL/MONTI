@@ -30,15 +30,54 @@ const REVERT_RULES: ReadonlyArray<readonly [string, PrecheckFailure]> = [
   ['MaxPerWalletExceeded', 'maxPerWallet'],
 ];
 
+/**
+ * The selector the generated ABI gives this error, or nothing when it does not carry the name.
+ * `encodeErrorResult` throws on a name it cannot find, and every caller below runs inside a
+ * `catch` — a rename in sub-plan 01 would otherwise throw a second time there and leave the
+ * screen stuck mid-send instead of falling through to the generic sentence.
+ */
+export function errorSelector(errorName: string): string | undefined {
+  try {
+    return encodeErrorResult({ abi: ticketAbi, errorName });
+  } catch {
+    return undefined;
+  }
+}
+
+/** Every one of these errors is argument-less, but slicing keeps a padded reason working. */
+function selectorOf(revertReason: Hex): string {
+  return revertReason.slice(0, 10).toLowerCase();
+}
+
+/**
+ * The same lookup for a screen with its own table. The invite and the inbox send other
+ * `Ticket` writes — `createOffer`, `cancelOffer`, `acceptOffer` — whose refusals are not all
+ * among the eight below, so they pair their own error names with their own sentences here and
+ * fall back to `revertRule` for the ones a handover already owns.
+ */
+export function revertMatch<T>(
+  revertReason: Hex,
+  table: ReadonlyArray<readonly [string, T]>,
+): T | undefined {
+  const selector = selectorOf(revertReason);
+  for (const [errorName, value] of table) {
+    if (errorSelector(errorName) === selector) return value;
+  }
+  return undefined;
+}
+
 /** Built once, from the generated ABI rather than from hand-copied selectors. */
 let bySelector: Map<string, PrecheckFailure> | undefined;
 
 export function revertRule(revertReason: Hex): PrecheckFailure | undefined {
   bySelector ??= new Map(
-    REVERT_RULES.map(([errorName, failure]) => [encodeErrorResult({ abi: ticketAbi, errorName }), failure]),
+    // A name the generated ABI no longer carries drops out of the map instead of throwing.
+    REVERT_RULES.flatMap(([errorName, failure]) => {
+      const selector = errorSelector(errorName);
+      return selector === undefined ? [] : [[selector, failure] as const];
+    }),
   );
-  // Every one of these errors is argument-less, but slicing keeps a padded reason working.
-  return bySelector.get(revertReason.slice(0, 10).toLowerCase());
+  return bySelector.get(selectorOf(revertReason));
 }
 
 /**

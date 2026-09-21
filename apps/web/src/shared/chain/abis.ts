@@ -28,8 +28,9 @@ export const USED_ABI = {
   Organizers: { gateInfo: 1, isOpenGate: 2, hasPermission: 3, gateOf: 1, ownerOf: 1 },
   Ticket: {
     eventOf: 1, tierOf: 1, eventStatus: 1, isRevoked: 1, transfersOf: 1, balanceOfEvent: 2,
-    checkInOf: 1, eventMeta: 1, tiers: 1,
+    checkInOf: 1, eventMeta: 1, tiers: 1, offerOf: 1,
     claim: 3, safeTransferFrom: 3,
+    createOffer: 3, cancelOffer: 1, acceptOffer: 2,
   },
 } as const satisfies Record<UsedContract, Readonly<Record<string, number>>>;
 
