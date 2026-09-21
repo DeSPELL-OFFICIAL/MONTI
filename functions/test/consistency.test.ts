@@ -247,7 +247,19 @@ interface CallSite {
   line: number;
   method: string;
   args: string[];
+  /**
+   * 수신자가 Firestore 문서·컬렉션 참조(또는 트랜잭션)로 보이는가.
+   * `.set`/`.update`/`.add` 라는 이름은 `Map`·`Set`·`crypto` 도 쓴다. 키 검사는 어느 쪽이든
+   * 보수적으로 돌리지만, "헬퍼를 못 펼쳤다"는 **큰소리 실패**는 진짜 Firestore 쓰기에만 건다.
+   */
+  firestoreLike: boolean;
 }
+
+const FIRESTORE_RECEIVERS = [
+  /(?:\.doc|\.collection|\.collectionGroup)\s*\([^()]*\)\s*$/,
+  /(?:^|[^\w$.])(?:tx|transaction|batch)\s*$/,
+  /[\w$]*[Rr]ef\s*$/,
+];
 
 /** 주어진 메서드 호출을 전부 찾아 균형 잡힌 인자와 함께 돌려준다. */
 function callSites(files: SourceFile[], names: readonly string[]): CallSite[] {
@@ -260,11 +272,13 @@ function callSites(files: SourceFile[], names: readonly string[]): CallSite[] {
       const open = file.code.indexOf('(', match.index);
       const args = readArgs(file.code, open);
       if (args !== null) {
+        const prefix = file.code.slice(Math.max(0, match.index - 80), match.index);
         out.push({
           file,
           line: lineOf(file.code, match.index),
           method: match[1] ?? '',
           args: splitArgs(args),
+          firestoreLike: FIRESTORE_RECEIVERS.some((pattern) => pattern.test(prefix)),
         });
       }
       match = pattern.exec(file.code);
@@ -273,31 +287,48 @@ function callSites(files: SourceFile[], names: readonly string[]): CallSite[] {
   return out;
 }
 
+/** 선언의 `=` 뒤부터 최상위 `;` 까지, 즉 초기화식 원문. */
+function initializerAfter(source: SourceFile, pattern: RegExp): string | null {
+  pattern.lastIndex = 0;
+  const match = pattern.exec(source.code);
+  if (match === null) return null;
+  let i = match.index + match[0].length;
+  const start = i;
+  let depth = 0;
+  while (i < source.code.length) {
+    const c = source.code[i];
+    if (c === "'" || c === '"' || c === '`') {
+      i = skipString(source.code, i);
+      continue;
+    }
+    if (c === '(' || c === '[' || c === '{') depth += 1;
+    else if (c === ')' || c === ']' || c === '}') depth -= 1;
+    else if (c === ';' && depth === 0) break;
+    i += 1;
+  }
+  return source.code.slice(start, i);
+}
+
 /**
  * 식별자의 선언 본문을 찾는다.
  *  1. 같은 파일의 `const|let|var X = …;` 초기화식
- *  2. **어느 파일이든** `function X(…) { … }` 본문 — 페이로드를 다른 파일 헬퍼로 빼도 펼쳐진다.
+ *  2. **어느 파일이든** `export const X = …;` — 페이로드 빌더를 화살표 상수로 빼도 따라간다.
+ *  3. **어느 파일이든** `function X(…) { … }` 본문
  */
 function declarationOf(files: SourceFile[], file: SourceFile, ident: string): string | null {
-  const local = new RegExp(`\\b(?:const|let|var)\\s+${ident}\\b\\s*(?::[^=\\n]*)?=`, 'g');
-  const match = local.exec(file.code);
-  if (match !== null) {
-    let i = match.index + match[0].length;
-    const start = i;
-    let depth = 0;
-    while (i < file.code.length) {
-      const c = file.code[i];
-      if (c === "'" || c === '"' || c === '`') {
-        i = skipString(file.code, i);
-        continue;
-      }
-      if (c === '(' || c === '[' || c === '{') depth += 1;
-      else if (c === ')' || c === ']' || c === '}') depth -= 1;
-      else if (c === ';' && depth === 0) break;
-      i += 1;
-    }
-    return file.code.slice(start, i);
+  const local = initializerAfter(
+    file,
+    new RegExp(`\\b(?:const|let|var)\\s+${ident}\\b\\s*(?::[^=\\n]*)?=`, 'g'),
+  );
+  if (local !== null) return local;
+
+  const exported = new RegExp(`\\bexport\\s+(?:const|let|var)\\s+${ident}\\b\\s*(?::[^=\\n]*)?=`, 'g');
+  for (const candidate of files) {
+    if (candidate === file) continue;
+    const hit = initializerAfter(candidate, exported);
+    if (hit !== null) return hit;
   }
+
   const fn = new RegExp(`\\bfunction\\s+${ident}\\s*\\(`, 'g');
   for (const candidate of [file, ...files]) {
     fn.lastIndex = 0;
@@ -325,13 +356,22 @@ function keysIn(objectText: string): Set<string> {
   return keys;
 }
 
+interface Payload {
+  keys: Set<string>;
+  /** 펼치지 못한 헬퍼 호출의 이름. 스캔은 이걸 조용히 넘기지 않고 실패로 보고한다. */
+  unresolved: string[];
+}
+
 /**
  * 한 쓰기 호출이 Firestore 문서에 실을 수 있는 키 전부.
- * 인자가 객체 리터럴이면 그 자리에서, 식별자면 선언을 펼쳐서, 스프레드면 그 대상(같은 파일의
- * 상수든 다른 파일의 `export function` 이든)을 펼쳐서 모은다.
+ * 인자가 객체 리터럴이면 그 자리에서, 식별자면 선언을 펼쳐서, 스프레드면 그 대상을 펼쳐서,
+ * **인자 전체가 헬퍼 호출식이면**(`.set(buildPersonDoc(phone))`) 그 헬퍼의 선언(같은 파일 상수·
+ * 다른 파일 `export const` 화살표·어느 파일이든 `function`)을 펼쳐서 모은다.
+ * 헬퍼를 못 찾으면 조용히 통과시키지 않고 `unresolved` 에 담아 스캔을 빨간불로 만든다.
  */
-function payloadKeys(files: SourceFile[], site: CallSite): Set<string> {
+function payloadKeys(files: SourceFile[], site: CallSite): Payload {
   const keys = new Set<string>();
+  const unresolved: string[] = [];
   const seen = new Set<string>();
   const expand = (text: string, depth: number): void => {
     if (depth > 3) return;
@@ -346,11 +386,20 @@ function payloadKeys(files: SourceFile[], site: CallSite): Set<string> {
       const declaration = declarationOf(files, site.file, ident);
       if (declaration !== null) expand(declaration, depth + 1);
     }
+    // 인자 전체가 **맨 이름의 호출식**이면 그 함수가 곧 페이로드다. `a.b()` 같은 메서드 호출은
+    // 정적으로 따라갈 대상이 없어(그리고 Map.set·cipher.update 가 같은 정규식을 공유해) 건너뛴다.
+    const call = /^([A-Za-z_$][\w$]*)\s*\(/.exec(bare);
+    if (call?.[1] !== undefined && bare.endsWith(')') && !seen.has(`call:${call[1]}`)) {
+      seen.add(`call:${call[1]}`);
+      const declaration = declarationOf(files, site.file, call[1]);
+      if (declaration === null) unresolved.push(call[1]);
+      else expand(declaration, depth + 1);
+    }
   };
   // `.set(payload)` 도 `tx.set(ref, payload, { merge: true })` 도 있으므로 모든 인자를 본다.
   for (const arg of site.args) expand(arg, 0);
   keys.delete('merge');
-  return keys;
+  return { keys, unresolved };
 }
 
 // ───────────────────────────────────────────────────────────── callable 모델
@@ -510,7 +559,15 @@ function scanForbiddenNames(files: SourceFile[]): ScanResult {
 
 const CHAIN_PROOFS = ['awaitFinalized', "blockTag: 'finalized'", 'decodeMontiLogs', "functionName: 'accountOf'"];
 
-/** 스펙 §10.4 규칙 3 — finalized 를 확인하지 않고 `active` 로 적지 않는다. */
+/**
+ * 스펙 §10.4 규칙 3 — finalized 를 확인하지 않고 `active` 로 적지 않는다.
+ *
+ * **의도적으로 파일 단위다.** 그래서 이미 체인 토큰이 있는 파일에 체인을 읽지 않는 새 분기가
+ * 생기거나, `status: STATUS_ACTIVE` 상수·`{ status }` 축약으로 쓰면 이 스캔은 놓친다.
+ * 분기 단위로 잡으려면 데이터 흐름 분석이 필요하고 그건 정적 문자열 스캔의 비용 곡선 밖이다.
+ * 이 불변식의 1차 방어선은 여기가 아니라 런타임의 `assertStatusTransition()`(`lib/db.ts`) 과
+ * 각 함수의 유닛 테스트이고, 이 스캔은 백스톱이다. 초록을 증명으로 읽지 말 것.
+ */
 function scanActiveStatus(files: SourceFile[]): ScanResult {
   const findings: Finding[] = [];
   let targets = 0;
@@ -528,6 +585,18 @@ function scanActiveStatus(files: SourceFile[]): ScanResult {
 }
 
 const WRITE_METHODS = ['set', 'update', 'create', 'add'] as const;
+
+/**
+ * 펼치지 못한 페이로드 빌더는 통과가 아니다 — 그 한 줄 뒤에 무엇이 저장되는지 모르기 때문이다.
+ * 단, Firestore 참조가 아닌 수신자(`Map.set`·`Set.add`·`cipher.update`)에는 걸지 않는다.
+ */
+function unresolvedFindings(site: CallSite, payload: Payload): Finding[] {
+  if (!site.firestoreLike) return [];
+  return payload.unresolved.map(
+    (callee) =>
+      `${site.file.rel}:${site.line} 의 페이로드가 헬퍼 호출 ${callee}(…) 로 만들어지는데 그 선언을 찾지 못했다 — 무엇이 저장되는지 확인할 수 없으므로 통과시키지 않는다.`,
+  );
+}
 const TICKET_FIELDS = ['checkedIn', 'permissionBits', 'canApprove'];
 
 /** 스펙 §10.4 규칙 3 — 입장·권한 필드는 Firestore 문서에 쓰지 않는다(초대장만 예외). */
@@ -535,10 +604,11 @@ function scanTicketFields(files: SourceFile[]): ScanResult {
   const writes = callSites(files, WRITE_METHODS);
   const findings: Finding[] = [];
   for (const site of writes) {
-    const keys = payloadKeys(files, site);
+    const payload = payloadKeys(files, site);
+    findings.push(...unresolvedFindings(site, payload));
     for (const field of TICKET_FIELDS) {
       // invites 컬렉션에만 허용된다(수락 전 임시 데이터, 체인에 쓰이면 삭제 대상).
-      if (keys.has(field) && site.file.rel !== INVITES_FILE) {
+      if (payload.keys.has(field) && site.file.rel !== INVITES_FILE) {
         findings.push(
           `${site.file.rel}:${site.line} stores "${field}" outside ${INVITES_FILE} — 입장·권한의 원본은 체인이다.`,
         );
@@ -548,14 +618,22 @@ function scanTicketFields(files: SourceFile[]): ScanResult {
   return { findings, targets: writes.length };
 }
 
+/** viem 이 가스 한도를 우리 대신 정해 버리는 쓰기 API 전부. `sendAttesterTx` 만이 한도를 명시한다. */
+const CHAIN_WRITE_CALLS = ['writeContract', 'sendTransaction', 'sendRawTransaction', 'deployContract'];
+
 /** Monad 는 gas_limit 기준 과금이라 모든 체인 쓰기가 `sendAttesterTx` 를 지나야 한다. */
 function scanGas(files: SourceFile[]): ScanResult {
   const findings: Finding[] = [];
   for (const file of files) {
     // 면제는 **정확히** lib/chain.ts 하나다. `fastchain.ts` 같은 이름이 끼어들 수 없다.
     if (file.rel === CHAIN_FILE) continue;
-    if (/\bwriteContract\s*\(|\[\s*['"]writeContract['"]\s*\]/.test(file.code)) {
-      findings.push(`${file.rel} calls writeContract directly — 모든 쓰기는 sendAttesterTx 를 지나야 한다.`);
+    const names = CHAIN_WRITE_CALLS.join('|');
+    const direct = new RegExp(`\\b(?:${names})\\s*\\(|\\[\\s*['"](?:${names})['"]\\s*\\]`);
+    const hit = direct.exec(file.code);
+    if (hit !== null) {
+      findings.push(
+        `${file.rel} calls ${flatten(hit[0]).replace(/\s*\($/, '')} directly — 모든 쓰기는 가스 한도를 명시하는 sendAttesterTx 를 지나야 한다.`,
+      );
     }
   }
   const chain = files.find((file) => file.rel === CHAIN_FILE);
@@ -574,9 +652,10 @@ function scanPhone(files: SourceFile[]): ScanResult {
   const writes = callSites(files, WRITE_METHODS);
   const findings: Finding[] = [];
   for (const site of writes) {
-    const keys = payloadKeys(files, site);
+    const payload = payloadKeys(files, site);
+    findings.push(...unresolvedFindings(site, payload));
     for (const field of PLAINTEXT_PHONE_FIELDS) {
-      if (keys.has(field)) {
+      if (payload.keys.has(field)) {
         findings.push(
           `${site.file.rel}:${site.line} 가 Firestore 페이로드에 평문 번호 필드 "${field}" 를 싣는다 — phoneHmac/phoneEnc/phoneIndex 만 허용된다.`,
         );
@@ -606,10 +685,12 @@ function scanRequestData(files: SourceFile[]): ScanResult {
     }
   }
 
-  // 파라미터 이름을 가리지 않는다 — `request.data` 든 `req.data` 든 전부 본다.
+  // 수신자를 **onCall 핸들러 파라미터**로 좁힌다. `request.data` 든 `req.data` 든 이름을 가리지 않되,
+  // Firestore 스냅샷 `snap.data()` 나 HTTP 본문 `body.data` 를 요청 본문으로 오진하지 않는다.
   for (const file of files) {
-    for (const m of file.code.matchAll(/\b([A-Za-z_$][\w$]*)\.data\b/g)) {
-      if (m.index === undefined) continue;
+    const receivers = requestReceivers(files, file);
+    for (const m of file.code.matchAll(/\b([A-Za-z_$][\w$]*)\.data\b(?!\s*\()/g)) {
+      if (m.index === undefined || m[1] === undefined || !receivers.has(m[1])) continue;
       targets += 1;
       const statement = statementAround(file.code, m.index);
       const line = lineOf(file.code, m.index);
@@ -622,13 +703,16 @@ function scanRequestData(files: SourceFile[]): ScanResult {
         }
       }
       // `const raw = request.data …` 뒤의 `raw.account` 처럼 별칭을 거쳐 읽는 경로.
+      // 점 접근과 대괄호 접근을 함께 보고, `const w = raw;` 처럼 한 번 더 넘긴 별칭까지 따라간다.
       const alias = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]*)?=/.exec(statement);
       if (!alias?.[1]) continue;
-      for (const field of CALLER_FIELDS) {
-        if (new RegExp(`\\b${alias[1]}\\.${field}\\b`).test(file.code)) {
-          findings.push(
-            `${file.rel}:${line} 가 요청 본문 별칭 "${alias[1]}" 에서 "${field}" 를 읽는다 — 호출자 계정은 resolveCallerAccount(request) 로만 정해진다.`,
-          );
+      for (const holder of aliasChain(file.code, alias[1])) {
+        for (const field of CALLER_FIELDS) {
+          if (readsField(file.code, holder, field)) {
+            findings.push(
+              `${file.rel}:${line} 가 요청 본문 별칭 "${holder}" 에서 "${field}" 를 읽는다 — 호출자 계정은 resolveCallerAccount(request) 로만 정해진다.`,
+            );
+          }
         }
       }
     }
@@ -636,7 +720,36 @@ function scanRequestData(files: SourceFile[]): ScanResult {
   return { findings, targets };
 }
 
-/** 한 문장이 읽어 가는 이름 전부 — 구조분해 바인딩 · `as { … }` 타입 키 · 속성 접근. */
+/** 이 파일에서 "요청 본문"으로 볼 수신자 이름 — 이 파일 onCall 핸들러들의 파라미터 + 관례적 `request`. */
+function requestReceivers(files: SourceFile[], file: SourceFile): Set<string> {
+  const names = new Set<string>(['request']);
+  for (const callable of callables(files)) {
+    if (callable.file === file && callable.param !== null) names.add(callable.param);
+  }
+  return names;
+}
+
+/** `const w = body;` 처럼 한 번 더 넘긴 별칭까지 모은다. */
+function aliasChain(code: string, root: string): Set<string> {
+  const aliases = new Set([root]);
+  for (let pass = 0; pass < 3; pass += 1) {
+    for (const alias of [...aliases]) {
+      const pattern = new RegExp(
+        `\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*(?::[^=]*)?=\\s*${alias}\\b`,
+        'g',
+      );
+      for (const m of code.matchAll(pattern)) if (m[1] !== undefined) aliases.add(m[1]);
+    }
+  }
+  return aliases;
+}
+
+/** `body.account` 든 `body['account']` 든 같은 읽기다. */
+function readsField(code: string, holder: string, field: string): boolean {
+  return new RegExp(`\\b${holder}\\s*(?:\\.${field}\\b|\\[\\s*(['"])${field}\\1\\s*\\])`).test(code);
+}
+
+/** 한 문장이 읽어 가는 이름 전부 — 구조분해 바인딩 · `as { … }` 타입 키 · 점/대괄호 속성 접근. */
 function namesReadBy(statement: string): Set<string> {
   const names = new Set<string>();
   const destructured = /\b(?:const|let|var)\s*\{([^}]*)\}\s*=/.exec(statement);
@@ -651,6 +764,9 @@ function namesReadBy(statement: string): Set<string> {
   }
   for (const m of statement.matchAll(/\.([A-Za-z_$][\w$]*)/g)) {
     if (m[1] !== undefined) names.add(m[1]);
+  }
+  for (const m of statement.matchAll(/\[\s*(['"])([A-Za-z_$][\w$]*)\1\s*\]/g)) {
+    if (m[2] !== undefined) names.add(m[2]);
   }
   return names;
 }
@@ -867,7 +983,7 @@ describe('negative fixtures — the nine ways a violation slipped past', () => {
          }`,
       ],
     );
-    expectCaught(scanGas(files), /fastchain\.ts calls writeContract directly/);
+    expectCaught(scanGas(files), /fastchain\.ts calls writeContract/);
   });
 
   it('9. a brand-new authorization helper taking the address straight from the request body', () => {
@@ -901,6 +1017,94 @@ describe('negative fixtures — the nine ways a violation slipped past', () => {
        export const evade = onCall(async ({ data }) => ({ account: (data as { account?: string }).account }));`,
     ]);
     expectCaught(scanRequestData(files), /구조분해라 요청 본문 읽기를 추적할 수 없다/);
+  });
+
+  it('10. the payload built by a helper CALL in the same file', () => {
+    const files = fixture([
+      join('functions', 'evade.ts'),
+      `import { PERSONS, db } from '../lib/db.js';
+       const buildPersonDoc = (p: string) => ({ phone: p, checkedIn: true, permissionBits: 7 });
+       export async function evade() {
+         await db.collection(PERSONS).doc('x').set(buildPersonDoc('01012345678'));
+       }`,
+    ]);
+    expectCaught(scanTicketFields(files), /stores "checkedIn"/);
+    expectCaught(scanPhone(files), /"phone"/);
+  });
+
+  it('11. the payload built by a helper CALL exported from another file', () => {
+    const files = fixture(
+      [
+        join('lib', 'docs.ts'),
+        `export const buildPersonDoc = (p: string) => ({ phone: p, canApprove: true });
+         export function buildOther(p: string) { return { phoneE164: p }; }`,
+      ],
+      [
+        join('functions', 'evade.ts'),
+        `import { PERSONS, db } from '../lib/db.js';
+         import { buildOther, buildPersonDoc } from '../lib/docs.js';
+         export async function evade() {
+           await db.collection(PERSONS).doc('x').set(buildPersonDoc('01012345678'));
+           await db.collection(PERSONS).doc('y').set(buildOther('01012345678'));
+         }`,
+      ],
+    );
+    expectCaught(scanTicketFields(files), /stores "canApprove"/);
+    expectCaught(scanPhone(files), /"phone"/);
+    expectCaught(scanPhone(files), /"phoneE164"/);
+  });
+
+  it('12. a payload helper the scan cannot find is reported, not waved through', () => {
+    const files = fixture([
+      join('functions', 'evade.ts'),
+      `import { PERSONS, db } from '../lib/db.js';
+       import { buildFromNowhere } from 'some-package';
+       export async function evade() {
+         await db.collection(PERSONS).doc('x').set(buildFromNowhere('01012345678'));
+       }`,
+    ]);
+    expectCaught(scanPhone(files), /헬퍼 호출 buildFromNowhere\(…\) 로 만들어지는데 그 선언을 찾지 못했다/);
+    expectCaught(scanTicketFields(files), /buildFromNowhere/);
+  });
+
+  it('13. the request body read through bracket access', () => {
+    const files = fixture([
+      join('functions', 'evade.ts'),
+      `import { onCall } from 'firebase-functions/v2/https';
+       export const evade = onCall(async (request) => {
+         const body = request.data as Body;
+         const caller = body['account'] as Hex;
+         return { caller };
+       });`,
+    ]);
+    expectCaught(scanRequestData(files), /별칭 "body" 에서 "account"/);
+  });
+
+  it('14. the request body read through a second alias hop', () => {
+    const files = fixture([
+      join('functions', 'evade.ts'),
+      `import { onCall } from 'firebase-functions/v2/https';
+       export const evade = onCall(async (request) => {
+         const body = request.data as Body;
+         const w = body;
+         return { caller: w.account };
+       });`,
+    ]);
+    expectCaught(scanRequestData(files), /별칭 "w" 에서 "account"/);
+  });
+
+  it('15. a Firestore snapshot .data() is not mistaken for the request body', () => {
+    const files = fixture([
+      join('functions', 'reader.ts'),
+      `import { onCall } from 'firebase-functions/v2/https';
+       import { PERSONS, db } from '../lib/db.js';
+       export const read = onCall(async (request) => {
+         const snap = await db.collection(PERSONS).doc('x').get();
+         const row = snap.data() as { owner?: string };
+         return { owner: row.owner };
+       });`,
+    ]);
+    expect(scanRequestData(files).findings, 'snap.data() 를 요청 본문으로 오진했다').toEqual([]);
   });
 
   it('an emptied source tree fails every scan instead of passing vacuously', () => {
