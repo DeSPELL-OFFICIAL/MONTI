@@ -132,6 +132,14 @@ vi.mock('../src/lib/db.js', async (importOriginal) => ({
   authAdmin: { updateUser, revokeRefreshTokens, deleteUser },
 }));
 
+/** 남긴 로그. 멈춘 파기 경보는 이 줄 하나로만 밖에 보인다. */
+const logs: Array<[key: string, payload: Record<string, unknown>]> = [];
+vi.mock('firebase-functions/logger', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('firebase-functions/logger')>()),
+  info: (key: string, payload: Record<string, unknown>) => void logs.push([key, payload]),
+  error: (key: string, payload: Record<string, unknown>) => void logs.push([key, payload]),
+}));
+
 /** Didit 파기 API 호출만 가짜로 바꾼다. 재시도 판단은 진짜 코드가 돈다. */
 const deleteDiditSession = vi.fn(async (..._args: unknown[]) => undefined);
 vi.mock('../src/lib/didit.js', async (importOriginal) => ({
@@ -202,8 +210,14 @@ afterEach(() => {
   }
 });
 
+/** 멈춘 파기 경보만 골라낸다. 나머지 로그는 운영 잡음이라 여기서 보지 않는다. */
+function stalled(): Array<Record<string, unknown>> {
+  return logs.filter(([key]) => key === 'deletion.didit.stalled').map(([, payload]) => payload);
+}
+
 beforeEach(() => {
   docs.clear();
+  logs.length = 0;
   process.env.DIDIT_API_KEY = 'didit-key';
   updateUser.mockClear();
   revokeRefreshTokens.mockClear();
@@ -342,6 +356,72 @@ describe('processDeletions', () => {
     deleteDiditSession.mockResolvedValue(undefined);
     await run();
     expect(snapshot(`${DELETION_REQUESTS}/uid-1`).get('status')).toBe('done');
+  });
+
+  /**
+   * 리뷰 concern 2. `DIDIT_API_KEY` 가 틀리면 파기는 매일 같은 자리에서 조용히 실패한다 —
+   * 예전에는 `deletion.failed` 한 줄뿐이라 며칠째 막혀 있는지 아무도 알 수 없었다.
+   * 파기는 법정 기한이 있는 일이라 이건 운영 잡음이 아니라 법적 노출이다.
+   */
+  it('raises a distinct alert once Didit erasure has failed three days running', async () => {
+    deleteDiditSession.mockRejectedValue(new Error('DIDIT_DELETE_FAILED:401'));
+    await call();
+    await makeDue();
+
+    await run();
+    expect(snapshot(`${DELETION_REQUESTS}/uid-1`).get('diditFailures')).toBe(1);
+    expect(stalled()).toEqual([]);
+
+    await run();
+    expect(snapshot(`${DELETION_REQUESTS}/uid-1`).get('diditFailures')).toBe(2);
+    expect(stalled()).toEqual([]);
+
+    // 하루 한 번 도는 일정이라 연속 실행이 곧 연속 일수다.
+    await run();
+    expect(snapshot(`${DELETION_REQUESTS}/uid-1`).get('diditFailures')).toBe(3);
+    expect(stalled()).toEqual([{ uid: 'uid-1', runs: 3 }]);
+
+    // 키가 틀렸다면 사람이 손대기 전까지 낫지 않는다 — 한 번 울고 조용해지면 아무도 보지 않는다.
+    await run();
+    expect(stalled()).toEqual([
+      { uid: 'uid-1', runs: 3 },
+      { uid: 'uid-1', runs: 4 },
+    ]);
+    // 그래도 스케줄러 밖으로는 던지지 않는다.
+    await expect(run()).resolves.toBeUndefined();
+  });
+
+  it('never advances the Didit counter on a failure that is not Didit', async () => {
+    const authDown = () => Object.assign(new Error('boom'), { code: 'auth/internal-error' });
+    deleteUser.mockRejectedValueOnce(authDown()).mockRejectedValueOnce(authDown()).mockRejectedValueOnce(authDown());
+    await call();
+    await makeDue();
+
+    await run();
+    await run();
+    await run();
+
+    // Didit 은 세 번 다 잘 지웠다. 이것까지 세면 "키가 틀렸다" 는 신호가 잡음에 묻힌다.
+    expect(snapshot(`${DELETION_REQUESTS}/uid-1`).get('status')).toBe('pending');
+    expect(snapshot(`${DELETION_REQUESTS}/uid-1`).get('diditFailures')).toBeUndefined();
+    expect(stalled()).toEqual([]);
+  });
+
+  it('forgets the streak once Didit answers again', async () => {
+    deleteDiditSession.mockRejectedValue(new Error('DIDIT_DELETE_FAILED:500'));
+    await call();
+    await makeDue();
+    await run();
+    await run();
+    expect(snapshot(`${DELETION_REQUESTS}/uid-1`).get('diditFailures')).toBe(2);
+
+    deleteDiditSession.mockResolvedValue(undefined);
+    await run();
+
+    // 다음에 또 막히면 그때부터 다시 센다 — 지난 장애의 횟수가 더해지면 경보가 하루 일찍 운다.
+    const done = snapshot(`${DELETION_REQUESTS}/uid-1`);
+    expect(done.get('status')).toBe('done');
+    expect(done.get('diditFailures')).toBeUndefined();
   });
 
   it('erases a person who never reached Didit or the chain', async () => {

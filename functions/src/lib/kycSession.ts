@@ -131,6 +131,10 @@ export async function ensureKycSession(personId: Hex, callbackUrl: string): Prom
         url: session.url,
         callbackUrl,
         status: 'open',
+        // 이 세션을 **만든** 시각. 버려진 세션 스윕(`reconcilePending`)이 나이를 여기서 잰다 —
+        // 사람 문서의 `updatedAt` 은 상관없는 쓰기에도 앞으로 가서 쓸 수 없고, 재사용 경로는
+        // 아무것도 쓰지 않으므로 링크를 다시 눌러도 이 값은 그대로 늙는다(Didit 수명과 같다).
+        openedAt: now,
         claimedAt: FieldValue.delete(),
         lastReason: null,
       },

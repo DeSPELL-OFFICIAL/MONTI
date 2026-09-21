@@ -37,6 +37,12 @@ const MAX_KYC_RESENDS_PER_RUN = 20;
  * 남겨 두면 `listPendingGates` 의 200칸 창과 uid 당 상한(`MAX_PENDING_PER_UID`)을 함께 먹는다.
  */
 const PENDING_GATE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+/**
+ * 열린 Didit 세션을 버린 것으로 보는 시각. 링크를 받고 하루가 지나도록 돌아오지 않았으면
+ * 그 세션은 끝난 것이고, Didit 쪽 수명도 그쯤이라 그 링크는 이미 열리지 않는다.
+ * 딱지를 바꾸지 않으면 `ensureKycSession` 이 죽은 링크를 영원히 다시 건네준다.
+ */
+const KYC_OPEN_TTL_SECONDS = 24 * 60 * 60;
 const SCHEDULE = 'every 5 minutes';
 
 type PublicClient = ReturnType<typeof publicClient>;
@@ -138,6 +144,15 @@ async function resendKycLevel(
 ): Promise<void> {
   const personId = doc.id as Hex;
 
+  // 이번 실행 몫을 다 썼다. **체인을 읽기 전에** 돌아선다 — 어차피 보내지 않을 문서까지
+  // 읽으면 밀린 200건이 아무것도 보내지 않으면서 직렬 eth_call 400번을 태운다.
+  // `updatedAt` 을 **건드리지 않아야** 이 문서가 앞줄에 남아 다음 틱이 가장 먼저 집는다
+  // (꼬리로 돌리는 `rotate` 와 정반대 의도다). 같은 판정을 다음 틱이 다시 한다.
+  if (budget.left <= 0) {
+    budget.deferred += 1;
+    return;
+  }
+
   // 체인이 이미 레벨을 갖고 있으면 보낼 것이 없다 — "전송 후 finalize 전 사망" 이 이 모양으로
   // 남는다(해시는 없고 레벨은 올라가 있다). 기다릴 영수증이 없으니 두 실행이 아니라
   // **이 실행에서** 바로 닫는다. 중복 트랜잭션 한 건도 함께 아낀다.
@@ -156,12 +171,7 @@ async function resendKycLevel(
     return;
   }
 
-  // 이번 실행 몫을 다 썼다. `updatedAt` 을 **건드리지 않아야** 이 문서가 앞줄에 남아
-  // 다음 틱이 가장 먼저 집는다(꼬리로 돌리는 `rotate` 와 정반대 의도다).
-  if (budget.left <= 0) {
-    budget.deferred += 1;
-    return;
-  }
+  // 보내기로 정한 순간에만 장을 뗀다 — 위에서 레벨만 보고 닫은 문서는 예산을 쓰지 않았다.
   budget.left -= 1;
 
   let txHash: Hex;
@@ -425,6 +435,37 @@ async function sweepPendingGates(): Promise<void> {
 }
 
 /**
+ * 열어 두고 돌아오지 않은 본인인증 세션에 `abandoned` 딱지를 붙인다. `ensureKycSession` 은
+ * `open` 을 보면 같은 링크를 그대로 돌려주므로, 이 딱지가 없으면 중간에 그만둔 사람은
+ * 이미 죽은 링크만 계속 받고 스스로 빠져나올 길이 없다.
+ *
+ * **Didit 에는 연락하지 않는다.** 저쪽 세션은 저쪽 수명이 닫는다 — 여기서 부르면 스윕 한 번이
+ * HTTP 왕복 200번이 되고, 파기(`processDeletions`)가 지워야 할 세션 id 도 그대로 남겨야 한다.
+ *
+ * 나이는 `kyc.openedAt`(세션을 만든 시각, 초)으로 잰다. 사람 문서의 `updatedAt` 은 닉네임
+ * 변경 같은 상관없는 쓰기에도 앞으로 가서, 그것으로 재면 버린 세션이 영영 늙지 않는다.
+ * 판정은 **질의가** 한다(루트 `firestore.indexes.json` 의 `persons (kyc.status, kyc.openedAt)`).
+ */
+async function sweepAbandonedKyc(): Promise<void> {
+  const cutoff = Math.floor(Date.now() / 1000) - KYC_OPEN_TTL_SECONDS;
+  const snapshot = await db
+    .collection(PERSONS)
+    .where('kyc.status', '==', 'open')
+    .where('kyc.openedAt', '<', cutoff)
+    .limit(SWEEP_LIMIT)
+    .get();
+
+  for (const doc of snapshot.docs) {
+    try {
+      // 딱지 하나만 바꾼다. `sessionId` 를 지우면 파기가 Didit 의 얼굴 자료를 못 찾는다.
+      await doc.ref.set({ kyc: { status: 'abandoned' } }, { merge: true });
+    } catch (cause) {
+      error('reconcile.abandonedKyc', { personId: doc.id, reason: (cause as Error).message });
+    }
+  }
+}
+
+/**
  * 5분마다 도는 대사(對査) 함수. 체인과 DB 를 함께 건드리다 중간에 죽은 작업을 주워 고친다
  * (스펙 §10.4 규칙 3의 "주기적 대사 함수").
  *
@@ -441,6 +482,7 @@ export const reconcilePending = onSchedule(
       ['transferInvites', sweepTransferInvites],
       ['authChallenges', sweepAuthChallenges],
       ['pendingGates', sweepPendingGates],
+      ['abandonedKyc', sweepAbandonedKyc],
     ] as const;
 
     for (const [name, sweep] of sweeps) {

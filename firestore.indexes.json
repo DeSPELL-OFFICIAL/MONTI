@@ -25,6 +25,14 @@
       ]
     },
     {
+      "collectionGroup": "persons",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "kyc.status", "order": "ASCENDING" },
+        { "fieldPath": "kyc.openedAt", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "eventChats",
       "queryScope": "COLLECTION",
       "fields": [

@@ -299,6 +299,42 @@ describe('startKyc — one session per person', () => {
     expect(createDiditSession).toHaveBeenCalledTimes(2);
   });
 
+  /**
+   * 버려진 세션 스윕(`reconcilePending`)이 나이를 재는 값이다. 사람 문서의 `updatedAt` 은
+   * 상관없는 쓰기에도 앞으로 가서, 그것으로 재면 버린 세션이 영영 늙지 않는다.
+   */
+  it('stamps when the Didit session was created, and never refreshes it on reuse', async () => {
+    const before = Math.floor(Date.now() / 1000);
+    await call();
+
+    const openedAt = snapshot(`${PERSONS}/${PERSON_ID}`).get('kyc.openedAt') as number;
+    expect(openedAt).toBeGreaterThanOrEqual(before);
+    expect(openedAt).toBeLessThanOrEqual(Math.floor(Date.now() / 1000));
+
+    // 같은 링크를 다시 받는 것은 새 세션이 아니다. 여기서 값을 새로 찍으면 링크를 계속
+    // 누르는 사람의 세션은 영원히 스윕에 걸리지 않는다.
+    write(`${PERSONS}/${PERSON_ID}`, { kyc: { openedAt: 1 } }, { merge: true });
+    await call();
+
+    expect(snapshot(`${PERSONS}/${PERSON_ID}`).get('kyc.openedAt')).toBe(1);
+    expect(createDiditSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens a fresh session once the sweep has marked the last one abandoned', async () => {
+    await call();
+    // 하루가 지나도록 돌아오지 않은 세션에 `reconcilePending` 이 붙이는 딱지.
+    write(`${PERSONS}/${PERSON_ID}`, { kyc: { status: 'abandoned' } }, { merge: true });
+
+    createDiditSession.mockResolvedValueOnce({ sessionId: 'sess-12', url: 'https://verify.didit.me/s/sess-12' });
+    const retry = await call();
+
+    expect(retry.sessionId).toBe('sess-12');
+    const person = snapshot(`${PERSONS}/${PERSON_ID}`);
+    expect(person.get('kyc.status')).toBe('open');
+    // 파기는 연 적 있는 세션을 전부 지운다 — 버린 세션도 그 목록에 남아 있어야 한다.
+    expect(person.get('kycSessionIds')).toEqual(['sess-9', 'sess-12']);
+  });
+
   it('records every session it ever opened, so deletion can erase all of them', async () => {
     await call();
     // 다른 공연 페이지에서 다시 시작한다 — 복귀 주소가 달라 새 세션이 열린다.

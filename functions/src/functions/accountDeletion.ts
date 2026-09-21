@@ -26,10 +26,22 @@ export const DELETION_GRACE_SECONDS = 7 * 24 * 60 * 60;
 const MAX_PER_RUN = 50;
 /** Didit 파기 시도 횟수(같은 실행 안에서). 그래도 안 되면 요청을 그대로 두고 다음 날 다시 한다. */
 const DIDIT_ATTEMPTS = 2;
+/**
+ * 며칠째 Didit 파기가 막혔을 때 사람을 부르는 선. 하루 한 번 도는 일정이라 연속 실행이 곧
+ * 연속 일수다. 사흘이면 일시적인 장애가 아니라 설정이 틀렸다는 뜻이고(대개 `DIDIT_API_KEY`),
+ * 그동안 이 계정의 파기는 법정 기한을 넘긴 채 멈춰 있다 — 운영 잡음이 아니라 법적 노출이다.
+ */
+const DIDIT_STALL_RUNS = 3;
 
 const SCHEDULE = '0 4 * * *';
 
 type Doc = FirebaseFirestore.QueryDocumentSnapshot;
+
+/**
+ * Didit 파기 실패에만 붙이는 표시. 연속 실패 카운터는 이것만 센다 — Auth 나 Firestore 가
+ * 흔들린 날까지 같이 세면 "Didit 이 막혔다" 는 신호가 잡음에 묻힌다.
+ */
+class DiditErasureFailed extends Error {}
 
 /**
  * 계정 파기 요청(개인정보 보호법 제36조 파기 요구).
@@ -111,7 +123,7 @@ async function eraseDiditSession(sessionId: string): Promise<void> {
       await deleteDiditSession(sessionId, DIDIT_API_KEY.value());
       return;
     } catch (cause) {
-      if (attempt === DIDIT_ATTEMPTS) throw cause;
+      if (attempt === DIDIT_ATTEMPTS) throw new DiditErasureFailed((cause as Error).message);
       error('deletion.didit.retry', { attempt, reason: (cause as Error).message });
     }
   }
@@ -142,6 +154,11 @@ async function erase(request: Doc): Promise<void> {
   const current = person.get('kyc.sessionId') as string | undefined;
   if (current) sessions.add(current);
   for (const sessionId of sessions) await eraseDiditSession(sessionId);
+  // Didit 을 넘겼다. 며칠째 막혀 있었다면 그 기록은 여기서 지운다 — 다음에 또 막히면 그때부터
+  // 다시 센다. 남겨 두면 지난 장애의 횟수가 새 장애에 더해져 경보가 하루 일찍 운다.
+  if (request.get('diditFailures') !== undefined) {
+    await request.ref.update({ diditFailures: FieldValue.delete() });
+  }
 
   const user = await db.collection(USERS).doc(uid).get();
   const phoneHmac = user.get('phoneHmac') as string | undefined;
@@ -154,6 +171,11 @@ async function erase(request: Doc): Promise<void> {
   if (account) await db.collection(DEVICES).doc(account).delete();
 
   if (person.exists) {
+    // 얼굴 사진은 `persons.photoEnc` 안의 KMS 봉투 하나뿐이라 이 문서를 털면 같이 사라진다.
+    // `functions/src` 에서 Cloud Storage 에 쓰는 곳은 `dailyExport.ts`(`EXPORT_BUCKET`) 하나뿐이고
+    // `persons/{personId}/` 에는 아무도 쓰지 않으므로, 지금은 지울 스토리지 객체가 없다.
+    // C4: storage sweep when photos land in Storage
+    //
     // 지금은 어떤 상태에서도 `deleted` 로 갈 수 있으므로 이 줄은 던지지 않는다.
     // 그래도 남겨 둔다 — 전이표가 언젠가 좁아지면 조용히 어긋나는 대신 여기서 크게 깨진다.
     assertStatusTransition((person.get('status') as PersonStatus | undefined) ?? 'pending', 'deleted');
@@ -179,6 +201,21 @@ async function erase(request: Doc): Promise<void> {
 }
 
 /**
+ * Didit 파기가 며칠째 막혀 있는지 센다. **절대 던지지 않는다** — 세다가 터져 스케줄러 밖으로
+ * 나가면 이미 끝난 파기까지 다시 훑는다. 선을 넘긴 뒤에는 매번 운다: 키가 틀렸다면 사람이
+ * 손대기 전까지 낫지 않고, 한 번 울고 조용해지면 아무도 보지 않는다.
+ */
+async function countDiditFailure(request: Doc): Promise<void> {
+  try {
+    const runs = ((request.get('diditFailures') as number | undefined) ?? 0) + 1;
+    await request.ref.update({ diditFailures: runs });
+    if (runs >= DIDIT_STALL_RUNS) error('deletion.didit.stalled', { uid: request.id, runs });
+  } catch (cause) {
+    error('deletion.didit.count', { uid: request.id, reason: (cause as Error).message });
+  }
+}
+
+/**
  * 매일 04:00(Asia/Seoul)에 도는 파기 작업. 유예가 끝난 요청만 집는다.
  *
  * 요청 하나가 터져도 나머지는 계속 간다. **스케줄러 밖으로는 절대 던지지 않는다** —
@@ -201,6 +238,7 @@ export const processDeletions = onSchedule(
         await erase(request);
       } catch (cause) {
         error('deletion.failed', { uid: request.id, reason: (cause as Error).message });
+        if (cause instanceof DiditErasureFailed) await countDiditFailure(request);
       }
     }
   },

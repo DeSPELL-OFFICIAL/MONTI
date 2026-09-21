@@ -38,6 +38,14 @@ const failWrite = new Set<string>();
 
 const setCustomUserClaims = vi.fn(async (_uid: string, _claims: Record<string, unknown>) => {});
 
+/** 남긴 로그. 미룬 건수는 이 줄 하나로만 밖에 보인다. */
+const logs: Array<[key: string, payload: Record<string, unknown>]> = [];
+vi.mock('firebase-functions/logger', () => ({
+  info: (key: string, payload: Record<string, unknown>) => void logs.push([key, payload]),
+  warn: vi.fn(),
+  error: (key: string, payload: Record<string, unknown>) => void logs.push([key, payload]),
+}));
+
 const DELETE = FieldValue.delete();
 const SERVER_TIMESTAMP = FieldValue.serverTimestamp();
 
@@ -123,7 +131,8 @@ function comparable(value: unknown): number {
 }
 
 function matches(data: Record<string, unknown>, [name, op, value]: Filter): boolean {
-  const actual = data[name];
+  // 진짜 Firestore 처럼 `kyc.status` 같은 점 경로도 거른다 — 버린 세션 스윕이 그 모양으로 묻는다.
+  const actual = field(data, name);
   if (op === '==') return actual === value;
   if (op === 'in') return (value as unknown[]).includes(actual);
   if (op === '<') return actual !== undefined && comparable(actual) < comparable(value);
@@ -225,6 +234,7 @@ beforeEach(() => {
   writes.length = 0;
   deletes.length = 0;
   queries.length = 0;
+  logs.length = 0;
   failQuery.clear();
   failWrite.clear();
   setCustomUserClaims.mockClear();
@@ -493,6 +503,30 @@ describe('reconcilePending — 멈춘 본인인증 레벨', () => {
     expect(deferred.every((id) => !rotated(id))).toBe(true);
   });
 
+  it('spends no chain read on a document this run will not send', async () => {
+    // 예산 확인이 `kycLevelOf` 아래에 있던 시절에는 미룬 문서도 읽기를 1~2번씩 태웠다 —
+    // 200건이 밀린 날 아무것도 보내지 않으면서 직렬 eth_call 400번이 나갔다.
+    const ids = Array.from(
+      { length: 25 },
+      (_, i) => `0x${i.toString(16).padStart(2, '0').repeat(32)}`,
+    );
+    for (const id of ids) seedPerson(id, { status: 'kyc_ok', kycLevel: 0 });
+
+    await run({} as never);
+
+    const sent = ids.filter((id) => snapshot(`persons/${id}`).get('chain.kycLevelTx') === KYC_TX);
+    const deferred = ids.filter((id) => !sent.includes(id));
+    expect(deferred).toHaveLength(5);
+    // 호출 목록 자체를 본다 — 횟수만 세면 다른 문서를 두 번 읽고 넘어가는 실수를 놓친다.
+    const asked = readContract.mock.calls.map(
+      (call) => (call[0] as unknown as { args: unknown[] }).args[0] as string,
+    );
+    expect([...asked].sort()).toEqual([...sent].sort());
+    for (const id of deferred) expect(asked).not.toContain(id);
+    // 미룬 건수는 그대로 남아야 한다 — 이 수가 계속 0 이 아니면 예산이 모자란다는 뜻이다.
+    expect(logs).toContainEqual(['reconcile.kycLevel.deferred', { count: 5 }]);
+  });
+
   it('takes the attester lease for the re-send and gives it back', async () => {
     seedPerson(P1, { status: 'kyc_ok', kycLevel: 0 });
 
@@ -665,6 +699,75 @@ describe('reconcilePending — 늙은 게이트 제안', () => {
   });
 });
 
+describe('reconcilePending — 버려진 본인인증 세션', () => {
+  const HOUR = 60 * 60;
+
+  /** Didit 세션을 열어 둔 사람. `openedAt` 은 `kycSession.ts` 가 세션을 저장할 때 찍는다. */
+  function opened(personId: string, ageSeconds: number): number {
+    const openedAt = seconds() - ageSeconds;
+    write(`persons/${personId}`, {
+      status: 'active',
+      kycLevel: 0,
+      updatedAt: stale(),
+      kyc: {
+        provider: 'didit',
+        sessionId: `sess-${personId.slice(2, 6)}`,
+        url: 'https://verify.didit.me/s/x',
+        status: 'open',
+        openedAt,
+      },
+    });
+    return openedAt;
+  }
+
+  it('marks a session nobody came back to as abandoned, and leaves a fresh one open', async () => {
+    const openedAt = opened(P1, 25 * HOUR);
+    opened(P2, 23 * HOUR);
+
+    await run({} as never);
+
+    const dead = snapshot(`persons/${P1}`);
+    expect(dead.get('kyc.status')).toBe('abandoned');
+    // 우리 쪽 딱지만 바꾼다 — 세션 id 를 지우면 파기가 Didit 의 얼굴 자료를 못 지운다.
+    expect(dead.get('kyc.sessionId')).toBe(`sess-${P1.slice(2, 6)}`);
+    expect(dead.get('kyc.openedAt')).toBe(openedAt);
+    expect(dead.get('status')).toBe('active');
+    expect(snapshot(`persons/${P2}`).get('kyc.status')).toBe('open');
+  });
+
+  it('never calls Didit — only our own record changes', async () => {
+    opened(P1, 25 * HOUR);
+
+    await run({} as never);
+
+    // 여기서 Didit 을 부르면 스윕 한 번이 200번의 HTTP 왕복이 된다. 세션은 저쪽 TTL 이 닫는다.
+    expect(readContract).not.toHaveBeenCalled();
+    expect(sendAttesterTx).not.toHaveBeenCalled();
+  });
+
+  it('asks the index for the old open sessions instead of filtering the window in memory', async () => {
+    await run({} as never);
+
+    const abandoned = queries.filter((q) => q.name === 'persons')[1];
+    expect(abandoned?.filters).toEqual([
+      ['kyc.status', '==', 'open'],
+      ['kyc.openedAt', '<', expect.any(Number)],
+    ]);
+    expect(abandoned?.max).toBe(200);
+  });
+
+  it('keeps going when one document blows up and never throws out of the scheduler', async () => {
+    opened(P1, 25 * HOUR);
+    opened(P2, 25 * HOUR);
+    failWrite.add(`persons/${P1}`);
+
+    await expect(run({} as never)).resolves.not.toThrow();
+
+    expect(snapshot(`persons/${P1}`).get('kyc.status')).toBe('open');
+    expect(snapshot(`persons/${P2}`).get('kyc.status')).toBe('abandoned');
+  });
+});
+
 describe('reconcilePending — 스윕 격리', () => {
   it('runs the later sweeps even when an earlier one throws', async () => {
     failQuery.add('persons');
@@ -705,6 +808,7 @@ describe('reconcilePending — 스윕 격리', () => {
       ['transferInvites', 200],
       ['authChallenges', 200],
       ['pendingGates', 200],
+      ['persons', 200],
     ]);
   });
 

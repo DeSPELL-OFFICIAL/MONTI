@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { FieldValue } from 'firebase-admin/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
+import type { ReadContractReturnType } from 'viem';
 import {
   TRANSFER_INVITE_TTL_SECONDS,
   offerDigest,
@@ -30,10 +31,48 @@ interface ChainOffer {
   expiresAt: bigint;
 }
 
-/** `Ticket.eventMeta` 에서 이 함수가 읽는 칸 하나. 나머지 필드는 여기서 쓰지 않는다. */
-interface ChainEventMeta {
-  requireKyc: boolean;
-}
+/**
+ * `abi/Ticket.json` 의 `eventMeta` 항목을 **그대로** 베낀 조각. `@monti/shared` 의 `ticketAbi` 는
+ * `as Abi` 로 나가 리터럴 타입이 지워지고, 그 위의 `ReadContractReturnType` 은 `unknown` 이 된다 —
+ * 그래서 반환 구조체 타입을 여기서 다시 깐다. 조각이 원본과 어긋나면
+ * `transferInvites.test.ts` 의 드리프트 테스트가 먼저 깨진다.
+ */
+export const eventMetaAbi = [
+  {
+    type: 'function',
+    name: 'eventMeta',
+    inputs: [{ name: 'eventId', type: 'uint256', internalType: 'uint256' }],
+    outputs: [
+      {
+        name: '',
+        type: 'tuple',
+        internalType: 'struct Ticket.EventMeta',
+        components: [
+          { name: 'orgId', type: 'uint256', internalType: 'uint256' },
+          { name: 'titleHash', type: 'bytes32', internalType: 'bytes32' },
+          { name: 'descHash', type: 'bytes32', internalType: 'bytes32' },
+          { name: 'imageCid', type: 'string', internalType: 'string' },
+          { name: 'startsAt', type: 'uint64', internalType: 'uint64' },
+          { name: 'endsAt', type: 'uint64', internalType: 'uint64' },
+          { name: 'venueHash', type: 'bytes32', internalType: 'bytes32' },
+          { name: 'saleStart', type: 'uint64', internalType: 'uint64' },
+          { name: 'saleEnd', type: 'uint64', internalType: 'uint64' },
+          { name: 'transferable', type: 'bool', internalType: 'bool' },
+          { name: 'transferCutoffSeconds', type: 'uint32', internalType: 'uint32' },
+          { name: 'maxTransfers', type: 'uint8', internalType: 'uint8' },
+          { name: 'approvalRequired', type: 'bool', internalType: 'bool' },
+          { name: 'category', type: 'uint8', internalType: 'uint8' },
+          { name: 'regionCode', type: 'bytes32', internalType: 'bytes32' },
+          { name: 'requireKyc', type: 'bool', internalType: 'bool' },
+        ],
+      },
+    ],
+    stateMutability: 'view',
+  },
+] as const;
+
+/** `Ticket.eventMeta` 의 반환 구조체. 손으로 적지 않는다 — 위 조각에서 컴파일러가 만든다. */
+type ChainEventMeta = ReadContractReturnType<typeof eventMetaAbi, 'eventMeta'>;
 
 export interface TransferInviteResult {
   inviteId: string;

@@ -7,6 +7,7 @@ import {
   TRANSFER_INVITE_TTL_SECONDS,
   offerDigest,
   recipientCommitment,
+  ticketAbi,
   type Hex,
 } from '@monti/shared';
 
@@ -144,7 +145,9 @@ vi.mock('../src/lib/chain.js', () => ({
 
 const { TRANSFER_INVITES, USERS } = await import('../src/lib/db.js');
 const { hmacPhone } = await import('../src/lib/phoneIndex.js');
-const { createTransferInvite, pendingOffers } = await import('../src/functions/transferInvites.js');
+const { createTransferInvite, eventMetaAbi, pendingOffers } = await import(
+  '../src/functions/transferInvites.js'
+);
 const functionsTest = (await import('firebase-functions-test')).default();
 
 const create = functionsTest.wrap(createTransferInvite);
@@ -341,6 +344,29 @@ describe('createTransferInvite', () => {
 
     expect(again.commitment).toBe(first.commitment);
     expect(again.inviteId).not.toBe(first.inviteId);
+  });
+});
+
+/**
+ * 손으로 적은 타입은 컨트랙트가 바뀌어도 조용히 통과한다 — `ChainEventMeta` 가 `as` 캐스트였던
+ * 시절의 구멍이다. 이제 반환 구조체 타입은 아래 조각에서 **컴파일러가** 만들지만, 조각 자체가
+ * 원본과 어긋나면 다시 같은 구멍이 된다. 그것을 막는 것이 이 테스트 하나다.
+ */
+describe('eventMeta ABI 조각', () => {
+  it('is a verbatim copy of the eventMeta entry in the real Ticket ABI', () => {
+    const real = (ticketAbi as unknown[]).filter(
+      (entry) => (entry as { type?: string; name?: string }).type === 'function' &&
+        (entry as { name?: string }).name === 'eventMeta',
+    );
+
+    expect(real).toHaveLength(1);
+    expect(eventMetaAbi).toEqual(real);
+  });
+
+  it('keeps requireKyc — the one field this file reads — last in the 16-field tuple', () => {
+    const components = eventMetaAbi[0].outputs[0].components;
+    expect(components).toHaveLength(16);
+    expect(components.at(-1)).toEqual({ name: 'requireKyc', type: 'bool', internalType: 'bool' });
   });
 });
 
