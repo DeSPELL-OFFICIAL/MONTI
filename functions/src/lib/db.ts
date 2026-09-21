@@ -53,7 +53,7 @@ export const ALLOWED_COLLECTIONS = [
  *  - `rotated`  계정이 새 계정으로 교체됐다.
  * 본인인증 통과 여부의 **원본은 `kycLevel`(0/1)** 이고 status 는 진행 단계 표시다.
  */
-const ALLOWED_TRANSITIONS: Record<PersonStatus, PersonStatus[]> = {
+export const ALLOWED_TRANSITIONS: Record<PersonStatus, PersonStatus[]> = {
   pending: ['pending', 'active', 'rejected'],
   active: ['active', 'kyc_ok', 'rejected', 'rotated'],
   kyc_ok: ['kyc_ok', 'active', 'rejected'],
