@@ -67,6 +67,13 @@ service cloud.firestore {
       }
     }
 
+    // 스태프 단말기가 올린 게이트 계정 대기열. 서버 전용이다 — 올리는 길은 `submitPendingGate`,
+    // 읽는 길은 `listPendingGates`(체인에서 PERM_MANAGE_GATES 확인) 뿐이다. 아래 포괄 거부가
+    // 이미 막지만, 스태프 앱이 쓰는 컬렉션이라 "클라이언트는 여기에 닿지 않는다"를 명시해 둔다.
+    match /pendingGates/{gateAccount} {
+      allow read, write: if false;
+    }
+
     // persons, passkeys, kycSessions, invites, phoneIndex, transferInvites, authChallenges 포함 전부 거부.
     match /{document=**} {
       allow read, write: if false;

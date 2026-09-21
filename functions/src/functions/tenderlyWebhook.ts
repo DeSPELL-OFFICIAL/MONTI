@@ -7,6 +7,7 @@ import {
   DEVICES,
   EVENT_CHATS,
   INVITES,
+  PENDING_GATES,
   PERSONS,
   TRANSFER_INVITES,
   USERS,
@@ -164,6 +165,24 @@ async function applyEventStatus(eventIdArg: bigint, statusCode: number): Promise
   // Draft 는 아무것도 하지 않는다.
 }
 
+/**
+ * 게이트가 체인에 올라간 순간 대기열은 끝난다(`submitPendingGate` 가 올린 제안).
+ * 문서 id 는 그 함수가 적은 **소문자** 주소고 이벤트 인자는 체크섬이라, 맞춰서 내린다.
+ *
+ * 아무도 큐에 올린 적 없는 게이트(관리자가 화면을 거치지 않고 바로 등록했다)는 기록만 남기고
+ * 넘어간다 — 웹훅 입력으로 문서를 새로 만들지 않는다. 같은 알림이 다시 배달돼도 같은 값을 덮어쓴다.
+ */
+async function closePendingGate(gateAccount: Hex, gateId: bigint, eventId: bigint): Promise<void> {
+  log({ cacheInvalidate: 'GateRegistered', args: String(eventId) });
+  const ref = db.collection(PENDING_GATES).doc(gateAccount.toLowerCase());
+  const pending = await ref.get();
+  if (!pending.exists) {
+    log({ tenderly: 'pending_gate_absent', gateId: String(gateId) });
+    return;
+  }
+  await ref.set({ status: 'registered', gateId: String(gateId) }, { merge: true });
+}
+
 async function applyEvent(event: { name: string; args: Record<string, unknown> }): Promise<void> {
   switch (event.name) {
     case 'CheckedIn':
@@ -209,8 +228,11 @@ async function applyEvent(event: { name: string; args: Record<string, unknown> }
       break;
     }
     case 'GateRegistered':
-      // `pendingGates` 는 Task 43 이 가진다. 여기서는 캐시 무효화 신호만 남긴다.
-      log({ cacheInvalidate: event.name, args: String(event.args.eventId ?? '') });
+      await closePendingGate(
+        event.args.gateAccount as Hex,
+        event.args.gateId as bigint,
+        event.args.eventId as bigint,
+      );
       break;
     default:
       break;

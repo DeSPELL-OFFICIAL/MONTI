@@ -163,7 +163,9 @@ vi.mock('firebase-admin/messaging', () => ({
   getMessaging: () => ({ send: (...args: unknown[]) => send(...(args as [never])) }),
 }));
 
-const { DEVICES, EVENT_CHATS, INVITES, PERSONS, TRANSFER_INVITES, USERS } = await import('../src/lib/db.js');
+const { DEVICES, EVENT_CHATS, INVITES, PENDING_GATES, PERSONS, TRANSFER_INVITES, USERS } = await import(
+  '../src/lib/db.js',
+);
 const { tenderlyWebhook } = await import('../src/functions/tenderlyWebhook.js');
 
 class FakeRes extends EventEmitter {
@@ -532,13 +534,37 @@ describe('tenderlyWebhook', () => {
     expect(snapshot(`${INVITES}/both-manager`).get('status')).toBe('done');
   });
 
-  it('only logs on GateRegistered — pendingGates belongs to Task 43', async () => {
+  it('closes the queued gate on GateRegistered and stamps the chain gate id', async () => {
+    // 문서 id 는 `submitPendingGate` 가 적은 소문자 주소다. 이벤트 인자는 체크섬으로 온다.
+    const queued = `${PENDING_GATES}/${OTHER.toLowerCase()}`;
+    write(queued, {
+      eventId: '11',
+      kx: `0x${'dd'.repeat(32)}`,
+      ky: `0x${'ee'.repeat(32)}`,
+      status: 'pending',
+      submittedBy: 'uid-1',
+    });
+
     const res = await deliver([gateRegistered(9n, 11n)]);
     expect(res.statusCode).toBe(200);
-    expect(res.body).toBe('ok:1');
-    // 체인도 읽지 않고 문서도 만들지 않는다.
+    expect(snapshot(queued).get('status')).toBe('registered');
+    expect(snapshot(queued).get('gateId')).toBe('9');
+    // 권한 판정은 여전히 eth_call 이다 — 여기서는 대기열만 닫고 체인을 읽지 않는다.
     expect(readContract).not.toHaveBeenCalled();
+
+    // 재배달은 아무것도 바꾸지 않고, 스태프가 올린 키도 그대로 남는다.
+    const again = await deliver([gateRegistered(9n, 11n)]);
+    expect(again.statusCode).toBe(200);
+    expect(snapshot(queued).get('status')).toBe('registered');
+    expect(snapshot(queued).get('kx')).toBe(`0x${'dd'.repeat(32)}`);
+  });
+
+  it('never creates a pending gate document for a gate nobody queued', async () => {
+    // 관리자가 승인 화면을 거치지 않고 바로 등록한 경우다. 웹훅 입력으로 문서를 만들지 않는다.
+    const res = await deliver([gateRegistered(9n, 11n)]);
+    expect(res.body).toBe('ok:1');
     expect(docs.size).toBe(0);
+    expect(readContract).not.toHaveBeenCalled();
   });
 
   it('skips an event status code it does not know instead of throwing', async () => {

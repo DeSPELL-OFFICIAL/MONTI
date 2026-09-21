@@ -6,6 +6,7 @@ export { diditWebhook } from './functions/diditWebhook.js';
 export { getPhotoForGate, issueSnapshot } from './functions/snapshot.js';
 export { getSignupStatus } from './functions/getSignupStatus.js';
 export { listAttendees } from './functions/listAttendees.js';
+export { listPendingGates, submitPendingGate } from './functions/pendingGates.js';
 export { lockDevice, startDeviceChange } from './functions/device.js';
 export { loginChallenge, loginVerify } from './functions/login.js';
 export { pinEventMetadata } from './functions/organizer.js';

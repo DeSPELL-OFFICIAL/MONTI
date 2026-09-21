@@ -156,3 +156,30 @@ describe('eventChats messages', () => {
     await assertFails(owner().doc('eventChats/11/messages/m1').update({ pinned: true }));
   });
 });
+
+describe('pendingGates', () => {
+  const GATE = '0x1234123412341234123412341234123412341234';
+
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (context) => {
+      await context
+        .firestore()
+        .doc(`pendingGates/${GATE}`)
+        .set({ eventId: '11', kx: '0x11', ky: '0x22', status: 'pending', submittedBy: 'uid-1' });
+    });
+  });
+
+  // 큐에 올리는 것도 읽는 것도 callable 만 한다 — 제안은 `submitPendingGate`, 조회는
+  // `listPendingGates` 이고 후자는 체인에서 게이트 관리 권한을 확인한다. 클라이언트가 직접
+  // 읽으면 다른 공연의 단말기 키까지 보이고, 직접 쓰면 승인 화면에 아무 주소나 올릴 수 있다.
+  it('blocks the client from reading the queue or writing into it', async () => {
+    const db = owner();
+    await assertFails(db.doc(`pendingGates/${GATE}`).get());
+    await assertFails(db.collection('pendingGates').get());
+    await assertFails(db.doc(`pendingGates/${GATE}`).update({ status: 'registered' }));
+    await assertFails(db.doc(`pendingGates/${GATE}`).delete());
+    await assertFails(
+      db.doc('pendingGates/0x5555555555555555555555555555555555555555').set({ eventId: '11', status: 'pending' }),
+    );
+  });
+});
