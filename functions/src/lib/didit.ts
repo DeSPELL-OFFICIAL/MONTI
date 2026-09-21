@@ -1,5 +1,4 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { parseAbi } from 'viem';
 import { DIDIT_WEBHOOK_TOLERANCE_SECONDS } from '@monti/shared';
 
 /**
@@ -45,6 +44,3 @@ export function redactDiditPayload(input: unknown): unknown {
   }
   return input;
 }
-
-/** `Identity.setKycLevel(bytes32,uint8)` 한 함수만 쓴다. 전체 ABI 를 들고 다닐 이유가 없다. */
-export const identityKycAbi = parseAbi(['function setKycLevel(bytes32 personId, uint8 level)']);

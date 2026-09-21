@@ -2,20 +2,12 @@ import { verifyRegistrationResponse } from '@simplewebauthn/server';
 import type { RegistrationResponseJSON } from '@simplewebauthn/server';
 import { FieldValue } from 'firebase-admin/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
-import { getAddress, parseAbi } from 'viem';
-import type { Hex } from '@monti/shared';
+import { getAddress } from 'viem';
+import { coinbaseFactoryAbi, type Hex } from '@monti/shared';
 import { RP_ID, expectedOrigins } from '../config.js';
 import { deployment, publicClient } from '../lib/chain.js';
 import { AUTH_CHALLENGES, PASSKEYS, PERSONS, USERS, db } from '../lib/db.js';
 import { CHALLENGE_RE, challengeFromClientData, coseToP256, ownerBytes } from '../lib/webauthn.js';
-
-/**
- * Task 3 이 `@monti/shared` 에 팩토리 ABI 를 넣기 전까지 이 한 조각이 유일한 ABI 텍스트다.
- * `CoinbaseSmartWalletFactory.getAddress(bytes[] owners, uint256 nonce)` 시그니처를 그대로 옮겼다.
- */
-const coinbaseFactoryAbi = parseAbi([
-  'function getAddress(bytes[] owners, uint256 nonce) view returns (address)',
-]);
 
 /** 사람마다 계정은 하나뿐이라 팩토리 nonce 는 항상 0이다. 기기 추가는 소유자 추가지 새 계정이 아니다. */
 const ACCOUNT_NONCE = 0n;

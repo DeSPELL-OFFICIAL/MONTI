@@ -1,10 +1,10 @@
 import { FieldValue } from 'firebase-admin/firestore';
 import { onRequest } from 'firebase-functions/v2/https';
-import type { Hex, PersonStatus } from '@monti/shared';
+import { identityAbi, type Hex, type PersonStatus } from '@monti/shared';
 import { ATTESTER_PK, DIDIT_WEBHOOK_SECRET } from '../config.js';
 import { awaitFinalized, deployment, publicClient, sendAttesterTx } from '../lib/chain.js';
 import { KYC_SESSIONS, PERSONS, assertStatusTransition, db } from '../lib/db.js';
-import { identityKycAbi, redactDiditPayload, verifyDiditSignature } from '../lib/didit.js';
+import { redactDiditPayload, verifyDiditSignature } from '../lib/didit.js';
 import { encryptField, piiAad } from '../lib/kms.js';
 
 const PERSON_ID_RE = /^0x[0-9a-fA-F]{64}$/;
@@ -229,7 +229,7 @@ export const diditWebhook = onRequest(
     // 여기부터 실패해도 사람은 `kyc_ok` 로 남는다 — reconcilePending 이 주워 간다.
     const txHash = await sendAttesterTx({
       address: deployment().identity,
-      abi: identityKycAbi,
+      abi: identityAbi,
       functionName: 'setKycLevel',
       args: [personId, 1],
     });
