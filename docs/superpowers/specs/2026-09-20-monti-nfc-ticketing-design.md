@@ -1,6 +1,8 @@
-# MONTI 기획서 v2.5 (최종 고정) · NFC 본인 확인 티켓팅 (Monad Metropolis 출품)
+# MONTI 기획서 v2.6 (최종 고정) · NFC 본인 확인 티켓팅 (Monad Metropolis 출품)
 
-작성일 2026-09-20 · v2.5 · 상태: **확정, 구현 계획 진행** · 대상: 창업자와 팀, 해커톤 write-up 원본
+작성일 2026-09-20 · v2.6 · 상태: **확정, 구현 계획 진행** · 대상: 창업자와 팀, 해커톤 write-up 원본
+
+v2.6 (2026-09-21): 01b redeploy bundle — 배포된 컨트랙트에 맞춰 본문을 고쳤다. 고친 절: **5.5**(교체 되돌리기·24시간), **5.8**(행사 취소는 파생), **6.3**(T11 백엔드 침해, T14 가짜 게이트), **7.2**(4단계 기기 서명 다이제스트, 5·6단계 늦은 경로), **7.3**(큐 유효기간), **10.2**(`rotateAccount` 한 줄 + v2.6 추가 블록), **12**(오프라인 큐가 `checkInLate`로 들어간다), **13**(OFFLINE 배지·오프라인 카운터·DENY 문구. DENY **코드 집합은 그대로**다). 근거는 `contracts/docs/abi-delta-01b.md`이고, 아직 배포 전이다(01b Task 15에서 재배포).
 
 v2.5에서 바뀐 것: **행사별 본인인증(KYC) 토글.** 가벼운 모임은 전화번호 + Face ID만으로 티켓을 받고, 암표를 막아야 하는 행사만 "본인인증 필수"를 켠다. 목록과 상세에 **"KYC 필요" 배지.** 가입은 전화번호 → Face ID로 끝나고, 본인인증은 KYC 필수 행사의 티켓을 받으려는 순간에 요구한다(프로필에서 미리 할 수도 있다). 계정 등급 0(전화 + Face ID) / 1(신분증 + 얼굴 확인)을 체인에 기록.
 
@@ -180,7 +182,7 @@ NFC가 안 되는 상황(기기, 브라우저에서 접속한 경우)이면 폰�
 |---|---|
 | 잃어버림, 해킹 의심 | 다른 폰이나 웹에서 "내 기기 잠금". 즉시. 잠긴 동안 입장 불가 |
 | 새 폰, 패스키가 동기화됨 | 새 폰에서 Face ID → "새 기기입니다" → 문자 인증 또는 본인인증 재수행 → **마지막 기기 등록 후 7일이 지났으면** 즉시 활성화, 아니면 7일 뒤 |
-| 패스키 자체를 잃음 | 문자 인증 또는 본인인증 재수행 → 새 패스키 → 확인 서명 키가 체인에서 계정을 교체(7일 쿨타임) → 티켓이 새 계정으로 이동 |
+| 패스키 자체를 잃음 | 문자 인증 또는 본인인증 재수행 → 새 패스키 → 확인 서명 키가 체인에서 계정을 교체(7일 쿨타임) → **24시간 뒤** 티켓이 새 계정으로 이동. 교체는 옛 폰의 기기를 즉시 잠그고, 본인이 원하지 않은 교체라면 옛 계정이 그 24시간 안에 `cancelRotation()`으로 되돌린다(6.3 T11). 그 24시간 동안은 **정당한 복구도 아무것도 받지 못한다**(새 계정으로 오는 티켓·양도가 `RotationPending`으로 막힌다). 되돌린 뒤에도 잠금은 남으므로 `setActiveDevice`로 새 기기를 등록해야 하고, 그 등록에도 7일 쿨타임이 걸린다 |
 | 공연이 7일 안인데 잠겨 있음 | 현장에서 매니저가 사진 대조 후 수동 승인. 승인자와 사유가 체인에 남는다 |
 
 ### 5.6 주최자: 프로젝트(공연·모임) 만들기, 6단계 마법사 (웹)
@@ -221,7 +223,7 @@ NFC가 안 되는 상황(기기, 브라우저에서 접속한 경우)이면 폰�
 | NFC 검표 | 스태프 앱(5.7). 매니저 본인도 관리자 권한으로 검표 화면 진입 가능 | 있음 |
 | 공지 | 행사 대화방에 고정 공지 | 추가 |
 | 참가 승인제(모임) | 신청 → 주최자 승인 → 티켓 발행 | Could |
-| 취소·환불 | 행사 취소 시 티켓 일괄 취소(체인). 환불은 유료 전환 후 | 취소는 있음, 환불은 이후 |
+| 취소·환불 | 행사 취소는 체인에 기록되고, 그 행사의 모든 티켓이 즉시 "취소됨"으로 읽힌다(`tokenURI`가 `eventStatus`에서 파생. 티켓마다 트랜잭션을 보내지 않는다). 취소된 행사의 티켓은 더 이상 **양도되지도 않는다**(`EventCancelled`). 환불은 유료 전환 후 | 취소는 있음, 환불은 이후 |
 | 정산·매출 | 유료 전환 후 | 이후 |
 | 복제·템플릿 | 지난 행사 복제 | Could |
 
@@ -287,10 +289,10 @@ B2는 창업자 제안("Face ID로 NFT를 변조 가능 상태로, 태그하면 
 | T8 | 스태프 결탁 | 잔존. 수동 승인은 승인자 주소, 역할, 사유가 체인에 남는다 |
 | T9 | 공연장 인터넷 다운 | 관객은 원래 무관. 단말기는 스냅샷 로컬 검증 + 큐잉(12장) |
 | T10 | 체인 RPC·번들러 지연 | 단말기 쪽만 영향. RPC·번들러 다중화 + 큐잉 |
-| T11 | 백엔드 침해 | **무력화.** 서버에 관객 키도, 게이트 키도, 발행 권한도 없다. 단말기는 체인만 믿는다. 남는 피해는 서비스 중단과 개인정보 유출(암호화로 대응) |
+| T11 | 백엔드 침해 | **부분 차단.** 서버에 관객 키도, 게이트 키도, 티켓 발행 권한도 없다. 단말기는 체인만 믿는다. 다만 **확인 서명 키(어테스터)가 털리면** 신원 등록·KYC 등급·계정 교체를 위조할 수 있다. 계정 교체는 `AccountRotated`로 체인에 남고, **티켓은 24시간(`MIGRATE_DELAY`) 동안 따라가지 않으며**, 그 24시간 안에 **직전 계정 본인이** `cancelRotation()`으로 되돌릴 수 있다(되돌려도 7일 쿨타임은 되감기지 않아 공격자는 다음 시도까지 꼬박 기다린다). 24시간 안에 되돌리지 않으면 미사용 티켓이 넘어간다. 남는 피해: KYC 등급 위조, 임의 신원 등록, 계정 잠금(현장 대량 DENY), 서비스 중단, 개인정보 유출(암호화로 대응). **어테스터 키를 Cloud KMS로 옮기는 것이 근본 해결이고 정식 출시 전 필수다(10.3).** 못 하는 것: 티켓 발행, 티켓 취소, 입장 처리, 행사 생성, 이미 입장했거나 취소된 티켓 이동. 되돌리기 자체의 잔존(**MVP가 받아들인 위험**): 도난·동기화된 **옛** 패스키가 정당한 교체 한 번을 그 24시간 안에 무효화해 복구를 다음 쿨타임으로 미룰 수 있고, 이것은 반복될 수 있다. 되돌리기에도 옛 폰의 생체 인증이 필요하므로 그 폰이 없는 절도범은 못 한다. 신원을 빼앗지는 못한다 — 되돌려도 교체가 건 기기 잠금이 남아 되살아난 계정은 문에서도 양도에서도 막히고, 그걸 푸는 `setActiveDevice`는 T6이 이미 받아들인 잔존 권한이다 |
 | T12 | 더블 탭, 재시도 | 컨트랙트가 두 번째를 거부. 단말기는 첫 판정 유지 |
 | T13 | 두 게이트에서 같은 티켓을 같은 초에 | 체인이 원자적으로 하나만 성공 |
-| T14 | **가짜 게이트**: 사기꾼이 공연장 밖에 폰을 놓고 "여기서 티켓 미리 확인하세요" | **이중 차단.** ① 관객 폰이 서명을 쓰기 전에 그 게이트가 체인 allowlist에 있는지 확인한다. ② 설령 서명을 얻어도 사기꾼 계정은 allowlist에 없어 체크인 트랜잭션이 거부된다. 진짜 단말기를 도난당해도 관리자가 allowlist에서 빼면 끝 |
+| T14 | **가짜 게이트**: 사기꾼이 공연장 밖에 폰을 놓고 "여기서 티켓 미리 확인하세요" | **이중 차단.** ① 관객 폰이 서명을 쓰기 전에 그 게이트가 체인 allowlist에 있는지 확인한다. ② 설령 서명을 얻어도 사기꾼 계정은 allowlist에 없어 체크인 트랜잭션이 거부된다. 진짜 단말기를 도난당해도 관리자가 allowlist에서 빼면 끝이다. v2.6부터 그 폐기(`revokeGate`)는 **가스 없이** 되고, 폐기된 게이트 계정은 페이마스터의 스폰서 대상에서도 즉시 빠지며, 그 주소를 새 단말기로 **다시 등록할 수 있다**. 폐기된 게이트는 오프라인 큐(`checkInLate`)도 흘리지 못한다 |
 | T15 | 단말기 도난 후 오프라인 큐 조작 | 큐의 트랜잭션은 관객 기기 키 서명이 있어야만 체인이 받는다. 단말기 혼자서는 못 만든다 |
 
 ---
@@ -312,9 +314,9 @@ B2는 창업자 제안("Face ID로 NFT를 변조 가능 상태로, 태그하면 
 | 1 | 관객 | **"입장하기" → Face ID.** 기기 키가 60초 동안 무장된다. 화면: 카운트다운 |
 | 2 | 단말기 | HCE로 NFC 태그(Type 4, 쓰기 가능)를 흉내 내며 3초마다 **게이트 1회용 번호** G를 내보낸다. `G = {gate_id, event_id, issued_at, nonce} ‖ sig_gate(G)`. 이때 단말기는 NFC 읽기 모드를 켜지 않는다 |
 | 3 | 관객 폰 | 탭 → G를 읽는다 → `sig_gate`를 체인 allowlist의 게이트 키(앱이 캐시, 이벤트로 갱신)로 검증. 가짜 게이트면 여기서 멈추고 "등록되지 않은 단말기" 표시 |
-| 4 | 관객 폰 | 기기 키로 서명 `S = sign_device({tokenId, gate_id, event_id, nonce, issued_at})`. Face ID 재요구 없음. **같은 탭 안에서 NFC 쓰기로 `{tokenId, S}`를 단말기에 돌려준다.** 진동. 폰 역할 끝. **인터넷 불필요** |
-| 5 | 단말기 | `checkIn(tokenId, G, S)` 트랜잭션 요청을 **게이트 계정으로** 번들러에 보낸다(Pimlico, 예비 Alchemy). 가스는 페이마스터. 전송 전 캐시된 스냅샷으로 사전 검증해 실패 트랜잭션을 줄인다 |
-| 6 | 체인(컨트랙트) | ① msg.sender가 이 공연의 등록된 게이트이고 열려 있는가 ② `S`가 `ownerOf(tokenId)`의 활성 기기 키 서명인가(P-256 프리컴파일) ③ `S` 안의 gate_id가 msg.sender의 게이트인가 ④ `now - issued_at ≤ 60초` ⑤ 티켓이 이 공연 것이고 입장 전이며 취소되지 않았고 계정이 잠기지 않았는가. 하나라도 실패하면 되돌린다 |
+| 4 | 관객 폰 | 기기 키로 서명 `S = sign_device(sha256(abi.encode(chainId, Ticket 주소, tokenId, gate_id, event_id, nonce, issued_at)))`. **일곱 낱말(224바이트)이고 앞의 두 낱말이 v2.6에서 새로 붙었다** — 체인과 배포본을 묶어, 테스트넷 서명이 메인넷에서, 옛 배포본의 서명이 새 배포본에서 통하지 않는다. 같은 값을 컨트랙트의 `deviceDigest(...)` 조회로 확인할 수 있다(클라이언트는 그걸 기준으로 한 벡터를 고정한다). 서명은 **low-`s`만** 받는다 — `s > N/2`이면 `s = N − s`로 정규화해서 보낸다. Face ID 재요구 없음. **같은 탭 안에서 NFC 쓰기로 `{tokenId, S}`를 단말기에 돌려준다.** 진동. 폰 역할 끝. **인터넷 불필요** |
+| 5 | 단말기 | `checkIn(tokenId, G, S)` 트랜잭션 요청을 **게이트 계정으로** 번들러에 보낸다(Pimlico, 예비 Alchemy). 가스는 페이마스터. 전송 전 캐시된 스냅샷으로 사전 검증해 실패 트랜잭션을 줄인다. 인터넷이 끊긴 상태였다면 같은 값을 큐에 쌓아 두었다가 복구 후 `checkInLate(tokenId, G, S)`로 보낸다(12장) |
+| 6 | 체인(컨트랙트) | ① msg.sender가 이 공연의 등록된 게이트이고 열려 있는가 ② `S`가 `ownerOf(tokenId)`의 활성 기기 키 서명인가(P-256 프리컴파일) ③ `S` 안의 gate_id가 msg.sender의 게이트인가 ④ 현장 경로는 `now - issued_at ≤ 60초`. 복구 후 기록 경로(`checkInLate`)는 개장 −12시간 ~ 폐장 +12시간 ⑤ 티켓이 이 공연 것이고 입장 전이며 취소되지 않았고 계정이 잠기지 않았는가. 하나라도 실패하면 되돌린다 |
 | 7 | 체인 | 통과하면 체크인 기록 + `CheckedIn(tokenId, eventId, gateId, nonceHash, ts)` 이벤트. `tokenURI`가 "입장 완료"로 바뀐다 |
 | 8 | 단말기 | 자기 요청의 결과와 `monadLogs` 구독으로 이벤트를 받아 **초록 + 사진**. 추측 실행 단계에서 켜고(0.7초), 확정되면 굳힌다(+0.6초) |
 | 9 | 서버 | 같은 이벤트를 Tenderly 알림으로 받아 인덱서 갱신, 관객 폰에 "입장 완료" 푸시. 판정 근거가 아니다 |
@@ -326,6 +328,7 @@ B2는 창업자 제안("Face ID로 NFT를 변조 가능 상태로, 태그하면 
 | 무장 시간 | 60초 | 줄 서서 Face ID 누르고 대기까지. 지나면 다시 누르면 된다 |
 | 1회용 번호 회전 | 3초 | 싸고, 오래된 번호 창을 줄인다 |
 | 번호 유효기간(체인 검사) | 60초 | 탭 → 전송 → 블록 포함까지 여유 |
+| 큐 유효기간(체인 검사) | 개장 −12시간 ~ 폐장 +12시간 | 오프라인 큐 전용(`checkInLate`). 현장 60초 창과 무관하며, 하한이 게이트의 서명 사전 수확을 막는다 |
 | 단말기 시계 | NTP 동기화 | 컨트랙트가 `block.timestamp`로 검사 |
 | 단말기 화면 | 2초까지 "확인 중", 5초 넘으면 "다시 대세요" | **시간 초과로 소프트 승인 금지** |
 | 탭 실패 재시도 | 아이폰 "세션 만료" 시 즉시 재탭 안내 | 단말기 간섭(18장) |
@@ -554,7 +557,7 @@ Monad 실측(2026-09-20): 기본 수수료 100 gwei 고정, MON 약 32원, **가
 **`Identity`**
 - `personId`는 **아무 의미 없는 난수 32바이트**다. 해시가 아니다. 난수 ↔ 실제 사람의 연결은 Firestore에만 있고, 체인만 봐서는 누구인지 알 수 없다
 - `register(personId, account, deviceKey)` 확인 서명 키만
-- `rotateAccount(personId, newAccount)` 확인 서명 키만, 7일 쿨타임
+- `rotateAccount(personId, newAccount)` 확인 서명 키만, 7일 쿨타임. 옛 계정의 기기를 잠그고, 직전 계정을 24시간 되돌리기용으로 기록한다
 - `setActiveDevice(deviceKey)` 계정 본인, 7일 쿨타임 · `lockDevice()` 계정 본인 또는 확인 서명 키
 - 조회: `accountOf`, `isMember`, `activeDevice`, `locked`
 - 이벤트 `Registered`, `AccountRotated`, `DeviceChanged`, `DeviceLocked`
@@ -574,6 +577,18 @@ Monad 실측(2026-09-20): 기본 수수료 100 gwei 고정, MON 약 32원, **가
 - `revoke(tokenId)`, `migrate(tokenId)`
 - `tokenURI`: 체인 데이터로 JSON 조립 → `data:` URI. 이름, 설명, 이미지(IPFS CID), 속성(공연, 일시, 장소, 종류, 좌석, **상태: 입장 전/입장 완료**, 양도 가능)
 - 이벤트 `EventCreated`, `Claimed`, `Transfer`, `CheckedIn(tokenId, eventId, gateId, nonceHash, ts)`, `OverrideRequested`, `ManualOverride(tokenId, gateId, approver, role, reason)`, `Revoked`, `Migrated`
+
+**v2.6 추가(컨트랙트, 01b 번들 재배포 2026-10-05)**
+- `Ticket`: `checkInLate(tokenId, G, S)` — 오프라인 큐 전용 입장 기록(12장). 게이트 계정만, 증명은 `checkIn`과 동일, 시계만 넓다(개장 −`LATE_WINDOW` ~ 폐장 +`LATE_WINDOW`, 12시간). 게이트가 열려 있을 필요는 없고 폐기된 게이트는 막힌다. 1회용 번호는 두 경로를 합쳐 **한 번만** 쓰인다. `CheckIn`에 `late` 추가, 이벤트 `CheckedInLate(tokenId, gateId, issuedAt, ts)`가 `CheckedIn`과 **함께** 나온다(입장 수를 셀 때는 `CheckedIn`만 센다). 되돌리는 사유 **12개는 `checkIn`과 완전히 같다** — 13장 DENY 코드는 움직이지 않는다.
+- `Ticket`: 입장 기록 조회 `checkInOf(tokenId)`의 반환 구조가 `(gateId, nonceHash, ts, manual, late)`로 바뀌었다(셀렉터는 그대로라 컴파일러가 못 잡는다. 자리로 해체하는 코드는 전부 고쳐야 한다).
+- `Ticket`: 기기 서명 다이제스트가 **도메인 분리**된다 — `sha256(abi.encode(chainId, Ticket 주소, tokenId, gateId, eventId, nonce, issuedAt))`, 일곱 낱말(7.2 4단계). 조회 `deviceDigest(...)`가 그 값을 그대로 내주며 클라이언트의 기준이다. **입장 서명은 low-`s`만 받는다**(solady `P256.verifySignature`). 관객·게이트 기기 키로 서명하는 모든 클라이언트는 `s > N/2`이면 `s = N − s`로 정규화한 뒤 보낸다. 안 하면 정상 탭의 절반이 `DEVICE_MISMATCH`로 거절된다.
+- `Ticket`: 양도 승인 서명이 **EIP-712**가 된다. `TransferApproval(uint256 tokenId,bytes32 recipientCommitment,address recipient)` / 도메인 `(MONTI Ticket, 1, chainId, verifyingContract)`. 조회 `offerDigest(tokenId, commitment, recipient)`, `eip712Domain()`. 같은 서명이 다른 체인·다른 배포본에서 더는 유효하지 않다.
+- `Ticket`: `migrate`에 `MIGRATE_DELAY`(24시간) 타임락. 교체 직후 24시간 동안은 **새 계정이 아무것도 받지 못한다**(모든 전송·발행이 `RotationPending`. `migrate`만 예외이며 그것도 같은 24시간을 기다린다). `tokenURI`가 취소된 행사를 "취소됨"으로 읽는다. `_update`가 보내는 쪽도 검사하고(잠김·탈퇴 계정은 전송 불가), 받는 쪽이 잠겨 있어도 막으며(양방향), 취소된 행사의 티켓은 움직이지 않는다(`EventCancelled`). `checkIn`이 보유자의 멤버십을 다시 본다(`NotMember`). `requestOverride`가 행사 상태를 본다.
+- `Identity`: `cancelRotation()` — **직전에 밀려난 계정만**, **교체 후 `ROTATION_UNDO_WINDOW`(24시간) 안에만**. 조회 `rotatedAt(personId)`, `rotatedFrom(personId)`, 이벤트 `RotationCancelled`. "지금 되돌릴 수 있나"는 `rotatedFrom(personId) == 내 주소 && now < rotatedAt(personId) + 24시간`이다(`rotatedAt`은 `register`도 찍으므로 혼자서는 깃발이 아니다). `rotateAccount`가 옛 기기를 잠그고 `DeviceLocked`를 함께 내며, **되돌려도 그 잠금은 풀리지 않는다**(정상적인 `setActiveDevice` 경로로만 풀린다). `ROTATION_UNDO_WINDOW`는 `Ticket.MIGRATE_DELAY`와 같은 값이어야 한다.
+- `Organizers`: `revokeGate`가 게이트 계정 매핑을 해제한다(폐기 뒤 재등록 가능, 페이마스터 스폰서 중단). `registerGate`가 반쪽 0 키를 거부한다.
+- `Paymaster`: 허용 함수에 `checkInLate`, `cancelRotation`, `revokeGate`, `revoke`, `createOrganizer`, `transferOwner` 추가. **deployer 전용 `setAllowed(selector, kind, word)`** — 허용 목록 변경이 더는 재배포를 요구하지 않고, 남용되는 셀렉터를 한 트랜잭션으로 끌 수 있다(대상 컨트랙트 세 개는 그대로 불변 생성자 인자다). 조회 `argWordOf(selector)`, 이벤트 `SelectorAllowed`.
+- **`Ticket.revoke`는 `PERM_CREATE_EVENT`를 가진 사람이 한다**(9.4 표에는 별도 행이 없다. 프로젝트를 만들 수 있는 권한이 그 프로젝트의 티켓을 무효화할 수 있다는 뜻이다).
+- **크기**: `Ticket`이 이 번들에서 EIP-170(24,576바이트)을 넘었다(런타임 26,351 / 이니트코드 27,665바이트). Monad의 한도는 **128KB**(10.1)이므로 문제가 아니지만, 그 대가로 `Ticket`은 **Monad 전용**이 됐다. 실제 게이트는 `test/ContractSize.t.sol`의 131,072바이트 단언이다.
 
 **v2.5 추가(컨트랙트)**
 - `Identity`: 계정 등급 `kycLevel`(0/1). `register(..., kycLevel)`, `setKycLevel(personId, level)` 확인 서명 키만, `kycLevelOf(account)` 조회, `KycLevelSet` 이벤트.
@@ -661,7 +676,7 @@ Monad 실측(2026-09-20): 기본 수수료 100 gwei 고정, MON 약 32원, **가
 |---|---|---|
 | 관객 폰 인터넷 없음 | **영향 없음.** 입장에 인터넷을 쓰지 않는다 | 없음 |
 | 공연장 Wi-Fi 다운 | 단말기가 LTE 또는 핫스팟으로 계속. 관객 무관 | 없음 |
-| 단말기 인터넷 없음 | **서명된 스냅샷** `{event, ticket, 계정, 기기 키, 사진, epoch, 만료} ‖ sig_attester`로 로컬 검증. "OFFLINE 승인"으로 표시하고 트랜잭션을 큐에 쌓아 복구 후 전송. 큐의 트랜잭션은 관객 서명이 있어야만 체인이 받는다 | **있음**(고립된 단말기끼리). 수용·기록·사후 대사 |
+| 단말기 인터넷 없음 | **서명된 스냅샷** `{event, ticket, 계정, 기기 키, 사진, epoch, 만료} ‖ sig_attester`로 로컬 검증. "OFFLINE 승인"으로 표시하고 트랜잭션을 큐에 쌓아 복구 후 전송. 복구 후 보내는 것은 `checkIn`이 아니라 **`checkInLate(tokenId, G, S)`**다 — 현장 경로의 60초 창으로는 큐가 절대 들어갈 수 없기 때문이다. 큐 경로가 받는 코드는 **개장 12시간 전부터**이고, 제출은 **폐장 12시간 후까지** 가능하다(`LATE_WINDOW`). 나머지 증명은 현장과 똑같다: 큐의 트랜잭션은 관객 기기 키 서명이 있어야만 체인이 받고, 폐기된 게이트는 큐도 못 흘린다. 체인에 `CheckIn.late = true`와 `CheckedInLate` 이벤트가 남아 사후 대사가 가능하다 | **있음**(고립된 단말기끼리). 수용·기록·사후 대사. 두 번째 제출은 `AlreadyCheckedIn`으로 되돌아오고, 단말기는 체인의 `checkInOf`를 읽어 "누가 먼저였는지"를 기록한다 |
 | 번들러 하나 다운 | 다음 번들러 | 없음 |
 | NFC 안 되는 상황 | 폰이 같은 `{tokenId, S}`를 QR로 표시, 스태프 촬영. 이후 동일 | 없음 |
 
@@ -678,9 +693,9 @@ Monad 실측(2026-09-20): 기본 수수료 100 gwei 고정, MON 약 32원, **가
 | 수신 | "서명 받음", 마스킹된 티켓 번호, 스냅샷 사전 검증 결과 |
 | 확인 중 | 스피너 2초 이내, "체인 확인 중" |
 | **ADMIT** | 전면 초록, **큰 본인인증 사진**, 이름, 종류/좌석, 입장 순번, 시각, 블록 번호. 24시간 내 기기 변경이면 앰버 배너 |
-| **OFFLINE 승인** | 초록에 앰버 테두리, "복구 후 기록 예정", 사진 |
-| **DENY** | ALREADY_USED(첫 입장 시각·게이트), WRONG_EVENT, REVOKED, EXPIRED_CODE(다시 대세요), NO_TICKET, GATE_CLOSED, DEVICE_LOCKED, DEVICE_MISMATCH, GATE_MISMATCH(다른 게이트의 번호), EVENT_ENDED(행사 종료), EVENT_CANCELLED(취소된 행사), TX_FAILED(사유) |
-| 오프라인 | "OFFLINE, 스냅샷 N분 전, 대기 N건" |
+| **OFFLINE 승인** | 초록에 앰버 테두리, "복구 후 기록 예정", 사진. 복구되면 `checkInLate`로 기록되고 배지가 "기록됨"으로 바뀐다. 폐장 12시간이 지나면 기록 창이 닫히므로 "미기록"으로 남고 주최자 대사 목록에 올라간다 |
+| **DENY** | 코드 집합은 v2.6에서도 그대로다(`checkInLate`가 되돌리는 12가지는 `checkIn`과 같다). ALREADY_USED(첫 입장 시각·게이트), WRONG_EVENT, REVOKED, EXPIRED_CODE(현장에서는 "다시 대세요". 큐를 흘리다 나오면 문구가 다르다 — "기록 창 만료, 미기록"), NO_TICKET, GATE_CLOSED, DEVICE_LOCKED, DEVICE_MISMATCH, GATE_MISMATCH(다른 게이트의 번호), EVENT_ENDED(행사 종료), EVENT_CANCELLED(취소된 행사), TX_FAILED(사유. 회전 대기 `RotationPending`과 탈퇴 계정 `NotMember`가 여기로 들어온다) |
+| 오프라인 | "OFFLINE, 스냅샷 N분 전, 대기 N건". 복구 후에는 "기록됨 N건 / 충돌 N건 / 미기록 N건" |
 | 수동 승인 | PIN + 사유 코드. 권한 있으면 즉시 승인, 없으면 "결재 요청 전송" |
 
 ---
