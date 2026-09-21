@@ -123,11 +123,12 @@ vi.mock('../src/lib/chain.js', () => ({
 
 const { INVITES, USERS } = await import('../src/lib/db.js');
 const { hmacPhone } = await import('../src/lib/phoneIndex.js');
-const { acceptInvite, createInvite } = await import('../src/functions/invites.js');
+const { acceptInvite, createInvite, revokeInvite } = await import('../src/functions/invites.js');
 const functionsTest = (await import('firebase-functions-test')).default();
 
 const create = functionsTest.wrap(createInvite);
 const accept = functionsTest.wrap(acceptInvite);
+const revoke = functionsTest.wrap(revokeInvite);
 
 /** 세션 클레임으로만 호출자를 묶는다 — 요청 본문의 주소는 어디에서도 읽지 않는다. */
 const ownerAuth = { uid: 'uid-owner', token: { account: OWNER } };
@@ -268,11 +269,14 @@ describe('acceptInvite', () => {
       data: `0x${string}`;
       orgId: string;
       role: string;
+      requiredSender: string;
     };
 
     expect(result.to).toBe(ORGANIZERS);
     expect(result.orgId).toBe('1');
     expect(result.role).toBe('manager');
+    // 이 calldata 를 보낼 수 있는 계정. 초대받은 사람이 자기 지갑으로 보내면 컨트랙트가 되돌린다.
+    expect(result.requiredSender).toBe(OWNER);
     const decoded = decodeFunctionData({ abi: organizersAbi, data: result.data });
     expect(decoded.functionName).toBe('setManager');
     expect(decoded.args).toEqual([1n, INVITEE, true, true]);
@@ -378,14 +382,91 @@ describe('acceptInvite', () => {
     await expect(accept({ data: { inviteId }, auth: inviteeAuth } as never)).rejects.toThrow('BAD_ROLE');
   });
 
-  it('leaks nothing about the org beyond this invite', async () => {
+  it('names the current org owner as the required sender, even for an invite an admin created', async () => {
+    const { inviteId } = (await create({
+      data: { orgId: '1', role: 'manager', phoneE164: PHONE },
+      auth: adminAuth,
+    } as never)) as { inviteId: string };
+
+    const result = (await accept({ data: { inviteId }, auth: inviteeAuth } as never)) as {
+      requiredSender: string;
+    };
+    // 만든 사람(관리자)이 아니라 **지금의 오너**다. 오너가 바뀌면 답도 바뀐다.
+    expect(result.requiredSender).toBe(OWNER);
+    expect(reads.at(-1)).toEqual({ functionName: 'ownerOf', args: [1n] });
+
+    chain.owner = OUTSIDER;
+    const again = (await accept({ data: { inviteId }, auth: inviteeAuth } as never)) as {
+      requiredSender: string;
+    };
+    expect(again.requiredSender).toBe(OUTSIDER);
+  });
+
+  it('leaks nothing about the org beyond this invite and who must send the calldata', async () => {
     const inviteId = await createManagerInvite();
     const result = (await accept({ data: { inviteId }, auth: inviteeAuth } as never)) as Record<
       string,
       unknown
     >;
-    expect(Object.keys(result).sort()).toEqual(['data', 'orgId', 'role', 'to']);
+    expect(Object.keys(result).sort()).toEqual(['data', 'orgId', 'requiredSender', 'role', 'to']);
     expect(JSON.stringify(result)).not.toContain(hmacPhone(PHONE, KEY));
-    expect(JSON.stringify(result)).not.toContain(OWNER);
+    // 오너 주소는 `requiredSender` 로만 나간다 — 누가 초대를 만들었는지(`createdBy`)는 나가지 않는다.
+    expect(result.createdBy).toBeUndefined();
+  });
+});
+
+describe('revokeInvite', () => {
+  it('revokes an invite the owner sent and answers the same way when called again', async () => {
+    const inviteId = await createManagerInvite();
+
+    const first = (await revoke({ data: { inviteId }, auth: ownerAuth } as never)) as { status: string };
+    expect(first).toEqual({ status: 'revoked' });
+    const invite = snapshot(`${INVITES}/${inviteId}`);
+    expect(invite.get('status')).toBe('revoked');
+    expect(invite.get('revokedBy')).toBe(OWNER);
+    expect(invite.get('revokedAt')).toBeDefined();
+    const revokedAt = invite.get('revokedAt');
+
+    // 멱등: 두 번째 호출은 같은 답을 주고 첫 기록을 덮어쓰지 않는다.
+    expect(await revoke({ data: { inviteId }, auth: ownerAuth } as never)).toEqual({ status: 'revoked' });
+    expect(snapshot(`${INVITES}/${inviteId}`).get('revokedAt')).toBe(revokedAt);
+  });
+
+  it('revokes an invite that was already accepted — the role has not gone on chain yet', async () => {
+    const inviteId = await createManagerInvite();
+    await accept({ data: { inviteId }, auth: inviteeAuth } as never);
+    expect(snapshot(`${INVITES}/${inviteId}`).get('status')).toBe('accepted');
+
+    await revoke({ data: { inviteId }, auth: ownerAuth } as never);
+    expect(snapshot(`${INVITES}/${inviteId}`).get('status')).toBe('revoked');
+  });
+
+  it('closes the invite for good — a revoked invite can no longer be accepted', async () => {
+    const inviteId = await createManagerInvite();
+    await revoke({ data: { inviteId }, auth: ownerAuth } as never);
+
+    await expect(accept({ data: { inviteId }, auth: inviteeAuth } as never)).rejects.toThrow(
+      'INVITE_NOT_OPEN',
+    );
+  });
+
+  it('refuses everyone but the org owner, including the admin who may create invites', async () => {
+    const inviteId = await createManagerInvite();
+
+    for (const auth of [adminAuth, outsiderAuth, inviteeAuth]) {
+      await expect(revoke({ data: { inviteId }, auth } as never)).rejects.toThrow('NOT_ORG_OWNER');
+    }
+    expect(snapshot(`${INVITES}/${inviteId}`).get('status')).toBe('sent');
+  });
+
+  it('rejects an unknown invite, a malformed id and an unauthenticated caller', async () => {
+    await expect(
+      revoke({ data: { inviteId: '11111111-2222-3333-4444-555555555555' }, auth: ownerAuth } as never),
+    ).rejects.toThrow('INVITE_NOT_FOUND');
+    await expect(revoke({ data: { inviteId: '../users/uid-1' }, auth: ownerAuth } as never)).rejects.toThrow(
+      'BAD_INVITE_ID',
+    );
+    await expect(revoke({ data: {}, auth: ownerAuth } as never)).rejects.toThrow('BAD_INVITE_ID');
+    await expect(revoke({ data: { inviteId: 'x' } } as never)).rejects.toThrow('AUTH_REQUIRED');
   });
 });

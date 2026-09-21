@@ -134,6 +134,9 @@ describe('deploy bundle', () => {
       'tenderlyWebhook',
       'reconcilePending',
       'dailyExport',
+      'pinEventMetadata',
+      'pinMessage',
+      'revokeInvite',
     ]) {
       expect(exported).toContain(name);
     }

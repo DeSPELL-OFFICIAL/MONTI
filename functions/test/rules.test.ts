@@ -135,4 +135,24 @@ describe('eventChats messages', () => {
     const stranger = env.authenticatedContext('uid-9', {}).firestore();
     await assertFails(stranger.doc('eventChats/11/members/uid-9').set({ account: '0x09', joinedAt: 1 }));
   });
+
+  // `pinned` 는 "주최자가 고정했다"는 권한 표현이다. 권한은 체인에만 있으므로(스펙 §9.4)
+  // 규칙은 그것을 알 수 없고, 서버의 `pinMessage` 가 eth_call 로 확인하는 길 하나만 남긴다.
+  it('blocks a client from creating a message that carries pinned', async () => {
+    await assertFails(
+      owner()
+        .collection('eventChats/11/messages')
+        .add({ uid: 'uid-1', text: 'hi', createdAt: 1, reported: 0, pinned: true }),
+    );
+  });
+
+  it('blocks a client from setting pinned on an existing message', async () => {
+    await env.withSecurityRulesDisabled(async (context) => {
+      await context
+        .firestore()
+        .doc('eventChats/11/messages/m1')
+        .set({ uid: 'uid-1', text: 'hi', createdAt: 1, reported: 0 });
+    });
+    await assertFails(owner().doc('eventChats/11/messages/m1').update({ pinned: true }));
+  });
 });

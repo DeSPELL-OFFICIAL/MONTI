@@ -1,4 +1,4 @@
-export { acceptInvite, createInvite } from './functions/invites.js';
+export { acceptInvite, createInvite, revokeInvite } from './functions/invites.js';
 export { closeEndedChats, joinEventChat, reportMessage } from './functions/eventChat.js';
 export { createTransferInvite, pendingOffers } from './functions/transferInvites.js';
 export { dailyExport } from './functions/dailyExport.js';
@@ -8,6 +8,8 @@ export { getSignupStatus } from './functions/getSignupStatus.js';
 export { listAttendees } from './functions/listAttendees.js';
 export { lockDevice, startDeviceChange } from './functions/device.js';
 export { loginChallenge, loginVerify } from './functions/login.js';
+export { pinEventMetadata } from './functions/organizer.js';
+export { pinMessage } from './functions/pinMessage.js';
 export { reconcilePending } from './functions/reconcilePending.js';
 export { registerIdentity } from './functions/registerIdentity.js';
 export { registerPasskey } from './functions/registerPasskey.js';

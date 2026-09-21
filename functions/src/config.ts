@@ -29,6 +29,8 @@ export const DIDIT_API_KEY = defineSecret('DIDIT_API_KEY');
 export const DIDIT_WORKFLOW_ID = defineSecret('DIDIT_WORKFLOW_ID');
 export const DIDIT_WEBHOOK_SECRET = defineSecret('DIDIT_WEBHOOK_SECRET');
 export const TENDERLY_WEBHOOK_SECRET = defineSecret('TENDERLY_WEBHOOK_SECRET');
+/** Pinata 업로드 키. 서버에만 있다 — 브라우저가 들면 누구나 우리 계정에 파일을 올린다. */
+export const PINATA_JWT = defineSecret('PINATA_JWT');
 
 /**
  * Android WebView는 origin을 `android:apk-key-hash:<base64url SHA-256>`로 보낸다.

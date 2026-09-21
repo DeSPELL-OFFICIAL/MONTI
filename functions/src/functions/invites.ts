@@ -26,6 +26,12 @@ export interface InviteCalldata {
   data: Hex;
   orgId: string;
   role: Role;
+  /**
+   * 이 calldata 를 **보낼 수 있는** 계정 — 조직의 현재 오너다.
+   * 초대받은 사람이 자기 지갑으로 보내면 `Organizers` 가 되돌린다(`setAdmin` 은 오너만,
+   * `setManager` 는 권한 보유자만). 웹은 이 주소를 보고 "오너가 보내야 한다"를 그린다.
+   */
+  requiredSender: Hex;
 }
 
 /**
@@ -213,7 +219,60 @@ export const acceptInvite = onCall(
             args: [BigInt(spec.orgId), account, true, spec.canApprove],
           });
 
+    // 보낼 수 있는 계정은 **지금의 오너**다. 초대를 만든 사람(관리자일 수 있다)이 아니고,
+    // 초대장에 박아 둔 값도 아니다 — 오너가 바뀌면 답도 따라 바뀌어야 한다.
+    const contracts = deployment();
+    const requiredSender = (await publicClient().readContract({
+      address: contracts.organizers,
+      abi: organizersAbi,
+      functionName: 'ownerOf',
+      args: [BigInt(spec.orgId)],
+    })) as Hex;
+
     // 초대장의 나머지(누가 만들었는지, 번호 색인, 조직의 다른 사람)는 나가지 않는다.
-    return { to: deployment().organizers, data, orgId: spec.orgId, role: spec.role };
+    return { to: contracts.organizers, data, orgId: spec.orgId, role: spec.role, requiredSender };
   },
 );
+
+/**
+ * 초대를 거둔다. **오너만** 할 수 있다 — 초대는 만들 수 있는 사람이 여럿이어도
+ * (관리자도 매니저 초대를 만든다) 거두는 것은 조직을 대표하는 한 사람의 결정이다.
+ *
+ * `sent` 든 `accepted` 든 `revoked` 로 간다. 수락된 초대까지 거둘 수 있어야 하는 이유는,
+ * 수락은 calldata 를 받아 간 것일 뿐 역할이 체인에 올라간 것이 아니기 때문이다.
+ * 이미 나간 calldata 는 어차피 **오너가 직접 보내야** 실행된다 — 거둔 초대를 오너가
+ * 실수로 보내는 일만 조심하면 된다. 두 번 불러도 같은 답을 주고 첫 기록을 덮지 않는다.
+ */
+export const revokeInvite = onCall(async (request): Promise<{ status: 'revoked' }> => {
+  const caller = await resolveCallerAccount(request);
+  const { inviteId } = (request.data ?? {}) as { inviteId?: string };
+  if (typeof inviteId !== 'string' || !INVITE_ID_RE.test(inviteId)) {
+    throw new HttpsError('invalid-argument', 'BAD_INVITE_ID');
+  }
+
+  const inviteRef = db.collection(INVITES).doc(inviteId);
+  const invite = await inviteRef.get();
+  if (!invite.exists) throw new HttpsError('not-found', 'INVITE_NOT_FOUND');
+
+  const owner = (await publicClient().readContract({
+    address: deployment().organizers,
+    abi: organizersAbi,
+    functionName: 'ownerOf',
+    args: [BigInt(invite.get('orgId') as string)],
+  })) as Hex;
+  if (owner.toLowerCase() !== caller.toLowerCase()) {
+    throw new HttpsError('permission-denied', 'NOT_ORG_OWNER');
+  }
+
+  const status = invite.get('status');
+  if (status === 'revoked') return { status: 'revoked' };
+  if (status !== 'sent' && status !== 'accepted') {
+    throw new HttpsError('failed-precondition', 'INVITE_NOT_OPEN');
+  }
+
+  await inviteRef.set(
+    { status: 'revoked', revokedBy: caller, revokedAt: FieldValue.serverTimestamp() },
+    { merge: true },
+  );
+  return { status: 'revoked' };
+});
