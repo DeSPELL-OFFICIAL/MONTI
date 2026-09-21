@@ -16,12 +16,6 @@ fs_permissions = [{ access = "read-write", path = "./deployments" }]
 verbosity = 3
 fuzz = { runs = 512 }
 
-# Task 29 gas measurement. Forking Monad testnet gives the real chain state; "osaka" keeps the
-# EIP-7951 P-256 precompile at 0x100 priced at 6,900 gas so the number we assert is the real one.
-[profile.fork]
-evm_version = "osaka"
-verbosity = 3
-
 [rpc_endpoints]
 monad_testnet = "${MONAD_TESTNET_RPC}"
 monad_mainnet = "${MONAD_MAINNET_RPC}"
