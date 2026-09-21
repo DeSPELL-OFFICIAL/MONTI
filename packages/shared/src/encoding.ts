@@ -1,5 +1,6 @@
+import { Encoder } from 'cbor-x';
 import { encodeAbiParameters, keccak256, parseAbiParameters, sha256, stringToBytes } from 'viem';
-import type { Hex } from './types.js';
+import { isGateCodeWire, type GateCodeWire, type Hex } from './types.js';
 
 function assertBytes32(value: Hex, label: string): void {
   if (typeof value !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(value)) throw new Error(label);
@@ -77,4 +78,34 @@ export function offerDigest(input: {
       [input.tokenId, input.recipientCommitment, input.recipientAccount],
     ),
   );
+}
+
+/**
+ * NFC로 오가는 바이트라서 옵션을 고정한다.
+ * - useRecords: false  → 레코드 확장 태그를 쓰지 않는다(다른 구현이 못 읽는다)
+ * - mapsAsObjects: true → 디코드 결과가 일반 객체
+ * - variableMapSize: true → 길이 프리픽스를 최소 크기로
+ */
+const cbor = new Encoder({
+  useRecords: false,
+  mapsAsObjects: true,
+  variableMapSize: true,
+  tagUint8Array: false,
+  useFloat32: 0,
+});
+
+export function encodeGateCode(wire: GateCodeWire): Uint8Array {
+  if (!isGateCodeWire(wire)) throw new Error('BAD_GATE_CODE');
+  return new Uint8Array(cbor.encode(wire));
+}
+
+export function decodeGateCode(bytes: Uint8Array): GateCodeWire {
+  let decoded: unknown;
+  try {
+    decoded = cbor.decode(bytes);
+  } catch {
+    throw new Error('BAD_GATE_CODE');
+  }
+  if (!isGateCodeWire(decoded)) throw new Error('BAD_GATE_CODE');
+  return decoded;
 }
