@@ -68,7 +68,7 @@ Both of those functions changed **meaning** (§6, §7) without changing shape.
 
 | Kind | Signature | Selector / topic0 | What it is |
 |---|---|---|---|
-| function | `setAllowed(bytes4,uint8,uint8)` | `0x4343c290` | Deployer-only kill switch **per selector**: `(selector, ArgKind, argWord)`. `ArgKind` is `uint8` on the wire: `0 = Platform, 1 = TokenId, 2 = OrgId` (read `MontiPaymaster.ArgKind` for the source of truth). Reverts `Unauthorized` for anyone else |
+| function | `setAllowed(bytes4,uint8,uint8)` | `0x4343c290` | Deployer-only kill switch **per selector**: `(selector, ArgKind, argWord)`. `ArgKind` is `uint8` on the wire: `0 = None, 1 = Platform, 2 = EventId, 3 = TokenId, 4 = OrgId` (`MontiPaymaster.ArgKind` in `src/MontiPaymaster.sol` is the source of truth). `0` is not a kind but a removal: it deletes the selector and its word together, so a later re-allow cannot inherit a stale word. The six rows below are therefore `3, 3, 1, 1, 4, 1` on the wire, which is what `argKindOf(bytes4)` returns. Reverts `Unauthorized` for anyone else |
 | function | `argWordOf(bytes4)` → `uint8` | `0x3a3d7a3d` | Which calldata word the id is read from |
 | event | `SelectorAllowed(bytes4 indexed selector, uint8 kind, uint8 word)` | `0xa18b45dfce741880437353feb0dcb69330ea4783821a3a3c16cb9edfae4b9e76` | Emitted by the constructor for each seeded row and by every `setAllowed` |
 
@@ -297,6 +297,12 @@ gets wrong.
 - [ ] `apps/web/src/shared/chain/reads.ts` — `CHECK_IN_FIELDS` is
       `['gateId', 'ts', 'nonceHash', 'manual']`. It becomes
       `['gateId', 'nonceHash', 'ts', 'manual', 'late']` (§5), and `CheckInStruct` gains `late: boolean`.
+      The same file's `STRUCT_SHAPES` pins every struct's component names **and order** against the ABI;
+      its `Ticket.checkInOf` row moves with `CHECK_IN_FIELDS` or the pin fails.
+- [ ] `apps/web/src/shared/chain/abis.test.ts` — the `USED_ABI` conformance test, and the one that
+      reads `STRUCT_SHAPES`. It is the only thing between this branch and a silently mis-decoded
+      `checkInOf`, so it has to list the new views (`deviceDigest`, `offerDigest`, `eip712Domain`,
+      `LATE_WINDOW`, `MIGRATE_DELAY`, the three rotation views) and the new events.
 - [ ] `apps/web/src/shared/chain/abis.ts` — `USED_ABI.Ticket` needs whatever this branch now reads
       (`deviceDigest: 5` for the parity check below; `offerDigest: 3` if the app ever previews one),
       and the events it decodes must include **both** `CheckedIn` and `CheckedInLate`.
