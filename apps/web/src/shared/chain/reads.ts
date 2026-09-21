@@ -10,6 +10,12 @@ import { ABI_BY_CONTRACT, type UsedContract, type UsedFunction } from './abis';
 export const EventStatus = { Draft: 0, Published: 1, Cancelled: 2, Ended: 3 } as const;
 export type EventStatusValue = (typeof EventStatus)[keyof typeof EventStatus];
 
+/**
+ * `Ticket.checkInOf`. `nonceHash` is `keccak256(abi.encode(nonce))` of the code the gate served
+ * (`Ticket.sol:360`) and is what the gate's verdict matches a tap on; a manual override writes
+ * `bytes32(0)` there, which answers no code at all. An unchecked ticket reads back as the zero
+ * struct, so `ts === 0n` — not an absent value — is how a screen reads "nobody came in on this".
+ */
 export interface CheckInStruct {
   gateId: bigint;
   ts: bigint;
@@ -141,6 +147,12 @@ const TIER_FIELDS = [
   'name', 'priceUsdCents', 'supply', 'minted', 'maxPerWallet', 'seated',
 ] as const satisfies readonly (keyof TierStruct)[];
 
+// 01b: (gateId, nonceHash, ts, manual, late) — the redeploy reorders `ts` and `nonceHash` and
+// adds `late: bool` for a tap recorded outside the code window
+// (`MONTI-01b/contracts/docs/abi-delta-01b.md` §5; the selector does not change, so nothing
+// else can catch it). The CURRENT order is pinned below on purpose: the day the regenerated ABI
+// lands, the test above fails rather than decoding `ts` out of `nonceHash`'s slot — and this
+// list and `CheckInStruct` move together.
 const CHECK_IN_FIELDS = [
   'gateId', 'ts', 'nonceHash', 'manual',
 ] as const satisfies readonly (keyof CheckInStruct)[];
