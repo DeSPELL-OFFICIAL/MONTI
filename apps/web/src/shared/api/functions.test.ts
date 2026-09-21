@@ -21,7 +21,7 @@ vi.mock('./firebase', () => ({
   getFirebaseFunctions: () => ({}),
 }));
 
-const { api, CallableError } = await import('./functions');
+const { api, CallableError, callableFailure } = await import('./functions');
 
 beforeEach(() => {
   nextError = null;
@@ -100,6 +100,29 @@ describe('error mapping', () => {
     nextError = new FirebaseError('auth/network-request-failed', 'A network error occurred');
     await expect(api.startKyc().catch((error: unknown) => error)).resolves.toMatchObject({
       code: 'internal', message: 'UNKNOWN',
+    });
+  });
+});
+
+describe('callableFailure', () => {
+  it('splits a callable rejection into the status and the server reason a screen branches on', () => {
+    expect(callableFailure(new CallableError('resource-exhausted', 'ATTESTER_BUSY'))).toEqual({
+      code: 'resource-exhausted', reason: 'ATTESTER_BUSY',
+    });
+  });
+
+  it('reads the same shape off a stand-in, so a mocked module does not silence the branch', () => {
+    expect(callableFailure(Object.assign(new Error('PERSON_MISMATCH'), { code: 'permission-denied' }))).toEqual({
+      code: 'permission-denied', reason: 'PERSON_MISMATCH',
+    });
+  });
+
+  it('gives empty strings for anything that is not a rejection with those fields', () => {
+    const empty = { code: '', reason: '' };
+    expect(callableFailure(null)).toEqual(empty);
+    expect(callableFailure('boom')).toEqual(empty);
+    expect(callableFailure(new DOMException('cancelled', 'NotAllowedError'))).toEqual({
+      code: '', reason: 'cancelled',
     });
   });
 });

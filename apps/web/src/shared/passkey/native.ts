@@ -31,11 +31,13 @@ function randomBase64Url(): string {
   return toBase64Url(crypto.getRandomValues(new Uint8Array(32)));
 }
 
-export async function createPasskeyNative(name: string): Promise<WebAuthnCredential> {
+export async function createPasskeyNative(name: string, challenge: string): Promise<WebAuthnCredential> {
   const registration = await createCredentialNative({
     rp: { id: getConfig().rpId, name: RP_NAME },
+    // The user handle is ours to pick and carries no personal data; the challenge is not —
+    // it has to be the one the server minted, which is already base64url.
     user: { id: randomBase64Url(), name, displayName: name },
-    challenge: randomBase64Url(),
+    challenge,
     pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
     authenticatorSelection: { residentKey: 'required', userVerification: 'required' },
   });

@@ -1,3 +1,4 @@
+import type { Hex } from '@monti/shared';
 import type { Copy } from '../../shared/copy/index';
 import type { PhoneAuthProblem } from '../../shared/api/auth';
 import { api } from '../../shared/api/functions';
@@ -11,7 +12,13 @@ import { api } from '../../shared/api/functions';
 const KEY = 'monti.signup';
 
 export interface SignupState {
-  personId?: string;
+  personId?: Hex;
+  /**
+   * The smart account `registerPasskey` predicted from the new passkey. It is the address
+   * firestore.rules checks and the one `registerIdentity` puts on chain, so it is carried
+   * from that answer rather than derived a second time on the client.
+   */
+  account?: Hex;
   /** Empty string means the platform verified instantly; absent means nothing started. */
   verificationId?: string;
   phoneE164?: string;

@@ -26,6 +26,13 @@ export function getBundlerClient(): BundlerClient {
 /**
  * One passkey owner, nonce 0 — the address is a pure function of the passkey public key,
  * so the same credential always resolves to the same account on any device.
+ *
+ * `version: '1.1'` is load-bearing. viem picks the factory from the version, and the two
+ * factories predict different addresses for the same owner: '1' is the v1.0 factory
+ * (0x0BA5ED0c...), '1.1' is 0xBA5ED110eFDBa3D005bfC882d75358ACBbB85842 — the
+ * `coinbaseFactory` in contracts/deployments/10143.json that `registerPasskey` reads
+ * `getAddress` from. Version '1' here would hand the attendee an address the server, the
+ * Identity contract and firestore.rules have never heard of.
  */
 export async function getSmartAccount(webAuthnAccount: WebAuthnAccount): Promise<SmartAccount> {
   // Memo keyed on the owner: after clearCredential() + re-login the stale account must not come back.
@@ -35,7 +42,7 @@ export async function getSmartAccount(webAuthnAccount: WebAuthnAccount): Promise
     client: getPublicClient(),
     owners: [webAuthnAccount],
     nonce: 0n,
-    version: '1',
+    version: '1.1',
   });
   smartAccountKey = key;
   return smartAccount;

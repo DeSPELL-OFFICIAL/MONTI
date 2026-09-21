@@ -56,6 +56,21 @@ function toCallableError(error: unknown): CallableError {
   return new CallableError(code as CallableErrorCode, message);
 }
 
+/**
+ * The two fields a caller branches on, read structurally rather than with `instanceof` so the
+ * branch still works when a screen's test mocks this whole module. A rejection from somewhere
+ * else — a dismissed authenticator prompt, a bug in a screen — yields empty strings and falls
+ * through every reason branch to the caller's default sentence.
+ */
+export function callableFailure(error: unknown): { code: string; reason: string } {
+  if (typeof error !== 'object' || error === null) return { code: '', reason: '' };
+  const { code, message } = error as { code?: unknown; message?: unknown };
+  return {
+    code: typeof code === 'string' ? code : '',
+    reason: typeof message === 'string' ? message : '',
+  };
+}
+
 function call<Req, Res>(name: string): (payload?: Req) => Promise<Res> {
   return async (payload?: Req) => {
     const fn = httpsCallable<Req | Record<string, never>, Res>(getFirebaseFunctions(), name);
@@ -89,7 +104,13 @@ export const api = {
     { personId: Hex; attestation: unknown },
     { ok: true; account: Hex; credentialId: string }
   >('registerPasskey'),
-  registerIdentity: call<{ personId: Hex; deviceX: Hex; deviceY: Hex }, { txHash: Hex }>('registerIdentity'),
+  // `alreadyRegistered` is a success, not a failure: the chain already knew this account, so
+  // nothing was sent and there is no hash. Treating it as an error would show a signed-up
+  // attendee a failure screen. See functions/src/functions/registerIdentity.ts.
+  registerIdentity: call<
+    { personId: Hex; deviceX: Hex; deviceY: Hex; platform: 'ios' | 'android' | 'web' },
+    { txHash?: Hex; alreadyRegistered?: true }
+  >('registerIdentity'),
   // One challenge endpoint serves both ceremonies; the server pins the purpose into the
   // challenge document and refuses a login challenge used to register, and the reverse.
   // `rpId` is not returned — the web app already has it from getConfig().

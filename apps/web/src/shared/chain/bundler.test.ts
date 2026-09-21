@@ -28,14 +28,16 @@ afterEach(() => {
 });
 
 describe('getSmartAccount', () => {
-  it('builds a Coinbase Smart Wallet v1 account with the passkey as the only owner and nonce 0', async () => {
+  it('builds a Coinbase Smart Wallet v1.1 account with the passkey as the only owner and nonce 0', async () => {
     resetBundler();
     const owner = { type: 'webAuthn', publicKey: `0x${'cd'.repeat(64)}` } as never;
     const account = (await getSmartAccount(owner)) as unknown as { args: Record<string, unknown> };
     expect(toCoinbaseSmartAccount).toHaveBeenCalledTimes(1);
     expect(account.args.owners).toEqual([owner]);
     expect(account.args.nonce).toBe(0n);
-    expect(account.args.version).toBe('1');
+    // The deployed factory (contracts/deployments/10143.json coinbaseFactory) is the v1.1 one;
+    // version '1' would derive a different address than registerPasskey wrote on the server.
+    expect(account.args.version).toBe('1.1');
   });
 
   it('memoises per owner: the same passkey returns the same instance without rebuilding', async () => {

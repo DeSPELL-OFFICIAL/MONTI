@@ -17,6 +17,10 @@ function toBase64Url(bytes: Uint8Array): string {
   return Base64.fromBytes(bytes, { url: true, pad: false });
 }
 
+/** Exactly what loginChallenge mints: 32 random bytes, base64url, 43 characters. */
+const CHALLENGE_BYTES = new Uint8Array(32).fill(0x2a);
+const CHALLENGE = toBase64Url(CHALLENGE_BYTES);
+
 /** A minimal but well-formed ES256 attestation object, the way an authenticator returns one. */
 function attestationObject(fill: number): string {
   const cose = encodeCbor(
@@ -73,12 +77,16 @@ beforeEach(() => {
 
 describe('createPasskey (web)', () => {
   it('asks for a resident key with user verification and stores what registerPasskey needs', async () => {
-    const credential = await createPasskey('MONTI');
+    const credential = await createPasskey('MONTI', CHALLENGE);
     const options = createCredential.mock.calls[0]![0] as {
       rp: { id: string };
+      challenge: Uint8Array;
       authenticatorSelection: { residentKey: string; userVerification: string };
     };
     expect(options.rp.id).toBe('monti.app');
+    // The server looks the attestation's challenge up as a document id; ox would otherwise
+    // invent one and registerPasskey would answer CHALLENGE_NOT_FOUND every time.
+    expect([...options.challenge]).toEqual([...CHALLENGE_BYTES]);
     expect(options.authenticatorSelection).toMatchObject({
       residentKey: 'required',
       userVerification: 'required',
@@ -95,7 +103,7 @@ describe('createPasskey (native)', () => {
   beforeEach(() => isNativePlatform.mockReturnValue(true));
 
   it('sends a JSON-safe request under publicKey and stores the same credential shape as the web path', async () => {
-    const credential = await createPasskey('MONTI');
+    const credential = await createPasskey('MONTI', CHALLENGE);
     const request = nativeCreateCredential.mock.calls[0]![0] as {
       publicKey: {
         rp: { id: string; name: string };
@@ -111,7 +119,8 @@ describe('createPasskey (native)', () => {
       residentKey: 'required',
       userVerification: 'required',
     });
-    expect(request.publicKey.challenge).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    // Native speaks base64url already, so the server's challenge travels through untouched.
+    expect(request.publicKey.challenge).toBe(CHALLENGE);
     expect(credential.id).toBe('Y3JlZC1pZA');
     expect(credential.publicKey).toBe(`0x04${'11'.repeat(32)}${'11'.repeat(32)}`);
     expect(Object.keys(credential).sort()).toEqual(['attestationJson', 'id', 'publicKey', 'transports']);
