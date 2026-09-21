@@ -30,6 +30,13 @@ export const startSignup = onCall(
     const key = PHONE_INDEX_KEY.value();
     const indexRef = phoneIndexRef(phoneE164, key);
 
+    // personId 는 아무 의미 없는 난수 32바이트다. 전화번호나 이름의 해시가 아니다.
+    const newPersonId = `0x${randomBytes(32).toString('hex')}` as Hex;
+    // KMS 왕복은 트랜잭션 **밖에서** 끝낸다. 트랜잭션 본문에 Firestore 아닌 네트워크 호출이 있으면
+    // 경합으로 재시도될 때마다 KMS 를 다시 부르고 그만큼 트랜잭션을 오래 열어 둔다.
+    // 여기서 만든 봉투는 아래 트랜잭션이 이 id 를 실제로 쓸 때만 저장된다 — 경합해서 졌으면 그냥 버린다.
+    const phoneEnc = await encryptField(phoneE164, piiAad(newPersonId, 'phoneE164'));
+
     // 사람·사용자·색인은 한 트랜잭션에서 같이 태어난다. 셋 중 하나만 남는 상태는 없다.
     const personId = await db.runTransaction(async (tx) => {
       const user = await tx.get(userRef);
@@ -40,25 +47,21 @@ export const startSignup = onCall(
       // 레벨 0 계정의 유일한 중복 방지: 한 번호에 한 계정. 번호만으로 남의 계정을 이어받지 못한다.
       if (index.get('personId')) throw new HttpsError('already-exists', 'PHONE_ALREADY_REGISTERED');
 
-      // personId 는 아무 의미 없는 난수 32바이트다. 전화번호나 이름의 해시가 아니다.
-      const id = `0x${randomBytes(32).toString('hex')}` as Hex;
-      const phoneEnc = await encryptField(phoneE164, piiAad(id, 'phoneE164'));
-
-      tx.set(db.collection(PERSONS).doc(id), {
+      tx.set(db.collection(PERSONS).doc(newPersonId), {
         status: 'pending',
         kycLevel: 0, // 본인인증은 공연별로 필요할 때 startKyc 가 올린다
         createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       });
       tx.set(userRef, {
-        personId: id,
+        personId: newPersonId,
         phoneEnc,
         locale: 'ko',
         chatOrder: [],
         createdAt: FieldValue.serverTimestamp(),
       });
-      await upsertPhoneIndex(phoneE164, id, key, tx);
-      return id;
+      await upsertPhoneIndex(phoneE164, newPersonId, key, tx);
+      return newPersonId;
     });
 
     return { personId };

@@ -31,7 +31,7 @@ beforeEach(async () => {
   await env.withSecurityRulesDisabled(async (context) => {
     const db = context.firestore();
     await db.doc(`devices/${ACCOUNT}`).set({ deviceX: '0x11', deviceY: '0x22', platform: 'ios' });
-    await db.doc('users/uid-1').set({ personId: '0xaa', phoneE164: '+821011112222', locale: 'ko' });
+    await db.doc('users/uid-1').set({ personId: '0xaa', phoneEnc: 'AQAdRkFLRS1FTlZFTE9QRQ==', locale: 'ko' });
     await db.doc('persons/0xaa').set({ status: 'active' });
     await db.doc('eventChats/11').set({ closed: false, endsAt: 4102444800, orgId: '1' });
     await db.doc('eventChats/11/members/uid-1').set({ account: ACCOUNT, joinedAt: 1 });
@@ -83,9 +83,9 @@ describe('users/{uid}', () => {
     );
   });
 
-  it('blocks writing personId or phoneE164', async () => {
+  it('blocks writing personId or phoneEnc', async () => {
     await assertFails(owner().doc('users/uid-1').update({ personId: '0xbb' }));
-    await assertFails(owner().doc('users/uid-1').update({ phoneE164: '+10000000000' }));
+    await assertFails(owner().doc('users/uid-1').update({ phoneEnc: 'AQAdT1RIRVItRU5WRUxPUEU=' }));
   });
 
   it('blocks an unsupported locale', async () => {
