@@ -5,4 +5,5 @@ export { lockDevice, startDeviceChange } from './functions/device.js';
 export { loginChallenge, loginVerify } from './functions/login.js';
 export { registerIdentity } from './functions/registerIdentity.js';
 export { registerPasskey } from './functions/registerPasskey.js';
+export { resolveRecipient } from './functions/resolveRecipient.js';
 export { startSignup } from './functions/startSignup.js';
