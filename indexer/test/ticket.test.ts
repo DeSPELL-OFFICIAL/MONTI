@@ -60,6 +60,8 @@ const TIERS = [
 /** 스텁이 다음에 돌려줄 값. 테스트가 갈아 끼운다. */
 let metaReply: Record<string, unknown> = META;
 let tiersReply: readonly Record<string, unknown>[] = TIERS;
+/** 마지막 eth_call 이 어느 블록을 물었는지. `'latest'` 면 고정에 실패한 것이다. */
+let lastBlockTag: unknown;
 
 function outputsOf(name: string): AbiFunction['outputs'] {
   const item = (ticketAbi as readonly AbiFunction[]).find(
@@ -84,7 +86,8 @@ beforeAll(async () => {
       body += chunk;
     });
     req.on('end', () => {
-      const rpc = JSON.parse(body) as { id: number; params: [{ data: `0x${string}` }] };
+      const rpc = JSON.parse(body) as { id: number; params: [{ data: `0x${string}` }, unknown] };
+      lastBlockTag = rpc.params[1];
       const { functionName } = decodeFunctionData({ abi: ticketAbi, data: rpc.params[0].data });
       const value = functionName === 'eventMeta' ? metaReply : tiersReply;
       const result = encodeAbiParameters(outputsOf(functionName), [value]);
@@ -185,6 +188,8 @@ describe('Ticket handlers — events and tiers', () => {
       seated: false,
     });
     expect(after.entities.Tier.get('11-1')?.name).toBe('VIP');
+    // 읽기는 그 이벤트가 난 블록에 고정돼 있어야 한다 — 'latest' 면 재생마다 답이 달라진다.
+    expect(lastBlockTag).toBe(`0x${BLOCK.toString(16)}`);
   });
 
   it('replaces meta and tiers on EventMetaUpdated and drops the tiers that went away', async () => {
@@ -261,6 +266,35 @@ describe('Ticket handlers — tickets', () => {
     expect(after.entities.Tier.get('11-1')?.minted).toBe(0n);
   });
 
+  /**
+   * 재싱크(Task 38)는 이미 팔린 공연을 처음부터 다시 재생한다. 그때 체인의 `minted`
+   * 는 벌써 올라가 있으므로, 그 값을 씨앗으로 놓으면 재생되는 `Claimed` 가 한 번 더
+   * 세어 두 배가 된다. 씨앗은 0 이고 오직 `Claimed` 가 센다 — 스텁이 5 를 돌려줘도
+   * claim 두 건이면 답은 2 다.
+   */
+  it('counts tier mints only from Claimed, ignoring the chain counter on a replay', async () => {
+    tiersReply = [{ ...TIERS[0], minted: 5 }, TIERS[1]];
+    try {
+      let mockDb = await created();
+      expect(mockDb.entities.Tier.get('11-0')?.minted).toBe(0n);
+
+      mockDb = await claimed(mockDb);
+      mockDb = await Ticket.Claimed.processEvent({
+        event: Ticket.Claimed.createMockEvent({
+          tokenId: 8n,
+          eventId: EVENT_ID,
+          to: BOB,
+          tier: 0n,
+          ...at(OTHER_TX, 1),
+        }),
+        mockDb,
+      });
+      expect(mockDb.entities.Tier.get('11-0')?.minted).toBe(2n);
+    } finally {
+      tiersReply = TIERS;
+    }
+  });
+
   it('counts a real transfer but not the mint, and re-links the identity', async () => {
     const minted = await claimed(await created());
     expect(minted.entities.Ticket.get('7')?.transfers).toBe(0);
@@ -334,6 +368,38 @@ describe('Ticket handlers — tickets', () => {
         from: BOB,
         to: CAROL,
         ...at(migrateTx, 1),
+      }),
+      mockDb,
+    });
+    expect(after.entities.Ticket.get('7')).toMatchObject({
+      owner: carol,
+      identity_id: carol,
+      transfers: 1,
+    });
+  });
+
+  /**
+   * 짝이 되는 `Transfer` 를 못 본 채로 온 `Migrated` 는 양도 수를 **깎지 않는다**.
+   * 깎으면 체인보다 하나 적은 수가 조용히 남는다.
+   */
+  it('does not give back a transfer when the paired Transfer never arrived', async () => {
+    let mockDb = await claimed(await created());
+    mockDb = await Ticket.Transfer.processEvent({
+      event: Ticket.Transfer.createMockEvent({
+        from: ALICE,
+        to: BOB,
+        tokenId: TOKEN,
+        ...at(OTHER_TX),
+      }),
+      mockDb,
+    });
+
+    const after = await Ticket.Migrated.processEvent({
+      event: Ticket.Migrated.createMockEvent({
+        tokenId: TOKEN,
+        from: BOB,
+        to: CAROL,
+        ...at(`0x${'ef'.repeat(32)}`, 1),
       }),
       mockDb,
     });

@@ -73,7 +73,11 @@ type Event {
   approvalRequired: Boolean!
   category: Int!
   regionCode: String!
-  status: String! @index   # Draft | Published | Cancelled | Ended
+  # Draft | Published | Cancelled. `Ended` 는 **이벤트로 오지 않는다** — 어떤 함수도
+  # `EventStatusChanged(3)` 을 내지 않고(Ticket.sol:178,193,201), 컨트랙트의
+  # `eventStatus` 뷰가 `endsAt` 에서 파생할 뿐이다. 끝난 공연을 고르려면 이 열이
+  # 아니라 `endsAt` 을 비교하라.
+  status: String! @index
   requireKyc: Boolean!
 }
 
@@ -107,10 +111,11 @@ type Ticket {
 
 # Ticket.CheckedIn(tokenId, eventId, gateId, nonceHash, ts) — manual false;
 # Ticket.ManualOverride writes the same row with manual true and a zero nonceHash.
-# late 는 01b 번들(checkInLate)이 채울 자리를 미리 비워 둔 것이다. 01b 의
-# `CheckedInLate(tokenId, gateId, issuedAt, ts)` 가 `CheckedIn` 과 **같은
-# 트랜잭션에** 오면 true 다. 재배포 전까지 핸들러는 늘 false 를 쓴다 —
-# 열을 지금 만들어 두면 01b 때 스키마 마이그레이션이 필요 없다.
+# late 는 01b 번들(checkInLate)이 채운다. 01b 의
+# `CheckedInLate(tokenId, gateId, issuedAt, ts)` 는 `CheckedIn` 과 같은 트랜잭션에서
+# **먼저** 오고(01b Ticket.sol:468-469), `CheckedIn` 핸들러가 그 행에서 late 를
+# 이어받는 규칙은 **이미 들어 있다**. 이 브랜치의 ABI 에 그 이벤트가 없어 결과가
+# 늘 false 일 뿐이고, 재배포 때 스키마도 핸들러도 고칠 것이 없다.
 type CheckIn {
   id: ID!            # tokenId
   gateId: BigInt!

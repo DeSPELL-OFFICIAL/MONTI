@@ -22,6 +22,7 @@ const { Identity, Organizers, Ticket } = require('generated') as typeof import('
 // 같은 이유로 viem 과 @monti/shared 도 require 다. 값 `import` 하나만 있어도 Node 22 의
 // 타입 스트리퍼가 이 파일을 ESM 으로 판정해 envio 의 require() 가 깨진다.
 const { createPublicClient, http } = require('viem') as typeof import('viem');
+const { createEffect, S } = require('envio') as typeof import('envio');
 const { EVENT_STATUS_BY_CODE, loadDeployment, ticketAbi } =
   require('@monti/shared') as typeof import('@monti/shared');
 
@@ -258,24 +259,79 @@ interface ChainTier {
 /** `createEvent` 가 강제하는 티어 상한(1..8). `updateEventMeta` 도 같다. */
 const MAX_TIERS = 8;
 
-/** ABI 는 리터럴 타입이 없는 JSON 이라 결과는 여기서 캐스팅한다(`packages/shared/src/abi.ts`). */
-async function readEventMeta(eventId: bigint): Promise<ChainEventMeta> {
-  return (await rpc().readContract({
-    address: deployment.ticket,
-    abi: ticketAbi,
-    functionName: 'eventMeta',
-    args: [eventId],
-  })) as ChainEventMeta;
-}
+const chainMetaSchema = S.schema({
+  orgId: S.bigint,
+  titleHash: S.string,
+  descHash: S.string,
+  imageCid: S.string,
+  startsAt: S.bigint,
+  endsAt: S.bigint,
+  venueHash: S.string,
+  saleStart: S.bigint,
+  saleEnd: S.bigint,
+  transferable: S.boolean,
+  transferCutoffSeconds: S.number,
+  maxTransfers: S.number,
+  approvalRequired: S.boolean,
+  category: S.number,
+  regionCode: S.string,
+  requireKyc: S.boolean,
+});
 
-async function readTiers(eventId: bigint): Promise<readonly ChainTier[]> {
-  return (await rpc().readContract({
-    address: deployment.ticket,
-    abi: ticketAbi,
-    functionName: 'tiers',
-    args: [eventId],
-  })) as readonly ChainTier[];
-}
+const chainTierSchema = S.schema({
+  name: S.string,
+  priceUsdCents: S.bigint,
+  supply: S.number,
+  // 체인의 `minted` 도 읽히지만 **쓰지 않는다** — 아래 `writeTiers` 의 주석을 보라.
+  minted: S.number,
+  maxPerWallet: S.number,
+  seated: S.boolean,
+});
+
+/**
+ * 공연 한 건의 체인 상태를 **그 이벤트가 난 블록에 고정해서** 읽는다.
+ *
+ * 블록을 고정하지 않으면(= latest) 과거를 재생할 때마다 값이 달라진다 — 재싱크는
+ * Task 38 이 반드시 한 번 밟는 경로다. 고정한 뒤에는 `(eventId, blockNumber)` 가 곧
+ * 답이므로 캐시가 성립한다: 재싱크 두 번째부터는 RPC 에 나가지 않는다.
+ *
+ * envio 2.32 의 `createEffect` 로 감쌌다(`experimental_createEffect` 는 같은 함수의
+ * 옛 이름이고 이 버전에서 deprecated 다). 효과는 입력별로 중복 제거·캐시되고,
+ * 출력 스키마가 디코드 결과를 검증한다 — 01b 델타 §5 가 경고하는 튜플 드리프트가
+ * 조용한 오독 대신 **에러**로 드러난다.
+ *
+ * **아카이브 RPC 가 필요하다.** 과거 블록의 상태를 묻기 때문이다(Task 38 인계).
+ */
+const readEventState = createEffect(
+  {
+    name: 'ticketEventState',
+    input: { eventId: S.bigint, blockNumber: S.bigint },
+    output: S.schema({ meta: chainMetaSchema, tiers: S.array(chainTierSchema) }),
+    // 공연 생성·수정은 드물고 한 건당 두 번 읽는다. 초당 상한을 둘 이유가 없다.
+    rateLimit: false,
+    cache: true,
+  },
+  async ({ input }) => {
+    // ABI 는 리터럴 타입이 없는 JSON 이라 결과는 여기서 캐스팅한다(`packages/shared/src/abi.ts`).
+    const [meta, tiers] = await Promise.all([
+      rpc().readContract({
+        address: deployment.ticket,
+        abi: ticketAbi,
+        functionName: 'eventMeta',
+        args: [input.eventId],
+        blockNumber: input.blockNumber,
+      }) as Promise<ChainEventMeta>,
+      rpc().readContract({
+        address: deployment.ticket,
+        abi: ticketAbi,
+        functionName: 'tiers',
+        args: [input.eventId],
+        blockNumber: input.blockNumber,
+      }) as Promise<ChainTier[]>,
+    ]);
+    return { meta, tiers };
+  },
+);
 
 /** 체인 메타 → `Event` 의 열. id·orgId·creator·status 는 부르는 쪽이 정한다. */
 function metaColumns(meta: ChainEventMeta) {
@@ -302,9 +358,18 @@ function metaColumns(meta: ChainEventMeta) {
  * 티어 배열을 통째로 다시 쓴다. `updateEventMeta` 는 `delete _tiers[eventId]` 뒤에
  * 새 배열을 넣으므로(Ticket.sol:215), 줄어든 경우 옛 행을 지워야 앱에 유령 티어가
  * 남지 않는다. 상한이 8 이라 훑는 비용은 고정이다.
+ *
+ * **`minted` 는 체인 값을 쓰지 않고 0 에서 시작한다.** 이 열은 오직 `Claimed` 가 센다.
+ * 체인 값을 씨앗으로 놓으면 그 뒤 재생되는 `Claimed` 가 같은 claim 을 한 번 더 세어
+ * 잔여 수량(`supply - minted`)이 두 배로 틀린다. 0 이 맞는 씨앗인 근거는 둘이다:
+ * 구독이 배포 블록부터라 놓치는 claim 이 없고, `updateEventMeta` 도 체인에서
+ * `t.minted = 0` 으로 되돌린다(Ticket.sol:216-218) — Draft 에서만 되므로 티켓이 없다.
  */
-async function writeTiers(context: handlerContext, eventId: bigint): Promise<void> {
-  const tiers = await readTiers(eventId);
+async function writeTiers(
+  context: handlerContext,
+  eventId: bigint,
+  tiers: readonly ChainTier[],
+): Promise<void> {
   tiers.forEach((tier, idx) => {
     context.Tier.set({
       id: `${eventId}-${idx}`,
@@ -313,7 +378,7 @@ async function writeTiers(context: handlerContext, eventId: bigint): Promise<voi
       name: tier.name,
       priceUsdCents: tier.priceUsdCents,
       supply: BigInt(tier.supply),
-      minted: BigInt(tier.minted),
+      minted: 0n,
       maxPerWallet: BigInt(tier.maxPerWallet),
       seated: tier.seated,
     });
@@ -331,7 +396,10 @@ async function writeTiers(context: handlerContext, eventId: bigint): Promise<voi
  */
 Ticket.EventCreated.handler(async ({ event, context }) => {
   const eventId = event.params.eventId;
-  const meta = await readEventMeta(eventId);
+  const { meta, tiers } = await context.effect(readEventState, {
+    eventId,
+    blockNumber: BigInt(event.block.number),
+  });
   context.Event.set({
     id: eventId.toString(),
     orgId: event.params.orgId,
@@ -339,7 +407,7 @@ Ticket.EventCreated.handler(async ({ event, context }) => {
     ...metaColumns(meta),
     status: 'Draft',
   });
-  await writeTiers(context, eventId);
+  await writeTiers(context, eventId, tiers);
 });
 
 /**
@@ -350,9 +418,12 @@ Ticket.EventMetaUpdated.handler(async ({ event, context }) => {
   const eventId = event.params.eventId;
   const current = await context.Event.get(eventId.toString());
   if (!current) return;
-  const meta = await readEventMeta(eventId);
+  const { meta, tiers } = await context.effect(readEventState, {
+    eventId,
+    blockNumber: BigInt(event.block.number),
+  });
   context.Event.set({ ...current, ...metaColumns(meta) });
-  await writeTiers(context, eventId);
+  await writeTiers(context, eventId, tiers);
 });
 
 /**
@@ -543,17 +614,32 @@ Ticket.Revoked.handler(async ({ event, context }) => {
  * 를 올리지 않는데(Ticket.sol:544), 인덱서에는 같은 트랜잭션의 `Transfer` 가 **먼저**
  * 와서 이미 +1 해 놓았다. 그 한 번을 여기서 되돌린다 — 남겨 두면 양도 한도가
  * 체인보다 빨리 닫힌 것처럼 보인다.
+ *
+ * 그 `Transfer` 를 정말 봤는지 확인하고 뺀다: 봤다면 행의 주인이 이미 새 계정이다.
+ * 아니라면 무엇인가 가정과 어긋난 것이므로 **빼지 않고 경고를 남긴다** — 조용히
+ * 깎으면 양도 수가 체인보다 하나 적어지고, 아무도 그 사실을 모른다.
  */
 Ticket.Migrated.handler(async ({ event, context }) => {
-  const current = await context.Ticket.get(event.params.tokenId.toString());
+  const id = event.params.tokenId.toString();
+  const current = await context.Ticket.get(id);
   if (!current) return;
   const owner = addr(event.params.to);
-  context.Ticket.set({
-    ...current,
-    owner,
-    identity_id: owner,
-    transfers: current.transfers > 0 ? current.transfers - 1 : 0,
-  });
+  const sawTransfer = current.owner === owner;
+
+  let transfers = current.transfers;
+  if (!sawTransfer) {
+    context.log.warn('Migrated without the paired Transfer — transfer count left as is', {
+      tokenId: id,
+      owner: current.owner,
+      to: owner,
+    });
+  } else if (transfers === 0) {
+    context.log.warn('Migrated with a zero transfer count — nothing to give back', { tokenId: id });
+  } else {
+    transfers -= 1;
+  }
+
+  context.Ticket.set({ ...current, owner, identity_id: owner, transfers });
 });
 
 /** 티켓 하나에 오퍼는 하나다(`_offers[tokenId]`) — 그래서 id 가 tokenId 다. */
