@@ -7,8 +7,13 @@ process.env.PINATA_JWT = 'pinata-test-jwt';
 const JWT = 'pinata-test-jwt';
 const ORGANIZERS = '0x2222222222222222222222222222222222222222';
 const TICKET = '0x3333333333333333333333333333333333333333';
-/** 조직 오너. 숫자만 쓰는 주소라 EIP-55 체크섬이 대소문자를 바꾸지 않는다. */
-const OWNER = '0x9999999999999999999999999999999999999999';
+/**
+ * 조직 오너. **글자가 섞인** 주소다 — 숫자만 쓰는 주소에서는 EIP-55 정규화가 항등함수라
+ * 체크섬을 빠뜨린 회귀를 테스트가 잡지 못한다.
+ */
+const OWNER = '0xDeaDbeefdEAdbeefdEadbEEFdeadbeEFdEaDbeeF';
+/** 노드가 돌려주는 모양. 체인 읽기는 체크섬을 지켜 주지 않는다. */
+const OWNER_FROM_CHAIN = OWNER.toLowerCase();
 /** `PERM_CREATE_EVENT(1)` 만 가진 관리자. */
 const CREATOR_ADMIN = '0x8888888888888888888888888888888888888888';
 /** 아무 권한도 없는 사람. */
@@ -25,7 +30,7 @@ vi.mock('../src/lib/db.js', () => ({ db: {}, PERSONS: 'persons', USERS: 'users' 
  * eth_call 하나하나의 답. 인가는 전부 체인에서 읽으므로(우리 DB에는 역할이 없다)
  * 이 표를 갈아끼우는 것이 곧 "누구로 부르는가" 다.
  */
-const chain = { owner: OWNER as string, bits: new Map<string, number>() };
+const chain = { owner: OWNER_FROM_CHAIN as string, ownerHasAllBits: true, bits: new Map<string, number>() };
 const reads: Array<{ functionName: string; args: readonly unknown[] }> = [];
 
 vi.mock('../src/lib/chain.js', () => ({
@@ -42,7 +47,7 @@ vi.mock('../src/lib/chain.js', () => ({
       if (functionName === 'ownerOf') return chain.owner;
       if (functionName === 'hasPermission') {
         const [, account, bit] = args as [bigint, string, number];
-        if (account.toLowerCase() === chain.owner.toLowerCase()) return true;
+        if (chain.ownerHasAllBits && account.toLowerCase() === chain.owner.toLowerCase()) return true;
         const held = chain.bits.get(account.toLowerCase()) ?? 0;
         return (held & bit) === bit && bit !== 0;
       }
@@ -74,7 +79,9 @@ function uploadCall(index: number) {
   };
 }
 
-const { MAX_IMAGE_BYTES, pinEventMetadata } = await import('../src/functions/organizer.js');
+const { MAX_IMAGE_BYTES, MAX_META_FIELD_CHARS, pinEventMetadata } = await import(
+  '../src/functions/organizer.js'
+);
 const functionsTest = (await import('firebase-functions-test')).default();
 
 const pin = functionsTest.wrap(pinEventMetadata);
@@ -100,7 +107,8 @@ function pinRequest(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   process.env.PINATA_JWT = JWT;
   reads.length = 0;
-  chain.owner = OWNER;
+  chain.owner = OWNER_FROM_CHAIN;
+  chain.ownerHasAllBits = true;
   chain.bits.clear();
   chain.bits.set(CREATOR_ADMIN.toLowerCase(), 1); // PERM_CREATE_EVENT
   fetchMock.mockReset();
@@ -131,6 +139,70 @@ describe('pinEventMetadata', () => {
       description: META.description,
       image: `ipfs://${IMAGE_CID}`,
     });
+  });
+
+  it('pins venue, category and region when they are given, trimmed', async () => {
+    await pin({
+      data: pinRequest({
+        meta: { ...META, venue: '  올림픽공원 K-아트홀  ', category: ' 공연 ', region: '  서울  ' },
+      }),
+      auth: ownerAuth,
+    } as never);
+
+    const metadata = JSON.parse(await uploadCall(1).file.text()) as Record<string, unknown>;
+    expect(Object.keys(metadata).sort()).toEqual([
+      'category',
+      'description',
+      'image',
+      'name',
+      'region',
+      'venue',
+    ]);
+    expect(metadata.venue).toBe('올림픽공원 K-아트홀');
+    expect(metadata.category).toBe('공연');
+    expect(metadata.region).toBe('서울');
+  });
+
+  it('leaves an absent or blank optional field out of the JSON entirely', async () => {
+    // 관람객 화면은 **없는 칸**을 기본값으로 채운다(`shared/envio/ipfs.ts`).
+    // 빈 문자열을 실어 보내면 기본값 대신 빈 줄이 그려진다.
+    await pin({
+      data: pinRequest({ meta: { ...META, venue: '   ', category: undefined } }),
+      auth: ownerAuth,
+    } as never);
+
+    const metadata = JSON.parse(await uploadCall(1).file.text()) as Record<string, unknown>;
+    expect(Object.keys(metadata).sort()).toEqual(['description', 'image', 'name']);
+    expect('venue' in metadata).toBe(false);
+    expect('category' in metadata).toBe(false);
+    expect('region' in metadata).toBe(false);
+  });
+
+  it('takes an optional field of exactly 200 characters, measured after trimming', async () => {
+    await pin({
+      data: pinRequest({ meta: { ...META, venue: `  ${'가'.repeat(MAX_META_FIELD_CHARS)}  ` } }),
+      auth: ownerAuth,
+    } as never);
+    const metadata = JSON.parse(await uploadCall(1).file.text()) as { venue: string };
+    expect(metadata.venue.length).toBe(MAX_META_FIELD_CHARS);
+  });
+
+  it('rejects an optional field over 200 characters or of the wrong type, before any upload', async () => {
+    fetchMock.mockReset();
+    const long = 'a'.repeat(MAX_META_FIELD_CHARS + 1);
+    for (const meta of [
+      { ...META, venue: long },
+      { ...META, category: long },
+      { ...META, region: long },
+      { ...META, venue: 7 },
+      { ...META, category: null },
+      { ...META, region: ['서울'] },
+    ]) {
+      await expect(pin({ data: pinRequest({ meta }), auth: ownerAuth } as never)).rejects.toThrow(
+        'BAD_META',
+      );
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('sends the server JWT as a bearer header and never hands it back to the caller', async () => {
@@ -208,6 +280,24 @@ describe('pinEventMetadata', () => {
     await expect(pin({ data: pinRequest(), auth: ownerAuth } as never)).rejects.toThrow(
       'PINATA_UPLOAD_FAILED',
     );
+  });
+
+  it('surfaces a non-JSON 200 as the same Pinata failure, not a raw parse error', async () => {
+    // 게이트웨이가 끼어들어 200 에 HTML 을 실어 주는 날이 있다. 그 실패가 파서에서 새어
+    // 나가면 호출자는 이유 없는 `internal` 을 받는다.
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValueOnce(new Response('<html>nope</html>', { status: 200 }));
+    await expect(pin({ data: pinRequest(), auth: ownerAuth } as never)).rejects.toThrow(
+      'PINATA_UPLOAD_FAILED',
+    );
+  });
+
+  it('authorises the owner off the chain answer alone, whatever case the node returns', async () => {
+    // 컨트랙트가 오너에게 모든 비트를 주지 않는 날에도 오너는 자기 조직에서 잠기지 않는다.
+    chain.ownerHasAllBits = false;
+    await pin({ data: pinRequest(), auth: ownerAuth } as never);
+    expect(reads).toContainEqual({ functionName: 'ownerOf', args: [5n] });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('refuses a CID that is not the base32 CIDv1 the chain takes', async () => {

@@ -10,8 +10,13 @@ process.env.RP_ID = 'monti.despell.io';
 
 const KEY = 'monti-test-key';
 const ORGANIZERS = '0x2222222222222222222222222222222222222222';
-/** 오너. 숫자만 쓰는 주소라 EIP-55 체크섬이 대소문자를 바꾸지 않는다. */
-const OWNER = '0x9999999999999999999999999999999999999999';
+/**
+ * 오너. **글자가 섞인** 주소다 — 숫자만 쓰는 주소에서는 EIP-55 정규화가 항등함수라
+ * 체크섬을 빠뜨린 회귀를 테스트가 잡지 못한다.
+ */
+const OWNER = '0xDeaDbeefdEAdbeefdEadbEEFdeadbeEFdEaDbeeF';
+/** 노드가 돌려주는 모양. 체인 읽기는 체크섬을 지켜 주지 않는다. */
+const OWNER_FROM_CHAIN = OWNER.toLowerCase();
 /** PERM_MANAGE_MANAGERS(8) 만 가진 관리자. */
 const MANAGER_ADMIN = '0x8888888888888888888888888888888888888888';
 /** 아무 권한도 없는 사람. */
@@ -55,6 +60,27 @@ function snapshot(path: string) {
   };
 }
 
+/** 실제로 나간 질의. "등식 하나 + 상한, 정렬 없음" 을 여기서 본다. */
+const queries: Array<{ name: string; filters: Array<[string, string, unknown]>; max: number }> = [];
+
+/** `where`/`limit` 만 흉내 내는 질의 — `listInvites` 가 쓰는 전부다. */
+function query(name: string, filters: Array<[string, string, unknown]>, max: number) {
+  return {
+    where: (field: string, op: string, value: unknown) =>
+      query(name, [...filters, [field, op, value]], max),
+    limit: (n: number) => query(name, filters, n),
+    get: async () => {
+      queries.push({ name, filters, max });
+      const matched = [...docs.entries()]
+        .filter(([path]) => path.startsWith(`${name}/`))
+        .filter(([, data]) => filters.every(([field, op, value]) => op === '==' && data[field] === value))
+        .slice(0, max)
+        .map(([path]) => snapshot(path));
+      return { docs: matched, size: matched.length, empty: matched.length === 0 };
+    },
+  };
+}
+
 function docRef(path: string) {
   return {
     path,
@@ -72,7 +98,10 @@ vi.mock('../src/lib/db.js', () => ({
   USERS: 'users',
   INVITES: 'invites',
   db: {
-    collection: (name: string) => ({ doc: (id: string) => docRef(`${name}/${id}`) }),
+    collection: (name: string) => ({
+      ...query(name, [], Number.POSITIVE_INFINITY),
+      doc: (id: string) => docRef(`${name}/${id}`),
+    }),
     runTransaction: async <T>(body: (tx: unknown) => Promise<T>): Promise<T> => {
       const pending: Array<() => void> = [];
       let reading = true;
@@ -95,7 +124,7 @@ vi.mock('../src/lib/db.js', () => ({
 }));
 
 /** 체인 상태. `hasPermission` 은 컨트랙트와 같이 오너에게 모든 비트를 준다. */
-const chain = { owner: OWNER as string, bits: new Map<string, number>() };
+const chain = { owner: OWNER_FROM_CHAIN as string, ownerHasAllBits: true, bits: new Map<string, number>() };
 const reads: Array<{ functionName: string; args: readonly unknown[] }> = [];
 
 vi.mock('../src/lib/chain.js', () => ({
@@ -112,7 +141,7 @@ vi.mock('../src/lib/chain.js', () => ({
       if (functionName === 'ownerOf') return chain.owner;
       if (functionName === 'hasPermission') {
         const [, account, bit] = args as [bigint, string, number];
-        if (account.toLowerCase() === chain.owner.toLowerCase()) return true;
+        if (chain.ownerHasAllBits && account.toLowerCase() === chain.owner.toLowerCase()) return true;
         const held = chain.bits.get(account.toLowerCase()) ?? 0;
         return (held & bit) === bit && bit !== 0;
       }
@@ -123,12 +152,15 @@ vi.mock('../src/lib/chain.js', () => ({
 
 const { INVITES, USERS } = await import('../src/lib/db.js');
 const { hmacPhone } = await import('../src/lib/phoneIndex.js');
-const { acceptInvite, createInvite, revokeInvite } = await import('../src/functions/invites.js');
+const { INVITE_PAGE_SIZE, acceptInvite, createInvite, listInvites, revokeInvite } = await import(
+  '../src/functions/invites.js'
+);
 const functionsTest = (await import('firebase-functions-test')).default();
 
 const create = functionsTest.wrap(createInvite);
 const accept = functionsTest.wrap(acceptInvite);
 const revoke = functionsTest.wrap(revokeInvite);
+const listTeam = functionsTest.wrap(listInvites);
 
 /** 세션 클레임으로만 호출자를 묶는다 — 요청 본문의 주소는 어디에서도 읽지 않는다. */
 const ownerAuth = { uid: 'uid-owner', token: { account: OWNER } };
@@ -153,8 +185,10 @@ beforeEach(() => {
   process.env.RP_ID = 'monti.despell.io';
   docs.clear();
   reads.length = 0;
+  queries.length = 0;
   directWrites = 0;
-  chain.owner = OWNER;
+  chain.owner = OWNER_FROM_CHAIN;
+  chain.ownerHasAllBits = true;
   chain.bits.clear();
   chain.bits.set(MANAGER_ADMIN.toLowerCase(), 8); // PERM_MANAGE_MANAGERS
   givenUser('uid-invitee', PHONE);
@@ -459,6 +493,25 @@ describe('revokeInvite', () => {
     expect(snapshot(`${INVITES}/${inviteId}`).get('status')).toBe('sent');
   });
 
+  it('refuses a stored orgId that is not a number, instead of a raw TypeError', async () => {
+    // 인자는 `ORG_ID_RE` 를 지나지만 **저장된** 값은 아무도 검증하지 않는다.
+    // 막지 않으면 `BigInt(...)` 가 날것의 TypeError 로 터져 이유 없는 `internal` 이 나간다.
+    const inviteId = await createManagerInvite();
+    (docs.get(`${INVITES}/${inviteId}`) as Record<string, unknown>).orgId = 'not-a-number';
+
+    await expect(revoke({ data: { inviteId }, auth: ownerAuth } as never)).rejects.toThrow('BAD_INVITE');
+    await expect(accept({ data: { inviteId }, auth: inviteeAuth } as never)).rejects.toThrow('BAD_INVITE');
+    expect(snapshot(`${INVITES}/${inviteId}`).get('status')).toBe('sent');
+  });
+
+  it('refuses an invite whose stored orgId went missing', async () => {
+    const inviteId = await createManagerInvite();
+    delete (docs.get(`${INVITES}/${inviteId}`) as Record<string, unknown>).orgId;
+
+    await expect(revoke({ data: { inviteId }, auth: ownerAuth } as never)).rejects.toThrow('BAD_INVITE');
+    await expect(accept({ data: { inviteId }, auth: inviteeAuth } as never)).rejects.toThrow('BAD_INVITE');
+  });
+
   it('rejects an unknown invite, a malformed id and an unauthenticated caller', async () => {
     await expect(
       revoke({ data: { inviteId: '11111111-2222-3333-4444-555555555555' }, auth: ownerAuth } as never),
@@ -468,5 +521,151 @@ describe('revokeInvite', () => {
     );
     await expect(revoke({ data: {}, auth: ownerAuth } as never)).rejects.toThrow('BAD_INVITE_ID');
     await expect(revoke({ data: { inviteId: 'x' } } as never)).rejects.toThrow('AUTH_REQUIRED');
+  });
+});
+
+describe('listInvites', () => {
+  /** 한 조직의 초대 두 장 — 하나는 보낸 채로, 하나는 수락된 채로. 정렬을 보려면 시각이 달라야 한다. */
+  async function givenTeamInvites(): Promise<{ sent: string; accepted: string }> {
+    const sent = await createManagerInvite();
+    const accepted = await createManagerInvite();
+    await accept({ data: { inviteId: accepted }, auth: inviteeAuth } as never);
+    (docs.get(`${INVITES}/${sent}`) as Record<string, unknown>).createdAt =
+      Timestamp.fromMillis(1_700_000_000_000);
+    (docs.get(`${INVITES}/${accepted}`) as Record<string, unknown>).createdAt =
+      Timestamp.fromMillis(1_700_000_060_000);
+    return { sent, accepted };
+  }
+
+  it('lists the org invites newest first with nothing the team screen does not need', async () => {
+    const { sent, accepted } = await givenTeamInvites();
+
+    const result = (await listTeam({ data: { orgId: '1' }, auth: ownerAuth } as never)) as {
+      invites: Array<Record<string, unknown>>;
+    };
+
+    expect(result.invites.map((row) => row.inviteId)).toEqual([accepted, sent]);
+    // 수락된 줄에만 보낼 사람이 붙는다 — calldata 가 오너의 서명을 기다리는 유일한 상태다.
+    expect(result.invites[0]).toEqual({
+      inviteId: accepted,
+      role: 'manager',
+      status: 'accepted',
+      createdAt: 1_700_000_060,
+      requiredSender: OWNER,
+    });
+    expect(Object.keys(result.invites[1] as object).sort()).toEqual([
+      'createdAt',
+      'inviteId',
+      'role',
+      'status',
+    ]);
+    expect(result.invites[1]?.requiredSender).toBeUndefined();
+  });
+
+  it('names the sender in EIP-55 form even though the node answers in lower case', async () => {
+    const { accepted } = await givenTeamInvites();
+    const result = (await listTeam({ data: { orgId: '1' }, auth: ownerAuth } as never)) as {
+      invites: Array<{ inviteId: string; requiredSender?: string }>;
+    };
+    const row = result.invites.find((invite) => invite.inviteId === accepted);
+    expect(row?.requiredSender).toBe(OWNER);
+    expect(row?.requiredSender).not.toBe(OWNER_FROM_CHAIN);
+  });
+
+  it('leaks neither the phone index nor who created or accepted the invite', async () => {
+    await givenTeamInvites();
+    const result = (await listTeam({ data: { orgId: '1' }, auth: ownerAuth } as never)) as {
+      invites: Array<Record<string, unknown>>;
+    };
+
+    const serialised = JSON.stringify(result);
+    expect(serialised).not.toContain(hmacPhone(PHONE, KEY));
+    expect(serialised).not.toContain('phoneHmac');
+    expect(serialised).not.toContain('permissionBits');
+    expect(serialised).not.toContain('createdBy');
+    expect(serialised).not.toContain('acceptedBy');
+    for (const row of result.invites) {
+      expect(Object.keys(row).every((key) => key !== 'phoneHmac')).toBe(true);
+    }
+  });
+
+  it('carries no requiredSender on a revoked invite', async () => {
+    const inviteId = await createManagerInvite();
+    await revoke({ data: { inviteId }, auth: ownerAuth } as never);
+
+    const result = (await listTeam({ data: { orgId: '1' }, auth: ownerAuth } as never)) as {
+      invites: Array<Record<string, unknown>>;
+    };
+    expect(result.invites[0]?.status).toBe('revoked');
+    expect(Object.keys(result.invites[0] as object).sort()).toEqual([
+      'createdAt',
+      'inviteId',
+      'role',
+      'status',
+    ]);
+  });
+
+  it('queries by orgId alone, capped and unordered, never crossing into another org', async () => {
+    await createManagerInvite();
+    await create({ data: { orgId: '2', role: 'manager', phoneE164: PHONE }, auth: ownerAuth } as never);
+    queries.length = 0;
+
+    const result = (await listTeam({ data: { orgId: '1' }, auth: ownerAuth } as never)) as {
+      invites: unknown[];
+    };
+    expect(result.invites).toHaveLength(1);
+    // 등식 하나뿐이라 복합 색인이 필요 없다. 정렬은 메모리에서 한다.
+    expect(queries).toEqual([
+      { name: INVITES, filters: [['orgId', '==', '1']], max: INVITE_PAGE_SIZE },
+    ]);
+  });
+
+  it('tolerates a createdAt the server has not resolved yet', async () => {
+    const inviteId = await createManagerInvite();
+    (docs.get(`${INVITES}/${inviteId}`) as Record<string, unknown>).createdAt = null;
+
+    const result = (await listTeam({ data: { orgId: '1' }, auth: ownerAuth } as never)) as {
+      invites: Array<{ createdAt: number }>;
+    };
+    expect(result.invites[0]?.createdAt).toBe(0);
+  });
+
+  it('lets an admin holding PERM_MANAGE_MANAGERS read, and refuses everyone else', async () => {
+    await createManagerInvite();
+
+    const asAdmin = (await listTeam({ data: { orgId: '1' }, auth: adminAuth } as never)) as {
+      invites: unknown[];
+    };
+    expect(asAdmin.invites).toHaveLength(1);
+    expect(reads).toContainEqual({ functionName: 'hasPermission', args: [1n, MANAGER_ADMIN, 8] });
+
+    await expect(listTeam({ data: { orgId: '1' }, auth: outsiderAuth } as never)).rejects.toThrow(
+      'NOT_ALLOWED_TO_INVITE',
+    );
+  });
+
+  it('authorises the owner off the chain answer alone, as the two reads are meant to', async () => {
+    await createManagerInvite();
+    // 컨트랙트가 오너에게 모든 비트를 주지 않는 날에도 오너는 자기 조직에서 잠기지 않는다.
+    chain.ownerHasAllBits = false;
+
+    const result = (await listTeam({ data: { orgId: '1' }, auth: ownerAuth } as never)) as {
+      invites: unknown[];
+    };
+    expect(result.invites).toHaveLength(1);
+    expect(reads).toContainEqual({ functionName: 'ownerOf', args: [1n] });
+  });
+
+  it('answers an org with no invites with an empty list', async () => {
+    expect(await listTeam({ data: { orgId: '9' }, auth: ownerAuth } as never)).toEqual({ invites: [] });
+  });
+
+  it('rejects a malformed orgId and an unauthenticated caller', async () => {
+    await expect(listTeam({ data: { orgId: '0x1' }, auth: ownerAuth } as never)).rejects.toThrow(
+      'BAD_ORG_ID',
+    );
+    await expect(listTeam({ data: {}, auth: ownerAuth } as never)).rejects.toThrow('BAD_ORG_ID');
+    await expect(listTeam({ data: { orgId: '1' } } as never)).rejects.toThrow('AUTH_REQUIRED');
+    expect(queries).toEqual([]);
   });
 });

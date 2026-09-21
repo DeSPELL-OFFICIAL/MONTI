@@ -1,5 +1,6 @@
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { warn } from 'firebase-functions/logger';
+import { getAddress } from 'viem';
 import { organizersAbi, type Hex } from '@monti/shared';
 import { PINATA_JWT } from '../config.js';
 import { PERM_CREATE_EVENT, resolveCallerAccount } from '../lib/auth.js';
@@ -33,6 +34,9 @@ const IMAGE_EXTENSIONS: Record<string, string> = {
  */
 const CID_RE = /^baf[ky][a-z2-7]{55}$/;
 
+/** 선택 칸 하나의 상한. 탐색 화면의 한 줄에 들어갈 만큼만 받는다. */
+export const MAX_META_FIELD_CHARS = 200;
+
 interface EventImage {
   bytes: Buffer;
   mime: string;
@@ -41,6 +45,9 @@ interface EventImage {
 interface EventMetaInput {
   name: string;
   description: string;
+  venue?: string;
+  category?: string;
+  region?: string;
 }
 
 function requireOrgId(value: unknown): string {
@@ -75,14 +82,34 @@ function requireImage(value: unknown): EventImage {
   return { bytes, mime };
 }
 
+/**
+ * 선택 칸 하나. 비어 있으면 **없는 것으로** 돌려준다 — 관람객 화면은 없는 칸을 기본값으로
+ * 채우므로(`shared/envio/ipfs.ts`), 빈 문자열을 고정해 두면 기본값 대신 빈 줄이 그려진다.
+ */
+function optionalMetaField(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string') throw new HttpsError('invalid-argument', 'BAD_META');
+  const trimmed = value.trim();
+  if (trimmed.length > MAX_META_FIELD_CHARS) throw new HttpsError('invalid-argument', 'BAD_META');
+  return trimmed.length === 0 ? undefined : trimmed;
+}
+
 function requireMeta(value: unknown): EventMetaInput {
-  const meta = value as { name?: unknown; description?: unknown } | undefined;
+  const meta = value as
+    | { name?: unknown; description?: unknown; venue?: unknown; category?: unknown; region?: unknown }
+    | undefined;
   if (typeof meta !== 'object' || meta === null) throw new HttpsError('invalid-argument', 'BAD_META');
   const { name, description } = meta;
   if (typeof name !== 'string' || name.trim().length === 0 || typeof description !== 'string') {
     throw new HttpsError('invalid-argument', 'BAD_META');
   }
-  return { name, description };
+  return {
+    name,
+    description,
+    venue: optionalMetaField(meta.venue),
+    category: optionalMetaField(meta.category),
+    region: optionalMetaField(meta.region),
+  };
 }
 
 /**
@@ -103,7 +130,7 @@ async function requireOrgOrganizer(orgId: bigint, caller: Hex): Promise<void> {
       abi: organizersAbi,
       functionName: 'ownerOf',
       args: [orgId],
-    }) as Promise<Hex>,
+    }) as Promise<string>,
     pc.readContract({
       address: contracts.organizers,
       abi: organizersAbi,
@@ -112,7 +139,9 @@ async function requireOrgOrganizer(orgId: bigint, caller: Hex): Promise<void> {
     }) as Promise<boolean>,
   ]);
 
-  if (owner.toLowerCase() !== caller.toLowerCase() && !canCreateEvent) {
+  // 체인 읽기가 돌려주는 주소는 체크섬이 지켜져 있지 않다. `lib/auth.ts` 가 세션 클레임에
+  // 거는 것과 같은 정규화를 여기서도 건다 — 비교 전에 한 번만.
+  if (getAddress(owner).toLowerCase() !== caller.toLowerCase() && !canCreateEvent) {
     throw new HttpsError('permission-denied', 'NOT_ORGANIZER');
   }
 }
@@ -147,7 +176,15 @@ async function pinToPinata(file: File): Promise<string> {
     throw new HttpsError('unavailable', 'PINATA_UPLOAD_FAILED');
   }
 
-  const body = (await response.json()) as { data?: { cid?: unknown } };
+  let body: { data?: { cid?: unknown } };
+  try {
+    body = (await response.json()) as { data?: { cid?: unknown } };
+  } catch {
+    // 200 인데 JSON 이 아니다(게이트웨이가 끼어들어 HTML 을 실어 주는 날이 있다).
+    // 여기서 막지 않으면 파서의 SyntaxError 가 그대로 새어 나가 이유 없는 `internal` 이 된다.
+    warn('pinata.upload_unparsable', { file: file.name, status: response.status });
+    throw new HttpsError('unavailable', 'PINATA_UPLOAD_FAILED');
+  }
   const cid = body.data?.cid;
   if (typeof cid !== 'string' || !CID_RE.test(cid)) {
     throw new HttpsError('internal', 'BAD_PINATA_CID');
@@ -182,7 +219,15 @@ export const pinEventMetadata = onCall(
       new File([image.bytes], `image.${IMAGE_EXTENSIONS[image.mime]}`, { type: image.mime }),
     );
     // 이미지 참조는 게이트웨이 주소가 아니라 `ipfs://` 다. 게이트웨이는 언제든 바뀐다.
-    const metadata = { name: meta.name, description: meta.description, image: `ipfs://${imageCid}` };
+    // 비어 있는 선택 칸은 **키째로** 빠진다 — 위 `optionalMetaField` 의 이유 그대로다.
+    const metadata = {
+      name: meta.name,
+      description: meta.description,
+      image: `ipfs://${imageCid}`,
+      ...(meta.venue !== undefined && { venue: meta.venue }),
+      ...(meta.category !== undefined && { category: meta.category }),
+      ...(meta.region !== undefined && { region: meta.region }),
+    };
     const metadataCid = await pinToPinata(
       new File([JSON.stringify(metadata)], 'metadata.json', { type: 'application/json' }),
     );

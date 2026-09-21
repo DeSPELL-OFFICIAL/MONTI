@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
-import { encodeFunctionData } from 'viem';
+import { encodeFunctionData, getAddress } from 'viem';
 import { organizersAbi, type Hex } from '@monti/shared';
 import { PHONE_INDEX_KEY, RP_ID } from '../config.js';
 import { PERM_MANAGE_MANAGERS, resolveCallerAccount } from '../lib/auth.js';
@@ -20,6 +20,38 @@ type Role = 'admin' | 'manager';
 const ALL_PERMISSION_BITS = 31;
 /** 초대장 수명. 지나면 아무도 못 받는다. */
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+/** `listInvites` 한 쪽의 상한. 한 조직의 팀 화면이 한 장에 그릴 만큼이다. */
+export const INVITE_PAGE_SIZE = 200;
+
+/**
+ * **저장된** orgId. 인자는 `ORG_ID_RE` 를 지나지만 문서 안의 값은 아무도 검증하지 않는다 —
+ * 그대로 `BigInt(...)` 에 넣으면 날것의 TypeError 가 터져 이유 없는 `internal` 이 나간다.
+ */
+function requireStoredOrgId(value: unknown): string {
+  if (typeof value !== 'string' || !ORG_ID_RE.test(value)) {
+    throw new HttpsError('failed-precondition', 'BAD_INVITE');
+  }
+  return value;
+}
+
+/**
+ * Firestore `Timestamp` → epoch **초**. `serverTimestamp()` 는 쓰기가 확정되기 전까지
+ * 비어 있으므로(그 순간 읽으면 `null`) 그런 줄은 0 초로 둔다 — 목록에서 빼지는 않는다.
+ */
+function epochSeconds(value: unknown): number {
+  const stamp = value as { toMillis?: () => number } | null | undefined;
+  return typeof stamp?.toMillis === 'function' ? Math.floor(stamp.toMillis() / 1000) : 0;
+}
+
+/** 주최자 팀 화면이 읽는 초대 한 줄. 번호 색인도, 권한 비트도, 만든 사람도 들어가지 않는다. */
+export interface InviteRow {
+  inviteId: string;
+  role: Role;
+  status: string;
+  createdAt: number;
+  /** `accepted` 인 줄에만 붙는다 — 그 상태에서만 calldata 가 오너의 서명을 기다린다. */
+  requiredSender?: Hex;
+}
 
 export interface InviteCalldata {
   to: Hex;
@@ -84,12 +116,16 @@ export const createInvite = onCall(
     const pc = publicClient();
 
     if (role === 'admin') {
-      const owner = (await pc.readContract({
-        address: contracts.organizers,
-        abi: organizersAbi,
-        functionName: 'ownerOf',
-        args: [BigInt(orgId)],
-      })) as Hex;
+      // 체인이 돌려주는 주소는 체크섬이 지켜져 있지 않다. `lib/auth.ts` 가 세션 클레임에
+      // 거는 것과 같은 정규화를 비교 전에 한 번 건다.
+      const owner = getAddress(
+        (await pc.readContract({
+          address: contracts.organizers,
+          abi: organizersAbi,
+          functionName: 'ownerOf',
+          args: [BigInt(orgId)],
+        })) as string,
+      );
       if (owner.toLowerCase() !== caller.toLowerCase()) {
         throw new HttpsError('permission-denied', 'NOT_ORG_OWNER');
       }
@@ -185,6 +221,7 @@ export const acceptInvite = onCall(
       if (role !== 'admin' && role !== 'manager') {
         throw new HttpsError('failed-precondition', 'BAD_ROLE');
       }
+      const orgId = requireStoredOrgId(invite.get('orgId'));
 
       if (!mine) {
         tx.set(
@@ -199,7 +236,7 @@ export const acceptInvite = onCall(
       }
 
       return {
-        orgId: invite.get('orgId') as string,
+        orgId,
         role: role as Role,
         permissionBits: (invite.get('permissionBits') as number | undefined) ?? 0,
         canApprove: invite.get('canApprove') === true,
@@ -222,12 +259,14 @@ export const acceptInvite = onCall(
     // 보낼 수 있는 계정은 **지금의 오너**다. 초대를 만든 사람(관리자일 수 있다)이 아니고,
     // 초대장에 박아 둔 값도 아니다 — 오너가 바뀌면 답도 따라 바뀌어야 한다.
     const contracts = deployment();
-    const requiredSender = (await publicClient().readContract({
-      address: contracts.organizers,
-      abi: organizersAbi,
-      functionName: 'ownerOf',
-      args: [BigInt(spec.orgId)],
-    })) as Hex;
+    const requiredSender = getAddress(
+      (await publicClient().readContract({
+        address: contracts.organizers,
+        abi: organizersAbi,
+        functionName: 'ownerOf',
+        args: [BigInt(spec.orgId)],
+      })) as string,
+    );
 
     // 초대장의 나머지(누가 만들었는지, 번호 색인, 조직의 다른 사람)는 나가지 않는다.
     return { to: contracts.organizers, data, orgId: spec.orgId, role: spec.role, requiredSender };
@@ -254,12 +293,15 @@ export const revokeInvite = onCall(async (request): Promise<{ status: 'revoked' 
   const invite = await inviteRef.get();
   if (!invite.exists) throw new HttpsError('not-found', 'INVITE_NOT_FOUND');
 
-  const owner = (await publicClient().readContract({
-    address: deployment().organizers,
-    abi: organizersAbi,
-    functionName: 'ownerOf',
-    args: [BigInt(invite.get('orgId') as string)],
-  })) as Hex;
+  const orgId = requireStoredOrgId(invite.get('orgId'));
+  const owner = getAddress(
+    (await publicClient().readContract({
+      address: deployment().organizers,
+      abi: organizersAbi,
+      functionName: 'ownerOf',
+      args: [BigInt(orgId)],
+    })) as string,
+  );
   if (owner.toLowerCase() !== caller.toLowerCase()) {
     throw new HttpsError('permission-denied', 'NOT_ORG_OWNER');
   }
@@ -275,4 +317,66 @@ export const revokeInvite = onCall(async (request): Promise<{ status: 'revoked' 
     { merge: true },
   );
   return { status: 'revoked' };
+});
+
+/**
+ * 주최자 팀 화면의 초대 목록.
+ *
+ * 초대는 세션을 넘겨 살아 있는데 `createInvite` 는 만든 그 순간의 링크만 돌려준다 —
+ * 화면을 새로 열면 보낸 초대가 어디에도 없다. 이 콜러블이 그 목록이다.
+ *
+ * 인가는 조직 **오너** 또는 `PERM_MANAGE_MANAGERS` 를 가진 **관리자**다. 초대를 만들 수 있는
+ * 사람이 자기가 만든 초대를 볼 수 있어야 하므로 `createInvite` 의 매니저 갈래와 같은 판정이다.
+ */
+export const listInvites = onCall(async (request): Promise<{ invites: InviteRow[] }> => {
+  // 인증이 먼저다. 로그인하지 않은 호출자는 인자가 어떻게 생겼는지도 배우지 못한다.
+  const caller = await resolveCallerAccount(request);
+  const { orgId } = (request.data ?? {}) as { orgId?: unknown };
+  if (typeof orgId !== 'string' || !ORG_ID_RE.test(orgId)) {
+    throw new HttpsError('invalid-argument', 'BAD_ORG_ID');
+  }
+
+  const contracts = deployment();
+  const pc = publicClient();
+  // 두 질문을 각각 던진다. 오너에게 모든 비트를 주는 것은 컨트랙트의 약속이지만,
+  // 그 약속 하나에 인가를 걸어 두면 컨트랙트가 바뀌는 날 오너가 자기 조직에서 잠긴다.
+  const [ownerRead, allowed] = await Promise.all([
+    pc.readContract({
+      address: contracts.organizers,
+      abi: organizersAbi,
+      functionName: 'ownerOf',
+      args: [BigInt(orgId)],
+    }) as Promise<string>,
+    pc.readContract({
+      address: contracts.organizers,
+      abi: organizersAbi,
+      functionName: 'hasPermission',
+      args: [BigInt(orgId), caller, PERM_MANAGE_MANAGERS],
+    }) as Promise<boolean>,
+  ]);
+  const owner = getAddress(ownerRead);
+  if (owner.toLowerCase() !== caller.toLowerCase() && !allowed) {
+    throw new HttpsError('permission-denied', 'NOT_ALLOWED_TO_INVITE');
+  }
+
+  // 등식 하나뿐이다. 여기에 다른 칸 정렬을 붙이면 복합 색인이 하나 더 필요해지는데,
+  // 한 조직의 초대는 상한 안에 들어오므로 메모리에서 세우는 편이 싸다.
+  const page = await db.collection(INVITES).where('orgId', '==', orgId).limit(INVITE_PAGE_SIZE).get();
+
+  const invites = page.docs.map((doc) => {
+    const status = doc.get('status') as string;
+    const row: InviteRow = {
+      inviteId: doc.id,
+      role: doc.get('role') as Role,
+      status,
+      createdAt: epochSeconds(doc.get('createdAt')),
+    };
+    // `accepted` 만이 "calldata 는 나갔는데 아직 체인에 올라가지 않은" 상태다. 그 줄에만
+    // 보낼 사람을 달아 준다 — 값은 인가에 이미 쓴 `ownerOf` 그대로다(초대장에 박힌 값이 아니다).
+    if (status === 'accepted') row.requiredSender = owner;
+    return row;
+  });
+  // 최신 것이 맨 위다.
+  invites.sort((a, b) => b.createdAt - a.createdAt);
+  return { invites };
 });

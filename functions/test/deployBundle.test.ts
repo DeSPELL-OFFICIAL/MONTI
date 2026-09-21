@@ -139,6 +139,8 @@ describe('deploy bundle', () => {
       'dailyExport',
       'pinEventMetadata',
       'pinMessage',
+      'listPinned',
+      'listInvites',
       'revokeInvite',
       'requestAccountDeletion',
       'processDeletions',

@@ -1,5 +1,6 @@
 import { FieldValue } from 'firebase-admin/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
+import { getAddress } from 'viem';
 import { organizersAbi, ticketAbi, type Hex } from '@monti/shared';
 import { PERM_CREATE_EVENT, resolveCallerAccount } from '../lib/auth.js';
 import { deployment, publicClient } from '../lib/chain.js';
@@ -14,6 +15,16 @@ const MSG_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
  * (서버 쓰기는 규칙을 지나지 않으므로 여기서 직접 지킨다).
  */
 export const MAX_ANNOUNCEMENT_CHARS = 500;
+
+/** `listPinned` 한 쪽의 상한. 한 공연의 공지는 주최자 화면 한 장에 들어간다. */
+export const PINNED_PAGE_SIZE = 100;
+
+/** 주최자 화면이 읽는 공지 한 줄. 방 안의 신원(`uid`·`senderUid`)도 신고 수도 들어가지 않는다. */
+export interface PinnedMessage {
+  messageId: string;
+  text: string;
+  createdAt: number;
+}
 
 /**
  * 공지를 고정할 수 있는 사람인지 **체인에서** 판정한다. 우리 DB 에는 역할이 없다(스펙 §9.4).
@@ -39,7 +50,7 @@ async function requireOrganizerAdmin(eventId: bigint, caller: Hex): Promise<void
       abi: organizersAbi,
       functionName: 'ownerOf',
       args: [orgId],
-    }) as Promise<Hex>,
+    }) as Promise<string>,
     pc.readContract({
       address: contracts.organizers,
       abi: organizersAbi,
@@ -48,9 +59,28 @@ async function requireOrganizerAdmin(eventId: bigint, caller: Hex): Promise<void
     }) as Promise<boolean>,
   ]);
 
-  if (owner.toLowerCase() !== caller.toLowerCase() && !canCreateEvent) {
+  // 체인 읽기가 돌려주는 주소는 체크섬이 지켜져 있지 않다. `lib/auth.ts` 가 세션 클레임에
+  // 거는 것과 같은 정규화를 여기서도 건다 — 비교 전에 한 번만.
+  if (getAddress(owner).toLowerCase() !== caller.toLowerCase() && !canCreateEvent) {
     throw new HttpsError('permission-denied', 'NOT_ORGANIZER_ADMIN');
   }
+}
+
+/** 공연 id. `listAttendees` 와 달리 10진수로 고르지 않는다 — 이 값은 문서 경로 한 조각이라 방을 가른다. */
+function requireEventId(value: unknown): string {
+  if (typeof value !== 'string' || !DIGITS_RE.test(value)) {
+    throw new HttpsError('invalid-argument', 'BAD_EVENT_ID');
+  }
+  return value;
+}
+
+/**
+ * Firestore `Timestamp` → epoch **초**. `serverTimestamp()` 는 쓰기가 확정되기 전까지
+ * 비어 있으므로(그 순간 읽으면 `null`) 그런 줄은 0 초로 둔다 — 목록에서 빼지는 않는다.
+ */
+function epochSeconds(value: unknown): number {
+  const stamp = value as { toMillis?: () => number } | null | undefined;
+  return typeof stamp?.toMillis === 'function' ? Math.floor(stamp.toMillis() / 1000) : 0;
 }
 
 /** 새 공지의 본문. 앞뒤 공백을 떼고 나서 재는 것이 사람이 보는 길이다. */
@@ -81,15 +111,13 @@ export const pinMessage = onCall(
     // 인증이 먼저다. 인가는 `eventOrg(eventId)` 로 조직을 찾아야 해서 값 검증 뒤에 온다.
     const caller = await resolveCallerAccount(request);
     const uid = request.auth?.uid as string;
-    const { eventId, messageId, text, pinned } = (request.data ?? {}) as {
+    const { eventId: rawEventId, messageId, text, pinned } = (request.data ?? {}) as {
       eventId?: unknown;
       messageId?: unknown;
       text?: unknown;
       pinned?: unknown;
     };
-    if (typeof eventId !== 'string' || !DIGITS_RE.test(eventId)) {
-      throw new HttpsError('invalid-argument', 'BAD_EVENT_ID');
-    }
+    const eventId = requireEventId(rawEventId);
 
     // 정확히 하나. 둘 다 오면 무엇을 고정하라는 것인지 서버가 고를 수 없고,
     // 둘 다 없으면 고정할 대상이 없다 — 어느 쪽도 조용히 넘기지 않는다.
@@ -144,3 +172,35 @@ export const pinMessage = onCall(
     return { ok: true, messageId: target };
   },
 );
+
+/**
+ * 주최자가 **자기 공지를** 읽는 길.
+ *
+ * `firestore.rules` 는 `eventChats/{id}/messages` 를 방 멤버에게만 연다. 주최자는 자기 공연
+ * 표를 사지 않아 `joinEventChat` 을 통과할 수 없으므로, 방금 올린 공지조차 클라이언트로는
+ * 읽지 못한다. 인가는 `pinMessage` 와 같은 체인 읽기 하나다.
+ */
+export const listPinned = onCall(async (request): Promise<{ messages: PinnedMessage[] }> => {
+  // 인증이 먼저다. 인가는 `eventOrg(eventId)` 로 조직을 찾아야 해서 값 검증 뒤에 온다.
+  const caller = await resolveCallerAccount(request);
+  const raw = (request.data ?? {}) as { eventId?: unknown };
+  const eventId = requireEventId(raw.eventId);
+  await requireOrganizerAdmin(BigInt(eventId), caller);
+
+  // 등식 하나뿐이다. 여기에 다른 칸 정렬을 붙이면 복합 색인이 하나 더 필요해지는데,
+  // 한 공연의 공지는 상한 안에 들어오므로 메모리에서 세우는 편이 싸다.
+  const page = await db
+    .collection(`${EVENT_CHATS}/${eventId}/messages`)
+    .where('pinned', '==', true)
+    .limit(PINNED_PAGE_SIZE)
+    .get();
+
+  const messages = page.docs.map((doc) => ({
+    messageId: doc.id,
+    text: (doc.get('text') as string | undefined) ?? '',
+    createdAt: epochSeconds(doc.get('createdAt')),
+  }));
+  // 최신 것이 맨 위다.
+  messages.sort((a, b) => b.createdAt - a.createdAt);
+  return { messages };
+});
