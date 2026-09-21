@@ -2,6 +2,7 @@
 pragma solidity 0.8.31;
 
 import {Script} from "forge-std/Script.sol";
+import {VmSafe} from "forge-std/Vm.sol";
 import {console2} from "forge-std/console2.sol";
 import {IEntryPoint} from "account-abstraction/interfaces/IEntryPoint.sol";
 import {Identity} from "../src/Identity.sol";
@@ -48,15 +49,17 @@ contract Deploy is Script {
     Ticket public ticket;
     MontiPaymaster public paymaster;
 
+    /// @notice Kept alongside the contracts because `record` writes them into the same file.
+    address public attester;
+    address public entryPoint;
+
     function run() external {
         uint256 pk = vm.envUint("DEPLOYER_PK");
-        address attester = vm.envAddress("ATTESTER_ADDRESS");
-        address entryPoint = vm.envOr("ENTRY_POINT", ENTRY_POINT_V06);
         uint256 stakeWei = vm.envOr("STAKE_WEI", DEFAULT_STAKE_WEI);
         uint256 depositWei = vm.envOr("DEPOSIT_WEI", DEFAULT_DEPOSIT_WEI);
 
         vm.startBroadcast(pk);
-        deploy(attester, entryPoint, stakeWei, depositWei);
+        deploy(vm.envAddress("ATTESTER_ADDRESS"), vm.envOr("ENTRY_POINT", ENTRY_POINT_V06), stakeWei, depositWei);
         vm.stopBroadcast();
 
         console2.log("identity       ", address(identity));
@@ -68,15 +71,21 @@ contract Deploy is Script {
         console2.log("stake (wei)    ", stakeWei);
         console2.log("deposit (wei)  ", depositWei);
 
-        _writeDeployments(attester, entryPoint);
+        // A dry run simulates the whole deployment but leaves nothing on chain, so recording its
+        // addresses would replace the tracked record with contracts that do not exist. Only a real
+        // broadcast earns the write; the tests call `record()` themselves.
+        if (vm.isContext(VmSafe.ForgeContext.ScriptBroadcast)) record();
     }
 
     /// @notice Deploys and wires the four contracts, then stakes and funds the paymaster.
     /// @dev    Separate from `run` so the tests can drive it without a broadcast. Every privileged role
     ///         (`Identity.deployer`, `Organizers.deployer`, `MontiPaymaster.deployer`) is whoever sends
     ///         these transactions, which under `run` is the DEPLOYER_PK account.
-    function deploy(address attester, address entryPoint, uint256 stakeWei, uint256 depositWei) public {
-        identity = new Identity(attester);
+    function deploy(address attester_, address entryPoint_, uint256 stakeWei, uint256 depositWei) public {
+        attester = attester_;
+        entryPoint = entryPoint_;
+
+        identity = new Identity(attester_);
         organizers = new Organizers();
         ticket = new Ticket(address(identity), address(organizers));
         // Once-only by design (Organizers.TicketAlreadySet): the Organizers above is brand new, so this
@@ -84,7 +93,7 @@ contract Deploy is Script {
         organizers.setTicket(address(ticket));
 
         paymaster = new MontiPaymaster(
-            IEntryPoint(entryPoint),
+            IEntryPoint(entryPoint_),
             IOrganizers(address(organizers)),
             ITicket(address(ticket)),
             IIdentity(address(identity))
@@ -99,7 +108,9 @@ contract Deploy is Script {
     /// @notice Records the deployment where sub-plans 02, 03 and 04 look for it.
     /// @dev    Task 31's `DeployCoinbaseFactory` writes `coinbaseFactory` into this same file, so an
     ///         existing value is read back and carried over instead of being overwritten with a zero.
-    function _writeDeployments(address attester, address entryPoint) private {
+    ///         Public, and called by `run` only under a broadcast, so the tests can write the file on
+    ///         their own chain id without a dry run ever reaching the tracked one.
+    function record() public {
         string memory path = string.concat("deployments/", vm.toString(block.chainid), ".json");
 
         address coinbaseFactory;

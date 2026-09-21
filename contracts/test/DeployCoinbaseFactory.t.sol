@@ -111,15 +111,41 @@ contract DeployCoinbaseFactoryTest is Test {
     /// @notice If Coinbase's own factory is already on the chain, MONTI must use it -- that is the
     ///         whole point of the mainnet addresses, and deploying a second factory next to it would
     ///         give every attendee a different account address than the rest of the ecosystem.
-    function test_adoptsTheCanonicalFactoryWhenItIsAlreadyOnChain() public {
-        (address canonicalFactory, address canonicalImplementation) = _etchCanonical();
+    function test_adoptsTheCanonicalV1FactoryWhenItIsAlreadyOnChain() public {
+        address canonicalImplementation = _etchCanonicalAt(script.MAINNET_FACTORY(), script.MAINNET_IMPLEMENTATION());
 
         script.resolve();
 
         assertTrue(script.adoptedCanonical(), "adopted rather than deployed");
-        assertEq(script.factoryAddress(), canonicalFactory, "the mainnet factory address");
+        assertEq(script.factoryAddress(), script.MAINNET_FACTORY(), "the v1 factory address");
         assertEq(script.implementationAddress(), canonicalImplementation, "its own implementation");
         assertEq(script.predictedFactory().code.length, 0, "nothing was deployed alongside it");
+    }
+
+    /// @notice lib/smart-wallet is pinned at v1.1.0-7-ga4e83fd, so v1.1 is the deployment Coinbase
+    ///         would most likely already have on a new chain. Checking only the v1 pair would walk
+    ///         straight past it and deploy a redundant factory.
+    function test_adoptsTheCanonicalV1_1FactoryWhenItIsAlreadyOnChain() public {
+        address canonicalImplementation =
+            _etchCanonicalAt(script.MAINNET_FACTORY_V1_1(), script.MAINNET_IMPLEMENTATION_V1_1());
+
+        script.resolve();
+
+        assertTrue(script.adoptedCanonical(), "adopted rather than deployed");
+        assertEq(script.factoryAddress(), script.MAINNET_FACTORY_V1_1(), "the v1.1 factory address");
+        assertEq(script.implementationAddress(), canonicalImplementation, "its own implementation");
+        assertEq(script.predictedFactory().code.length, 0, "nothing was deployed alongside it");
+    }
+
+    /// @notice With both on chain, v1 wins: permissionless.js's `toCoinbaseSmartAccount` defaults to
+    ///         the v1 factory, so adopting it is what keeps sub-plan 03 on stock configuration.
+    function test_prefersTheV1FactoryWhenBothAreOnChain() public {
+        _etchCanonicalAt(script.MAINNET_FACTORY(), script.MAINNET_IMPLEMENTATION());
+        _etchCanonicalAt(script.MAINNET_FACTORY_V1_1(), script.MAINNET_IMPLEMENTATION_V1_1());
+
+        script.resolve();
+
+        assertEq(script.factoryAddress(), script.MAINNET_FACTORY(), "v1 is preferred");
     }
 
     /// @notice `Deploy.s.sol` and this script write the same file from opposite ends. Whichever runs
@@ -167,22 +193,29 @@ contract DeployCoinbaseFactoryTest is Test {
         vm.removeFile(path);
     }
 
+    /// @dev The v1.1 pair is `lib/smart-wallet/script/DeployFactory.s.sol`'s own EXPECTED_* constants;
+    ///      the v1 pair is the row above it in that repo's README deployment table.
     function test_constantsAreTheCanonicalMainnetAddresses() public view {
         assertEq(script.CREATE2_DEPLOYER(), CREATE2_DEPLOYER, "CREATE2 deployer");
-        assertEq(script.MAINNET_FACTORY(), 0x0BA5ED0c6AA8c49038F819E587E2633c4A9F428a, "mainnet factory");
-        assertEq(script.MAINNET_IMPLEMENTATION(), 0x000100abaad02f1cfC8Bbe32bD5a564817339E72, "mainnet impl");
+        assertEq(script.MAINNET_FACTORY(), 0x0BA5ED0c6AA8c49038F819E587E2633c4A9F428a, "v1 factory");
+        assertEq(script.MAINNET_IMPLEMENTATION(), 0x000100abaad02f1cfC8Bbe32bD5a564817339E72, "v1 impl");
+        assertEq(script.MAINNET_FACTORY_V1_1(), 0xBA5ED110eFDBa3D005bfC882d75358ACBbB85842, "v1.1 factory");
+        assertEq(script.MAINNET_IMPLEMENTATION_V1_1(), 0x00000110dCdEdC9581cb5eCB8467282f2926534d, "v1.1 impl");
         assertEq(script.SALT(), bytes32(0), "salt");
     }
 
-    /// @dev Puts a real factory and implementation at the mainnet addresses, which is what a chain
-    ///      Coinbase has already deployed to looks like from the script's point of view.
-    function _etchCanonical() private returns (address factory, address implementation) {
+    /// @dev Puts a real factory and implementation at one of the two canonical address pairs, which
+    ///      is what a chain Coinbase has already deployed to looks like from the script's point of
+    ///      view. Returns the implementation, which is what the adopted factory must report.
+    function _etchCanonicalAt(address factorySlot, address implementationSlot)
+        private
+        returns (address implementation)
+    {
         CoinbaseSmartWallet realImplementation = new CoinbaseSmartWallet();
-        implementation = script.MAINNET_IMPLEMENTATION();
+        implementation = implementationSlot;
         vm.etch(implementation, address(realImplementation).code);
 
         CoinbaseSmartWalletFactory realFactory = new CoinbaseSmartWalletFactory(implementation);
-        factory = script.MAINNET_FACTORY();
-        vm.etch(factory, address(realFactory).code);
+        vm.etch(factorySlot, address(realFactory).code);
     }
 }

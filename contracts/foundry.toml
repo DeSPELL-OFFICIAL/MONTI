@@ -17,10 +17,15 @@ libs = ["lib"]
 test = "test"
 script = "script"
 # No project-wide solc pin: lib/smart-wallet pins `pragma solidity 0.8.23` exactly, so a single
-# pinned version cannot build the tree. Nothing is lost by dropping it -- every first-party
-# contract, test and script pins `pragma solidity 0.8.31;` in its own header, which is the stronger
-# guarantee. forge builds src/, test/ and script/ with 0.8.31 and the vendored Coinbase sources
-# with 0.8.23, as two compilation units.
+# pinned version cannot build the tree (and compilation_restrictions cannot override a pin -- forge
+# resolves the pin first and then fails on `=0.8.23`). Nothing is lost by dropping it: every
+# first-party source pins its own exact version in its own header -- 0.8.31 everywhere except
+# DeployCoinbaseFactory.s.sol and its test, which import the Coinbase wallet and so must join its
+# 0.8.23 unit. forge builds two units: 88 files at 0.8.31, 38 at 0.8.23.
+#
+# On a cold checkout forge downloads solc 0.8.23 on the first build, once, alongside 0.8.31. Note
+# also that `evm_version` below is capped per compiler: the 0.8.23 unit is emitted for shanghai,
+# the newest target that compiler knows. That is a subset of what Monad executes, so it runs.
 auto_detect_solc = true
 evm_version = "osaka"
 optimizer = true

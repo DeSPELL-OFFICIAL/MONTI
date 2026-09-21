@@ -4,6 +4,7 @@
 pragma solidity 0.8.23;
 
 import {Script} from "forge-std/Script.sol";
+import {VmSafe} from "forge-std/Vm.sol";
 import {console2} from "forge-std/console2.sol";
 import {CoinbaseSmartWallet} from "smart-wallet/CoinbaseSmartWallet.sol";
 import {CoinbaseSmartWalletFactory} from "smart-wallet/CoinbaseSmartWalletFactory.sol";
@@ -15,21 +16,25 @@ import {CoinbaseSmartWalletFactory} from "smart-wallet/CoinbaseSmartWalletFactor
 ///
 /// @dev    Three outcomes, in order of preference:
 ///
-///         1. Coinbase's own factory is already on the chain at the mainnet address. Then MONTI uses
-///            it and deploys nothing: the ecosystem's account addresses and ours agree, and sub-plan
-///            03's `toCoinbaseSmartAccount` runs on its stock configuration.
+///         1. Coinbase's own factory is already on the chain, at either of the two addresses they
+///            have shipped -- v1 or v1.1. Then MONTI uses it and deploys nothing: the ecosystem's
+///            account addresses and ours agree, and sub-plan 03's `toCoinbaseSmartAccount` runs on
+///            its stock configuration. v1 is preferred when both are present, because that is the
+///            factory permissionless.js defaults to.
 ///         2. Our own build is already there from an earlier run. The CREATE2 deployer reverts on a
 ///            repeat, so the script adopts what it finds instead of trying again -- reruns are free.
 ///         3. Nothing is there. Deploy the implementation, then the factory that proxies to it, both
 ///            through the canonical CREATE2 deployer with a zero salt so the addresses fall out of
 ///            the init code alone and can be recomputed by anyone.
 ///
-///         In case 3 the addresses will almost certainly differ from mainnet, and that is expected
-///         rather than a failure. An address matches only when bytecode, salt and deployer all match,
-///         and Coinbase built with solc 0.8.23 at 999_999 optimizer runs through the IR pipeline with
-///         an IPFS metadata hash, deployed from the Safe singleton factory. This repo builds at 200
-///         runs with `bytecode_hash = "none"`. The script logs the difference and carries on, because
-///         nothing downstream hardcodes the factory -- everything reads the JSON this writes.
+///         In case 3 the addresses cannot be Coinbase's, and that is by construction rather than a
+///         failure. An address matches only when bytecode, salt and deployer all match, and the brief
+///         mandates `salt = bytes32(0)` and the Arachnid deployer where `lib/smart-wallet`'s own
+///         `script/DeployFactory.s.sol` uses two non-zero salts and the Safe singleton factory. The
+///         bytecode differs on top of that (Coinbase build at 999_999 optimizer runs through the IR
+///         pipeline with an IPFS metadata hash; this repo at 200 runs with `bytecode_hash = "none"`).
+///         No build setting closes that gap, so the script says so once and carries on -- nothing
+///         downstream hardcodes the factory, everything reads the JSON this writes.
 ///
 ///         Inputs come from the environment only, so no key is ever written into this repository:
 ///           DEPLOYER_PK  broadcast key. Always required, including on the two paths that deploy
@@ -40,9 +45,18 @@ contract DeployCoinbaseFactory is Script {
     ///         forge, which makes the deployed address a function of the init code and nothing else.
     address public constant CREATE2_DEPLOYER = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
 
-    /// @notice Coinbase Smart Wallet v1 on Ethereum mainnet and every chain Coinbase has deployed to.
+    /// @notice Coinbase Smart Wallet v1, the same address on every chain Coinbase has deployed to.
+    ///         Listed first because this is the factory permissionless.js's `toCoinbaseSmartAccount`
+    ///         defaults to, so it is the one sub-plan 03 gets for free.
     address public constant MAINNET_IMPLEMENTATION = 0x000100abaad02f1cfC8Bbe32bD5a564817339E72;
     address public constant MAINNET_FACTORY = 0x0BA5ED0c6AA8c49038F819E587E2633c4A9F428a;
+
+    /// @notice Coinbase Smart Wallet v1.1, which is what `lib/smart-wallet` is actually pinned at
+    ///         (`v1.1.0-7-ga4e83fd`). Both addresses come from that tree's own deploy script,
+    ///         `lib/smart-wallet/script/DeployFactory.s.sol`, and its README's deployment table.
+    ///         Without this pair the adopt path would walk straight past a real Coinbase deployment.
+    address public constant MAINNET_IMPLEMENTATION_V1_1 = 0x00000110dCdEdC9581cb5eCB8467282f2926534d;
+    address public constant MAINNET_FACTORY_V1_1 = 0xBA5ED110eFDBa3D005bfC882d75358ACBbB85842;
 
     bytes32 public constant SALT = bytes32(0);
 
@@ -64,7 +78,11 @@ contract DeployCoinbaseFactory is Script {
         vm.stopBroadcast();
 
         _log();
-        record();
+
+        // A dry run simulates the deployment but changes nothing on chain, so recording its
+        // addresses would overwrite the tracked record with contracts that do not exist. Only a
+        // real broadcast earns the write; the tests call `record()` themselves.
+        if (vm.isContext(VmSafe.ForgeContext.ScriptBroadcast)) record();
     }
 
     /// @notice Adopts or deploys the factory, whichever the chain calls for.
@@ -82,10 +100,11 @@ contract DeployCoinbaseFactory is Script {
             abi.encodePacked(type(CoinbaseSmartWalletFactory).creationCode, abi.encode(predictedImplementation));
         predictedFactory = vm.computeCreate2Address(SALT, keccak256(factoryInitCode), CREATE2_DEPLOYER);
 
-        if (_isLiveFactory(MAINNET_FACTORY)) {
+        address canonical = _liveCanonicalFactory();
+        if (canonical != address(0)) {
             adoptedCanonical = true;
-            factoryAddress = MAINNET_FACTORY;
-            implementationAddress = CoinbaseSmartWalletFactory(MAINNET_FACTORY).implementation();
+            factoryAddress = canonical;
+            implementationAddress = CoinbaseSmartWalletFactory(canonical).implementation();
             return;
         }
 
@@ -108,9 +127,21 @@ contract DeployCoinbaseFactory is Script {
 
         (bool ok, bytes memory ret) = CREATE2_DEPLOYER.call(abi.encodePacked(SALT, initCode));
         require(ok, "create2 failed");
+        // The deployer returns exactly 20 bytes, and a short or malformed return cannot pass
+        // unnoticed: the next line requires the result to be the address predicted from this very
+        // init code, which no truncation would produce.
+        // forge-lint: disable-next-line(unsafe-typecast)
         deployed = address(uint160(bytes20(ret)));
         require(deployed == predicted, "deployed somewhere other than predicted");
         require(deployed.code.length > 0, "no code at deployed address");
+    }
+
+    /// @dev v1 before v1.1: both are real Coinbase deployments, but permissionless.js defaults to v1,
+    ///      so preferring it keeps sub-plan 03 on stock configuration.
+    function _liveCanonicalFactory() private view returns (address) {
+        if (_isLiveFactory(MAINNET_FACTORY)) return MAINNET_FACTORY;
+        if (_isLiveFactory(MAINNET_FACTORY_V1_1)) return MAINNET_FACTORY_V1_1;
+        return address(0);
     }
 
     /// @dev A factory worth adopting is one that answers `implementation()` with a contract. Comparing
@@ -134,13 +165,14 @@ contract DeployCoinbaseFactory is Script {
             console2.log("Coinbase's own factory was already deployed here; adopted it, deployed nothing");
             return;
         }
-        if (factoryAddress == MAINNET_FACTORY && implementationAddress == MAINNET_IMPLEMENTATION) {
-            console2.log("addresses match mainnet");
-            return;
-        }
-        console2.log("WARNING: addresses differ from mainnet; sub-plans 02 and 03 must read the JSON below");
-        console2.log("mainnet implementation", MAINNET_IMPLEMENTATION);
-        console2.log("mainnet factory       ", MAINNET_FACTORY);
+
+        // Not a warning to act on: `salt = bytes32(0)` and the Arachnid deployer are this script's
+        // mandate, and Coinbase used two non-zero salts and the Safe singleton factory, so no build
+        // setting reaches their addresses. Said once, plainly, so nobody goes looking.
+        console2.log("this is MONTI's own factory, not Coinbase's -- read it from the JSON below");
+        console2.log("parity is unreachable by construction: salt and deployer differ from Coinbase's");
+        console2.log("Coinbase v1.0 factory ", MAINNET_FACTORY);
+        console2.log("Coinbase v1.1 factory ", MAINNET_FACTORY_V1_1);
     }
 
     /// @notice Records the factory where sub-plans 02 and 03 look for it.

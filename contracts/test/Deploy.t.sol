@@ -118,6 +118,12 @@ contract DeployTest is Test {
 
         deployScript.run();
 
+        // `run` records only under `--broadcast`, and neither `forge test` nor a dry run is that.
+        // Without this gate a `forge script --rpc-url <monad>` rehearsal would overwrite the tracked
+        // deployments/10143.json with addresses that were never deployed.
+        assertFalse(vm.exists(PATH), "a run that is not a broadcast records nothing");
+        deployScript.record();
+
         // Privileged roles must land on the broadcasting key, not on the script contract — otherwise
         // nobody can rotate the attester or top the paymaster up after the deploy.
         assertEq(deployScript.identity().deployer(), deployer, "identity.deployer");
@@ -140,6 +146,7 @@ contract DeployTest is Test {
         // sub-plan 03 loses the account factory it creates attendee wallets with.
         vm.writeFile(PATH, string.concat('{"coinbaseFactory":"', vm.toString(FACTORY), '"}'));
         deployScript.run();
+        deployScript.record();
 
         raw = vm.readFile(PATH);
         assertEq(vm.parseJsonAddress(raw, ".coinbaseFactory"), FACTORY, "coinbaseFactory survived");

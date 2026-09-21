@@ -7,5 +7,7 @@ node_modules/
 # Written by the deploy scripts when the tests run them on a local chain: 31337 from Deploy.t.sol,
 # 31338 and 31339 from DeployCoinbaseFactory.t.sol, which takes its own ids because forge runs the
 # suites in parallel. The record that ships is deployments/10143.json.
+# deployments/seed-10143.json is Task 32's tracked seed; its local-chain siblings are not.
 deployments/*.json
 !deployments/10143.json
+!deployments/seed-10143.json
