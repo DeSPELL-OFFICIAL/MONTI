@@ -44,8 +44,18 @@ export const WAITING_DEADLINE_MS = (CODE_WINDOW_SECONDS + CLOCK_SKEW_SECONDS) * 
  * so today the array holds one signature and the day the ABI lands it holds two, with no change
  * here. `tokenId` is `CheckedIn`'s first indexed parameter, so it is `topic1`.
  */
+/**
+ * The names that mean "this ticket was admitted", listed rather than taken from every key of
+ * `USED_EVENTS.Ticket` — that manifest covers every Ticket event this app subscribes to
+ * anywhere, and it also carries `EventCreated`, whose first indexed argument is an `eventId`
+ * sitting in the same `topic1` position this filter matches `tokenId` in. Globbing the
+ * manifest would turn this screen green on somebody else's new event. `satisfies` keeps the
+ * list honest: a name renamed in the manifest fails to compile here.
+ */
+const CHECK_IN_EVENTS = ['CheckedIn', 'CheckedInLate'] as const satisfies readonly (keyof typeof USED_EVENTS.Ticket)[];
+
 export function checkedInTopics(tokenId: string): (Hex | Hex[] | null)[] | null {
-  const signatures = Object.keys(USED_EVENTS.Ticket)
+  const signatures = CHECK_IN_EVENTS
     .map((eventName) => eventTopic('Ticket', eventName))
     .filter((topic): topic is Hex => topic !== null);
   // `null`, never `[]`: a node reads an empty `topic0` as "match any topic0", which would turn

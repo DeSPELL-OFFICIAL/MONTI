@@ -26,6 +26,9 @@ const GATE_REVERTS: ReadonlyArray<readonly [string, GateProblem]> = [
   ['UnknownGate', 'unknownGate'],
   ['GateIsRevoked', 'alreadyRevoked'],
   ['ZeroAddress', 'account'],
+  // `registerGate` raises this for an event that does not exist (`Organizers.sol:127`). Telling
+  // the organiser to try again for a number that will never work is worse than saying nothing.
+  ['UnknownOrganizer', 'unknownEvent'],
 ];
 
 type GateWrite = 'registerGate' | 'openGate' | 'closeGate' | 'revokeGate';
@@ -45,7 +48,10 @@ const EMPTY_PASTE = { gateAccount: '', kx: '', ky: '' };
  */
 export function Gates() {
   const { eventId = '' } = useParams();
-  const copy = useOrganizerCopy().gates;
+  const organizer = useOrganizerCopy();
+  const copy = organizer.gates;
+  // The one sentence for "it is still on its way", shared with the lifecycle screens.
+  const lifecycle = organizer.lifecycle;
 
   const [orgId, setOrgId] = useState<bigint | null>(null);
   const [mayManage, setMayManage] = useState<boolean | null>(null);
@@ -54,6 +60,7 @@ export function Gates() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<GateProblem | ''>('');
+  const [confirming, setConfirming] = useState(false);
   const [unsponsored, setUnsponsored] = useState(false);
   const [paste, setPaste] = useState(EMPTY_PASTE);
   const [reload, setReload] = useState(0);
@@ -74,6 +81,8 @@ export function Gates() {
       if (cancelled) return;
       setOrgId(org);
 
+      // The signed-in passkey account, which is the same one the session carries; reading it
+      // here rather than from the session store keeps this screen testable on its own.
       const account = await getStaffAccount()
         .then((staff) => staff.address as Hex)
         .catch(() => null);
@@ -106,6 +115,7 @@ export function Gates() {
       if (orgId === null) return;
       setBusy(true);
       setProblem('');
+      setConfirming(false);
       setUnsponsored(false);
       try {
         await organizersOp({ account: await getStaffAccount(), orgId, functionName, args });
@@ -113,12 +123,14 @@ export function Gates() {
         setReload((count) => count + 1);
       } catch (cause) {
         if (cause instanceof OpReverted) {
-          const named = cause.revertReason
-            ? revertMatch(organizersAbi, cause.revertReason as Hex, GATE_REVERTS)
-            : undefined;
-          // A `wait` that gave up is not a refusal, but the list is the honest answer either
-          // way: it is reloaded, and whatever landed shows up there.
-          setProblem(cause.revertReason === 'TIMEOUT' ? '' : (named ?? 'failed'));
+          // A `wait` that gave up is not a refusal — it says so, rather than going quiet after
+          // a write that is still on its way. The list is reloaded either way, so whatever did
+          // land shows up in it.
+          if (cause.revertReason === 'TIMEOUT') setConfirming(true);
+          else {
+            const named = revertMatch(organizersAbi, cause.revertReason as Hex, GATE_REVERTS);
+            setProblem(named ?? 'failed');
+          }
           setReload((count) => count + 1);
         } else if (isUnsponsored(cause)) {
           setUnsponsored(true);
@@ -153,6 +165,7 @@ export function Gates() {
   return (
     <Screen title={copy.title}>
       {problem === '' ? null : <Alert tone="error">{copy.problems[problem]}</Alert>}
+      {confirming ? <Alert tone="info">{lifecycle.confirming}</Alert> : null}
       {unsponsored ? <UnsponsoredNotice /> : null}
       {busy ? <Alert tone="info">{copy.working}</Alert> : null}
 

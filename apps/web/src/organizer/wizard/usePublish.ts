@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react';
 import type { Hex } from 'viem';
 import { ticketAbi } from '../../shared/chain/abis';
 import { getStaffAccount } from '../../shared/chain/accounts';
+import { createdEventId } from '../../shared/chain/createdEvent';
 import { OpReverted, resolveSubmittedOp, ticketOp } from '../../shared/chain/ops';
 import { revertMatch } from '../../shared/chain/revert';
 import { isUnsponsored } from '../../shared/chain/unsponsored';
@@ -42,6 +43,12 @@ export interface PublishState {
   problems: WizardProblem[];
   /** One sentence for a failure that names no field. Empty when there is none. */
   error: string;
+  /**
+   * The id of the event that was just created, read out of its own `EventCreated` log, or `''`
+   * when the operation's logs did not carry one (a `wait` that gave up has none at all). The
+   * organiser's home screen still takes the number by hand for exactly that case.
+   */
+  eventId: string;
   publish: () => Promise<void>;
 }
 
@@ -59,6 +66,7 @@ export function usePublish(
   const [phase, setPhase] = useState<PublishPhase>('idle');
   const [problems, setProblems] = useState<WizardProblem[]>([]);
   const [error, setError] = useState('');
+  const [eventId, setEventId] = useState('');
 
   const publish = useCallback(async (): Promise<void> => {
     // One `createEvent` per draft. A previous attempt whose `wait` gave up may still be in
@@ -69,9 +77,13 @@ export function usePublish(
       setProblems([]);
       setError('');
       setPhase('confirming');
-      const state = await resolveSubmittedOp(draft.submittedOpHash as Hex).catch(() => 'pending' as const);
-      if (state === 'pending') return;
-      if (state === 'landed') {
+      const submitted = await resolveSubmittedOp(draft.submittedOpHash as Hex).catch(
+        () => ({ state: 'pending', logs: [] }) as const,
+      );
+      if (submitted.state === 'pending') return;
+      if (submitted.state === 'landed') {
+        // It did land after all, so the event exists and its log says which one.
+        setEventId(createdEventId(submitted.logs));
         setPhase('published');
         onPublished();
         return;
@@ -101,12 +113,15 @@ export function usePublish(
         description: draft.description,
       });
       setPhase('sending');
-      await ticketOp({
+      const receipt = await ticketOp({
         account: await getStaffAccount(),
         orgId: BigInt(orgId),
         functionName: 'createEvent',
         args: [buildEventMeta(draft, metadataCid), buildTiers(draft)],
       });
+      // `createEvent` returns the new id, but a sponsored operation gives back a receipt —
+      // so the id comes out of the operation's own `EventCreated` log.
+      setEventId(createdEventId(receipt.logs));
       setPhase('published');
       onPublished();
     } catch (cause) {
@@ -143,5 +158,5 @@ export function usePublish(
     }
   }, [copy, draft, onPublished, patch]);
 
-  return { phase, problems, error, publish };
+  return { phase, problems, error, eventId, publish };
 }

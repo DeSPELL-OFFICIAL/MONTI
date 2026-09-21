@@ -2,7 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { encodeErrorResult, keccak256, toBytes } from 'viem';
+import { encodeErrorResult, encodeEventTopics, keccak256, numberToHex, toBytes } from 'viem';
 import { ticketAbi } from '../../shared/chain/abis';
 
 const pinEventMetadata = vi.fn(async () => ({ imageCid: 'bafkImage', metadataCid: 'bafyMeta' }));
@@ -12,8 +12,23 @@ vi.mock('../../shared/api/functions', async (orig) => ({
 }));
 
 interface SentOp { functionName: string; orgId: bigint; args: readonly unknown[] }
-const ticketOp = vi.fn(async (_options: SentOp) => ({ success: true }));
-const resolveSubmittedOp = vi.fn(async (_hash: string) => 'pending' as 'pending' | 'landed' | 'failed');
+/** `EventCreated(eventId, orgId, creator)` for event 12, all three arguments indexed. */
+const CREATED_LOG = {
+  address: `0x${'33'.repeat(20)}`,
+  topics: [
+    encodeEventTopics({ abi: ticketAbi, eventName: 'EventCreated', args: { eventId: 12n } })[0],
+    numberToHex(12n, { size: 32 }),
+    numberToHex(9n, { size: 32 }),
+    `0x${'00'.repeat(12)}${'ab'.repeat(20)}`,
+  ],
+  data: '0x',
+};
+
+const ticketOp = vi.fn(async (_options: SentOp) => ({ success: true, logs: [CREATED_LOG] }));
+const resolveSubmittedOp = vi.fn(async (_hash: string) => ({
+  state: 'pending' as 'pending' | 'landed' | 'failed',
+  logs: [] as unknown[],
+}));
 vi.mock('../../shared/chain/ops', async (orig) => ({
   ...(await orig<typeof import('../../shared/chain/ops')>()),
   ticketOp,
@@ -22,6 +37,14 @@ vi.mock('../../shared/chain/ops', async (orig) => ({
 
 const ACCOUNT = `0x${'ab'.repeat(20)}` as const;
 vi.mock('../../shared/chain/accounts', () => ({ getStaffAccount: async () => ({ address: ACCOUNT }) }));
+
+// Only `useNavigate` is stubbed; `MemoryRouter` and the route table stay real, so where the
+// confirmation sends the organiser is checked rather than guessed at.
+const navigate = vi.fn();
+vi.mock('react-router-dom', async (orig) => ({
+  ...(await orig<typeof import('react-router-dom')>()),
+  useNavigate: () => navigate,
+}));
 
 const { OpReverted } = await import('../../shared/chain/ops');
 const { organizerCopy } = await import('../copy');
@@ -68,7 +91,8 @@ async function toReview(user: ReturnType<typeof userEvent.setup>) {
 
 beforeEach(() => {
   localStorage.clear();
-  resolveSubmittedOp.mockResolvedValue('pending');
+  ticketOp.mockResolvedValue({ success: true, logs: [CREATED_LOG] });
+  resolveSubmittedOp.mockResolvedValue({ state: 'pending', logs: [] });
 });
 
 describe('the six-step wizard', () => {
@@ -160,6 +184,32 @@ describe('the review step', () => {
     expect(localStorage.getItem(DRAFT_KEY)).toBeNull();
   });
 
+  /**
+   * The id is in the operation's own `EventCreated` log (`Ticket.sol:177`). Without it the
+   * organiser has to be asked to type the number of the event they just made.
+   */
+  it('opens the event it just created, from the id in its own log', async () => {
+    const user = userEvent.setup();
+    open();
+    await toReview(user);
+    await user.click(screen.getByRole('button', { name: copy.publish }));
+
+    await user.click(await screen.findByRole('button', { name: copy.openEvent }));
+    expect(navigate).toHaveBeenCalledWith('/org/events/12');
+  });
+
+  /** A `wait` that gave up carries no log, so the number is typed in on the home screen. */
+  it('falls back to the home screen when the receipt carries no log', async () => {
+    const user = userEvent.setup();
+    ticketOp.mockResolvedValueOnce({ success: true, logs: [] });
+    open();
+    await toReview(user);
+    await user.click(screen.getByRole('button', { name: copy.publish }));
+
+    await user.click(await screen.findByRole('button', { name: copy.heading }));
+    expect(navigate).toHaveBeenCalledWith('/org');
+  });
+
   it('blocks a draft the chain would revert on, naming each rule', async () => {
     const user = userEvent.setup();
     open({
@@ -238,7 +288,7 @@ describe('the review step', () => {
 
   it('asks after that operation instead of sending a second one', async () => {
     const user = userEvent.setup();
-    resolveSubmittedOp.mockResolvedValue('pending');
+    resolveSubmittedOp.mockResolvedValue({ state: 'pending', logs: [] });
     open({ ...READY, submittedOpHash: SUBMITTED });
     await toReview(user);
     await user.click(screen.getByRole('button', { name: copy.publish }));
@@ -251,7 +301,7 @@ describe('the review step', () => {
 
   it('shows the confirmation when that operation turns out to have landed', async () => {
     const user = userEvent.setup();
-    resolveSubmittedOp.mockResolvedValue('landed');
+    resolveSubmittedOp.mockResolvedValue({ state: 'landed', logs: [CREATED_LOG] });
     open({ ...READY, submittedOpHash: SUBMITTED });
     await toReview(user);
     await user.click(screen.getByRole('button', { name: copy.publish }));
@@ -259,11 +309,14 @@ describe('the review step', () => {
     expect(await screen.findByText(copy.published)).toBeInTheDocument();
     expect(ticketOp).not.toHaveBeenCalled();
     expect(localStorage.getItem(DRAFT_KEY)).toBeNull();
+    // It landed after all, so its log names the event the organiser is now sent to.
+    await user.click(screen.getByRole('button', { name: copy.openEvent }));
+    expect(navigate).toHaveBeenCalledWith('/org/events/12');
   });
 
   it('sends the draft again once that operation is known to have reverted', async () => {
     const user = userEvent.setup();
-    resolveSubmittedOp.mockResolvedValue('failed');
+    resolveSubmittedOp.mockResolvedValue({ state: 'failed', logs: [] });
     open({ ...READY, submittedOpHash: SUBMITTED });
     await toReview(user);
     await user.click(screen.getByRole('button', { name: copy.publish }));

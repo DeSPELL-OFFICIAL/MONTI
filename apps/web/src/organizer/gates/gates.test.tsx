@@ -42,6 +42,7 @@ const { OpReverted } = await import('../../shared/chain/ops');
 const { organizerCopy } = await import('../copy');
 const { Gates } = await import('./Gates');
 const copy = organizerCopy.ko.gates;
+const life = organizerCopy.ko.lifecycle;
 
 function open() {
   render(
@@ -88,6 +89,27 @@ describe('the pending-gate queue', () => {
     open();
     await user.click(await screen.findByRole('button', { name: copy.register }));
     expect(await screen.findByText(copy.problems.inUse)).toBeInTheDocument();
+  });
+
+  /** `registerGate` raises this for an event that does not exist (`Organizers.sol:127`). */
+  it('says the event number is not one rather than "try again"', async () => {
+    const user = userEvent.setup();
+    organizersOp.mockRejectedValueOnce(
+      new OpReverted('registerGate', encodeErrorResult({ abi: organizersAbi, errorName: 'UnknownOrganizer' })),
+    );
+    open();
+    await user.click(await screen.findByRole('button', { name: copy.register }));
+    expect(await screen.findByText(copy.problems.unknownEvent)).toBeInTheDocument();
+  });
+
+  /** The screen used to go quiet after a write that was still on its way. */
+  it('says it is still confirming when the wait gave up', async () => {
+    const user = userEvent.setup();
+    organizersOp.mockRejectedValueOnce(new OpReverted('registerGate', 'TIMEOUT'));
+    open();
+    await user.click(await screen.findByRole('button', { name: copy.register }));
+    expect(await screen.findByText(life.confirming)).toBeInTheDocument();
+    expect(screen.queryByText(copy.problems.failed)).not.toBeInTheDocument();
   });
 
   it('tells an organiser without the gate permission instead of letting them send', async () => {

@@ -129,6 +129,31 @@ describe('publishing and cancelling', () => {
     expect(screen.queryByRole('button', { name: life.cancel })).not.toBeInTheDocument();
   });
 
+  /**
+   * The refetch that follows a write races the indexer's own `EventStatusChanged`. Choosing the
+   * sentence off `status` meant an organiser who had just cancelled read 발행했어요 for as long
+   * as the indexer was behind — wrong in exactly the moment they most need to be sure.
+   */
+  it('says what was just done, not what the indexer still thinks the event is', async () => {
+    const user = userEvent.setup();
+    open();
+    await user.click(await screen.findByRole('button', { name: life.cancel }));
+    await user.click(screen.getByRole('button', { name: life.confirm }));
+
+    expect(await screen.findByText(life.cancelled)).toBeInTheDocument();
+    expect(screen.queryByText(life.published)).not.toBeInTheDocument();
+  });
+
+  it('says 발행했어요 after a publish, for the same reason', async () => {
+    const user = userEvent.setup();
+    open();
+    await user.click(await screen.findByRole('button', { name: life.publish }));
+    await user.click(screen.getByRole('button', { name: life.confirm }));
+
+    expect(await screen.findByText(life.published)).toBeInTheDocument();
+    expect(screen.queryByText(life.cancelled)).not.toBeInTheDocument();
+  });
+
   it('names the rule when the chain refuses the write', async () => {
     const user = userEvent.setup();
     const { OpReverted } = await import('../shared/chain/ops');
@@ -141,5 +166,27 @@ describe('publishing and cancelling', () => {
     await user.click(await screen.findByRole('button', { name: life.publish }));
     await user.click(screen.getByRole('button', { name: life.confirm }));
     expect(await screen.findByText(life.notDraft)).toBeInTheDocument();
+  });
+});
+
+describe('an event the indexer has no row for', () => {
+  /**
+   * A mistyped number on the home screen, or an event created a moment ago. Neither read
+   * failed, so the old code showed a blank screen with no writes offered and no reason.
+   */
+  it('says the number is unknown or not indexed yet rather than rendering blank', async () => {
+    gql.mockResolvedValue({ Event: [], Tier: [] });
+    listAttendees.mockResolvedValue([]);
+    open();
+    expect(await screen.findByText(dash.notIndexed)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: life.publish })).not.toBeInTheDocument();
+  });
+
+  it('shows the load failure instead when both reads threw', async () => {
+    gql.mockRejectedValue(new Error('offline'));
+    listAttendees.mockRejectedValue(new Error('offline'));
+    open();
+    expect(await screen.findByText(dash.failed)).toBeInTheDocument();
+    expect(screen.queryByText(dash.notIndexed)).not.toBeInTheDocument();
   });
 });

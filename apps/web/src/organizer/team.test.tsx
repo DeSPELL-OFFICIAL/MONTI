@@ -2,6 +2,8 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { encodeErrorResult } from 'viem';
+import { organizersAbi } from '../shared/chain/abis';
 
 interface SentOp { functionName: string; orgId: bigint; args: readonly unknown[] }
 const organizersOp = vi.fn(async (_options: SentOp) => ({ success: true }));
@@ -30,9 +32,11 @@ vi.mock('../shared/api/functions', async (orig) => ({
   api: { createInvite, revokeInvite },
 }));
 
+const { OpReverted } = await import('../shared/chain/ops');
 const { organizerCopy } = await import('./copy');
 const { Team } = await import('./Team');
 const copy = organizerCopy.ko.team;
+const life = organizerCopy.ko.lifecycle;
 
 function open() {
   render(
@@ -151,6 +155,75 @@ describe('putting the role on chain', () => {
     open();
     await waitFor(() => expect(ownerOf).toHaveBeenCalled());
     await user.type(screen.getByLabelText(copy.account), '0xnope');
+    await user.click(screen.getByRole('button', { name: copy.grant }));
+    expect(await screen.findByText(copy.problems.account)).toBeInTheDocument();
+    expect(organizersOp).not.toHaveBeenCalled();
+  });
+});
+
+describe('what comes back from the grant', () => {
+  async function grant(user: ReturnType<typeof userEvent.setup>) {
+    open();
+    await waitFor(() => expect(ownerOf).toHaveBeenCalled());
+    await user.type(screen.getByLabelText(copy.account), INVITED);
+    await user.click(screen.getByRole('button', { name: copy.grant }));
+  }
+
+  /**
+   * A timeout means the grant may well be landing. Calling it a failure invites the owner to
+   * press again — the same sentinel every other screen here treats as still-in-flight.
+   */
+  it('says it is still confirming when the wait gave up, not that it failed', async () => {
+    const user = userEvent.setup();
+    organizersOp.mockRejectedValueOnce(new OpReverted('setManager', 'TIMEOUT'));
+    await grant(user);
+    expect(await screen.findByText(life.confirming)).toBeInTheDocument();
+    expect(screen.queryByText(copy.problems.failed)).not.toBeInTheDocument();
+  });
+
+  /** `setAdmin` raises `NotOwner` and `setManager` raises `Unauthorized` — different rules. */
+  it('tells the two authorisation refusals apart', async () => {
+    const user = userEvent.setup();
+    organizersOp.mockRejectedValueOnce(
+      new OpReverted('setAdmin', encodeErrorResult({ abi: organizersAbi, errorName: 'NotOwner' })),
+    );
+    await grant(user);
+    expect(await screen.findByText(copy.problems.notOwner)).toBeInTheDocument();
+
+    organizersOp.mockRejectedValueOnce(
+      new OpReverted('setManager', encodeErrorResult({ abi: organizersAbi, errorName: 'Unauthorized' })),
+    );
+    await user.click(screen.getByRole('button', { name: copy.grant }));
+    expect(await screen.findByText(copy.problems.notAllowed)).toBeInTheDocument();
+  });
+
+  it('says the organisation number is not one rather than blaming the permissions', async () => {
+    const user = userEvent.setup();
+    organizersOp.mockRejectedValueOnce(
+      new OpReverted('setAdmin', encodeErrorResult({ abi: organizersAbi, errorName: 'UnknownOrganizer' })),
+    );
+    await grant(user);
+    expect(await screen.findByText(copy.problems.unknownOrg)).toBeInTheDocument();
+  });
+
+  it('falls back to one sentence for a revert it has no name for', async () => {
+    const user = userEvent.setup();
+    organizersOp.mockRejectedValueOnce(
+      new OpReverted('setAdmin', encodeErrorResult({ abi: organizersAbi, errorName: 'GateAccountInUse' })),
+    );
+    await grant(user);
+    expect(await screen.findByText(copy.problems.failed)).toBeInTheDocument();
+  });
+
+  /**
+   * EIP-55 exists for the "copied one character wrong off a colleague's screen" case, and
+   * admin bits on an account nobody holds cannot be taken back.
+   */
+  it('refuses a mixed-case address whose checksum does not add up', async () => {
+    const user = userEvent.setup();
+    open();
+    await waitFor(() => expect(ownerOf).toHaveBeenCalled());
+    await user.type(screen.getByLabelText(copy.account), `0xA${INVITED.slice(3)}`);
     await user.click(screen.getByRole('button', { name: copy.grant }));
     expect(await screen.findByText(copy.problems.account)).toBeInTheDocument();
     expect(organizersOp).not.toHaveBeenCalled();

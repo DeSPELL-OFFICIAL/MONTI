@@ -89,6 +89,16 @@ describe('checkedInTopics', () => {
     expect(signature).toHaveLength(1);
   });
 
+  /**
+   * `USED_EVENTS.Ticket` also carries `EventCreated`, whose first indexed argument is an
+   * `eventId` in the same topic position this filter matches `tokenId` in. Subscribing to it
+   * here would turn the entry screen green on an unrelated event with a colliding number.
+   */
+  it('subscribes to the check-in events only, never to every Ticket event in the manifest', () => {
+    const [signature] = checkedInTopics('42') ?? [];
+    expect(signature).not.toContain(encodeEventTopics({ abi: ticketAbi, eventName: 'EventCreated' })[0]);
+  });
+
   it('answers null rather than an empty topic0 when the ABI has no check-in event', () => {
     // An empty `topic0` array is read by a node as "match any topic0", which would turn this
     // screen green on the next Transfer this ticket emits.

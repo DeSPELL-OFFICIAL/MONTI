@@ -35,12 +35,13 @@ export function Step6Review({
   onBack: () => void;
   /** Runs the moment the event is on chain: the wizard throws the draft away here. */
   onPublished: () => void;
-  /** Where the organiser goes once they have read the confirmation. */
-  onDone: () => void;
+  /** Where the organiser goes once they have read the confirmation. Carries the new event's
+   *  id when its `EventCreated` log gave one, and `''` when the operation is still confirming. */
+  onDone: (eventId: string) => void;
 }) {
   const copy = useOrganizerCopy().wizard;
   const locale = useLocale();
-  const { phase, problems, error, publish } = usePublish(draft, onPublished, patch);
+  const { phase, problems, error, eventId, publish } = usePublish(draft, onPublished, patch);
   const region = KR_REGIONS.find((entry) => entry.code === draft.regionCode);
   const busy = phase === 'pinning' || phase === 'sending';
   const yes = locale === 'en' ? 'Yes' : '예';
@@ -53,7 +54,7 @@ export function Step6Review({
       <section>
         <h2>{copy.step6}</h2>
         <Alert tone="info">{copy.published}</Alert>
-        <Button onClick={onDone}>{copy.heading}</Button>
+        <Button onClick={() => onDone(eventId)}>{eventId === '' ? copy.heading : copy.openEvent}</Button>
       </section>
     );
   }

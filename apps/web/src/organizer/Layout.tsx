@@ -46,7 +46,9 @@ function Wizard() {
           patch={patch}
           onBack={onBack}
           onPublished={reset}
-          onDone={() => navigate('/org')}
+          // Straight to the new event when its log named it; otherwise the home screen, where
+          // the number can be typed in (a `wait` that gave up carries no log to read).
+          onDone={(eventId) => navigate(eventId === '' ? '/org' : `/org/events/${eventId}`)}
         />
       ) : null}
       <p style={{ color: 'var(--muted)', fontSize: 13 }}>{copy.saveDraft}</p>

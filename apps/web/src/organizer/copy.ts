@@ -67,6 +67,7 @@ const ko = {
       halfZero: '키 한 쪽이 비어 있어요. 단말기에서 키를 다시 만들어 주세요',
       inUse: '이 단말기는 이미 다른 행사에 등록돼 있어요',
       unknownGate: '없는 단말기 번호예요',
+      unknownEvent: '없는 행사 번호예요',
       alreadyRevoked: '이미 폐기한 단말기예요',
       notAllowed: '이 행사의 입구를 관리할 권한이 없어요',
       failed: '보내지 못했어요. 잠시 뒤 다시 시도해 주세요',
@@ -107,6 +108,8 @@ const ko = {
       account: '계정 주소를 0x로 시작하는 42자로 옮겨 적어 주세요',
       bits: '권한을 하나 이상 골라 주세요',
       notAllowed: '이 조직에 사람을 더할 권한이 없어요',
+      notOwner: '조직의 오너만 보낼 수 있는 작업이에요',
+      unknownOrg: '없는 조직 번호예요',
       notFound: '없는 초대장이에요',
       failed: '보내지 못했어요. 잠시 뒤 다시 시도해 주세요',
     },
@@ -147,6 +150,7 @@ const ko = {
     checkedIn: '입장함',
     notCheckedIn: '아직',
     gates: '입구 단말기',
+    notIndexed: '없는 행사 번호이거나 아직 색인 전이에요',
     failed: '현황을 불러오지 못했어요. 잠시 뒤 다시 시도해 주세요',
   },
 
@@ -201,6 +205,7 @@ const ko = {
     publish: '발행하기', publishing: '발행하고 있어요', pinning: '이미지와 소개글을 올리고 있어요',
     confirming: '아직 확인 중이에요. 잠시 뒤 행사 목록에서 확인해 주세요',
     published: '발행했습니다',
+    openEvent: '행사 화면 열기',
 
     // 운영자에게만 보이는 안내라 '지갑'을 쓸 수 있는 유일한 문구다(01b 재배포 전까지).
     unsponsored: '주최자 작업은 지금은 수수료 지갑이 필요해요',
@@ -292,6 +297,7 @@ const en: typeof ko = {
       halfZero: 'One half of the key is empty. Please make the key again on the terminal',
       inUse: 'This terminal is already approved for another event',
       unknownGate: 'No terminal has that number',
+      unknownEvent: 'No event has that number',
       alreadyRevoked: 'That terminal is already retired',
       notAllowed: 'You may not manage the entrances of this event',
       failed: 'Could not send that. Please try again in a moment',
@@ -332,6 +338,8 @@ const en: typeof ko = {
       account: 'Copy the account address as 42 characters starting with 0x',
       bits: 'Please pick at least one permission',
       notAllowed: 'You may not add people to this organisation',
+      notOwner: 'Only the organisation owner can send this',
+      unknownOrg: 'No organisation has that number',
       notFound: 'No such invitation',
       failed: 'Could not send that. Please try again in a moment',
     },
@@ -372,6 +380,7 @@ const en: typeof ko = {
     checkedIn: 'In',
     notCheckedIn: 'Not yet',
     gates: 'Entry terminals',
+    notIndexed: 'No event has that number, or it has not been indexed yet',
     failed: 'Could not load the status. Please try again in a moment',
   },
 
@@ -428,6 +437,7 @@ const en: typeof ko = {
     publish: 'Publish', publishing: 'Publishing', pinning: 'Uploading the image and the description',
     confirming: 'Still confirming. Check your event list again in a moment',
     published: 'Published',
+    openEvent: 'Open the event screen',
 
     // Organiser-only notice: the one place this app is allowed that vocabulary (until 01b).
     unsponsored: 'Organiser actions still need a fee wallet for now',

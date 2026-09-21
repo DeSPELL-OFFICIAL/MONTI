@@ -15,6 +15,16 @@ import { UnsponsoredNotice } from './Unsponsored';
 type Pending = '' | 'publish' | 'cancel';
 
 /**
+ * The result of a lifecycle write, with the write that produced it.
+ *
+ * `which` is what the confirmation sentence is chosen from, never the event's `status`: the
+ * refetch that follows a write races the indexer's own `EventStatusChanged`, so for the
+ * seconds it is behind, `status` still says what the event *was* — and an organiser who just
+ * cancelled would read 발행했어요. The action that ran is not in doubt.
+ */
+type Outcome = LifecycleResult & { which: Exclude<Pending, ''> };
+
+/**
  * One event, from the indexer. Every number on this screen is a chain fact the indexer already
  * has — how many of each kind went out, how many came in — and the attendee list is
  * `listAttendees`, which is the indexer read the server is allowed to make on the organiser's
@@ -33,7 +43,7 @@ export function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [pending, setPending] = useState<Pending>('');
-  const [outcome, setOutcome] = useState<LifecycleResult | null>(null);
+  const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [busy, setBusy] = useState(false);
   const [reload, setReload] = useState(0);
 
@@ -69,14 +79,14 @@ export function Dashboard() {
       .eventOrg(BigInt(eventId))
       .catch(() => null);
     if (orgId === null || orgId === 0n) {
-      setOutcome({ state: 'refused', problem: 'failed' });
+      setOutcome({ state: 'refused', problem: 'failed', which });
       setBusy(false);
       setPending('');
       return;
     }
     const result =
       which === 'publish' ? await publishEvent(BigInt(eventId), orgId) : await cancelEvent(BigInt(eventId), orgId);
-    setOutcome(result);
+    setOutcome({ ...result, which });
     setBusy(false);
     setPending('');
     if (result.state === 'done') setReload((count) => count + 1);
@@ -96,11 +106,18 @@ export function Dashboard() {
   return (
     <Screen title={dash.title}>
       {failed ? <Alert tone="error">{dash.failed}</Alert> : null}
+      {/* Both reads answered, and the indexer simply has no row: a number that was mistyped on
+          the home screen, or an event created a moment ago. Neither is a failure, and neither
+          is a blank screen with no writes offered and no reason given. */}
+      {!failed && event === null ? <Alert tone="warn">{dash.notIndexed}</Alert> : null}
 
       {outcome?.state === 'unsponsored' ? <UnsponsoredNotice /> : null}
       {outcome?.state === 'confirming' ? <Alert tone="info">{life.confirming}</Alert> : null}
       {outcome?.state === 'refused' ? <Alert tone="error">{life[outcome.problem]}</Alert> : null}
-      {outcome?.state === 'done' ? <Alert tone="info">{status === 'Cancelled' ? life.cancelled : life.published}</Alert> : null}
+      {/* The sentence comes from the write that ran, not from an indexer that may be behind. */}
+      {outcome?.state === 'done' ? (
+        <Alert tone="info">{outcome.which === 'cancel' ? life.cancelled : life.published}</Alert>
+      ) : null}
       {busy ? <Alert tone="info">{life.working}</Alert> : null}
 
       {pending === '' ? (

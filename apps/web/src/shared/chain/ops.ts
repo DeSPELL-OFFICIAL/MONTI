@@ -3,7 +3,7 @@ import type { SmartAccount } from 'viem/account-abstraction';
 import { getConfig } from '../config';
 import { identityAbi, organizersAbi, ticketAbi, type UsedContract, type UsedFunction } from './abis';
 import { bundlerRequest } from './bundler';
-import { sendSponsoredOp, type SponsoredOpReceipt } from './sendSponsoredOp';
+import { readOpLogs, sendSponsoredOp, type SponsoredOpLog, type SponsoredOpReceipt } from './sendSponsoredOp';
 
 /** The operation did not succeed — the contract reverted, or `wait` timed out before it
  * landed (`revertReason` is then the `'TIMEOUT'` sentinel). Either way, user-facing failure.
@@ -25,6 +25,12 @@ export class OpReverted extends Error {
 /** Where an operation this app already sent has got to. */
 export type SubmittedOpState = 'pending' | 'landed' | 'failed';
 
+export interface SubmittedOp {
+  state: SubmittedOpState;
+  /** The operation's own logs, so a caller that timed out can still read what it created. */
+  logs: readonly SponsoredOpLog[];
+}
+
 /**
  * Asks the bundler about an operation whose `wait` gave up. `pending` means it is still on its
  * way and nothing new may be sent for it; `failed` means it reverted, so the same work may be
@@ -32,10 +38,13 @@ export type SubmittedOpState = 'pending' | 'landed' | 'failed';
  * it throws, and the caller decides (every one of them treats that as `pending`, because the
  * safe answer to "did my event get created?" is never "send another one").
  */
-export async function resolveSubmittedOp(userOpHash: Hex): Promise<SubmittedOpState> {
-  const receipt = await bundlerRequest<{ success?: boolean } | null>('eth_getUserOperationReceipt', [userOpHash]);
-  if (receipt === null || receipt === undefined) return 'pending';
-  return receipt.success === true ? 'landed' : 'failed';
+export async function resolveSubmittedOp(userOpHash: Hex): Promise<SubmittedOp> {
+  const receipt = await bundlerRequest<{ success?: boolean; logs?: unknown } | null>(
+    'eth_getUserOperationReceipt',
+    [userOpHash],
+  );
+  if (receipt === null || receipt === undefined) return { state: 'pending', logs: [] };
+  return { state: receipt.success === true ? 'landed' : 'failed', logs: readOpLogs(receipt) };
 }
 
 export interface SendOpArgs {

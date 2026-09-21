@@ -28,7 +28,7 @@ const account = {
   signUserOperation: vi.fn(async () => '0xsig' as const),
 } as never;
 
-const { applyGasBuffer, encodePaymasterAndData, sendSponsoredOp } = await import('./sendSponsoredOp');
+const { applyGasBuffer, encodePaymasterAndData, readOpLogs, sendSponsoredOp } = await import('./sendSponsoredOp');
 
 // restoreMocks only restores spies; a bare vi.fn() keeps its call history between tests.
 beforeEach(() => {
@@ -73,7 +73,9 @@ describe('sendSponsoredOp', () => {
     expect(sent.preVerificationGas).toBe('0xd1f6');     //  50000 * 1.075 =  53750
     expect(sent.paymasterAndData).toBe(encodePaymasterAndData(PAYMASTER, 7n));
     expect(handle.userOpHash).toBe('0xuserophash');
-    await expect(handle.wait()).resolves.toEqual({ success: true, txHash: '0xtx', blockNumber: 42n });
+    await expect(handle.wait()).resolves.toEqual({
+      success: true, txHash: '0xtx', blockNumber: 42n, revertReason: undefined, logs: [],
+    });
   });
 
   it('resolves a TIMEOUT receipt at the deadline instead of overrunning a slow poll', async () => {
@@ -88,7 +90,9 @@ describe('sendSponsoredOp', () => {
       const handle = await sendSponsoredOp({ account, orgId: 1n, calls: [{ to: `0x${'33'.repeat(20)}`, data: '0x01' }] });
       const waited = handle.wait(15_000);
       await vi.advanceTimersByTimeAsync(15_000);
-      await expect(waited).resolves.toEqual({ success: false, txHash: '0x', blockNumber: 0n, revertReason: 'TIMEOUT' });
+      await expect(waited).resolves.toEqual({
+        success: false, txHash: '0x', blockNumber: 0n, revertReason: 'TIMEOUT', logs: [],
+      });
     } finally {
       vi.useRealTimers();
     }
@@ -107,7 +111,9 @@ describe('sendSponsoredOp', () => {
       const handle = await sendSponsoredOp({ account, orgId: 1n, calls: [{ to: `0x${'33'.repeat(20)}`, data: '0x01' }] });
       const waited = handle.wait(15_000);
       await vi.advanceTimersByTimeAsync(1_000); // two poll intervals (~600ms), well under the deadline
-      await expect(waited).resolves.toEqual({ success: true, txHash: '0xtx', blockNumber: 42n });
+      await expect(waited).resolves.toEqual({
+        success: true, txHash: '0xtx', blockNumber: 42n, revertReason: undefined, logs: [],
+      });
     } finally {
       vi.useRealTimers();
     }
@@ -123,5 +129,25 @@ describe('sendSponsoredOp', () => {
     });
     const estimated = (bundlerRequest.mock.calls[0]![1] as unknown[])[0] as Record<string, string>;
     expect(estimated.callData).toBe('0xbatch');
+  });
+});
+
+describe('the logs one operation emitted', () => {
+  it('carries the operation\'s own logs off the receipt, so a caller can read what it created', async () => {
+    const log = { address: `0x${'44'.repeat(20)}`, topics: ['0xaa'], data: '0x' };
+    bundlerRequest
+      .mockResolvedValueOnce({ callGasLimit: '0x186a0', verificationGasLimit: '0x186a0', preVerificationGas: '0xc350' })
+      .mockResolvedValueOnce('0xuserophash')
+      .mockResolvedValueOnce({ success: true, logs: [log], receipt: { transactionHash: '0xtx', blockNumber: '0x2a' } });
+    const handle = await sendSponsoredOp({ account, orgId: 1n, calls: [{ to: `0x${'33'.repeat(20)}`, data: '0x01' }] });
+    await expect(handle.wait()).resolves.toMatchObject({ logs: [log] });
+  });
+
+  /** A bundler that omits `logs` is not a failure — the caller simply learns nothing from them. */
+  it('answers with none when the bundler sends none, or sends something that is not a list', async () => {
+    expect(readOpLogs(null)).toEqual([]);
+    expect(readOpLogs(undefined)).toEqual([]);
+    expect(readOpLogs({})).toEqual([]);
+    expect(readOpLogs({ logs: 'nope' })).toEqual([]);
   });
 });

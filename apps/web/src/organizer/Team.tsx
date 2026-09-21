@@ -2,10 +2,12 @@ import { useCallback, useEffect, useState } from 'react';
 import { isAddress, type Hex } from 'viem';
 import { Alert, Button, Field, Screen } from '../shared/ui';
 import { api, callableFailure } from '../shared/api/functions';
+import { organizersAbi } from '../shared/chain/abis';
 import { getStaffAccount } from '../shared/chain/accounts';
 import { OpReverted, organizersOp } from '../shared/chain/ops';
 import { PERMISSION_BITS, PERM_CREATE_EVENT, PERM_MANAGE_GATES } from '../shared/chain/permissions';
 import { readOrganizers } from '../shared/chain/reads';
+import { revertMatch } from '../shared/chain/revert';
 import { isUnsponsored } from '../shared/chain/unsponsored';
 import { useOrganizerCopy, type OrganizerCopy } from './copy';
 import { UnsponsoredNotice } from './Unsponsored';
@@ -15,6 +17,20 @@ type TeamProblem = keyof OrganizerCopy['team']['problems'];
 
 const PHONE_RE = /^\+[0-9]{7,15}$/;
 const ORG_ID_RE = /^[0-9]{1,78}$/;
+
+/**
+ * What `Organizers` reverts these two writes with, against the rule each one names.
+ * `setAdmin` raises `NotOwner` (`Organizers.sol:96`) and `setManager` raises `Unauthorized`
+ * (`:104`) — different rules, and worth different sentences: one says "you are not the owner",
+ * the other "you do not hold PERM_MANAGE_MANAGERS". `UnknownOrganizer` is a number that is not
+ * an organisation at all, which no amount of pressing again will fix.
+ */
+const GRANT_REVERTS: ReadonlyArray<readonly [string, TeamProblem]> = [
+  ['NotOwner', 'notOwner'],
+  ['Unauthorized', 'notAllowed'],
+  ['UnknownOrganizer', 'unknownOrg'],
+  ['ZeroAddress', 'account'],
+];
 
 /** What this screen made in this session. There is no callable that lists invites, and the
  *  invite document's own `done` flag is written by the Tenderly webhook — so nothing here
@@ -39,7 +55,10 @@ interface SessionInvite {
  * arguments, as a sponsored operation.
  */
 export function Team({ orgId: fixedOrgId }: { orgId?: string } = {}) {
-  const copy = useOrganizerCopy().team;
+  const organizer = useOrganizerCopy();
+  const copy = organizer.team;
+  // The one sentence for "it is still on its way", shared with the lifecycle screens.
+  const lifecycle = organizer.lifecycle;
   const [orgId, setOrgId] = useState(fixedOrgId ?? '');
 
   const [phone, setPhone] = useState('');
@@ -53,10 +72,15 @@ export function Team({ orgId: fixedOrgId }: { orgId?: string } = {}) {
   const [granted, setGranted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<TeamProblem | ''>('');
+  const [confirming, setConfirming] = useState(false);
   const [unsponsored, setUnsponsored] = useState(false);
 
   // Owner or not is a chain question and the answer decides what this screen offers. An
   // organisation number that is not one yet (`ownerOf` is the zero address) is simply not mine.
+  //
+  // The account asked about is `getStaffAccount()`, which is the signed-in passkey account —
+  // the same one the session carries. That equality is the invariant this screen depends on;
+  // reading it here rather than from the session store keeps the screen testable on its own.
   useEffect(() => {
     if (!ORG_ID_RE.test(orgId)) {
       setIsOwner(null);
@@ -82,7 +106,9 @@ export function Team({ orgId: fixedOrgId }: { orgId?: string } = {}) {
 
   /** The chain's own answer to "did it land?", which is the only one this screen trusts. */
   const check = useCallback(async (): Promise<void> => {
-    if (!ORG_ID_RE.test(orgId) || !isAddress(account, { strict: false })) return;
+    // Strict: a mixed-case address whose EIP-55 checksum does not add up is one character of
+    // somebody else's, and admin bits on an account nobody holds cannot be taken back.
+    if (!ORG_ID_RE.test(orgId) || !isAddress(account, { strict: true })) return;
     const target = account as Hex;
     const organizers = readOrganizers();
     const held =
@@ -138,10 +164,11 @@ export function Team({ orgId: fixedOrgId }: { orgId?: string } = {}) {
 
   async function grant(): Promise<void> {
     setProblem('');
+    setConfirming(false);
     setUnsponsored(false);
     setGranted(false);
     if (!ORG_ID_RE.test(orgId)) return setProblem('orgId');
-    if (!isAddress(account, { strict: false })) return setProblem('account');
+    if (!isAddress(account, { strict: true })) return setProblem('account');
     if (role === 'admin' && bits === 0) return setProblem('bits');
 
     setBusy(true);
@@ -155,8 +182,17 @@ export function Team({ orgId: fixedOrgId }: { orgId?: string } = {}) {
       });
       await check();
     } catch (cause) {
-      if (cause instanceof OpReverted) setProblem(cause.revertReason === 'TIMEOUT' ? 'failed' : 'notAllowed');
-      else if (isUnsponsored(cause)) setUnsponsored(true);
+      if (cause instanceof OpReverted) {
+        // A `wait` that gave up is not a refusal: the grant may well be landing, and telling
+        // the owner it failed invites a second send. Same rule as every other screen here.
+        if (cause.revertReason === 'TIMEOUT') setConfirming(true);
+        else {
+          const named = cause.revertReason
+            ? revertMatch(organizersAbi, cause.revertReason as Hex, GRANT_REVERTS)
+            : undefined;
+          setProblem(named ?? 'failed');
+        }
+      } else if (isUnsponsored(cause)) setUnsponsored(true);
       else setProblem('failed');
     } finally {
       setBusy(false);
@@ -166,6 +202,7 @@ export function Team({ orgId: fixedOrgId }: { orgId?: string } = {}) {
   return (
     <Screen title={copy.title}>
       {problem === '' ? null : <Alert tone="error">{copy.problems[problem]}</Alert>}
+      {confirming ? <Alert tone="info">{lifecycle.confirming}</Alert> : null}
       {unsponsored ? <UnsponsoredNotice /> : null}
       {busy ? <Alert tone="info">{copy.working}</Alert> : null}
 

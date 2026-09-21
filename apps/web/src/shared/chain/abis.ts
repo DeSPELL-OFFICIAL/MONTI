@@ -67,6 +67,13 @@ export const USED_EVENTS = {
     /** `CheckedIn(uint256 tokenId, uint256 eventId, uint256 gateId, bytes32 nonceHash, uint64 ts)` */
     CheckedIn: 5,
     /**
+     * `EventCreated(uint256 indexed eventId, uint256 indexed orgId, address indexed creator)`.
+     * `createEvent` returns the new id, but a sponsored operation gives back a receipt rather
+     * than a return value — so this log is the only way the wizard learns which event it just
+     * made without waiting for the indexer.
+     */
+    EventCreated: 3,
+    /**
      * 01b: `CheckedInLate(uint256 indexed tokenId, uint256 indexed gateId, uint64 issuedAt,
      * uint64 ts)` — **four** parameters, no `eventId` and no `nonceHash`
      * (`MONTI-01b/contracts/docs/abi-delta-01b.md:54`). It is emitted *in addition to*
