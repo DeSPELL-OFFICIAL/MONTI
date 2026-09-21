@@ -292,7 +292,9 @@ contract Ticket is ERC721, ITicket {
         if (_revoked[tokenId]) revert TicketRevoked();
         if (!m.transferable) revert TransfersDisabled();
         if (_checkIns[tokenId].ts != 0) revert AlreadyCheckedIn();
-        if (block.timestamp + m.transferCutoffSeconds > m.startsAt) revert TransferCutoffPassed();
+        // Same boundary as _update: at the cutoff instant itself the handoff is already closed, so an
+        // offer opened here could never be collected.
+        if (block.timestamp + m.transferCutoffSeconds >= m.startsAt) revert TransferCutoffPassed();
         if (_transfers[tokenId] >= m.maxTransfers) revert TransferLimitReached();
         if (expiresAt <= block.timestamp) revert OfferExpired();
 
@@ -332,6 +334,8 @@ contract Ticket is ERC721, ITicket {
 
         uint256 eventId = _eventOf[tokenId];
         if (g.eventId != eventId) revert WrongEvent();
+        // eventStatus promotes to Ended only from Published, so Ended and Cancelled are mutually
+        // exclusive states, not a precedence: swapping these two lines would change nothing.
         EventStatus status = eventStatus(eventId);
         if (status == EventStatus.Ended) revert EventEnded();
         if (status == EventStatus.Cancelled) revert EventCancelled();
@@ -443,6 +447,9 @@ contract Ticket is ERC721, ITicket {
         address holder = _ownerOf(tokenId);
         if (holder == address(0)) revert NoSuchTicket();
 
+        // Defensive: every path that hands a token to an account checks isMember first and personOf is
+        // never cleared, so a live token's holder always has a personId. Kept so a future mint path
+        // cannot silently report NotRotatedAccount for what is really an unregistered holder.
         bytes32 personId = identity.personOf(holder);
         if (personId == bytes32(0)) revert NotMember();
         address current = identity.accountOf(personId);

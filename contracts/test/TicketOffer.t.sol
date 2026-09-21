@@ -127,6 +127,26 @@ contract TicketOfferTest is MontiTest {
         assertEq(ticket.offerOf(tokenId).from, address(0));
     }
 
+    /// @dev The cutoff instant itself is closed for a transfer, so an offer created at that instant
+    ///      could never be collected. `createOffer` closes on the same boundary `_update` does.
+    function test_createOfferAtExactCutoffReverts() public {
+        vm.warp(T0 + 1 days - 2 hours);
+        vm.prank(ALICE);
+        vm.expectRevert(Ticket.TransferCutoffPassed.selector);
+        ticket.createOffer(tokenId, COMMITMENT, T0 + 1 days);
+    }
+
+    /// @dev One second earlier the handoff still completes, which is the boundary's other side.
+    function test_offerCreatedOneSecondBeforeTheCutoffIsStillCollectable() public {
+        vm.warp(T0 + 1 days - 2 hours - 1);
+        vm.prank(ALICE);
+        ticket.createOffer(tokenId, COMMITMENT, T0 + 1 days);
+
+        vm.prank(BOB);
+        ticket.acceptOffer(tokenId, _sig(tokenId, COMMITMENT, BOB));
+        assertEq(ticket.ownerOf(tokenId), BOB);
+    }
+
     /// @dev Admission kills a live offer, so the recipient cannot accept a ticket that is already inside.
     function test_offerIsVoidAfterCheckIn() public {
         vm.prank(ALICE);
