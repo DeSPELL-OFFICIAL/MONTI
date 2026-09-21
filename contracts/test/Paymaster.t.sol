@@ -2,6 +2,7 @@
 pragma solidity 0.8.31;
 
 import {MontiTest} from "./Base.t.sol";
+import {stdError} from "forge-std/StdError.sol";
 import {MontiPaymaster} from "../src/MontiPaymaster.sol";
 import {MockEntryPoint} from "./mocks/MockEntryPoint.sol";
 import {Ticket} from "../src/Ticket.sol";
@@ -506,6 +507,147 @@ contract PaymasterTest is MontiTest {
 
         vm.prank(address(ep));
         paymaster.postOp(mode, abi.encode(slot, maxCost), actualGasCost);
+    }
+
+    // --- debit and exhaustion (Task 27) --------------------------------------------------------------
+
+    /// @dev The platform slot keeps no books of its own, so the only record of a platform-paid operation
+    ///      is the event: `budgetOf(PLATFORM)` moves because the EntryPoint took the cost, not this code.
+    function test_platformSpendIsReportedByBudgetDebitedWithSlotZero() public {
+        paymaster.depositPlatform{value: 1 ether}();
+        (bytes memory context,) = ep.callValidate(address(paymaster), _op(_claimCall(), 0), bytes32(0), 0.01 ether);
+
+        vm.expectEmit(true, false, false, true);
+        emit BudgetDebited(paymaster.PLATFORM(), 0.004 ether);
+        ep.callPostOp(address(paymaster), IPaymaster.PostOpMode.opSucceeded, context, 0.004 ether);
+
+        assertEq(paymaster.budgetOf(0), 1 ether - 0.004 ether, "the deposit is the platform slot");
+    }
+
+    function test_settlementAtTheCeilingReturnsNothingAndAtZeroReturnsEverything() public {
+        paymaster.deposit{value: 1 ether}(orgId);
+        _selfSponsor();
+
+        (bytes memory spentInFull,) = ep.callValidate(address(paymaster), _op(_claimCall(), 0), bytes32(0), 0.01 ether);
+        vm.expectEmit(true, false, false, true);
+        emit BudgetDebited(orgId, 0.01 ether);
+        ep.callPostOp(address(paymaster), IPaymaster.PostOpMode.opSucceeded, spentInFull, 0.01 ether);
+        assertEq(paymaster.budgetOf(orgId), 1 ether - 0.01 ether, "a reservation used up returns nothing");
+
+        (bytes memory freeOp,) = ep.callValidate(address(paymaster), _op(_claimCall(), 0), bytes32(0), 0.01 ether);
+        vm.expectEmit(true, false, false, true);
+        emit BudgetDebited(orgId, 0);
+        ep.callPostOp(address(paymaster), IPaymaster.PostOpMode.opSucceeded, freeOp, 0);
+        assertEq(paymaster.budgetOf(orgId), 1 ether - 0.01 ether, "a free operation gives the reservation back");
+    }
+
+    function test_selfSponsoredOrgWithAnEmptySlotIsRefusedEvenWhenThePlatformIsFunded() public {
+        paymaster.depositPlatform{value: 1 ether}();
+        _selfSponsor();
+
+        vm.expectRevert(MontiPaymaster.BudgetExhausted.selector);
+        ep.callValidate(address(paymaster), _op(_claimCall(), 0), bytes32(0), 0.01 ether);
+        assertEq(paymaster.budgetOf(0), 1 ether, "an empty project slot never falls back onto MONTI");
+    }
+
+    /// @dev What the brief called "an empty budget refuses sponsorship" is the EntryPoint's job for the
+    ///      platform slot: it has already refused an operation its deposit cannot cover (AA31), and
+    ///      reading that deposit here would be the forbidden EntryPoint call of OP-054.
+    function test_anEmptyPlatformDepositIsTheEntryPointsRefusalNotThePaymasters() public {
+        assertEq(paymaster.budgetOf(0), 0, "nothing deposited");
+
+        (bytes memory context,) = ep.callValidate(address(paymaster), _op(_claimCall(), 0), bytes32(0), 0.01 ether);
+        (uint256 slot, uint256 maxCost) = abi.decode(context, (uint256, uint256));
+        assertEq(slot, 0);
+        assertEq(maxCost, 0.01 ether);
+    }
+
+    /// @dev Nothing is read out of `paymasterAndData`, so there is nothing in it to malform: the bare
+    ///      20-byte form the EntryPoint routes on is as valid as the padded one the other tests send.
+    function test_paymasterAndDataCarryingNothingButTheAddressIsAccepted() public {
+        paymaster.depositPlatform{value: 1 ether}();
+        UserOperation memory op = _op(_claimCall(), 0);
+        op.paymasterAndData = abi.encodePacked(address(paymaster));
+
+        (bytes memory context,) = ep.callValidate(address(paymaster), op, bytes32(0), 0.01 ether);
+        (uint256 slot,) = abi.decode(context, (uint256, uint256));
+        assertEq(slot, 0);
+    }
+
+    function test_turningSelfSponsorshipOffMidFlightStillSettlesTheProjectThatReserved() public {
+        paymaster.depositPlatform{value: 1 ether}();
+        paymaster.deposit{value: 1 ether}(orgId);
+        _selfSponsor();
+
+        (bytes memory context,) = ep.callValidate(address(paymaster), _op(_claimCall(), 0), bytes32(0), 0.01 ether);
+        assertEq(paymaster.budgetOf(orgId), 1 ether - 0.01 ether, "reserved while self-sponsored");
+
+        vm.prank(ORG_OWNER);
+        paymaster.setSelfSponsored(orgId, false);
+
+        vm.expectEmit(true, false, false, true);
+        emit BudgetDebited(orgId, 0.004 ether);
+        ep.callPostOp(address(paymaster), IPaymaster.PostOpMode.opSucceeded, context, 0.004 ether);
+        assertEq(paymaster.budgetOf(orgId), 1 ether - 0.004 ether, "the context says who reserved, not the flag");
+    }
+
+    function test_turningSelfSponsorshipOnMidFlightDoesNotBillTheProjectForAPlatformReservation() public {
+        paymaster.depositPlatform{value: 1 ether}();
+        paymaster.deposit{value: 1 ether}(orgId);
+
+        (bytes memory context,) = ep.callValidate(address(paymaster), _op(_claimCall(), 0), bytes32(0), 0.01 ether);
+        _selfSponsor();
+
+        vm.expectEmit(true, false, false, true);
+        emit BudgetDebited(paymaster.PLATFORM(), 0.004 ether);
+        ep.callPostOp(address(paymaster), IPaymaster.PostOpMode.opSucceeded, context, 0.004 ether);
+        assertEq(paymaster.budgetOf(orgId), 1 ether, "a platform reservation never becomes a project debit");
+    }
+
+    function test_withdrawCannotTakeWeiAnInFlightOperationHasReserved() public {
+        paymaster.deposit{value: 1 ether}(orgId);
+        _selfSponsor();
+        ep.callValidate(address(paymaster), _op(_claimCall(), 0), bytes32(0), 0.01 ether);
+
+        vm.prank(ORG_OWNER);
+        vm.expectRevert(stdError.arithmeticError);
+        paymaster.withdraw(orgId, 1 ether);
+
+        vm.prank(ORG_OWNER);
+        paymaster.withdraw(orgId, 1 ether - 0.01 ether);
+        assertEq(paymaster.budgetOf(orgId), 0, "withdraw is capped by what the slot still holds");
+    }
+
+    /// @dev A reservation leaves `_orgBudget` but stays inside `_orgBudgetTotal`, so the wei an in-flight
+    ///      operation is holding is still backed and MONTI still cannot withdraw it.
+    function test_platformWithdrawStillCannotTouchWeiThatIsReserved() public {
+        paymaster.depositPlatform{value: 1 ether}();
+        paymaster.deposit{value: 2 ether}(orgId);
+        _selfSponsor();
+        ep.callValidate(address(paymaster), _op(_claimCall(), 0), bytes32(0), 0.01 ether);
+        assertEq(paymaster.budgetOf(orgId), 2 ether - 0.01 ether, "reserved wei has left the slot");
+
+        vm.expectRevert(MontiPaymaster.BudgetExhausted.selector);
+        paymaster.withdrawPlatform(address(this), 1 ether + 1);
+
+        paymaster.withdrawPlatform(address(this), 1 ether);
+        assertEq(paymaster.budgetOf(0), 2 ether, "what stays on deposit still backs the slot and its reservation");
+    }
+
+    /// @dev Spec 8.3: a check-in is 330,000 gas, which at Monad's 100 gwei base fee is 0.033 MON. This is
+    ///      the arithmetic sub-plan 03's budget warning is built on, so it is pinned here.
+    function test_fiveMonSponsorsAboutOneHundredFiftyCheckIns() public {
+        paymaster.deposit{value: 5 ether}(orgId);
+        _selfSponsor();
+        uint256 maxCost = 330_000 * 100 gwei;
+
+        uint256 sponsored;
+        while (paymaster.budgetOf(orgId) >= maxCost) {
+            ep.callValidate(address(paymaster), _op(_claimCall(), 0), bytes32(0), maxCost);
+            sponsored += 1;
+        }
+        assertEq(sponsored, 151);
+        assertLt(paymaster.budgetOf(orgId), maxCost, "what is left cannot cover one more");
     }
 
     receive() external payable {}

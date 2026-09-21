@@ -153,6 +153,9 @@ contract MontiPaymaster is IPaymaster {
     ///         against what the ones before it already committed. The platform slot is deliberately not
     ///         checked: the EntryPoint has already refused the operation if the deposit cannot cover it,
     ///         and reading that deposit here would be a forbidden EntryPoint call (OP-054).
+    ///         Reserving writes storage during validation, which the bundler re-simulates: only a staked
+    ///         paymaster may touch its own storage that way (ERC-7562 STO-032/033), which is why this
+    ///         contract must be staked before it sponsors anything.
     function validatePaymasterUserOp(UserOperation calldata userOp, bytes32, uint256 maxCost)
         external
         returns (bytes memory context, uint256 validationData)
