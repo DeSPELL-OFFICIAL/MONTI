@@ -23,7 +23,7 @@ contract Identity is IIdentity, AttesterRole {
     mapping(address => bytes32) private _personOf;
     mapping(bytes32 => uint64) private _rotatedAt;
     mapping(address => Device) private _devices;
-    mapping(address => uint8) private _kycLevel;
+    mapping(bytes32 => uint8) private _kycLevel;
     mapping(bytes32 => address) private _nicknameOwner;
     mapping(address => bytes32) private _nicknameOf;
 
@@ -67,7 +67,7 @@ contract Identity is IIdentity, AttesterRole {
         _personOf[account] = personId;
         _rotatedAt[personId] = uint64(block.timestamp);
         _devices[account] = Device({x: deviceX, y: deviceY, updatedAt: uint64(block.timestamp), locked: false});
-        _kycLevel[account] = kycLevel;
+        _kycLevel[personId] = kycLevel;
 
         emit Registered(personId, account);
         emit DeviceChanged(account, deviceX, deviceY);
@@ -103,7 +103,7 @@ contract Identity is IIdentity, AttesterRole {
     function setKycLevel(bytes32 personId, uint8 level) external onlyAttester {
         address account = _accountOf[personId];
         if (account == address(0)) revert NotRegistered();
-        _kycLevel[account] = level;
+        _kycLevel[personId] = level;
         emit KycLevelSet(account, level);
     }
 
@@ -135,7 +135,7 @@ contract Identity is IIdentity, AttesterRole {
     }
 
     function kycLevelOf(address account) external view returns (uint8) {
-        return _kycLevel[account];
+        return _kycLevel[_personOf[account]];
     }
 
     /// @notice Register this phone's hardware key as the one key allowed to sign check-ins.
