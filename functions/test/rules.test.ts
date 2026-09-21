@@ -157,6 +157,28 @@ describe('eventChats messages', () => {
   });
 });
 
+describe('deletionRequests', () => {
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (context) => {
+      await context
+        .firestore()
+        .doc('deletionRequests/uid-1')
+        .set({ personId: '0xaa', status: 'pending', scheduledFor: 4102444800 });
+    });
+  });
+
+  // 접수는 `requestAccountDeletion`, 실행은 `processDeletions` 뿐이다. 클라이언트가 직접
+  // 쓰면 자기 유예 기한을 앞당기거나(`scheduledFor`) 남의 uid 로 파기를 걸 수 있다.
+  it('blocks the owner from reading, creating, rescheduling or cancelling their own request', async () => {
+    const db = owner();
+    await assertFails(db.doc('deletionRequests/uid-1').get());
+    await assertFails(db.doc('deletionRequests/uid-1').update({ scheduledFor: 1 }));
+    await assertFails(db.doc('deletionRequests/uid-1').update({ status: 'done' }));
+    await assertFails(db.doc('deletionRequests/uid-1').delete());
+    await assertFails(db.doc('deletionRequests/uid-2').set({ personId: '0xbb', status: 'pending' }));
+  });
+});
+
 describe('pendingGates', () => {
   const GATE = '0x1234123412341234123412341234123412341234';
 

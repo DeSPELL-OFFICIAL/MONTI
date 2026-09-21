@@ -1,7 +1,7 @@
 export type Hex = `0x${string}`;
 
 /** Firestore `persons/{personId}.status`. 전이는 pending → kyc_ok → active 만 허용된다. */
-export type PersonStatus = 'pending' | 'kyc_ok' | 'active' | 'rotated' | 'rejected';
+export type PersonStatus = 'pending' | 'kyc_ok' | 'active' | 'rotated' | 'rejected' | 'deleted';
 
 export interface GateCodeWire {
   v: 1;

@@ -140,6 +140,8 @@ describe('deploy bundle', () => {
       'pinEventMetadata',
       'pinMessage',
       'revokeInvite',
+      'requestAccountDeletion',
+      'processDeletions',
     ]) {
       expect(exported).toContain(name);
     }

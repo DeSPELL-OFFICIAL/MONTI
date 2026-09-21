@@ -1,3 +1,4 @@
+export { processDeletions, requestAccountDeletion } from './functions/accountDeletion.js';
 export { acceptInvite, createInvite, revokeInvite } from './functions/invites.js';
 export { closeEndedChats, joinEventChat, reportMessage } from './functions/eventChat.js';
 export { createTransferInvite, pendingOffers } from './functions/transferInvites.js';

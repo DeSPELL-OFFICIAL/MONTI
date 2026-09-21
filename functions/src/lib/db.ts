@@ -54,14 +54,18 @@ export const ALLOWED_COLLECTIONS = [
  *  - `kyc_ok`   Didit 이 승인했지만 `setKycLevel(1)` 이 아직 finalized 되지 않은 중간 상태.
  *  - `rejected` Didit 이 거절했거나 같은 얼굴이 이미 있다.
  *  - `rotated`  계정이 새 계정으로 교체됐다.
+ *  - `deleted`  파기 요청이 끝났다. 문서는 남지만 개인정보는 없다 — 체인이 이 personId 를
+ *               가리키고 있어서 지울 수 없다(스펙 §10.2). **어느 상태에서든 갈 수 있고,
+ *               돌아오는 길은 없다.**
  * 본인인증 통과 여부의 **원본은 `kycLevel`(0/1)** 이고 status 는 진행 단계 표시다.
  */
 export const ALLOWED_TRANSITIONS: Record<PersonStatus, PersonStatus[]> = {
-  pending: ['pending', 'active', 'rejected'],
-  active: ['active', 'kyc_ok', 'rejected', 'rotated'],
-  kyc_ok: ['kyc_ok', 'active', 'rejected'],
-  rejected: ['rejected', 'kyc_ok', 'active'],
-  rotated: ['rotated'],
+  pending: ['pending', 'active', 'rejected', 'deleted'],
+  active: ['active', 'kyc_ok', 'rejected', 'rotated', 'deleted'],
+  kyc_ok: ['kyc_ok', 'active', 'rejected', 'deleted'],
+  rejected: ['rejected', 'kyc_ok', 'active', 'deleted'],
+  rotated: ['rotated', 'deleted'],
+  deleted: ['deleted'],
 };
 
 /** 뒤로 가거나 죽은 상태를 되살리는 전이만 막는다. */

@@ -106,3 +106,21 @@ export async function createDiditSession(
   if (!body.session_id || !body.url) throw new Error('DIDIT_SESSION_MALFORMED');
   return { sessionId: body.session_id, url: body.url };
 }
+
+/**
+ * 개인정보 파기 요청. Didit 쪽 세션과 그 안의 생체 템플릿까지 지운다(스펙 §9.2 데이터 항목).
+ *
+ * 404 는 성공으로 읽는다 — 파기에서 "이미 없다" 는 우리가 원하던 결과다. 그 밖의 실패는
+ * 던진다: 부르는 쪽(`processDeletions`)이 우리 DB 를 지우기 **전에** 다시 시도해야 하고,
+ * 여기서 조용히 삼키면 Didit 에 자료가 남은 채로 "파기 완료" 도장이 찍힌다.
+ */
+export async function deleteDiditSession(sessionId: string, apiKey: string): Promise<void> {
+  const response = await fetch(`${DIDIT_API}/session/${sessionId}/delete/`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-api-key': apiKey },
+    body: JSON.stringify({ deletion_instruction: 'privacy erasure' }),
+  });
+  if (!response.ok && response.status !== 404) {
+    throw new Error(`DIDIT_DELETE_FAILED:${response.status}`);
+  }
+}

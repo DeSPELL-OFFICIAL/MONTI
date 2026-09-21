@@ -74,6 +74,13 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // 계정 파기 요청 큐. 접수는 `requestAccountDeletion`, 실행은 `processDeletions` 하나씩만 한다.
+    // 아래 포괄 거부가 이미 막지만, 여기에 직접 쓸 수 있으면 남의 uid 로 파기를 걸거나
+    // 자기 요청의 `scheduledFor` 를 앞당겨 7일 유예를 없앨 수 있다 — 명시해 둔다.
+    match /deletionRequests/{uid} {
+      allow read, write: if false;
+    }
+
     // persons, passkeys, kycSessions, invites, phoneIndex, transferInvites, authChallenges 포함 전부 거부.
     match /{document=**} {
       allow read, write: if false;
