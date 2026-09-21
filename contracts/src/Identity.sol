@@ -96,6 +96,14 @@ contract Identity is IIdentity, AttesterRole {
         }
 
         emit AccountRotated(personId, oldAccount, newAccount);
+
+        // 회전은 폰을 잃어버려서 하는 절차다(5.5). 잃어버린 폰이 Ticket.migrate 전까지 계속
+        // 입장하던 구멍을 여기서 닫는다(I2). cancelRotation 이 이 잠금을 되돌린다.
+        Device storage lost = _devices[oldAccount];
+        if (!lost.locked) {
+            lost.locked = true;
+            emit DeviceLocked(oldAccount, true);
+        }
     }
 
     /// @notice Raises (or lowers) the verification level after a later Didit session. Attester only:

@@ -349,6 +349,9 @@ contract Ticket is ERC721, ITicket {
         if (g.issuedAt > block.timestamp + CLOCK_SKEW) revert CodeExpired();
         if (uint256(g.issuedAt) + CODE_WINDOW < block.timestamp) revert CodeExpired();
 
+        // 회전된 계정이 티켓을 아직 들고 있을 수 있다. 잠금만으로도 막히지만(I2가 회전 시
+        // 잠그므로) 두 컨트랙트의 불변식을 서로에게 기대지 않도록 여기서도 직접 묻는다.
+        if (!identity.isMember(holder)) revert NotMember();
         if (identity.isLocked(holder)) revert DeviceLocked();
         (bytes32 x, bytes32 y) = identity.activeDevice(holder);
 

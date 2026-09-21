@@ -2,6 +2,7 @@
 pragma solidity 0.8.31;
 
 import {Test} from "forge-std/Test.sol";
+import {Vm} from "forge-std/Vm.sol";
 import {Identity} from "../src/Identity.sol";
 import {AttesterRole} from "../src/libs/AttesterRole.sol";
 
@@ -306,5 +307,40 @@ contract IdentityTest is Test {
         assertEq(identity.nicknameOf(BOB), nicknameHash);
         assertEq(identity.nicknameOwner(nicknameHash), BOB);
         assertEq(identity.nicknameOf(ALICE), bytes32(0));
+    }
+
+    /// @dev 회전은 폰을 잃어버려서 하는 절차다(5.5). 잃어버린 폰은 그 순간부터 문에서 막힌다.
+    function test_rotateAccountLocksTheOldDevice() public {
+        vm.prank(ATTESTER);
+        identity.register(PERSON_A, ALICE, DEV_X, DEV_Y, 1);
+        assertFalse(identity.isLocked(ALICE));
+        vm.warp(block.timestamp + 7 days);
+
+        vm.prank(ATTESTER);
+        identity.rotateAccount(PERSON_A, BOB);
+
+        assertTrue(identity.isLocked(ALICE), "the lost phone is locked at rotation, not at migrate");
+        assertFalse(identity.isLocked(BOB), "the new account is not locked");
+    }
+
+    /// @dev 이미 잠겨 있었으면 중복 이벤트를 내지 않는다.
+    function test_rotateDoesNotRelockAnAlreadyLockedDevice() public {
+        vm.prank(ATTESTER);
+        identity.register(PERSON_A, ALICE, DEV_X, DEV_Y, 1);
+        vm.prank(ALICE);
+        identity.lockDevice(ALICE);
+        vm.warp(block.timestamp + 7 days);
+
+        vm.recordLogs();
+        vm.prank(ATTESTER);
+        identity.rotateAccount(PERSON_A, BOB);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        uint256 locks;
+        for (uint256 i; i < logs.length; ++i) {
+            if (logs[i].topics[0] == keccak256("DeviceLocked(address,bool)")) ++locks;
+        }
+        assertEq(locks, 0, "already locked: no second DeviceLocked");
+        assertTrue(identity.isLocked(ALICE));
     }
 }

@@ -165,6 +165,19 @@ contract TicketCheckInTest is MontiTest {
         ticket.checkIn(tokenId, _code(gateAId), _sigA());
     }
 
+    /// @dev 회전 뒤 티켓은 잠시 옛 계정에 남아 있다(새 계정이 migrate 하기 전까지).
+    ///      그 사이에 옛 폰이 걸어 들어오면 안 된다.
+    function test_rotatedAwayHolderCannotCheckIn() public {
+        vm.warp(P256Vectors.ISSUED_AT + 7 days);
+        vm.prank(attester);
+        identity.rotateAccount(bytes32(uint256(0xA1A1)), CAROL);
+        vm.warp(P256Vectors.ISSUED_AT + 5);
+
+        vm.prank(GATE_A);
+        vm.expectRevert(Ticket.NotMember.selector);
+        ticket.checkIn(tokenId, _code(gateAId), _sigA());
+    }
+
     function test_T6_wrongDeviceKeyRejected() public {
         vm.prank(GATE_A);
         vm.expectRevert(Ticket.BadDeviceSignature.selector);
