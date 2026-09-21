@@ -22,6 +22,8 @@ export const TRANSFER_INVITES = 'transferInvites';
 export const EVENT_CHATS = 'eventChats';
 export const DELETION_REQUESTS = 'deletionRequests';
 export const PENDING_GATES = 'pendingGates';
+/** 서버 내부 상태만 들어간다. 클라이언트는 규칙의 포괄 거부로 닿지 못한다(어테스터 리스). */
+export const SYSTEM = 'system';
 
 /**
  * Functions가 쓸 수 있는 컬렉션의 전부. 스펙 §10.4 규칙 1에 따라
@@ -40,6 +42,7 @@ export const ALLOWED_COLLECTIONS = [
   EVENT_CHATS,
   DELETION_REQUESTS,
   PENDING_GATES,
+  SYSTEM,
   'members',
   'messages',
 ] as const;
