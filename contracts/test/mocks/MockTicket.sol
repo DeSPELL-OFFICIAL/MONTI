@@ -14,4 +14,13 @@ contract MockTicket is ITicket {
     function eventOrg(uint256 eventId) external view returns (uint256) {
         return orgOf[eventId];
     }
+
+    /// @dev The Organizers tests never resolve a tokenId; this exists only to satisfy ITicket.
+    function eventOf(uint256) external pure returns (uint256) {
+        return 0;
+    }
+
+    function isRevoked(uint256) external pure returns (bool) {
+        return false;
+    }
 }

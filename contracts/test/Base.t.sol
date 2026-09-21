@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {Identity} from "../src/Identity.sol";
 import {Organizers} from "../src/Organizers.sol";
 import {Ticket} from "../src/Ticket.sol";
+import {P256Vectors} from "./utils/P256Vectors.sol";
 
 abstract contract MontiTest is Test {
     Identity internal identity;
@@ -32,6 +33,13 @@ abstract contract MontiTest is Test {
         ticket = new Ticket(address(identity), address(organizers));
         organizers.setTicket(address(ticket));
         vm.warp(T0);
+    }
+
+    /// @dev Registers a member whose device key is the generated P-256 vector key, so check-in
+    ///      tests (Task 20+) can present real signatures the live 0x100 precompile verifies.
+    function _memberWithDeviceKey(address account, uint256 personSeed) internal {
+        vm.prank(attester);
+        identity.register(bytes32(personSeed), account, P256Vectors.DEVICE_X, P256Vectors.DEVICE_Y, 1);
     }
 
     /// @dev Default members are fully verified (kycLevel 1).

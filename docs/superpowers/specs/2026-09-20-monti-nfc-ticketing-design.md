@@ -679,7 +679,7 @@ Monad 실측(2026-09-20): 기본 수수료 100 gwei 고정, MON 약 32원, **가
 | 확인 중 | 스피너 2초 이내, "체인 확인 중" |
 | **ADMIT** | 전면 초록, **큰 본인인증 사진**, 이름, 종류/좌석, 입장 순번, 시각, 블록 번호. 24시간 내 기기 변경이면 앰버 배너 |
 | **OFFLINE 승인** | 초록에 앰버 테두리, "복구 후 기록 예정", 사진 |
-| **DENY** | ALREADY_USED(첫 입장 시각·게이트), WRONG_EVENT, REVOKED, EXPIRED_CODE(다시 대세요), NO_TICKET, GATE_CLOSED, DEVICE_LOCKED, DEVICE_MISMATCH, EVENT_ENDED(행사 종료), TX_FAILED(사유) |
+| **DENY** | ALREADY_USED(첫 입장 시각·게이트), WRONG_EVENT, REVOKED, EXPIRED_CODE(다시 대세요), NO_TICKET, GATE_CLOSED, DEVICE_LOCKED, DEVICE_MISMATCH, GATE_MISMATCH(다른 게이트의 번호), EVENT_ENDED(행사 종료), EVENT_CANCELLED(취소된 행사), TX_FAILED(사유) |
 | 오프라인 | "OFFLINE, 스냅샷 N분 전, 대기 N건" |
 | 수동 승인 | PIN + 사유 코드. 권한 있으면 즉시 승인, 없으면 "결재 요청 전송" |
 

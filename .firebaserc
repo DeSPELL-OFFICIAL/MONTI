@@ -1,7 +1,7 @@
 {
   "projects": {
-    "default": "monti-dev",
-    "dev": "monti-dev",
+    "default": "mon-ti",
+    "dev": "mon-ti",
     "prod": "monti-prod"
   }
 }
