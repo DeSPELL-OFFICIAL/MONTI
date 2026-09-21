@@ -149,8 +149,24 @@ export const api = {
   // `token` goes to signInWithCustomToken; its claims are exactly { personId, account },
   // which is where the session store reads the signed-in identity from.
   loginVerify: call<{ assertion: unknown }, { token: string; personId: Hex; account: Hex }>('loginVerify'),
-  lockDevice: call<void, { txHash: Hex }>('lockDevice'),
-  startDeviceChange: call<{ method: 'sms' | 'kyc' }, { allowedAt: number; kycUrl?: string }>('startDeviceChange'),
+  // `alreadyLocked` is a success, not a failure: the chain was already locked, so nothing was
+  // sent and there is no hash. A caller that read it as an error would show a locked attendee
+  // a failure screen. See functions/src/functions/device.ts.
+  lockDevice: call<void, { txHash?: Hex; alreadyLocked?: true }>('lockDevice'),
+  // Proves the recovery right and answers when the chain will accept a device change; with the
+  // new phone's key it also records that key as pending. The server never sends
+  // `setActiveDevice` — the contract reads `msg.sender`, so that write is the new phone's own
+  // sponsored operation. Every number below is epoch seconds.
+  startDeviceChange: call<
+    { method: 'sms' | 'kyc'; phone?: string; deviceX?: Hex; deviceY?: Hex },
+    {
+      allowedAt: number;
+      now: number;
+      cooldownSeconds: number;
+      allowed: boolean;
+      pending?: { deviceX: Hex; deviceY: Hex; requestedAt: number };
+    }
+  >('startDeviceChange'),
   // The result type is the server's own (packages/shared), so a change there breaks this
   // call site rather than silently disagreeing with it.
   resolveRecipient: call<
@@ -191,5 +207,4 @@ export const api = {
   >('getPhotoForGate'),
   // Defined by this sub-plan, see the Interfaces block.
   pinMessage: call<{ eventId: string; msgId: string; pinned: boolean }, { ok: true }>('pinMessage'),
-  requestAccountDeletion: call<{ reason?: string }, { ok: true; scheduledFor: number }>('requestAccountDeletion'),
 };

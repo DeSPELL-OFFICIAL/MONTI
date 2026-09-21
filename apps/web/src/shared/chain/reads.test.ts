@@ -57,11 +57,15 @@ describe('reads', () => {
   // The other half of the manifest guard: nothing is exposed here that USED_ABI does not
   // declare, so abis.test.ts really does check every read this app can make.
   it('exposes only reads the usage manifest declares', () => {
-    expect(Object.keys(readIdentity()).sort()).toEqual(Object.keys(USED_ABI.Identity).sort());
-    expect(Object.keys(readOrganizers()).sort()).toEqual(Object.keys(USED_ABI.Organizers).sort());
     // The manifest types the writes too (`ops.ts` reads it), and a write never shows up here.
-    const writes = ['claim', 'safeTransferFrom', 'createOffer', 'cancelOffer', 'acceptOffer'];
-    const ticketReads = Object.keys(USED_ABI.Ticket).filter((name) => !writes.includes(name));
-    expect(Object.keys(readTicket()).sort()).toEqual(ticketReads.sort());
+    const writes = [
+      'setNickname',
+      'claim', 'safeTransferFrom', 'createOffer', 'cancelOffer', 'acceptOffer',
+    ];
+    const readsOf = (contract: Record<string, number>) =>
+      Object.keys(contract).filter((name) => !writes.includes(name)).sort();
+    expect(Object.keys(readIdentity()).sort()).toEqual(readsOf(USED_ABI.Identity));
+    expect(Object.keys(readOrganizers()).sort()).toEqual(readsOf(USED_ABI.Organizers));
+    expect(Object.keys(readTicket()).sort()).toEqual(readsOf(USED_ABI.Ticket));
   });
 });

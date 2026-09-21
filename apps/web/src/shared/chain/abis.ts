@@ -24,7 +24,10 @@ export type UsedContract = 'Identity' | 'Organizers' | 'Ticket';
  * `safeTransferFrom(address,address,uint256)` (`0x42842e0e`), not the 4-argument one.
  */
 export const USED_ABI = {
-  Identity: { isMember: 1, isLocked: 1, kycLevelOf: 1, activeDevice: 1 },
+  Identity: {
+    isMember: 1, isLocked: 1, kycLevelOf: 1, activeDevice: 1, deviceUpdatedAt: 1,
+    nicknameOwner: 1, setNickname: 2,
+  },
   Organizers: { gateInfo: 1, isOpenGate: 2, hasPermission: 3, gateOf: 1, ownerOf: 1 },
   Ticket: {
     eventOf: 1, tierOf: 1, eventStatus: 1, isRevoked: 1, transfersOf: 1, balanceOfEvent: 2,

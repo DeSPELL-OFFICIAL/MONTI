@@ -67,6 +67,15 @@ function reader<C extends UsedContract>(contract: C, address: Hex) {
     getPublicClient().readContract({ address, abi, functionName, args }) as Promise<T>;
 }
 
+/**
+ * `Identity.ROTATION_UNDO_WINDOW()` and `Ticket.MIGRATE_DELAY()` — one span under two names,
+ * which sub-plan 01b's redeploy asserts are equal to each other. Neither view exists on the
+ * ABI this branch builds against, so the span is named once here and read from this constant;
+ * no screen interpolates an hour count of its own. When 01b lands it becomes a real read
+ * (`readIdentity().rotationUndoWindow()`) and this line goes away.
+ */
+export const ROTATION_UNDO_WINDOW_SECONDS = 86_400;
+
 /** `Identity.activeDevice` answers with two separate `bytes32` outputs, not a struct. */
 export interface DeviceKeyPoint {
   x: Hex;
@@ -79,6 +88,10 @@ export function readIdentity() {
     isMember: (account: Hex) => call<boolean>('isMember', [account]),
     isLocked: (account: Hex) => call<boolean>('isLocked', [account]),
     kycLevelOf: (account: Hex) => call<number>('kycLevelOf', [account]),
+    /** Zero means nobody holds this name yet — how the profile blocks `NicknameTaken` early. */
+    nicknameOwner: (nicknameHash: Hex) => call<Hex>('nicknameOwner', [nicknameHash]),
+    /** `uint64` seconds. The device cooldown is counted from here, never from Firestore. */
+    deviceUpdatedAt: (account: Hex) => call<bigint>('deviceUpdatedAt', [account]),
     /** The P-256 point `Ticket.checkIn` verifies the device signature against. */
     activeDevice: async (account: Hex): Promise<DeviceKeyPoint> => {
       const [x, y] = await call<[Hex, Hex]>('activeDevice', [account]);

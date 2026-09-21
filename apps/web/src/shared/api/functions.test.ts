@@ -37,6 +37,13 @@ describe('callable wrappers', () => {
     await expect(api.pinMessage({ eventId: '3', msgId: 'm1', pinned: true })).resolves.toMatchObject({ name: 'pinMessage' });
   });
 
+  it('offers nothing sub-plan 02 never deployed', () => {
+    // `requestAccountDeletion` is planned, not built (functions/src/index.ts exports no such
+    // name). A wrapper for it would fail as `internal`/`UNKNOWN` at the worst possible moment —
+    // somebody asking to be erased — so the profile hands that request off by mail instead.
+    expect(Object.keys(api)).not.toContain('requestAccountDeletion');
+  });
+
   it('asks for a register-purpose challenge, which is the only way registerPasskey is reachable', async () => {
     // loginVerify demands purpose 'login' and registerPasskey demands 'register'; the server
     // refuses each ceremony the other's challenge, so the purpose has to leave the client.
