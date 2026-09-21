@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { HttpsError } from 'firebase-functions/v2/https';
 import { getAddress } from 'viem';
 
 process.env.GCP_PROJECT_ID = 'monti-dev';
@@ -36,8 +37,20 @@ vi.mock('../src/lib/chain.js', () => ({
   }),
 }));
 
+/** auth.ts 는 db.ts 를 끌고 오고 db.ts 는 import 시점에 firebase-admin 을 띄운다. 여기서는 필요 없다. */
+vi.mock('../src/lib/db.js', () => ({ db: {}, PERSONS: 'persons', USERS: 'users' }));
+
+/**
+ * `resolveCallerAccount` 만 가짜로 바꾸고 나머지는 진짜를 쓴다.
+ * 권한 비트를 여기에 베껴 적으면 `hasPermission` 에 실제로 실려 가는 값이 아무것도 고정되지 않는다.
+ */
 const resolveCallerAccount = vi.fn(async () => CALLER);
-vi.mock('../src/lib/auth.js', () => ({ resolveCallerAccount, PERM_CREATE_EVENT: 1 }));
+vi.mock('../src/lib/auth.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/auth.js')>()),
+  resolveCallerAccount,
+}));
+
+const { PERM_CREATE_EVENT } = await import('../src/lib/auth.js');
 
 interface EnvioRow {
   id: string;
@@ -81,6 +94,7 @@ beforeEach(() => {
   chain.manager = [false, false];
   chain.canCreateEvent = true;
   readContract.mockClear();
+  resolveCallerAccount.mockClear();
   envioQuery.mockClear();
   pages = [
     [
@@ -144,11 +158,25 @@ describe('listAttendees', () => {
 
   it('reads the organisation from the chain, never from the indexer', async () => {
     await call();
-    const names = readContract.mock.calls.map(([args]) => (args as ReadArgs).functionName);
-    expect(names).toContain('eventOrg');
-    expect(names).toContain('ownerOf');
-    expect(names).toContain('managerOf');
-    expect(names).toContain('hasPermission');
+    const argsOf = (name: string) =>
+      readContract.mock.calls.find(([args]) => (args as ReadArgs).functionName === name)?.[0].args;
+    // 공연 → 조직은 체인에서 찾고, 세 갈래 판정은 모두 그 orgId 와 호출자로 묻는다.
+    expect(argsOf('eventOrg')).toEqual([11n]);
+    expect(argsOf('ownerOf')).toEqual([1n]);
+    expect(argsOf('managerOf')).toEqual([1n, CALLER]);
+    expect(argsOf('hasPermission')).toEqual([1n, CALLER, PERM_CREATE_EVENT]);
+  });
+
+  it('asks for PERM_CREATE_EVENT, the bit Organizers.sol gives that name', async () => {
+    // contracts/src/Organizers.sol:11 — `uint32 public constant PERM_CREATE_EVENT = 1;`
+    expect(PERM_CREATE_EVENT).toBe(1);
+    await call();
+    const hasPermission = readContract.mock.calls
+      .map(([args]) => args as ReadArgs)
+      .filter((args) => args.functionName === 'hasPermission');
+    // 한 비트만 묻는다. 마스크로 뭉쳐 물으면 hasPermission 이 "전부" 로 구현됐을 때 조용히 거부된다.
+    expect(hasPermission).toHaveLength(1);
+    expect(hasPermission[0]!.args?.[2]).toBe(1);
   });
 
   it('asks Hasura with a numeric eventId normalised to one decimal form', async () => {
@@ -166,6 +194,18 @@ describe('listAttendees', () => {
     expect(envioQuery).toHaveBeenCalledTimes(2);
     expect(envioQuery.mock.calls[1]![1]).toMatchObject({ cursor: String(ATTENDEE_PAGE_SIZE) });
     expect(result.at(-1)).toMatchObject({ tokenId: String(ATTENDEE_PAGE_SIZE + 3) });
+  });
+
+  it('stops the whole list when the indexer hands back a kycLevel outside 0 | 1', async () => {
+    pages = [[{ id: '9', tier: 0, checkIn: null, identity: { nickname: 'alex', kycLevel: 7 } }]];
+    // 그 줄만 빼면 주최자 화면에서 표를 가진 사람이 소리 없이 사라진다. 크게 터뜨린다.
+    await expect(call()).rejects.toThrow('BAD_KYC_LEVEL');
+  });
+
+  it('authenticates before it looks at the arguments', async () => {
+    resolveCallerAccount.mockRejectedValueOnce(new HttpsError('unauthenticated', 'AUTH_REQUIRED'));
+    await expect(call({ eventId: 'not-a-number' })).rejects.toThrow('AUTH_REQUIRED');
+    expect(readContract).not.toHaveBeenCalled();
   });
 
   it('rejects an eventId that is not a decimal string', async () => {

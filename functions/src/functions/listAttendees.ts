@@ -1,5 +1,5 @@
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
-import { organizersAbi, ticketAbi, type Hex } from '@monti/shared';
+import { organizersAbi, ticketAbi, type AttendeeRow, type Hex } from '@monti/shared';
 import { PERM_CREATE_EVENT, resolveCallerAccount } from '../lib/auth.js';
 import { deployment, publicClient } from '../lib/chain.js';
 import { envioQuery } from '../lib/envio.js';
@@ -9,26 +9,25 @@ const DIGITS_RE = /^[0-9]+$/;
 /** Hasura 는 역할마다 행 수 상한이 있다. 한 쪽씩 커서로 끝까지 읽어야 목록이 잘리지 않는다. */
 export const ATTENDEE_PAGE_SIZE = 500;
 
-/**
- * 주최자 화면의 참석자 한 줄.
- *
- * **닉네임 말고는 사람을 가리키는 것이 하나도 없다.** 전화번호·실명·사진은 물론
- * 지갑 주소조차 싣지 않는다 — 얼굴 사진은 게이트 스냅샷(`issueSnapshot`)에서만,
- * 그것도 스태프 인가를 통과한 뒤에만 평문이 된다.
- */
-export interface AttendeeRow {
-  tokenId: string;
-  nickname: string;
-  checkedIn: boolean;
-  tier: number;
-  kycLevel: number;
-}
-
 interface EnvioAttendeeRow {
   id: string;
   tier: number;
   checkIn: { id: string } | null;
   identity: { nickname: string | null; kycLevel: number } | null;
+}
+
+/**
+ * 인덱서의 `kycLevel` 을 `AttendeeRow.kycLevel`(0 | 1)로 좁힌다.
+ *
+ * 인덱서에 계정 행이 없으면 0 이다 — 아직 아무것도 확인되지 않은 계정과 같다.
+ * 0 도 1 도 아닌 값은 인덱서나 컨트랙트가 어긋났다는 뜻이라 **목록 전체를 세운다**.
+ * 그 줄만 조용히 빼면 주최자 화면에서 표를 가진 사람이 사라진다 —
+ * 잘린 목록은 게이트의 잘린 스냅샷과 같은 종류의, 가장 나쁜 실패다.
+ */
+function narrowKycLevel(value: number | undefined): 0 | 1 {
+  if (value === undefined) return 0;
+  if (value !== 0 && value !== 1) throw new HttpsError('internal', 'BAD_KYC_LEVEL');
+  return value;
 }
 
 /**
@@ -115,28 +114,35 @@ async function attendeePage(eventId: string, cursor: string): Promise<EnvioAtten
  * 여기서 새어 나갈 개인정보가 애초에 없다. 닉네임은 체인에서 읽을 수 없고
  * (`Identity.nicknameOf` 는 해시만 돌려준다) `NicknameSet` 이벤트를 받은
  * 인덱서에만 평문이 있다.
+ *
+ * 쪽 수에 상한이 없으므로 기본 60 초·256 MiB 로는 큰 공연에서 불투명하게 죽는다.
+ * `issueSnapshot` 과 같은 이유로 한도를 명시한다.
  */
-export const listAttendees = onCall(async (request): Promise<AttendeeRow[]> => {
-  const raw = (request.data ?? {}) as { eventId?: unknown };
-  const eventId = requireEventId(raw.eventId);
+export const listAttendees = onCall(
+  { memory: '512MiB', timeoutSeconds: 120 },
+  async (request): Promise<AttendeeRow[]> => {
+    // 인증이 먼저다. 로그인하지 않은 호출자는 인자가 어떻게 생겼는지도 배우지 못한다.
+    // (인가는 `eventOrg(eventId)` 로 조직을 찾아야 해서 값 검증 뒤에 온다.)
+    const caller = await resolveCallerAccount(request);
+    const raw = (request.data ?? {}) as { eventId?: unknown };
+    const eventId = requireEventId(raw.eventId);
+    await requireOrganizer(BigInt(eventId), caller);
 
-  const caller = await resolveCallerAccount(request);
-  await requireOrganizer(BigInt(eventId), caller);
-
-  const attendees: AttendeeRow[] = [];
-  let cursor = '';
-  for (;;) {
-    const rows = await attendeePage(eventId, cursor);
-    for (const row of rows) {
-      attendees.push({
-        tokenId: row.id,
-        nickname: row.identity?.nickname ?? '',
-        checkedIn: row.checkIn !== null,
-        tier: row.tier,
-        kycLevel: row.identity?.kycLevel ?? 0,
-      });
+    const attendees: AttendeeRow[] = [];
+    let cursor = '';
+    for (;;) {
+      const rows = await attendeePage(eventId, cursor);
+      for (const row of rows) {
+        attendees.push({
+          tokenId: row.id,
+          nickname: row.identity?.nickname ?? '',
+          checkedIn: row.checkIn !== null,
+          tier: row.tier,
+          kycLevel: narrowKycLevel(row.identity?.kycLevel),
+        });
+      }
+      if (rows.length < ATTENDEE_PAGE_SIZE) return attendees;
+      cursor = rows[rows.length - 1]!.id;
     }
-    if (rows.length < ATTENDEE_PAGE_SIZE) return attendees;
-    cursor = rows[rows.length - 1]!.id;
-  }
-});
+  },
+);
