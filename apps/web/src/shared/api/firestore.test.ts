@@ -2,12 +2,23 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const addDoc = vi.fn();
 const setDoc = vi.fn();
+const getDoc = vi.fn();
+const getDocs = vi.fn();
 const onSnapshot = vi.fn();
 const SERVER_TIME = Symbol('serverTimestamp');
+
+/**
+ * The create allowlist, copied out of firestore.rules:59-60 (`hasAll` + `hasOnly`). A stray key
+ * is not a validation message on that path, it is a permission error, so the payload is pinned
+ * against this list rather than against whatever the helper happens to send.
+ */
+const RULES_MESSAGE_FIELDS = ['createdAt', 'reported', 'text', 'uid'];
 
 vi.mock('firebase/firestore', () => ({
   addDoc,
   setDoc,
+  getDoc,
+  getDocs,
   onSnapshot,
   collection: (_db: unknown, ...path: string[]) => ({ path: path.join('/') }),
   doc: (_db: unknown, ...path: string[]) => ({ path: path.join('/') }),
@@ -23,8 +34,10 @@ vi.mock('./firebase', () => ({
   getFirebaseAuth: () => ({ currentUser }),
 }));
 
-const { saveUserProfile, savePushToken, sendChatMessage, watchChatMessages, watchChatRoom } =
-  await import('./firestore');
+const {
+  loadChatMembers, loadChatRoom, saveUserProfile, savePushToken, sendChatMessage,
+  watchChatMessages, watchChatRoom,
+} = await import('./firestore');
 
 /** A Firestore document snapshot, as thin as the helpers actually touch it. */
 function docOf(id: string, data: Record<string, unknown>): { id: string; data: () => unknown } {
@@ -35,6 +48,8 @@ beforeEach(() => {
   currentUser = { uid: 'uid-1' };
   addDoc.mockResolvedValue({ id: 'msg-9' });
   setDoc.mockResolvedValue(undefined);
+  getDoc.mockResolvedValue({ data: () => undefined });
+  getDocs.mockResolvedValue({ docs: [] });
   onSnapshot.mockReturnValue(() => undefined);
 });
 
@@ -43,7 +58,10 @@ describe('sendChatMessage', () => {
     await expect(sendChatMessage('3', 'hi')).resolves.toBe('msg-9');
     const [ref, payload] = addDoc.mock.calls[0] as [{ path: string }, Record<string, unknown>];
     expect(ref.path).toBe('eventChats/3/messages');
-    expect(Object.keys(payload).sort()).toEqual(['createdAt', 'reported', 'text', 'uid']);
+    expect(Object.keys(payload).sort()).toEqual(RULES_MESSAGE_FIELDS);
+    // `pinned` is the one the rules single out: an announcement is the server's word, not ours.
+    expect(RULES_MESSAGE_FIELDS).not.toContain('pinned');
+    expect(payload).not.toHaveProperty('pinned');
     expect(payload).toMatchObject({ uid: 'uid-1', text: 'hi', reported: 0, createdAt: SERVER_TIME });
   });
 
@@ -90,6 +108,35 @@ describe('watchChatRoom', () => {
       { closed: false, endsAt: 0 },
       { closed: true, endsAt: 1790000000 },
     ]);
+  });
+});
+
+describe('loadChatRoom', () => {
+  it('reads the room document once', async () => {
+    getDoc.mockResolvedValue({ data: () => ({ closed: true, endsAt: 1790000000 }) });
+    await expect(loadChatRoom('3')).resolves.toEqual({ closed: true, endsAt: 1790000000 });
+    expect(getDoc).toHaveBeenCalledWith({ path: 'eventChats/3' });
+  });
+
+  it('answers null for a room this device may not read yet, rather than inventing a state', async () => {
+    await expect(loadChatRoom('3')).resolves.toBeNull();
+    getDoc.mockRejectedValue(Object.assign(new Error('insufficient'), { code: 'permission-denied' }));
+    await expect(loadChatRoom('3')).resolves.toBeNull();
+  });
+});
+
+describe('loadChatMembers', () => {
+  it('maps the roster from uid to account and drops a row without one', async () => {
+    getDocs.mockResolvedValue({
+      docs: [docOf('uid-1', { account: '0xabc' }), docOf('uid-2', {})],
+    });
+    await expect(loadChatMembers('3')).resolves.toEqual([{ uid: 'uid-1', account: '0xabc' }]);
+    expect(getDocs).toHaveBeenCalledWith({ path: 'eventChats/3/members' });
+  });
+
+  it('lets a refusal through, because only the caller knows what to say about it', async () => {
+    getDocs.mockRejectedValue(new Error('permission-denied'));
+    await expect(loadChatMembers('3')).rejects.toThrow();
   });
 });
 

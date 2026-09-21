@@ -1,5 +1,6 @@
 import {
-  addDoc, collection, doc, limit, onSnapshot, orderBy, query, serverTimestamp, setDoc,
+  addDoc, collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, serverTimestamp,
+  setDoc,
 } from 'firebase/firestore';
 import type { Hex } from '@monti/shared';
 import { getDb, getFirebaseAuth } from './firebase';
@@ -16,6 +17,19 @@ export interface ChatMessage {
   pinned?: boolean;
 }
 
+/** What `closeEndedChats` writes on `eventChats/{eventId}`, and all the client reads there. */
+export interface ChatRoomState {
+  closed: boolean;
+  /** Epoch seconds, copied off the chain by `joinEventChat`. */
+  endsAt: number;
+}
+
+/** One row of `eventChats/{eventId}/members`, keyed by the member's Firebase uid. */
+export interface ChatMember {
+  uid: string;
+  account: string;
+}
+
 /** Message limits the rules enforce server-side; checked here so a doomed write never leaves. */
 export const CHAT_MESSAGE_MAX_LENGTH = 500;
 const CHAT_PAGE_SIZE = 200;
@@ -30,35 +44,91 @@ function toMillis(value: unknown): number {
   return typeof timestamp?.toMillis === 'function' ? timestamp.toMillis() : 0;
 }
 
-export function watchChatMessages(eventId: string, onChange: (messages: ChatMessage[]) => void): () => void {
+/**
+ * `onError` is not optional in practice: the rules open `messages` to members only, so an
+ * attendee who has not joined yet gets `permission-denied` on the very first snapshot. Firestore
+ * detaches the listener when that happens, so this is a terminal answer, not a retryable one —
+ * the screen turns it into the join error rather than letting it surface as an uncaught error.
+ */
+export function watchChatMessages(
+  eventId: string,
+  onChange: (messages: ChatMessage[]) => void,
+  onError?: (error: unknown) => void,
+): () => void {
   const messages = query(
     collection(getDb(), 'eventChats', eventId, 'messages'),
     orderBy('createdAt', 'desc'),
     limit(CHAT_PAGE_SIZE),
   );
-  return onSnapshot(messages, (snapshot) => {
-    onChange(
-      snapshot.docs
-        .map((document) => {
-          const data = document.data() as Omit<ChatMessage, 'id'>;
-          return { ...data, id: document.id, createdAt: toMillis(data.createdAt) };
-        })
-        // The query takes the newest 200; the view reads oldest first.
-        .reverse(),
-    );
-  });
+  return onSnapshot(
+    messages,
+    (snapshot) => {
+      onChange(
+        snapshot.docs
+          .map((document) => {
+            const data = document.data() as Omit<ChatMessage, 'id'>;
+            return { ...data, id: document.id, createdAt: toMillis(data.createdAt) };
+          })
+          // The query takes the newest 200; the view reads oldest first.
+          .reverse(),
+      );
+    },
+    (error) => onError?.(error),
+  );
 }
 
-export function watchChatRoom(eventId: string, onChange: (room: { closed: boolean; endsAt: number }) => void): () => void {
-  return onSnapshot(doc(getDb(), 'eventChats', eventId), (snapshot) => {
-    const data = snapshot.data() as { closed?: boolean; endsAt?: number } | undefined;
-    onChange({ closed: data?.closed ?? false, endsAt: data?.endsAt ?? 0 });
-  });
+export function watchChatRoom(
+  eventId: string,
+  onChange: (room: ChatRoomState) => void,
+  onError?: (error: unknown) => void,
+): () => void {
+  return onSnapshot(
+    doc(getDb(), 'eventChats', eventId),
+    (snapshot) => {
+      const data = snapshot.data() as Partial<ChatRoomState> | undefined;
+      onChange({ closed: data?.closed ?? false, endsAt: data?.endsAt ?? 0 });
+    },
+    (error) => onError?.(error),
+  );
 }
 
 /**
- * The security rules reject unknown keys, so the create payload is exactly
- * { uid, text, createdAt, reported }. `pinned` is server-only (pinMessage callable).
+ * One read of the room document, for the list — which has no reason to hold a live listener on
+ * every room at once. `null` means this device may not read it: the rules open
+ * `eventChats/{eventId}` to members only, and membership is what `joinEventChat` writes. A room
+ * nobody has joined yet is not a closed room, so the caller shows it as open.
+ */
+export async function loadChatRoom(eventId: string): Promise<ChatRoomState | null> {
+  try {
+    const snapshot = await getDoc(doc(getDb(), 'eventChats', eventId));
+    const data = snapshot.data() as Partial<ChatRoomState> | undefined;
+    return data ? { closed: data.closed ?? false, endsAt: data.endsAt ?? 0 } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The room's roster: `uid` (the message rows' author key) to `account` (what the index holds a
+ * nickname for). `joinEventChat` writes these documents and the rules open them to members, so
+ * this is the only permitted way to put a name on somebody else's message — `users/{uid}` is
+ * readable by that user alone. A refusal is thrown, not swallowed: the caller decides.
+ */
+export async function loadChatMembers(eventId: string): Promise<ChatMember[]> {
+  const snapshot = await getDocs(collection(getDb(), 'eventChats', eventId, 'members'));
+  return snapshot.docs
+    .map((document) => ({
+      uid: document.id,
+      account: String((document.data() as { account?: string }).account ?? ''),
+    }))
+    .filter((member) => member.account !== '');
+}
+
+/**
+ * The security rules reject unknown keys (`hasAll` + `hasOnly`, firestore.rules:59-60), so the
+ * create payload is exactly { uid, text, createdAt, reported } — a stray field is not a
+ * validation message, it is a permission error. `pinned` is server-only: an announcement is a
+ * row the organiser path pinned, never one this client wrote.
  * Returns the new message id so the organizer can pin it straight away.
  */
 export async function sendChatMessage(eventId: string, text: string): Promise<string> {
