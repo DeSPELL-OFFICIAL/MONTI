@@ -135,6 +135,30 @@ contract OrganizersGatesTest is Test {
         orgs.openGate(gateId);
     }
 
+    /// @dev An id nobody ever registered is its own error, not a permission failure -- the staff app
+    ///      needs to tell "wrong gate id" apart from "not your gate".
+    function test_openGateRejectsAnUnknownGateId() public {
+        vm.prank(GATEKEEPER);
+        vm.expectRevert(Organizers.UnknownGate.selector);
+        orgs.openGate(4242);
+    }
+
+    /// @dev The gate bit is granted per organizer: holding it for another project opens nothing here.
+    function test_gateAdminOfAnotherOrganizerCannotOpenThisGate() public {
+        uint256 gateId = _registered();
+
+        address otherOwner = address(0x03);
+        address otherAdmin = address(0x0B);
+        uint32 gateBit = orgs.PERM_MANAGE_GATES();
+        uint256 otherOrgId = orgs.createOrganizer(otherOwner);
+        vm.prank(otherOwner);
+        orgs.setAdmin(otherOrgId, otherAdmin, gateBit);
+
+        vm.prank(otherAdmin);
+        vm.expectRevert(Organizers.Unauthorized.selector);
+        orgs.openGate(gateId);
+    }
+
     function test_strangerCannotOpenGate() public {
         uint256 gateId = _registered();
         vm.prank(STRANGER);
