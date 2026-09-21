@@ -29,6 +29,8 @@ export async function resolveCallerAccount(request: CallableRequest): Promise<He
   return getAddress(account);
 }
 
+/** `Organizers.sol` 의 권한 비트. 값은 컨트랙트가 진실이다(contracts/src/Organizers.sol). */
+export const PERM_CREATE_EVENT = 1;
 export const PERM_MANAGE_GATES = 2;
 export const PERM_APPROVE_OVERRIDE = 4;
 export const PERM_MANAGE_MANAGERS = 8;
