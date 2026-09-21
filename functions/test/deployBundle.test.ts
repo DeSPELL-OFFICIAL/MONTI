@@ -129,6 +129,7 @@ describe('deploy bundle', () => {
       'registerIdentity',
       'issueSnapshot',
       'resolveRecipient',
+      'getSignupStatus',
       'listAttendees',
       'tenderlyWebhook',
       'reconcilePending',
