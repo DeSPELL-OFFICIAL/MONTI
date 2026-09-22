@@ -66,5 +66,7 @@
       ]
     }
   ],
-  "fieldOverrides": []
+  "fieldOverrides": [
+    { "collectionGroup": "diditEvents", "fieldPath": "expireAt", "ttl": true, "indexes": [] }
+  ]
 }
