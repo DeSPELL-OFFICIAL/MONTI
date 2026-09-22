@@ -6,3 +6,4 @@ export { Alert } from './Alert';
 export { Countdown } from './Countdown';
 export { Spinner } from './Spinner';
 export { Field } from './Field';
+export { ContactLink } from './ContactLink';

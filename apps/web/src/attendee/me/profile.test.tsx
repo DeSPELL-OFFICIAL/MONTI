@@ -209,6 +209,18 @@ describe('Profile', () => {
     );
   });
 
+  /**
+   * Every other way out of this screen is self-service. Locking the phone, changing phones and
+   * deleting the account all end somewhere a person may need a human, and the footer is the only
+   * address the app ever gives them — so it is pinned to the shared key rather than to a literal.
+   */
+  it('offers the support address in the footer, as something to tap', async () => {
+    wrap(<Profile />);
+    const link = await screen.findByRole('link', { name: ko.common.contactEmail });
+    expect(link).toHaveAttribute('href', `mailto:${ko.common.contactEmail}`);
+    expect(screen.getByText(ko.common.contactHelp, { exact: false })).toBeInTheDocument();
+  });
+
   it('states the three facts before it deletes anything', async () => {
     wrap(<Profile />);
     await userEvent.click(await screen.findByRole('button', { name: ko.me.deleteCta }));

@@ -6,6 +6,10 @@
   "outputDirectory": "apps/web/dist",
   "rewrites": [
     {
+      "source": "/api/webhooks/didit",
+      "destination": "https://diditwebhook-5kjnthhcbq-ue.a.run.app"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

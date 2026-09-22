@@ -164,13 +164,53 @@ describe('vercel.json SPA rewrite', () => {
   ];
 
   it('sends every client route to the app entry', () => {
-    expect(config.rewrites).toHaveLength(1);
-    const [rewrite] = config.rewrites;
+    // The catch-all is deliberately last: anything added after it would never be reached.
+    expect(config.rewrites).toHaveLength(2);
+    const rewrite = config.rewrites.at(-1);
     expect(rewrite?.destination).toBe('/index.html');
     const matcher = new RegExp(`^${rewrite?.source}$`);
     for (const route of CLIENT_ROUTES) {
       expect(matcher.test(route), `${route} is not covered by the SPA rewrite`).toBe(true);
     }
+  });
+});
+
+/**
+ * Didit is told one callback URL and remembers it. Pointing it at the Cloud Run URL works but
+ * puts a generated `*.a.run.app` host on a vendor dashboard next to the custom domain, and it
+ * moves the day the function is redeployed under a different name; the domain is the stable
+ * address. Vercel serves an external `destination` by proxying it — the docs call a rewrite to
+ * an external origin exactly that, "allowing Vercel to function as a reverse proxy"
+ * (https://vercel.com/docs/rewrites) — so the POST arrives at the function with its method, its
+ * `X-Signature-V2`/`X-Timestamp` headers and its body intact. That last part is the whole point:
+ * `functions/src/lib/didit.ts` takes the HMAC over `req.rawBody`, so anything that re-encoded the
+ * JSON on the way through would turn every real event into a forged one.
+ */
+describe('the Didit webhook proxy', () => {
+  const WEBHOOK_PATH = '/api/webhooks/didit';
+  const FUNCTION_URL = 'https://diditwebhook-5kjnthhcbq-ue.a.run.app';
+
+  it('proxies the webhook path to the Cloud Run function', () => {
+    const rule = config.rewrites.find((entry) => entry.source === WEBHOOK_PATH);
+    expect(rule, 'vercel.json has no rewrite for the Didit webhook').toBeDefined();
+    expect(rule?.destination).toBe(FUNCTION_URL);
+  });
+
+  it('is matched before the SPA catch-all, which would otherwise swallow the POST', () => {
+    const webhook = config.rewrites.findIndex((entry) => entry.source === WEBHOOK_PATH);
+    const spa = config.rewrites.findIndex((entry) => entry.destination === '/index.html');
+    expect(webhook).toBeGreaterThanOrEqual(0);
+    expect(spa).toBeGreaterThanOrEqual(0);
+    expect(webhook).toBeLessThan(spa);
+    // Order is the only thing keeping it off index.html: the catch-all does match this path.
+    const catchAll = new RegExp(`^${config.rewrites[spa]?.source}$`);
+    expect(catchAll.test(WEBHOOK_PATH)).toBe(true);
+  });
+
+  it('leaves the CSP alone, because the proxy hop never happens in a browser', () => {
+    // connect-src governs what the page may fetch. Didit talks to the domain from its own
+    // servers, so widening the CSP for this would loosen the app for nothing.
+    expect(cspDirectives().get('connect-src')).not.toContain(FUNCTION_URL);
   });
 });
 

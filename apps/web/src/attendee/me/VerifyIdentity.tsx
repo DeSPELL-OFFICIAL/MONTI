@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Screen, Spinner } from '../../shared/ui';
+import { Alert, Button, ContactLink, Screen, Spinner } from '../../shared/ui';
 import { useCopy } from '../../shared/i18n';
 import { api, callableFailure } from '../../shared/api/functions';
 import {
@@ -143,6 +143,9 @@ export function VerifyIdentity() {
     <Screen title={copy.kyc.title}>
       <p>{copy.kyc.body}</p>
       {error ? <Alert tone="error">{error}</Alert> : null}
+      {/* A refused check is the one place in the app a person cannot help themselves out of:
+          the verdict came from the vendor and no button on this screen can change it. */}
+      {error ? <ContactLink /> : null}
       {timedOut ? <Alert tone="warn">{copy.kyc.timeout}</Alert> : null}
       {polling ? <><Spinner /><p>{copy.kyc.waiting}</p></> : null}
       {timedOut ? (

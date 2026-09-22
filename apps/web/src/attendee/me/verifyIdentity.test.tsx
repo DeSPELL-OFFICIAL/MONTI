@@ -4,6 +4,7 @@ import { MemoryRouter, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StrictMode, type ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ko } from '../../shared/copy/index';
 
 const POLL_INTERVAL_MS = 2_000;
 const POLL_LIMIT = 45;
@@ -137,6 +138,23 @@ describe('VerifyIdentity', () => {
     await userEvent.click(cta());
     await comeBack();
     expect(await screen.findByText('본인 확인에 실패했어요. 다시 시도해 주세요.')).toBeInTheDocument();
+  });
+
+  /**
+   * A refusal is the one dead end in the app: the verdict came from the vendor, no button on
+   * this screen can change it, and a person who believes it is wrong has nowhere else to go.
+   * The address only appears with the refusal — an idle screen offering support reads as a
+   * warning that something is already broken.
+   */
+  it('hands a refused person the support address, and only then', async () => {
+    getSignupStatus.mockResolvedValue({ status: 'rejected', kycLevel: 0, kycReason: 'declined' });
+    renderScreen();
+    expect(screen.queryByRole('link', { name: ko.common.contactEmail })).toBeNull();
+
+    await userEvent.click(cta());
+    await comeBack();
+    const link = await screen.findByRole('link', { name: ko.common.contactEmail });
+    expect(link).toHaveAttribute('href', `mailto:${ko.common.contactEmail}`);
   });
 
   it('sends a verified person back to the screen that asked for the check', async () => {

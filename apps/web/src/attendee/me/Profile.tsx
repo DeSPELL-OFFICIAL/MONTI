@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
-import { Alert, Button, Field, Screen } from '../../shared/ui';
+import { Alert, Button, ContactLink, Field, Screen } from '../../shared/ui';
 import { fmt, setLocale, useCopy, useLocale } from '../../shared/i18n';
 import type { Locale } from '../../shared/copy/index';
 import { api } from '../../shared/api/functions';
@@ -134,6 +134,7 @@ export function Profile() {
         <a href={`${explorerBase}/address/${session.account ?? ''}`}>{copy.me.publicRecord}</a>
       </p>
       <DeleteAccount />
+      <footer><ContactLink /></footer>
     </Screen>
   );
 }

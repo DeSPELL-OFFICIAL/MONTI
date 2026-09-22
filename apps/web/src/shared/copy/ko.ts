@@ -5,6 +5,8 @@ export const ko = {
     retry: '다시 시도', save: '저장', loading: '불러오는 중이에요',
     error: '문제가 생겼어요. 잠시 뒤 다시 시도해 주세요.',
     offline: '인터넷에 연결되어 있지 않아요.',
+    contactHelp: '도움이 필요하면 메일로 연락해 주세요',
+    contactEmail: 'info@despell.io',
   },
   signup: {
     phoneTitle: '휴대폰 번호를 입력해 주세요', phoneHint: '문자로 인증번호를 보내드려요',

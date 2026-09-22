@@ -7,6 +7,8 @@ export const en: typeof ko = {
     retry: 'Try again', save: 'Save', loading: 'Loading',
     error: 'Something went wrong. Please try again in a moment.',
     offline: 'You are not connected to the internet.',
+    contactHelp: 'Need a hand? Email us.',
+    contactEmail: 'info@despell.io',
   },
   signup: {
     phoneTitle: 'Enter your phone number', phoneHint: 'We will text you a code',

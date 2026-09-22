@@ -17,6 +17,15 @@ describe('attendee copy', () => {
     expect(en.enter.armed).toContain('{{seconds}}');
   });
 
+  /**
+   * The support address lives here and nowhere else — no component spells it out — so this is
+   * the one place a typo in it can be caught, and the one place it has to be changed.
+   */
+  it('gives both locales the same support address', () => {
+    expect(ko.common.contactEmail).toBe('info@despell.io');
+    expect(en.common.contactEmail).toBe(ko.common.contactEmail);
+  });
+
   it('interpolates with fmt', () => {
     expect(fmt(ko.enter.armed, { seconds: 42 })).toBe('42초 안에 단말기에 대세요');
   });
