@@ -1,7 +1,15 @@
 import { render, screen } from '@testing-library/react';
 import { RouterProvider, createMemoryRouter } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+// The organiser home asks the indexer who this person organises for. This file is about the
+// route table, so both hooks answer "nobody" rather than opening a connection.
+vi.mock('./organizer/useMyOrgs', () => ({
+  useMyOrgs: () => ({ orgs: [], canCreateEvent: false, isLoading: false, isError: false, error: null, refetch: () => undefined }),
+  useOrgEvents: () => ({ events: [], isLoading: false, isError: false, error: null, refetch: () => undefined }),
+}));
+
 import { routes } from './router';
 import { queryClient } from './shared/query';
 import { bootSession, getSession, registerSessionHydrator, setSession } from './shared/session';
@@ -32,6 +40,19 @@ describe('router', () => {
     renderAt('/signup/phone');
     expect(await screen.findByRole('main')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: '내 티켓' })).toBeNull();
+  });
+
+  /**
+   * Four tabs stay four: `/org` is reached from the explore FAB and from the profile, and it
+   * carries its own `탐색으로` link back. Adding it to `TAB_PATHS` would give an attendee a
+   * fifth tab for a screen most of them have no use for.
+   */
+  it('hides the bottom tabs on the organiser home', async () => {
+    setSession({ status: 'signedIn', account: `0x${'44'.repeat(20)}`, personId: 'p4' });
+    renderAt('/org');
+    expect(await screen.findByRole('heading', { name: '주최자' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '내 티켓' })).toBeNull();
+    expect(screen.getByRole('link', { name: '탐색으로' })).toBeInTheDocument();
   });
 
   it('redirects a protected route to /login when signed out', async () => {

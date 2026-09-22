@@ -11,8 +11,27 @@ import { useLocale } from '../shared/i18n';
 const ko = {
   home: {
     title: '주최자',
-    newEvent: '행사 만들기',
-    openEvent: '행사 열기',
+    backToDiscover: '탐색으로',
+
+    orgs: '내 주최사',
+    org: '주최사',
+    orgsEmpty: '아직 속한 주최사가 없어요.',
+    become: '주최사 만들기',
+    // 콜러블이 답한 번호가 인덱서에 오르기까지 1~2초가 걸린다. 그 사이에 여기로 오면 목록에 없다.
+    orgPending: '방금 만든 주최사는 잠시 뒤에 목록에 나타나요',
+    noPermission: '행사를 만들 권한이 없어요. 주최사 오너에게 권한을 요청해 주세요',
+
+    events: '내 행사',
+    eventsEmpty: '아직 만든 행사가 없어요. 아래 만들기로 시작해 보세요',
+    eventsFailed: '내 행사를 가져오지 못했어요. 잠시 뒤 다시 시도해 주세요',
+    // 목록은 체인 줄만 읽는다. 제목은 IPFS에 있고, 느린 게이트웨이가 목록을 붙잡으면 안 된다.
+    eventFallback: '행사 #{{id}}',
+    status: { Draft: '초안', Published: '발행됨', Cancelled: '취소됨' },
+
+    create: '만들기',
+    retry: '다시 시도',
+
+    manual: '행사 번호로 열기',
     eventId: '행사 번호',
     open: '열기',
     team: '팀',
@@ -259,8 +278,28 @@ const ko = {
 const en: typeof ko = {
   home: {
     title: 'Organiser',
-    newEvent: 'Create an event',
-    openEvent: 'Open an event',
+    backToDiscover: 'Back to explore',
+
+    orgs: 'My organisers',
+    org: 'Organiser',
+    orgsEmpty: 'You do not belong to an organiser yet.',
+    become: 'Create an organiser',
+    // The callable answers with the number a second or two before the indexer lists it.
+    orgPending: 'An organiser you just created appears in this list in a moment',
+    noPermission: 'You may not create events. Ask the organiser owner to give you the permission',
+
+    events: 'My events',
+    eventsEmpty: 'No events yet. Start one with Create below',
+    eventsFailed: 'Could not load your events. Please try again in a moment',
+    // The list reads the indexed rows only. Titles live on IPFS, and a slow gateway must not
+    // hold up rows that are already in hand.
+    eventFallback: 'Event #{{id}}',
+    status: { Draft: 'Draft', Published: 'Published', Cancelled: 'Cancelled' },
+
+    create: 'Create',
+    retry: 'Try again',
+
+    manual: 'Open by event number',
     eventId: 'Event number',
     open: 'Open',
     team: 'Team',
