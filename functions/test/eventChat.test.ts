@@ -96,6 +96,8 @@ function collection(name: string) {
 
 vi.mock('../src/lib/db.js', () => ({
   EVENT_CHATS: 'eventChats',
+  PERSONS: 'persons',
+  USERS: 'users',
   db: {
     collection,
     doc: (path: string) => docRef(path),
@@ -137,7 +139,13 @@ vi.mock('../src/lib/chain.js', () => ({
   }),
 }));
 
-vi.mock('../src/lib/auth.js', () => ({
+/**
+ * `resolveCallerAccount` 만 가짜로 바꾸고 나머지는 진짜를 쓴다 — 티켓 보유 검사
+ * (`holdsEventTicket`)는 `getEventPrivate` 과 공유하는 진짜 함수여야, 두 문이 갈라지는
+ * 회귀를 이 테스트가 잡는다. 체인은 위에서 이미 mock 되어 있다.
+ */
+vi.mock('../src/lib/auth.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/auth.js')>()),
   resolveCallerAccount: vi.fn(async () => ACCOUNT),
 }));
 

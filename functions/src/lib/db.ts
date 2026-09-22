@@ -34,6 +34,13 @@ export const PENDING_GATES = 'pendingGates';
  */
 export const ORG_PROFILES = 'orgProfiles';
 /**
+ * 공연의 **비공개 장소**. 문서 id 는 체인이 정한 `eventId`(십진 문자열)이고 값은
+ * `{ venue?, note? }` 다. 공개 IPFS JSON 에서는 `venue` 키가 통째로 빠지고(계획 B-1)
+ * 진짜 값은 여기에만 있다. **서버 전용이다** — 규칙 파일은 체인을 읽을 수 없어
+ * "티켓을 들고 있는가"를 판정할 수 없고, 그 판정은 `getEventPrivate` 이 eth_call 로 한다.
+ */
+export const EVENT_PRIVATE = 'eventPrivate';
+/**
  * 사람 한 명의 **하루 핀 횟수**. 문서 id 는 `personId` 이고 값은 `{ day, count }` 하나뿐이다.
  * `pinEventImage` 는 주최자 인가보다 앞에 있어(초안은 주최사를 만들기 전에 쓴다) 로그인한
  * 아무나 부를 수 있다 — 이 장부가 우리 Pinata 저장 공간의 유일한 문지기다.
@@ -61,6 +68,7 @@ export const ALLOWED_COLLECTIONS = [
   EVENT_CHATS,
   DELETION_REQUESTS,
   PENDING_GATES,
+  EVENT_PRIVATE,
   ORG_PROFILES,
   PIN_QUOTA,
   SYSTEM,

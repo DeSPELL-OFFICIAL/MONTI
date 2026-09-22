@@ -132,6 +132,8 @@ describe('deploy bundle', () => {
       'resolveRecipient',
       'getSignupStatus',
       'listAttendees',
+      'getEventPrivate',
+      'setEventPrivate',
       'listPendingGates',
       'submitPendingGate',
       'tenderlyWebhook',

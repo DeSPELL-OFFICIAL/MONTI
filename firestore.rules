@@ -91,6 +91,14 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // 공연의 비공개 장소. 서버 전용이다 — 읽는 길은 `getEventPrivate`, 쓰는 길은
+    // `setEventPrivate` 뿐이고 둘 다 체인에 묻는다. 규칙만으로는 이 문을 지킬 수 없다:
+    // 규칙 파일은 체인을 읽지 못하므로 "티켓을 들고 있는가"를 판정할 방법이 없고,
+    // `eventChats` 처럼 거울 문서를 두면 양도 뒤 낡은 거울이 남의 장소를 계속 열어 준다.
+    match /eventPrivate/{eventId} {
+      allow read, write: if false;
+    }
+
     // 사람 한 명의 하루 핀 횟수. 서버(`pinEventImage`)만 읽고 쓴다. 아래 포괄 거부가 이미
     // 막지만, 클라이언트가 여기에 쓸 수 있으면 자기 카운터를 0 으로 되돌려 한도를 없앨 수 있다.
     match /pinQuota/{personId} {

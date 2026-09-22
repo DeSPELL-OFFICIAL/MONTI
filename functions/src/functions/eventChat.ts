@@ -2,7 +2,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { CHAT_CLOSE_SCHEDULE, EVENT_STATUS_BY_CODE, ticketAbi } from '@monti/shared';
-import { resolveCallerAccount } from '../lib/auth.js';
+import { holdsEventTicket, resolveCallerAccount } from '../lib/auth.js';
 import { deployment, publicClient } from '../lib/chain.js';
 import { EVENT_CHATS, db } from '../lib/db.js';
 
@@ -22,13 +22,10 @@ export const joinEventChat = onCall(async (request): Promise<{ ok: true }> => {
   const contracts = deployment();
   const pc = publicClient();
 
-  const [balance, statusCode, meta] = await Promise.all([
-    pc.readContract({
-      address: contracts.ticket,
-      abi: ticketAbi,
-      functionName: 'balanceOfEvent',
-      args: [account, BigInt(eventId)],
-    }),
+  const [holdsTicket, statusCode, meta] = await Promise.all([
+    // 이 검사는 `getEventPrivate` 과 **같은 함수**다(`lib/auth.holdsEventTicket`).
+    // 두 곳이 갈라지면 채팅에는 들어가는데 장소는 못 보는(또는 그 반대의) 사람이 생긴다.
+    holdsEventTicket(BigInt(eventId), account),
     pc.readContract({
       address: contracts.ticket,
       abi: ticketAbi,
@@ -43,7 +40,7 @@ export const joinEventChat = onCall(async (request): Promise<{ ok: true }> => {
     }),
   ]);
 
-  if ((balance as bigint) === 0n) throw new HttpsError('permission-denied', 'NO_TICKET_FOR_EVENT');
+  if (!holdsTicket) throw new HttpsError('permission-denied', 'NO_TICKET_FOR_EVENT');
   if (EVENT_STATUS_BY_CODE[Number(statusCode)] !== 'Published') {
     throw new HttpsError('failed-precondition', 'EVENT_NOT_PUBLISHED');
   }

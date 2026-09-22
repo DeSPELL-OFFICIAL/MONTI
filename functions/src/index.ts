@@ -5,6 +5,7 @@ export { createTransferInvite, pendingOffers } from './functions/transferInvites
 export { createOrganizerForMe } from './functions/createOrganizer.js';
 export { dailyExport } from './functions/dailyExport.js';
 export { diditWebhook } from './functions/diditWebhook.js';
+export { getEventPrivate, setEventPrivate } from './functions/eventPrivate.js';
 export { getPhotoForGate, issueSnapshot } from './functions/snapshot.js';
 export { getSignupStatus } from './functions/getSignupStatus.js';
 export { listAttendees } from './functions/listAttendees.js';
