@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
-import { Alert, Button, ContactLink, Field, Screen } from '../../shared/ui';
+import { Alert, Button, ContactLink, Field, Screen, Spinner } from '../../shared/ui';
 import { fmt, setLocale, useCopy, useLocale } from '../../shared/i18n';
 import type { Locale } from '../../shared/copy/index';
 import { api } from '../../shared/api/functions';
@@ -9,6 +9,7 @@ import { getFirebaseAuth } from '../../shared/api/firebase';
 import { saveUserProfile } from '../../shared/api/firestore';
 import { getConfig } from '../../shared/config';
 import { useSession } from '../../shared/session';
+import { useOrganizerEntry } from '../../organizer/useOrganizerEntry';
 import { Nickname } from './Nickname';
 import { DeviceLock } from './DeviceLock';
 import { NewDevice } from './NewDevice';
@@ -28,6 +29,38 @@ export function KycStatus() {
       <p>{verified ? copy.kyc.mineVerified : copy.kyc.mineUnverified}</p>
       {verified ? null : (
         <Button onClick={() => navigate('/me/verify?returnTo=/me')}>{copy.kyc.cta}</Button>
+      )}
+    </section>
+  );
+}
+
+/**
+ * The way from 프로필 into the organiser side, and the second half of the answer to "there is
+ * no link to `/org` anywhere" — the other half is the floating 만들기 on 탐색. Both ask
+ * {@link useOrganizerEntry}, so neither can decide this person is an organiser while the other
+ * decides they are not.
+ *
+ * It sits above 계정 삭제 rather than beside it because it is a capability, not something
+ * irreversible. While the indexer has not answered, the heading stands alone over a spinner:
+ * either label would be a guess, and `주최자 되기` is the guess that would be insulting to
+ * somebody who already runs three organisations.
+ */
+function OrganizerSection() {
+  const copy = useCopy();
+  const navigate = useNavigate();
+  const { profileTo, hasOrg, isLoading } = useOrganizerEntry();
+
+  return (
+    <section>
+      <h2>{copy.me.organizer}</h2>
+      {isLoading ? <Spinner /> : null}
+      {isLoading ? null : (
+        <>
+          {hasOrg ? null : <p className="muted">{copy.me.organizerHint}</p>}
+          <Button variant="ghost" onClick={() => navigate(profileTo)}>
+            {hasOrg ? copy.me.organizerOpen : copy.me.organizerBecome}
+          </Button>
+        </>
       )}
     </section>
   );
@@ -133,6 +166,7 @@ export function Profile() {
       <p>
         <a href={`${explorerBase}/address/${session.account ?? ''}`}>{copy.me.publicRecord}</a>
       </p>
+      <OrganizerSection />
       <DeleteAccount />
       <footer><ContactLink /></footer>
     </Screen>

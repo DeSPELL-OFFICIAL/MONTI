@@ -61,7 +61,7 @@ export const en: typeof ko = {
     inviteKycNote: 'After signing up they must verify their ID to receive the ticket.',
   },
   discover: {
-    title: 'Explore', searchPlaceholder: 'Search events',
+    title: 'Explore', searchPlaceholder: 'Search events', create: 'Create',
     filterDate: 'Date', filterRegion: 'Region', filterCategory: 'Theme',
     dateToday: 'Today', dateWeek: 'This week', dateMonth: 'This month', datePick: 'Pick a date',
     categoryAll: 'All', category0: 'Concert', category1: 'Meetup', category2: 'Exhibition', category3: 'Other',
@@ -191,6 +191,9 @@ export const en: typeof ko = {
     recoveryUndo: 'For {{hours}} hours your old phone can undo the move. It asks for the face or fingerprint saved on that phone.',
     recoveryQuarantine: 'During those {{hours}} hours the new phone cannot get a new ticket or receive one from anybody.',
     recoveryMigrate: 'Tickets you already hold move once {{hours}} hours have passed: open MONTI on the new phone and tap "Move my tickets".',
+    organizer: 'Organising', organizerOpen: 'Open the organiser screens',
+    organizerBecome: 'Become an organiser',
+    organizerHint: 'You can put on your own events and hand out tickets.',
     publicRecord: 'Public record', deleteAccount: 'Delete account',
     deleteCta: 'Delete my account', deleteConfirmTitle: 'Delete this account?',
     deleteSignOut: 'You are signed out right away and cannot sign in again.',

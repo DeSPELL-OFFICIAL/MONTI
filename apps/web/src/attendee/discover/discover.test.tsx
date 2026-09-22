@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { keccak256, toBytes } from 'viem';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -13,6 +13,25 @@ const fetchEventMetadata = vi.fn();
 vi.mock('../../shared/envio/client', () => ({ gql }));
 vi.mock('../../shared/envio/ipfs', () => ({ fetchEventMetadata }));
 
+/**
+ * The organiser side is mocked one level higher than the transport: `organizer/myOrgs.test.tsx`
+ * already proves what the indexer's rows fold into, and `me/profile.test.tsx` drives the real
+ * hook end to end. What is under test here is the routing table on top of that answer, so it is
+ * the answer that is handed in — otherwise every row would need its own indexer round trip to
+ * settle before the button could be tapped, and the table would be tested through the timing of
+ * two queries rather than through itself.
+ */
+const useMyOrgs = vi.fn();
+vi.mock('../../organizer/useMyOrgs', () => ({ useMyOrgs }));
+
+// A signed-in session makes `useKycLevel` ask the server for real; only that one call is stubbed.
+const getSignupStatus = vi.fn(async () => ({ status: 'active', kycLevel: 0 }));
+vi.mock('../../shared/api/functions', async (orig) => ({
+  ...(await orig<typeof import('../../shared/api/functions')>()),
+  api: { getSignupStatus },
+}));
+
+const { setSession } = await import('../../shared/session');
 const { Discover } = await import('./Discover');
 const { EventDetail } = await import('./EventDetail');
 const { METADATA_CONCURRENCY, mapWithPool } = await import('./useEvents');
@@ -61,6 +80,45 @@ function renderDiscover() {
   );
 }
 
+/** Pushes every address the router visits, so a tap is read off the router, not guessed at. */
+function renderDiscoverTracked(): string[] {
+  const seen: string[] = [];
+  function Probe() {
+    seen.push(useLocation().pathname);
+    return null;
+  }
+  render(
+    <QueryClientProvider client={client()}>
+      <MemoryRouter>
+        <Probe />
+        <Discover />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  return seen;
+}
+
+/** What the indexer said about this person as an organiser, in the shape `useMyOrgs` answers. */
+function myOrgs(over: Partial<{
+  orgs: Array<{ orgId: string; name: string; role: string; bits: number; canCreateEvent: boolean }>;
+  canCreateEvent: boolean;
+  isLoading: boolean;
+  isError: boolean;
+}> = {}): void {
+  useMyOrgs.mockReturnValue({
+    orgs: [], canCreateEvent: false, isLoading: false, isError: false,
+    error: null, refetch: () => undefined, ...over,
+  });
+}
+
+const ORG = { orgId: '3', name: '재즈 컴퍼니', role: 'owner', bits: 0, canCreateEvent: true };
+const ORG_NO_PERMISSION = { ...ORG, role: 'manager', bits: 0, canCreateEvent: false };
+const ME = `0x${'ab'.repeat(20)}` as const;
+
+async function tapCreate(): Promise<void> {
+  await userEvent.click(await screen.findByRole('button', { name: '만들기' }));
+}
+
 function renderDetail(eventId = '1') {
   return render(
     <QueryClientProvider client={client()}>
@@ -77,6 +135,10 @@ beforeEach(() => {
   localStorage.clear();
   gql.mockReset();
   fetchEventMetadata.mockReset();
+  useMyOrgs.mockReset();
+  // The state every screen in this file starts in: nobody is signed in and nothing is known.
+  setSession({ status: 'loading' });
+  myOrgs();
   gql.mockResolvedValue({ Event: [EVENT_ONE, EVENT_TWO] });
   fetchEventMetadata.mockImplementation(metadataByCid);
 });
@@ -143,6 +205,66 @@ describe('Discover', () => {
     renderDiscover();
     expect(await screen.findByRole('alert')).toHaveTextContent('문제가 생겼어요. 잠시 뒤 다시 시도해 주세요.');
     expect(screen.getByRole('button', { name: '다시 시도' })).toBeInTheDocument();
+  });
+});
+
+/**
+ * One button, five answers. The whole point of the table is that the person never has to know
+ * which of them applies to them — so every row is checked here, through the router, rather
+ * than through the hook that decides it.
+ */
+describe('Discover · 만들기', () => {
+  it('shows the button to a visitor who is not signed in, rather than hiding the way in', async () => {
+    renderDiscoverTracked();
+    expect(await screen.findByRole('button', { name: '만들기' })).toBeEnabled();
+  });
+
+  it('sends a visitor who is not signed in to signing up', async () => {
+    const seen = renderDiscoverTracked();
+    await tapCreate();
+    expect(seen.at(-1)).toBe('/signup/phone');
+  });
+
+  it('goes straight to the wizard for somebody who may create an event', async () => {
+    setSession({ status: 'signedIn', account: ME });
+    myOrgs({ orgs: [ORG], canCreateEvent: true });
+    const seen = renderDiscoverTracked();
+    await tapCreate();
+    expect(seen.at(-1)).toBe('/org/new');
+  });
+
+  it('offers 주최사 만들기 to somebody who belongs to no organisation', async () => {
+    setSession({ status: 'signedIn', account: ME });
+    myOrgs({ orgs: [], canCreateEvent: false });
+    const seen = renderDiscoverTracked();
+    await tapCreate();
+    expect(seen.at(-1)).toBe('/org/become');
+  });
+
+  it('hands somebody who belongs but may not create to the screen that explains why', async () => {
+    setSession({ status: 'signedIn', account: ME });
+    myOrgs({ orgs: [ORG_NO_PERMISSION], canCreateEvent: false });
+    const seen = renderDiscoverTracked();
+    await tapCreate();
+    // `/org` already carries `행사를 만들 권한이 없어요…`; no second sentence is written here.
+    expect(seen.at(-1)).toBe('/org');
+  });
+
+  it('still leads somewhere while the indexer has not answered', async () => {
+    setSession({ status: 'signedIn', account: ME });
+    myOrgs({ isLoading: true });
+    const seen = renderDiscoverTracked();
+    await tapCreate();
+    expect(seen.at(-1)).toBe('/org');
+  });
+
+  it('still leads somewhere when the indexer will not answer at all', async () => {
+    setSession({ status: 'signedIn', account: ME });
+    myOrgs({ isError: true });
+    const seen = renderDiscoverTracked();
+    await tapCreate();
+    // The organiser home owns that failure and offers its own retry there.
+    expect(seen.at(-1)).toBe('/org');
   });
 });
 

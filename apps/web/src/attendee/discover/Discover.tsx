@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Alert, Button, Field, KycBadge, Screen, Spinner } from '../../shared/ui';
+import { Link, useNavigate } from 'react-router-dom';
+import { Alert, Button, Fab, Field, KycBadge, Screen, Spinner } from '../../shared/ui';
 import { useCopy, useLocale } from '../../shared/i18n';
 import { useSession } from '../../shared/session';
+import { useOrganizerEntry } from '../../organizer/useOrganizerEntry';
 import { useKycLevel } from '../me/useKycLevel';
 import { Filters } from './Filters';
 import {
@@ -21,6 +22,11 @@ export function Discover() {
   // Asked once for the whole page, not once per card, and not at all for a signed-out visitor.
   const signedIn = useSession().status === 'signedIn';
   const { kycLevel } = useKycLevel();
+  const navigate = useNavigate();
+  // Shown to everybody, signed out included. The one decision about where it goes is
+  // `useOrganizerEntry`'s, and it sends a visitor to signing up rather than refusing them:
+  // hiding the button is exactly how a founder with a fresh account finds nothing at all.
+  const organizer = useOrganizerEntry();
   const { data, isLoading, isError, refetch } = useEvents();
   const items = applyFilters(data ?? [], filters);
 
@@ -62,6 +68,8 @@ export function Discover() {
           </li>
         ))}
       </ul>
+
+      <Fab label={copy.discover.create} onClick={() => navigate(organizer.to)} />
     </Screen>
   );
 }

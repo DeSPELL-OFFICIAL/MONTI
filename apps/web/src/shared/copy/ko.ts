@@ -59,7 +59,7 @@ export const ko = {
     inviteKycNote: '가입 후 본인인증을 마쳐야 티켓을 받을 수 있어요.',
   },
   discover: {
-    title: '탐색', searchPlaceholder: '행사 이름 검색',
+    title: '탐색', searchPlaceholder: '행사 이름 검색', create: '만들기',
     filterDate: '날짜', filterRegion: '지역', filterCategory: '테마',
     dateToday: '오늘', dateWeek: '이번 주', dateMonth: '이번 달', datePick: '직접 선택',
     categoryAll: '전체', category0: '공연', category1: '모임', category2: '전시', category3: '기타',
@@ -189,6 +189,8 @@ export const ko = {
     recoveryUndo: '{{hours}}시간 안에는 예전 휴대폰에서 되돌릴 수 있어요. 그 휴대폰에 저장된 얼굴·지문 확인이 필요해요.',
     recoveryQuarantine: '그 {{hours}}시간 동안에는 새 휴대폰으로 티켓을 새로 받거나 다른 사람에게서 받을 수 없어요.',
     recoveryMigrate: '갖고 있던 티켓은 {{hours}}시간이 지난 뒤, 새 휴대폰에서 MONTI를 열고 "티켓 가져오기"를 누르면 옮겨져요.',
+    organizer: '주최자', organizerOpen: '주최자 화면 열기', organizerBecome: '주최자 되기',
+    organizerHint: '직접 행사를 열고 표를 나눠줄 수 있어요.',
     publicRecord: '공개 기록', deleteAccount: '계정 삭제',
     deleteCta: '계정 삭제하기', deleteConfirmTitle: '정말 계정을 삭제할까요?',
     deleteSignOut: '지금 바로 로그아웃되고, 다시 로그인할 수 없어요.',

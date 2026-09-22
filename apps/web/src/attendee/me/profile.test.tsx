@@ -43,7 +43,17 @@ vi.mock('../../shared/api/firebase', () => ({
 }));
 
 const saveUserProfile = vi.fn(async () => undefined);
-vi.mock('../../shared/api/firestore', () => ({ saveUserProfile }));
+// `loadOrgName` belongs to the same module and is what `useMyOrgs` — now reached through the
+// profile's 주최자 section — reads an organisation's display name with. Left out of the mock it
+// is not a missing stub but a missing export, and every render in this file throws.
+const loadOrgName = vi.fn(async (): Promise<string | null> => null);
+vi.mock('../../shared/api/firestore', () => ({ saveUserProfile, loadOrgName }));
+
+// The 주최자 section is driven through the real `useMyOrgs` here — this file is where the
+// whole chain, indexer row to button label, is proved — so the indexer transport is mocked and
+// nothing else is.
+const gql = vi.fn();
+vi.mock('../../shared/envio/client', () => ({ gql }));
 
 const setLocale = vi.fn(async () => undefined);
 vi.mock('../../shared/i18n', async (orig) => ({
@@ -80,6 +90,11 @@ function wrap(node: ReactNode) {
 
 beforeEach(() => {
   setSession({ status: 'signedIn', account: ACCOUNT });
+  gql.mockReset();
+  loadOrgName.mockReset();
+  // The plain case: this person organises for nobody.
+  gql.mockResolvedValue({ Organizer: [], Admin: [], Manager: [] });
+  loadOrgName.mockResolvedValue(null);
   isLocked.mockResolvedValue(false);
   deviceUpdatedAt.mockResolvedValue(BigInt(NOW() - 2 * DAY));
   lockDevice.mockResolvedValue({ txHash: '0xaa' });
@@ -257,6 +272,42 @@ describe('Profile', () => {
     expect(screen.queryByText(ko.me.deleteSignOut)).not.toBeInTheDocument();
     // The way back in is still there.
     expect(screen.getByRole('button', { name: ko.me.deleteCta })).toBeInTheDocument();
+  });
+
+  /**
+   * The profile is the other half of the answer to "there is no way into `/org`" — the first
+   * half being 탐색's floating 만들기. Both read `useOrganizerEntry`, and this is the file that
+   * drives it through the real indexer rows rather than through a stubbed hook.
+   */
+  it('opens the organiser screens for somebody who organises for an organisation', async () => {
+    gql.mockResolvedValue({
+      Organizer: [{ id: '3', owner: ACCOUNT.toLowerCase() }], Admin: [], Manager: [],
+    });
+    loadOrgName.mockResolvedValue('재즈 컴퍼니');
+    wrap(<Profile />);
+    await userEvent.click(await screen.findByRole('button', { name: ko.me.organizerOpen }));
+    // Manage, not make: the profile never drops anybody straight into the wizard, even an owner.
+    expect(navigate).toHaveBeenCalledWith('/org');
+    expect(screen.queryByText(ko.me.organizerHint)).not.toBeInTheDocument();
+  });
+
+  it('offers to make one, and says what for, when there is no organisation', async () => {
+    wrap(<Profile />);
+    await userEvent.click(await screen.findByRole('button', { name: ko.me.organizerBecome }));
+    expect(navigate).toHaveBeenCalledWith('/org/become');
+    expect(screen.getByText(ko.me.organizerHint)).toBeInTheDocument();
+  });
+
+  it('says nothing at all while the indexer is still answering', async () => {
+    // A question that never resolves: the section may show its heading and a spinner, and
+    // neither label — `주최자 되기` to somebody who already runs three organisations would be
+    // the worse of the two guesses.
+    gql.mockImplementation(() => new Promise(() => undefined));
+    wrap(<Profile />);
+    expect(await screen.findByRole('heading', { name: ko.me.organizer })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: ko.me.organizerBecome })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: ko.me.organizerOpen })).not.toBeInTheDocument();
+    expect(screen.queryByText(ko.me.organizerHint)).not.toBeInTheDocument();
   });
 
   it('keeps the person signed in when the request did not go through', async () => {
