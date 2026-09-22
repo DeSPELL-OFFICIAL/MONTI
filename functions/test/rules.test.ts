@@ -333,6 +333,53 @@ describe('eventDrafts/{uid}/drafts/{draftId}', () => {
     tiers: [{ name: '일반', supply: 100 }],
   };
 
+  // W5 뒤의 티켓 종류 한 줄. 그림은 글자 프리셋이거나 올린 그림의 CID 다.
+  const tier = {
+    name: '일반',
+    supply: 100,
+    maxPerWallet: 1,
+    currency: 'free',
+    amount: 0,
+    transferable: true,
+    transferCutoffHours: 2,
+    art: { preset: 'a' },
+  };
+
+  // W2 의 훅이 실제로 보내는 문서 그대로 — `updatedAt` 은 서버 스탬프(규칙에는 timestamp 로
+  // 도착한다), `submittedOpHash` 는 아직 공개 전이라 빈 문자열이다.
+  const webDraft = {
+    orgId: '42',
+    title: '모나드 데모 나이트',
+    description: '한 줄 소개',
+    posterCid: `bafk${'a'.repeat(55)}`,
+    category: 0,
+    tags: ['모나드', '해커톤'],
+    regionCode: 'KR-11',
+    venue: '올림픽공원 K-아트홀',
+    venueHidden: false,
+    startsAt: 1_767_225_600,
+    endsAt: 1_767_232_800,
+    timeHidden: false,
+    transferable: true,
+    transferCutoffHours: 2,
+    requireKyc: false,
+    tiers: [
+      tier,
+      {
+        name: 'VIP',
+        supply: 20,
+        maxPerWallet: 2,
+        currency: 'USDC',
+        amount: 49.5,
+        transferable: false,
+        transferCutoffHours: 0,
+        art: { imageCid: `bafk${'b'.repeat(55)}` },
+      },
+    ],
+    submittedOpHash: '',
+    updatedAt: new Date(),
+  };
+
   beforeEach(async () => {
     await env.withSecurityRulesDisabled(async (context) => {
       await context.firestore().doc(MINE).set(draft);
@@ -395,5 +442,102 @@ describe('eventDrafts/{uid}/drafts/{draftId}', () => {
     await assertFails(db.doc(MINE).update({ title: 7 }));
     await assertFails(db.doc(MINE).update({ posterCid: { base64: 'x' } }));
     await assertFails(db.doc(MINE).update({ tags: 'not-a-list' }));
+  });
+
+  // 훅이 보내는 문서가 규칙을 그대로 통과해야 한다 — 통과하지 못하면 저장 실패는 화면의
+  // 검증 메시지가 아니라 권한 오류이고, 조직자는 왜 안 되는지 볼 수단이 없다.
+  it("accepts the whole document the web's draft hook writes", async () => {
+    const db = owner();
+    await assertSucceeds(db.doc('eventDrafts/uid-1/drafts/d4').set(webDraft));
+    await assertSucceeds(db.doc(MINE).update({ updatedAt: new Date(), tiers: webDraft.tiers }));
+    await assertSucceeds(db.doc(MINE).update({ submittedOpHash: `0x${'a'.repeat(64)}` }));
+    await assertSucceeds(db.doc(MINE).update({ submittedOpHash: '' }));
+  });
+
+  // W2 가 아직 쓰고 있는 옛 모양(`art` 대신 `design`/`imageCid` 를 종류에 납작하게 둔 것)도
+  // 그대로 지나가야 한다. 규칙이 웹보다 먼저 올라가는 일이 있고, 그때 저장이 멈추면 안 된다.
+  it("accepts the tier shape the web writes today, before art lands", async () => {
+    await assertSucceeds(
+      owner()
+        .doc(MINE)
+        .update({
+          tiers: [{ name: '일반', supply: 100, maxPerWallet: 1, currency: 'free', amount: 0, design: 'aurora', imageCid: '' }],
+        }),
+    );
+  });
+
+  /**
+   * 이 테스트가 이 블록에서 가장 중요하다. 규칙 엔진은 요청 하나에 **표현식 1,000개**가
+   * 상한이고, 목록을 돌 수 없어 8칸을 손으로 편 탓에 종류마다 붙는 검사 값이 여덟 배가 된다.
+   * 종류 검사를 하나만 더 늘려도 여기서 6칸째부터 BUDGET 오류로 저장이 통째로 거부된다 —
+   * 조직자에게는 "티켓 종류를 여섯 개 넣으면 초안이 사라진다"로 보인다. 규칙의 종류 검사를
+   * 건드린 사람은 이 테스트로 예산을 다시 재게 된다.
+   */
+  it('takes eight fully filled tiers at once — the rule budget has to hold', async () => {
+    const eight = Array.from({ length: 8 }, (_, i) => ({
+      ...tier,
+      name: `종류 ${i}`,
+      supply: 100_000,
+      maxPerWallet: 20,
+      currency: 'USDT',
+      amount: 12.5,
+      transferCutoffHours: 24,
+      art: { imageCid: `bafk${'c'.repeat(55)}` },
+    }));
+    await assertSucceeds(owner().doc(MINE).update({ tiers: eight }));
+  });
+
+  // 통화는 체인이 아는 네 가지뿐이다. 마지막 줄은 두 번째 칸도 실제로 검사된다는 확인이다 —
+  // 0번만 보면 두 번째 종류로 그대로 빠져나간다.
+  it('blocks a tier currency the chain does not know', async () => {
+    const db = owner();
+    await assertFails(db.doc(MINE).update({ tiers: [{ ...tier, currency: 'KRW' }] }));
+    await assertFails(db.doc(MINE).update({ tiers: [{ ...tier, currency: 'mon' }] }));
+    await assertFails(db.doc(MINE).update({ tiers: [{ ...tier, currency: 7 }] }));
+    await assertFails(db.doc(MINE).update({ tiers: [tier, { ...tier, currency: 'KRW' }] }));
+  });
+
+  // 종류 이름이 바이트를 담는 자리가 되면 안 된다. 여덟 종류 × 상한 없는 이름이면
+  // 초안 하나가 그대로 1 MiB 다.
+  it('blocks an oversize tier name, in the first slot and in the last', async () => {
+    const db = owner();
+    await assertFails(db.doc(MINE).update({ tiers: [{ ...tier, name: 'x'.repeat(41) }] }));
+    await assertFails(db.doc(MINE).update({ tiers: [{ ...tier, name: 7 }] }));
+    await assertFails(
+      db.doc(MINE).update({
+        tiers: [...Array.from({ length: 7 }, () => tier), { ...tier, name: 'x'.repeat(41) }],
+      }),
+    );
+  });
+
+  // 그림 칸이 잠겨 있지 않으면 거기가 base64 바이트를 담는 자리가 된다.
+  it('blocks ticket art that is neither a preset letter nor a CID', async () => {
+    const db = owner();
+    await assertFails(db.doc(MINE).update({ tiers: [{ ...tier, art: { preset: 'e' } }] }));
+    await assertFails(db.doc(MINE).update({ tiers: [{ ...tier, art: { preset: 'aurora' } }] }));
+    await assertFails(db.doc(MINE).update({ tiers: [{ ...tier, art: { base64: 'x'.repeat(40) } }] }));
+    await assertFails(db.doc(MINE).update({ tiers: [{ ...tier, art: { imageCid: 'x'.repeat(81) } }] }));
+    await assertFails(db.doc(MINE).update({ tiers: [{ ...tier, art: { imageCid: 7 } }] }));
+    await assertFails(db.doc(MINE).update({ tiers: [{ ...tier, art: 'a' }] }));
+  });
+
+  // `updatedAt` 은 "가장 최근 초안"을 고르는 정렬 키다 — 숫자를 섞으면 이어쓰기가 엉뚱한
+  // 초안을 연다. `submittedOpHash` 는 빈 문자열이거나 0x + 64 hex 딱 하나다.
+  it('blocks a hand-stamped updatedAt and a malformed submittedOpHash', async () => {
+    const db = owner();
+    await assertFails(db.doc(MINE).update({ updatedAt: 1 }));
+    await assertFails(db.doc(MINE).update({ updatedAt: '2026-09-22' }));
+    await assertFails(db.doc(MINE).update({ submittedOpHash: '0xnope' }));
+    await assertFails(db.doc(MINE).update({ submittedOpHash: `0x${'a'.repeat(63)}` }));
+    await assertFails(db.doc(MINE).update({ submittedOpHash: `0x${'a'.repeat(65)}` }));
+    await assertFails(db.doc(MINE).update({ submittedOpHash: 7 }));
+  });
+
+  // 웹이 쓰는 본문 칸의 이름은 `description` 이다. `body` 만 재면 본문이 상한 없는 칸이 되어
+  // 문서 하나로 1 MiB 를 채울 수 있다.
+  it('caps description the same way it caps body', async () => {
+    const db = owner();
+    await assertSucceeds(db.doc(MINE).update({ description: 'x'.repeat(5000) }));
+    await assertFails(db.doc(MINE).update({ description: 'x'.repeat(5001) }));
   });
 });
