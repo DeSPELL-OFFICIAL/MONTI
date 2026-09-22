@@ -46,6 +46,19 @@ describe('callable wrappers', () => {
   });
 
   /**
+   * Organiser creation goes through the attester rather than a send of this person's own:
+   * until sub-plan 01b sponsors `Organizers.createOrganizer` an attendee account has nothing
+   * to pay that write with. The wrapper passes the name straight through — the server trims it
+   * and counts code points — and answers with the number the chain chose.
+   */
+  it('names the attester-sponsored organiser callable exactly as it is deployed', async () => {
+    await expect(api.createOrganizerForMe({ name: '재즈 컴퍼니' })).resolves.toMatchObject({
+      name: 'createOrganizerForMe',
+      payload: { name: '재즈 컴퍼니' },
+    });
+  });
+
+  /**
    * The shipped callable answers `{ gates }` and every caller wants the rows, so the wrapper
    * unwraps — the same shape `pendingOffers` has. A row is exactly the four values
    * `Organizers.registerGate` takes plus when it arrived: no device label, no `createdAt`,

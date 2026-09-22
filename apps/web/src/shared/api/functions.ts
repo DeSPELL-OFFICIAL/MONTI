@@ -299,6 +299,32 @@ export const api = {
    *  server (functions/src/functions/pendingGates.ts). */
   listPendingGates: async (args: { eventId: string }): Promise<PendingGate[]> =>
     (await callPendingGates(args)).gates,
+  /**
+   * Makes one organisation owned by the person calling, and answers with the number the chain
+   * chose for it — `orgId` is a **decimal string** like `"42"`, never a name and never an
+   * address (functions/src/functions/createOrganizer.ts).
+   *
+   * The server's attester sends it, not this person's own account: until sub-plan 01b puts the
+   * organiser selectors on the paymaster's allowlist there is nothing to pay that write with,
+   * and `Organizers.createOrganizer(address owner)` takes the owner as an argument, so the
+   * organisation belongs to this caller either way. Nothing here asks the caller for a fee.
+   *
+   * Two facts a call site has to build around:
+   *  - **It is not idempotent.** The contract hands out a fresh id on every call, so a retry
+   *    makes a *second* organisation — nothing on either side deduplicates, and the only thing
+   *    that ever stops it is the limit of three per person (`ORG_LIMIT`). The caller must lock
+   *    its button for the whole call rather than let a second tap through.
+   *  - **It waits for the receipt and for finality before it answers** — normally 2-5 seconds,
+   *    occasionally past ten (`timeoutSeconds: 120`). Show that something is happening.
+   *
+   * The display name is not put on chain. The server writes it to `orgProfiles/{orgId}`, which
+   * is where `loadOrgName` reads it back; a caller reads nothing of its own after this.
+   *
+   * Refusals worth their own sentence, by reason: `NO_SIGNUP` (not-found), `NOT_ACTIVE`
+   * (failed-precondition), `ORG_LIMIT` (resource-exhausted), `BAD_NAME` (invalid-argument).
+   * The last two statuses are both HTTP 400, so branch on the reason, never on the status.
+   */
+  createOrganizerForMe: call<{ name: string }, { orgId: string }>('createOrganizerForMe'),
   // `link` is the one an organiser sends to the person; it carries the invite id and nothing
   // else — no number, no organisation detail.
   createInvite: call<

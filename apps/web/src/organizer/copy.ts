@@ -40,6 +40,28 @@ const ko = {
     orgFallback: '주최사 #{{id}}',
   },
 
+  become: {
+    title: '주최사 만들기',
+    name: '주최사 이름',
+    // 이름은 화면에 보여 주기 위한 것뿐이다. 서버가 orgProfiles 문서에 적고, 목록이 그것을 읽는다.
+    nameHelp: '목록과 행사 화면에 보여 줄 이름이에요. 지금은 나중에 고칠 수 없으니 한 번에 정확히 적어 주세요',
+    create: '만들기',
+    // 콜러블은 영수증까지 기다렸다가 답한다. 보통 2~5초, 드물게 10초가 넘는다.
+    working: '만들고 있어요',
+    cancel: '취소',
+    // 가입이 끝나지 않은 두 경우에만 뜨는 이어가기 버튼.
+    resume: '가입 이어서 하기',
+    problems: {
+      notActive: '가입을 먼저 마무리해 주세요',
+      noSignup: '가입을 먼저 마무리해 주세요',
+      // 한 사람이 만들 수 있는 주최사는 3개다. 네 번째는 서버가 보내기 전에 거절한다.
+      limit: '주최사는 3개까지 만들 수 있어요',
+      badName: '이름을 2자에서 40자 사이로 적어 주세요',
+      // T-UX-8이 이 한 줄을 describeFailure로 갈아 끼운다.
+      failed: '지금은 만들 수 없어요. 잠시 뒤 다시 시도해 주세요',
+    },
+  },
+
   lifecycle: {
     publish: '발행하기',
     publishConfirm: '발행하면 누구나 이 행사를 보고 신청할 수 있어요. 발행한 뒤에는 내용을 고칠 수 없어요',
@@ -306,6 +328,28 @@ const en: typeof ko = {
     orgId: 'Organisation number',
     // The chain holds no name. An organisation with no orgProfiles document goes by number.
     orgFallback: 'Organiser #{{id}}',
+  },
+
+  become: {
+    title: 'Create an organiser',
+    name: 'Organiser name',
+    // The name is for showing only: the server writes it to orgProfiles and the lists read it.
+    nameHelp: 'The name shown in your lists and on your event screens. It cannot be edited afterwards for now, so please get it right the first time',
+    create: 'Create',
+    // The callable waits for the receipt before it answers: usually 2-5 seconds, sometimes more.
+    working: 'Creating',
+    cancel: 'Cancel',
+    // Offered for the two refusals that really mean "your signup is not finished".
+    resume: 'Finish signing up',
+    problems: {
+      notActive: 'Please finish signing up first',
+      noSignup: 'Please finish signing up first',
+      // Three per person. The fourth is refused before anything is sent.
+      limit: 'You can create up to three organisers',
+      badName: 'Write a name of 2 to 40 characters',
+      // T-UX-8 swaps this one line for describeFailure.
+      failed: 'That cannot be done right now. Please try again in a moment',
+    },
   },
 
   lifecycle: {

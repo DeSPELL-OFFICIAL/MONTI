@@ -5,6 +5,7 @@ import { fmt, useLocale } from '../shared/i18n';
 import { formatEventDate } from '../attendee/discover/useEvents';
 import { useOrganizerCopy, type OrganizerCopy } from './copy';
 import { useMyOrgs, useOrgEvents } from './useMyOrgs';
+import { Become } from './Become';
 import { Dashboard } from './Dashboard';
 import { Team } from './Team';
 import { Gates } from './gates/Gates';
@@ -232,6 +233,9 @@ export function OrganizerRoutes() {
   return (
     <Routes>
       <Route index element={<OrganizerHome />} />
+      {/* Where `주최사 만들기` lands — the organiser home's empty state, the explore FAB
+          and the profile section all point here (`useOrganizerEntry`). */}
+      <Route path="become" element={<Become />} />
       <Route path="new" element={<Wizard />} />
       <Route path="events/:eventId" element={<Dashboard />} />
       <Route path="events/:eventId/gates" element={<Gates />} />
