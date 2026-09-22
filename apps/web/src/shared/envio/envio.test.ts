@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EnvioError, gql } from './client';
-import { EVENTS_QUERY, EVENT_QUERY } from './queries';
+import { EVENTS_QUERY, EVENT_QUERY, MY_ORGS_QUERY, ORG_EVENTS_QUERY } from './queries';
 import { clearMetadataCache, fetchEventMetadata, gatewayUrl, normalizeMetadata } from './ipfs';
 import { getConfig } from '../config';
 
@@ -78,6 +78,17 @@ describe('queries', () => {
     expect(EVENT_QUERY).toContain('idx name priceUsdCents supply minted');
     expect(EVENT_QUERY).not.toContain('sold');
     expect(EVENTS_QUERY).toContain('status: { _eq: "Published" }');
+  });
+
+  it('declares the organiser documents with the scalar each column actually has', () => {
+    // `Organizer.owner` and `Admin`/`Manager.account` are `String!`; `Event.orgId` is `BigInt!`,
+    // which Hasura serves as `numeric` — so the list of ids is a list of those, not of strings.
+    expect(MY_ORGS_QUERY).toContain('$me: String!');
+    expect(MY_ORGS_QUERY).not.toMatch(/\$me:\s*numeric/);
+    expect(ORG_EVENTS_QUERY).toContain('$orgIds: [numeric!]!');
+    expect(ORG_EVENTS_QUERY).not.toMatch(/\$orgIds:\s*\[String!\]!/);
+    // A manager keeps its row after removal, so only the live ones are asked for.
+    expect(MY_ORGS_QUERY).toContain('exists: { _eq: true }');
   });
 });
 

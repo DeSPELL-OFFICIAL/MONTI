@@ -17,6 +17,8 @@ const ko = {
     open: '열기',
     team: '팀',
     orgId: '조직 번호',
+    // 체인에는 이름이 없다. orgProfiles 문서가 없는 조직은 번호로 부른다.
+    orgFallback: '주최사 #{{id}}',
   },
 
   lifecycle: {
@@ -263,6 +265,8 @@ const en: typeof ko = {
     open: 'Open',
     team: 'Team',
     orgId: 'Organisation number',
+    // The chain holds no name. An organisation with no orgProfiles document goes by number.
+    orgFallback: 'Organiser #{{id}}',
   },
 
   lifecycle: {

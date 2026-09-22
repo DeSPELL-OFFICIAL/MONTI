@@ -6,9 +6,11 @@ import type { Hex } from '@monti/shared';
 import { getDb, getFirebaseAuth } from './firebase';
 
 /**
- * The only three places the client is allowed to touch Firestore (firestore.rules):
+ * The only three places the client is allowed to write to Firestore (firestore.rules):
  * its own `users/{uid}` profile fields, `devices/{account}.pushToken`, and event chat.
- * Everything else goes through a callable in ./functions.
+ * It also reads one collection it may never write: `orgProfiles/{orgId}`, the organiser
+ * display names the chain has no room for — open to any signed-in reader and written by the
+ * server alone. Everything else goes through a callable in ./functions.
  */
 
 export interface ChatMessage {
@@ -119,6 +121,25 @@ export async function loadChatRoom(eventId: string): Promise<ChatRoomState | nul
     const snapshot = await getDoc(doc(getDb(), 'eventChats', eventId));
     const data = snapshot.data() as Partial<ChatRoomState> | undefined;
     return data ? { closed: data.closed ?? false, endsAt: data.endsAt ?? 0 } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The display name of one organisation. `null` when there is no document — an organisation
+ * created straight on chain has no profile row, and the caller shows the number instead.
+ *
+ * `createOrganizerForMe` writes this document, and the rules open `orgProfiles/{orgId}` to any
+ * signed-in reader. A refusal or a dropped connection is swallowed into `null` the way
+ * {@link loadChatRoom} swallows its own: a name that could not be read is a missing name, and
+ * a missing name must never fail the list it was being read for.
+ */
+export async function loadOrgName(orgId: string): Promise<string | null> {
+  try {
+    const snapshot = await getDoc(doc(getDb(), 'orgProfiles', orgId));
+    const name = (snapshot.data() as { name?: string } | undefined)?.name;
+    return typeof name === 'string' && name !== '' ? name : null;
   } catch {
     return null;
   }
