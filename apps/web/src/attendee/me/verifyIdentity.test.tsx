@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StrictMode, type ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ko } from '../../shared/copy/index';
+import { clearSession, setSession } from '../../shared/session';
 
 const POLL_INTERVAL_MS = 2_000;
 const POLL_LIMIT = 45;
@@ -294,13 +295,29 @@ describe('VerifyIdentity', () => {
 });
 
 describe('useKycLevel', () => {
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={new QueryClient()}>{children}</QueryClientProvider>
+  );
+
   it('reads the level the server reports and defaults to unverified', async () => {
+    setSession({ status: 'signedIn', account: `0x${'44'.repeat(20)}`, personId: 'p4' });
     getSignupStatus.mockResolvedValue({ status: 'kyc_ok', kycLevel: 1 });
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={new QueryClient()}>{children}</QueryClientProvider>
-    );
     const { result } = renderHook(() => useKycLevel(), { wrapper });
     expect(result.current.kycLevel).toBe(0);
     await waitFor(() => expect(result.current.kycLevel).toBe(1));
+    clearSession();
+  });
+
+  /**
+   * The event pages are public. Asking this of a visitor with no session only ever comes back
+   * `unauthenticated`, so the badge gets its 0 without a wasted call on every page load.
+   */
+  it('asks nothing of a visitor with no session, and is not left waiting on it', async () => {
+    clearSession();
+    getSignupStatus.mockClear();
+    const { result } = renderHook(() => useKycLevel(), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.kycLevel).toBe(0);
+    expect(getSignupStatus).not.toHaveBeenCalled();
   });
 });

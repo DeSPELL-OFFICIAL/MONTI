@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Alert, Button, Field, Screen, Spinner } from '../../shared/ui';
+import { Alert, Button, Field, KycBadge, Screen, Spinner } from '../../shared/ui';
 import { useCopy, useLocale } from '../../shared/i18n';
+import { useSession } from '../../shared/session';
+import { useKycLevel } from '../me/useKycLevel';
 import { Filters } from './Filters';
 import {
   applyFilters,
@@ -16,6 +18,9 @@ export function Discover() {
   const copy = useCopy();
   const locale = useLocale();
   const [filters, setFilters] = useState<DiscoverFilters>(loadFilters);
+  // Asked once for the whole page, not once per card, and not at all for a signed-out visitor.
+  const signedIn = useSession().status === 'signedIn';
+  const { kycLevel } = useKycLevel();
   const { data, isLoading, isError, refetch } = useEvents();
   const items = applyFilters(data ?? [], filters);
 
@@ -52,7 +57,7 @@ export function Discover() {
         {items.map(({ event, metadata }) => (
           <li key={event.id}>
             <Link to={`/events/${event.id}`}>{metadata?.title || copy.discover.untitled}</Link>
-            {event.requireKyc ? <span className="badge">{copy.kyc.requiredBadge}</span> : null}
+            <KycBadge required={event.requireKyc} level={kycLevel} signedIn={signedIn} />
             <p className="muted">{formatEventDate(event.startsAt, locale)}</p>
           </li>
         ))}

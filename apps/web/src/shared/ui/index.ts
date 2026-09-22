@@ -6,4 +6,5 @@ export { Alert } from './Alert';
 export { Countdown } from './Countdown';
 export { Spinner } from './Spinner';
 export { Field } from './Field';
+export { KycBadge } from './KycBadge';
 export { ContactLink } from './ContactLink';

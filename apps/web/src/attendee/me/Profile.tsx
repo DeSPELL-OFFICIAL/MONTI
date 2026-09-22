@@ -25,7 +25,7 @@ export function KycStatus() {
   return (
     <section>
       <h2>{copy.kyc.status}</h2>
-      <p>{verified ? copy.kyc.verified : copy.kyc.unverified}</p>
+      <p>{verified ? copy.kyc.mineVerified : copy.kyc.mineUnverified}</p>
       {verified ? null : (
         <Button onClick={() => navigate('/me/verify?returnTo=/me')}>{copy.kyc.cta}</Button>
       )}

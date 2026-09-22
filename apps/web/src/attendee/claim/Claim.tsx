@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Alert, Button, Field, Screen, Spinner } from '../../shared/ui';
+import { Alert, Button, Field, KycBadge, Screen, Spinner } from '../../shared/ui';
 import { useCopy } from '../../shared/i18n';
 import { gql } from '../../shared/envio/client';
 import { EVENT_QUERY, type EnvioEvent, type EnvioTier } from '../../shared/envio/queries';
@@ -34,10 +34,12 @@ const CLAIM_INTENT = 'claim';
 export function KycRequiredSheet({
   eventId,
   tier,
+  level,
   onClose,
 }: {
   eventId: string;
   tier: number;
+  level: number;
   onClose: () => void;
 }) {
   const copy = useCopy();
@@ -46,6 +48,9 @@ export function KycRequiredSheet({
   return (
     <div role="dialog" aria-modal="true">
       <h2>{copy.kyc.requiredTitle}</h2>
+      {/* The sheet only exists on an event that asks for the check, and only behind the session
+          guard, so both of those are settled before it is drawn. */}
+      <KycBadge required level={level} signedIn />
       <p>{copy.kyc.requiredBody}</p>
       <Button onClick={() => navigate(`/me/verify?returnTo=${encodeURIComponent(resume)}`)}>
         {copy.kyc.cta}
@@ -182,7 +187,7 @@ export function Claim() {
       ) : null}
       {error ? <Alert tone="error">{error}</Alert> : null}
       {needsKyc ? (
-        <KycRequiredSheet eventId={eventId} tier={tier} onClose={() => setNeedsKyc(false)} />
+        <KycRequiredSheet eventId={eventId} tier={tier} level={kycLevel} onClose={() => setNeedsKyc(false)} />
       ) : null}
       {/* Still confirming counts as busy: the op is already on its way and a second tap would
           claim twice — `held` cannot have caught up yet to stop it. */}

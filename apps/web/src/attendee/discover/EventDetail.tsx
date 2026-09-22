@@ -1,11 +1,13 @@
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Alert, Button, Screen, Spinner } from '../../shared/ui';
+import { Alert, Button, KycBadge, Screen, Spinner } from '../../shared/ui';
 import { fmt, useCopy, useLocale } from '../../shared/i18n';
 import { gql } from '../../shared/envio/client';
 import { EVENT_QUERY, type EnvioEvent, type EnvioTier } from '../../shared/envio/queries';
 import { fetchEventMetadata } from '../../shared/envio/ipfs';
 import { getConfig } from '../../shared/config';
+import { useSession } from '../../shared/session';
+import { useKycLevel } from '../me/useKycLevel';
 import { formatEventDate } from './useEvents';
 
 const CANCELLED = 'Cancelled';
@@ -31,6 +33,9 @@ export function EventDetail() {
   const copy = useCopy();
   const locale = useLocale();
   const { eventId = '' } = useParams();
+  // This screen is public, so the badge asks whether there is anybody to have a status first.
+  const signedIn = useSession().status === 'signedIn';
+  const { kycLevel } = useKycLevel();
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['event', eventId],
@@ -73,7 +78,7 @@ export function EventDetail() {
   return (
     <Screen title={metadata?.title || copy.discover.untitled}>
       {metadata?.image ? <img className="event-hero" src={metadata.image} alt="" /> : null}
-      {event.requireKyc ? <span className="badge">{copy.kyc.requiredBadge}</span> : null}
+      <KycBadge required={event.requireKyc} level={kycLevel} signedIn={signedIn} />
       {metadata?.description ? <p>{metadata.description}</p> : null}
       <p className="muted">{formatEventDate(event.startsAt, locale)}</p>
       {metadata?.venue ? (

@@ -86,7 +86,7 @@ describe('Discover', () => {
     renderDiscover();
     expect(await screen.findByText('재즈 나이트')).toBeInTheDocument();
     expect(screen.getByText('개발자 모임')).toBeInTheDocument();
-    expect(screen.getAllByText('KYC 필요')).toHaveLength(1);
+    expect(screen.getAllByText('본인인증 필수')).toHaveLength(1);
     expect(screen.getByRole('link', { name: /재즈 나이트/ })).toHaveAttribute('href', '/events/1');
   });
 
@@ -96,7 +96,7 @@ describe('Discover', () => {
     await userEvent.type(screen.getByPlaceholderText('행사 이름 검색'), '개발자');
     expect(screen.queryByText('재즈 나이트')).toBeNull();
     expect(screen.getByText('개발자 모임')).toBeInTheDocument();
-    expect(screen.queryByText('KYC 필요')).toBeNull();
+    expect(screen.queryByText('본인인증 필수')).toBeNull();
   });
 
   it('narrows by date, region and theme', async () => {
@@ -213,7 +213,7 @@ describe('EventDetail', () => {
     expect(screen.getByText('한남동의 밤')).toBeInTheDocument();
     expect(screen.getByText('일반')).toBeInTheDocument();
     expect(screen.getByText('60자리 남음')).toBeInTheDocument();
-    expect(screen.getByText('KYC 필요')).toBeInTheDocument();
+    expect(screen.getByText('본인인증 필수')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '티켓 받기' })).toHaveAttribute('href', '/claim/1');
   });
 

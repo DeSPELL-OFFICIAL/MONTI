@@ -189,7 +189,7 @@ describe('KycStatus', () => {
 
   it('shows the verified state with nothing left to do', async () => {
     wrap(<KycStatus />);
-    expect(await screen.findByText(ko.kyc.verified)).toBeInTheDocument();
+    expect(await screen.findByText(ko.kyc.mineVerified)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: ko.kyc.cta })).not.toBeInTheDocument();
   });
 });
