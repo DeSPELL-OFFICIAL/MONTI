@@ -84,6 +84,7 @@ export const en: typeof ko = {
     failed: 'Could not get the ticket. Please try again shortly.',
     confirming: 'Still confirming. Your ticket will show up under My tickets shortly.',
     limitReached: 'You already have every ticket this event allows.',
+    soldOut: 'This type is sold out. Please pick another one.',
   },
   transfer: {
     title: 'Hand over', byNickname: 'Nickname', byAddress: 'Address', byPhone: 'Phone',
