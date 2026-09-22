@@ -47,6 +47,17 @@ export const CID_RE = /^baf[ky][a-z2-7]{55}$/;
 
 /** 선택 칸 하나의 상한. 탐색 화면의 한 줄에 들어갈 만큼만 받는다. */
 export const MAX_META_FIELD_CHARS = 200;
+/** 제목의 상한. 씬 1 의 제목 칸과 같은 60자다(초안은 클라이언트가 같은 값으로 막는다). */
+export const MAX_NAME_CHARS = 60;
+/** 소개글의 상한. 지금까지 길이 검사가 없어 IPFS 에 무한정 긴 글이 올라갈 수 있었다. */
+export const MAX_DESCRIPTION_CHARS = 2000;
+/** 자유 태그. 탐색 카드에 두 개, 상세에 전부 그린다(계획 B-2). */
+export const MAX_TAGS = 5;
+export const MAX_TAG_CHARS = 12;
+
+/** C0·DEL·C1 제어문자. 화면·로그·CSV 를 한 번에 망가뜨리므로 태그에 들어올 이유가 없다. */
+const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/;
+
 /** 분류의 상한. 체인의 `EventMeta.category` 가 `uint8` 이라 정본이 0–255 다(`transferInvites.ts` 의 ABI 조각). */
 const MAX_CATEGORY = 255;
 /** 숫자 문자열만 받는 모양. `Number('')`·`Number('0x10')` 이 조용히 숫자가 되는 것을 여기서 막는다. */
@@ -65,6 +76,9 @@ interface EventMetaInput {
   venue?: string;
   category?: number;
   region?: string;
+  tags?: string[];
+  venueHidden: boolean;
+  timeHidden: boolean;
 }
 
 /**
@@ -142,6 +156,42 @@ function optionalCategory(value: unknown): number | undefined {
   return parsed;
 }
 
+/**
+ * 공개 범위 깃발. 없으면 **공개**다 — 숨김은 언제나 주최자가 명시적으로 켠 것이어야지
+ * 빠진 칸이 우연히 숨김이 되어서는 안 된다.
+ */
+function optionalFlag(value: unknown): boolean {
+  if (value === undefined) return false;
+  if (typeof value !== 'boolean') throw new HttpsError('invalid-argument', 'BAD_META');
+  return value;
+}
+
+/**
+ * 자유 태그. 클라이언트와 **같은 규칙**을 서버에서 다시 건다(계획 B-2):
+ * trim → 앞의 `#` 제거 → 빈 값·중복 제거 → 각 ≤ 12자 → 최대 5개.
+ * 규칙을 어긴 태그는 조용히 버리지 않고 요청 전체를 거절한다 — 주최자가 적은 것과
+ * 관객이 보는 것이 달라지는 쪽이 더 나쁘고, IPFS 는 고쳐 올릴 수 없다.
+ * 길이는 **코드 포인트**로 센다. `'가'.length` 는 1 이지만 이모지는 2 다.
+ */
+function optionalTags(value: unknown): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > MAX_TAGS) {
+    throw new HttpsError('invalid-argument', 'BAD_TAGS');
+  }
+
+  const tags: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'string') throw new HttpsError('invalid-argument', 'BAD_TAGS');
+    const tag = entry.trim().replace(/^#+/, '').trim();
+    if (tag.length === 0) continue;
+    if ([...tag].length > MAX_TAG_CHARS || CONTROL_CHARS.test(tag)) {
+      throw new HttpsError('invalid-argument', 'BAD_TAGS');
+    }
+    if (!tags.includes(tag)) tags.push(tag);
+  }
+  return tags.length === 0 ? undefined : tags;
+}
+
 /** 포스터의 CID. `pinEventImage` 가 돌려준 값 그대로여야 한다. */
 function requireCid(value: unknown): string {
   if (typeof value !== 'string' || !CID_RE.test(value)) {
@@ -154,16 +204,28 @@ function requireMeta(value: unknown): EventMetaInput {
   const meta = value as Record<string, unknown> | undefined;
   if (typeof meta !== 'object' || meta === null) throw new HttpsError('invalid-argument', 'BAD_META');
   const { name, description } = meta;
-  if (typeof name !== 'string' || name.trim().length === 0 || typeof description !== 'string') {
+  if (typeof name !== 'string' || typeof description !== 'string') {
+    throw new HttpsError('invalid-argument', 'BAD_META');
+  }
+  // 길이는 **코드 포인트**로 센다. `'가'.length` 는 1 이지만 이모지는 2 다.
+  const trimmedName = name.trim();
+  const nameChars = [...trimmedName].length;
+  if (nameChars === 0 || nameChars > MAX_NAME_CHARS) {
+    throw new HttpsError('invalid-argument', 'BAD_META');
+  }
+  if ([...description].length > MAX_DESCRIPTION_CHARS) {
     throw new HttpsError('invalid-argument', 'BAD_META');
   }
   return {
-    name,
+    name: trimmedName,
     description,
     imageCid: requireCid(meta.imageCid),
     venue: optionalMetaField(meta.venue),
     category: optionalCategory(meta.category),
     region: optionalMetaField(meta.region),
+    tags: optionalTags(meta.tags),
+    venueHidden: optionalFlag(meta.venueHidden),
+    timeHidden: optionalFlag(meta.timeHidden),
   };
 }
 
@@ -336,6 +398,11 @@ export const pinEventImage = onCall(
  * 체인에는 제목·소개글의 해시만 올라가므로(`Ticket.EventMeta`), 탐색 화면이 평문 제목과 그림을
  * 보여주려면 공개된 JSON 이 어딘가 있어야 한다. 포스터는 이미 `pinEventImage` 로 올라가 있고,
  * 여기서는 그 CID 를 가리키는 JSON 하나만 고정한다.
+ *
+ * **비공개 장소는 여기 들어오지 않는다.** `venueHidden` 이 참이면 `venue` 키가 **통째로 빠지고**
+ * 진짜 값은 `eventPrivate/{eventId}` 에만 있다(계획 B-1). IPFS 에 한 번 실어 보낸 장소는
+ * 지울 수 없고, 공개 뒤에는 `updateEventMeta` 도 막히므로(`Ticket.sol:235`) 되돌릴 길이 없다.
+ * 시각은 이 JSON 에 애초에 없다 — `timeHidden` 은 화면의 표시 규칙일 뿐이다(계획 B-1).
  */
 export const pinEventMetadata = onCall(
   { secrets: [PINATA_JWT], timeoutSeconds: 120 },
@@ -355,9 +422,12 @@ export const pinEventMetadata = onCall(
       name: meta.name,
       description: meta.description,
       image: `ipfs://${meta.imageCid}`,
-      ...(meta.venue !== undefined && { venue: meta.venue }),
+      ...(!meta.venueHidden && meta.venue !== undefined && { venue: meta.venue }),
       ...(meta.category !== undefined && { category: meta.category }),
       ...(meta.region !== undefined && { region: meta.region }),
+      ...(meta.tags !== undefined && { tags: meta.tags }),
+      ...(meta.venueHidden && { venueHidden: true }),
+      ...(meta.timeHidden && { timeHidden: true }),
     };
     const metadataCid = await pinToPinata(
       new File([JSON.stringify(metadata)], 'metadata.json', { type: 'application/json' }),

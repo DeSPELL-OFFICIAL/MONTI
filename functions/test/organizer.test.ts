@@ -84,7 +84,14 @@ function uploadCall(index: number) {
   };
 }
 
-const { MAX_META_FIELD_CHARS, pinEventMetadata } = await import('../src/functions/organizer.js');
+const {
+  MAX_DESCRIPTION_CHARS,
+  MAX_META_FIELD_CHARS,
+  MAX_NAME_CHARS,
+  MAX_TAGS,
+  MAX_TAG_CHARS,
+  pinEventMetadata,
+} = await import('../src/functions/organizer.js');
 const functionsTest = (await import('firebase-functions-test')).default();
 
 const pin = functionsTest.wrap(pinEventMetadata);
@@ -331,5 +338,129 @@ describe('pinEventMetadata', () => {
     fetchMock.mockReset();
     fetchMock.mockResolvedValue(pinataReply('QmPK1s3pNYLi9ERiq3BDxKa4XosgWwFRQUydHUtz4YgpqB'));
     await expect(pin({ data: pinRequest(), auth: ownerAuth } as never)).rejects.toThrow('BAD_PINATA_CID');
+  });
+});
+
+/**
+ * 핀된 JSON 을 그대로 돌려준다 — 테스트가 보는 것은 언제나 관객이 받게 될 바로 그 바이트다.
+ * **마지막** 업로드를 읽는다. 한 테스트가 두 번 핀하면 0번은 앞선 호출의 것이라,
+ * 0번을 읽는 헬퍼는 두 번째 단언을 조용히 첫 번째 결과로 통과시킨다.
+ */
+async function pinnedJson(overrides: Record<string, unknown>): Promise<Record<string, unknown>> {
+  await pin({ data: pinRequest({ meta: { ...META, ...overrides } }), auth: ownerAuth } as never);
+  return JSON.parse(await uploadCall(fetchMock.mock.calls.length - 1).file.text()) as Record<
+    string,
+    unknown
+  >;
+}
+
+describe('pinEventMetadata — tags', () => {
+  it('pins tags trimmed, unhashed, de-duplicated and in the order they were given', async () => {
+    const metadata = await pinnedJson({ tags: ['  #모나드 ', '해커톤', '모나드', '  ', '#NFT'] });
+    expect(metadata.tags).toEqual(['모나드', '해커톤', 'NFT']);
+  });
+
+  it('takes five tags of twelve code points each', async () => {
+    const tag = '가'.repeat(MAX_TAG_CHARS);
+    const tags = Array.from({ length: MAX_TAGS }, (_value, at) => `${tag.slice(1)}${at}`);
+    const metadata = await pinnedJson({ tags });
+    expect(metadata.tags).toEqual(tags);
+  });
+
+  it('leaves the tags key out entirely when there is nothing to say', async () => {
+    // 관람객 화면은 **없는 칸**을 기본값으로 채운다. 빈 배열을 실어 보낼 이유가 없다.
+    expect('tags' in (await pinnedJson({}))).toBe(false);
+    expect('tags' in (await pinnedJson({ tags: [] }))).toBe(false);
+    expect('tags' in (await pinnedJson({ tags: ['  ', '#', '##'] }))).toBe(false);
+  });
+
+  /**
+   * 규칙을 어긴 태그를 조용히 버리지 않는다. IPFS 는 고쳐 올릴 수 없고 공개 뒤에는
+   * `updateEventMeta` 도 막히므로(`Ticket.sol:235`), 주최자가 적은 것과 관객이 보는 것이
+   * 달라진 채로 굳어 버리는 쪽이 거절보다 나쁘다.
+   */
+  it('refuses the whole request rather than dropping a tag that breaks the rules', async () => {
+    fetchMock.mockReset();
+    for (const tags of [
+      Array.from({ length: MAX_TAGS + 1 }, (_value, at) => `t${at}`),
+      ['가'.repeat(MAX_TAG_CHARS + 1)],
+      ['🎉'.repeat(MAX_TAG_CHARS + 1)],
+      ['해\u0000커톤'],
+      ['ok', 7],
+      'not-a-list',
+      { 0: 'ok' },
+    ]) {
+      await expect(pinnedJson({ tags })).rejects.toThrow('BAD_TAGS');
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('counts a tag in code points, so twelve emoji still fit', async () => {
+    const metadata = await pinnedJson({ tags: ['🎉'.repeat(MAX_TAG_CHARS)] });
+    expect(metadata.tags).toEqual(['🎉'.repeat(MAX_TAG_CHARS)]);
+  });
+});
+
+describe('pinEventMetadata — hidden venue and time', () => {
+  /**
+   * 비공개 장소의 핵심 단언. 진짜 값은 `eventPrivate/{eventId}` 에만 있고, 공개 JSON 에는
+   * **키째로** 없어야 한다 — IPFS 는 지울 수 없으므로 한 번 실어 보내면 되돌릴 길이 없다.
+   */
+  it('never carries venue in the JSON when venueHidden is on, even though one was given', async () => {
+    const metadata = await pinnedJson({ venue: '올림픽공원 K-아트홀', venueHidden: true });
+    expect('venue' in metadata).toBe(false);
+    expect(JSON.stringify(metadata)).not.toContain('올림픽공원');
+    expect(metadata.venueHidden).toBe(true);
+  });
+
+  it('keeps venue when the flag is off or absent', async () => {
+    expect((await pinnedJson({ venue: '홍대 앞', venueHidden: false })).venue).toBe('홍대 앞');
+    expect((await pinnedJson({ venue: '홍대 앞' })).venue).toBe('홍대 앞');
+  });
+
+  it('pins timeHidden on its own — the times themselves were never in this JSON', async () => {
+    const metadata = await pinnedJson({ timeHidden: true });
+    expect(metadata.timeHidden).toBe(true);
+    expect(Object.keys(metadata).sort()).toEqual(['description', 'image', 'name', 'timeHidden']);
+  });
+
+  it('leaves both flags out when they are off, so a false never has to be stored', async () => {
+    const metadata = await pinnedJson({ venueHidden: false, timeHidden: false });
+    expect('venueHidden' in metadata).toBe(false);
+    expect('timeHidden' in metadata).toBe(false);
+  });
+
+  it('refuses anything but a boolean for either flag', async () => {
+    fetchMock.mockReset();
+    for (const meta of [
+      { venueHidden: 'true' },
+      { venueHidden: 1 },
+      { timeHidden: 'yes' },
+      { timeHidden: null },
+    ]) {
+      await expect(pinnedJson(meta)).rejects.toThrow('BAD_META');
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('pinEventMetadata — title and description limits', () => {
+  it('takes a 60 code point title and pins it trimmed', async () => {
+    const title = '가'.repeat(MAX_NAME_CHARS);
+    expect((await pinnedJson({ name: `  ${title}  ` })).name).toBe(title);
+    expect((await pinnedJson({ name: '🎉'.repeat(MAX_NAME_CHARS) })).name).toBe(
+      '🎉'.repeat(MAX_NAME_CHARS),
+    );
+  });
+
+  it('takes a 2,000 code point description and refuses a longer one', async () => {
+    const description = '가'.repeat(MAX_DESCRIPTION_CHARS);
+    expect((await pinnedJson({ description })).description).toBe(description);
+
+    fetchMock.mockReset();
+    await expect(pinnedJson({ description: `${description}가` })).rejects.toThrow('BAD_META');
+    await expect(pinnedJson({ name: '가'.repeat(MAX_NAME_CHARS + 1) })).rejects.toThrow('BAD_META');
+    await expect(pinnedJson({ name: '   ' })).rejects.toThrow('BAD_META');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
