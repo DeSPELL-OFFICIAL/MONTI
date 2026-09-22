@@ -220,3 +220,23 @@ describe('pendingGates', () => {
     );
   });
 });
+
+describe('diditEvents', () => {
+  const EVENT = 'evt-1';
+
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (context) => {
+      await context.firestore().doc(`diditEvents/${EVENT}`).set({ sessionId: 's1', status: 'Approved' });
+    });
+  });
+
+  // Didit 웹훅의 중복 방지 장부. 여기에 쓸 수 있으면 아직 오지 않은 event_id 를 미리 찍어
+  // 진짜 배달을 "이미 처리됨"으로 삼키게 만들 수 있고, 읽으면 남의 본인인증 진행이 보인다.
+  it('blocks the client from reading the ledger or stamping an event of its own', async () => {
+    const db = owner();
+    await assertFails(db.doc(`diditEvents/${EVENT}`).get());
+    await assertFails(db.collection('diditEvents').get());
+    await assertFails(db.doc(`diditEvents/${EVENT}`).delete());
+    await assertFails(db.doc('diditEvents/evt-2').set({ sessionId: 's2', status: 'Approved' }));
+  });
+});

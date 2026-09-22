@@ -60,6 +60,7 @@ const PORTRAIT = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ==';
 const TOUCHED = [
   'authChallenges',
   'devices',
+  'diditEvents',
   'kycSessions',
   'passkeys',
   'persons',
@@ -115,6 +116,7 @@ const functionsTest = (await import('firebase-functions-test')).default({
 const { db, authAdmin, AUTH_CHALLENGES, DEVICES, KYC_SESSIONS, PASSKEYS, PERSONS, PHONE_INDEX, SYSTEM, USERS } =
   await import('../../src/lib/db.js');
 const { decryptField, piiAad } = await import('../../src/lib/kms.js');
+const { canonicalDiditJson } = await import('../../src/lib/didit.js');
 const { hmacPhone } = await import('../../src/lib/phoneIndex.js');
 const { startSignup } = await import('../../src/functions/startSignup.js');
 const { registerPasskey } = await import('../../src/functions/registerPasskey.js');
@@ -229,7 +231,10 @@ async function deliver(body: unknown): Promise<FakeRes> {
   const timestamp = Math.floor(Date.now() / 1000);
   const headers: Record<string, string> = {
     'content-type': 'application/json',
-    'x-signature-v2': createHmac('sha256', WEBHOOK_SECRET).update(raw, 'utf8').digest('hex'),
+    // Didit 이 권하는 V2: **정규화 JSON** 에 대한 HMAC. 보내는 바이트가 아니라 값이 서명 대상이다.
+    'x-signature-v2': createHmac('sha256', WEBHOOK_SECRET)
+      .update(canonicalDiditJson(JSON.parse(raw)), 'utf8')
+      .digest('hex'),
     'x-timestamp': String(timestamp),
   };
   const req = {
@@ -246,6 +251,9 @@ async function deliver(body: unknown): Promise<FakeRes> {
 
 function approvedBody(personId: Hex): unknown {
   return {
+    // 진짜 Firestore 위에서 `diditEvents/{event_id}` first-wins 도장까지 돈다.
+    event_id: 'int-event-1',
+    webhook_type: 'status.updated',
     session_id: SESSION_ID,
     status: 'Approved',
     vendor_data: personId,
@@ -331,6 +339,8 @@ describe('signup chain on the Firestore + Auth emulators', () => {
     await expect(deliver(approvedBody(personId))).rejects.toThrow('BAD_STATUS_TRANSITION:pending->kyc_ok');
 
     expect((await db.collection(KYC_SESSIONS).get()).size).toBe(0);
+    // `event_id` 도장도 반납됐다 — 그대로 두면 Didit 의 재배달이 "이미 처리됨"으로 삼켜진다.
+    expect((await db.collection('diditEvents').get()).size).toBe(0);
     const person = await db.collection(PERSONS).doc(personId).get();
     expect(person.get('status')).toBe('pending');
     expect(person.get('kycLevel')).toBe(0);

@@ -6,7 +6,7 @@ import { identityAbi, organizersAbi, ticketAbi, type Hex } from '@monti/shared';
  * Tenderly 웹훅 서명. 문서대로 **본문 바이트 + `Date` 헤더**를 이어 붙인 것에 대한
  * HMAC-SHA256 이다. 본문은 파싱 전의 원본(`req.rawBody`)이어야 한다 —
  * JSON.parse → JSON.stringify 를 거치면 키 순서·공백이 달라져 같은 본문도 서명이 깨진다.
- * 비교는 `timingSafeEqual` 로만 한다(`verifyDiditSignature` 와 같은 규칙).
+ * 비교는 `timingSafeEqual` 로만 한다(`verifyDiditWebhook` 과 같은 규칙).
  */
 export function verifyTenderlySignature(input: {
   raw: string;

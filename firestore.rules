@@ -81,6 +81,14 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Didit 웹훅의 `event_id` 중복 방지 장부. 서버(`diditWebhook`)만 쓰고 아무도 읽지 않는다.
+    // 아래 포괄 거부가 이미 막지만, 여기에 쓸 수 있으면 아직 오지 않은 event_id 를 미리 찍어
+    // 진짜 배달을 "이미 처리됨"으로 삼키게 만들 수 있다 — 명시해 둔다.
+    // `expireAt`(Timestamp) 에 TTL 정책을 건다(콘솔/`gcloud firestore fields ttls update`).
+    match /diditEvents/{eventId} {
+      allow read, write: if false;
+    }
+
     // persons, passkeys, kycSessions, invites, phoneIndex, transferInvites, authChallenges 포함 전부 거부.
     match /{document=**} {
       allow read, write: if false;

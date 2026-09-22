@@ -14,6 +14,12 @@ export const PASSKEYS = 'passkeys';
 export const DEVICES = 'devices';
 export const INVITES = 'invites';
 export const KYC_SESSIONS = 'kycSessions';
+/**
+ * Didit 웹훅의 `event_id` 도장. 문서가 이미 있으면 그 배달은 재배달이다(first-wins).
+ * 서버 전용이고, `expireAt`(Timestamp) 에 Firestore TTL 정책을 걸어 7일 뒤 스스로 지워진다 —
+ * 이 컬렉션은 **읽을 일이 없고** 무한히 자라면 안 되는 중복 방지 장부일 뿐이다.
+ */
+export const DIDIT_EVENTS = 'diditEvents';
 export const AUTH_CHALLENGES = 'authChallenges';
 export const PHONE_INDEX = 'phoneIndex';
 export const TRANSFER_INVITES = 'transferInvites';
@@ -34,6 +40,7 @@ export const ALLOWED_COLLECTIONS = [
   DEVICES,
   INVITES,
   KYC_SESSIONS,
+  DIDIT_EVENTS,
   AUTH_CHALLENGES,
   PHONE_INDEX,
   TRANSFER_INVITES,

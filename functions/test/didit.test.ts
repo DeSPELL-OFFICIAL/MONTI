@@ -1,27 +1,178 @@
 import { createHmac } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { declineReason, redactDiditPayload, verifyDiditSignature } from '../src/lib/didit.js';
+import {
+  canonicalDiditJson,
+  declineReason,
+  declineReasonFromDecision,
+  diditIdVerification,
+  faceSearchClear,
+  faceSearchStatus,
+  redactDiditPayload,
+  redactRawBody,
+  verifyDiditWebhook,
+} from '../src/lib/didit.js';
 
 const SECRET = 'whsec-monti';
-const RAW = '{"session_id":"s1","status":"Approved","vendor_data":"0xaa"}';
 const NOW = 1_789_862_400;
-const SIG = createHmac('sha256', SECRET).update(RAW, 'utf8').digest('hex');
 
-describe('verifyDiditSignature', () => {
-  it('accepts a correct signature inside the 300 s window', () => {
-    expect(verifyDiditSignature({ raw: RAW, signature: SIG, timestamp: NOW, secret: SECRET, now: NOW })).toBe(true);
-    expect(verifyDiditSignature({ raw: RAW, signature: SIG, timestamp: NOW - 299, secret: SECRET, now: NOW })).toBe(true);
+// ─────────────────────────────────────────────────────────────────────────────
+// V2 정규화 JSON — 손으로 계산한 벡터 하나가 이 정의 전체를 못 박는다
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('canonicalDiditJson', () => {
+  it('sorts keys recursively, keeps array order, keeps Unicode and uses compact separators', () => {
+    // 손으로 계산한 기대값: 최상위는 a,b,c 순, `c` 안은 y,z 순, `[3,1]` 은 **그대로**,
+    // `é` 는 `\uXXXX` 가 아니라 글자 그대로, 구분자는 `,` 와 `:` 뿐(공백 없음).
+    const canonical = canonicalDiditJson({ b: 1, c: { z: true, y: [3, 1] }, a: 'héllo' });
+    expect(canonical).toBe('{"a":"héllo","b":1,"c":{"y":[3,1],"z":true}}');
+    expect(canonical).not.toContain('\\u');
+    expect(canonical).not.toContain(', ');
+    expect(canonical).not.toContain(': ');
   });
 
-  it('rejects a stale or future timestamp', () => {
-    expect(verifyDiditSignature({ raw: RAW, signature: SIG, timestamp: NOW - 301, secret: SECRET, now: NOW })).toBe(false);
-    expect(verifyDiditSignature({ raw: RAW, signature: SIG, timestamp: NOW + 301, secret: SECRET, now: NOW })).toBe(false);
+  it('keeps Korean text as Korean — a \\uXXXX escape would break every signature we get', () => {
+    expect(canonicalDiditJson({ status: 'Approved', name: '홍길동' })).toBe(
+      '{"name":"홍길동","status":"Approved"}',
+    );
   });
 
-  it('rejects a wrong signature, a wrong body and a wrong secret', () => {
-    expect(verifyDiditSignature({ raw: RAW, signature: 'deadbeef', timestamp: NOW, secret: SECRET, now: NOW })).toBe(false);
-    expect(verifyDiditSignature({ raw: `${RAW} `, signature: SIG, timestamp: NOW, secret: SECRET, now: NOW })).toBe(false);
-    expect(verifyDiditSignature({ raw: RAW, signature: SIG, timestamp: NOW, secret: 'other', now: NOW })).toBe(false);
+  it('is a pure function of the value, not of the bytes it arrived in', () => {
+    const spaced = '{ "b" : 1 ,\n "a" : { "d" : 2, "c" : 3 } }';
+    const tight = '{"a":{"c":3,"d":2},"b":1}';
+    expect(canonicalDiditJson(JSON.parse(spaced))).toBe(canonicalDiditJson(JSON.parse(tight)));
+    expect(canonicalDiditJson(JSON.parse(spaced))).toBe(tight);
+  });
+
+  it('matches the HMAC vector pinned for this secret', () => {
+    // 위 정규화 문자열에 대한 HMAC-SHA256. 정규화가 한 글자라도 달라지면 이 값이 깨진다.
+    expect(createHmac('sha256', SECRET).update('{"a":"héllo","b":1,"c":{"y":[3,1],"z":true}}', 'utf8').digest('hex')).toBe(
+      '4f183d1ba5684d9839ff99df92ed028b5e2b02e352c1260823744341a3eed9aa',
+    );
+    expect(createHmac('sha256', SECRET).update('{"name":"홍길동","status":"Approved"}', 'utf8').digest('hex')).toBe(
+      '66478facea2203621b68eec9b586ae46baf11f5915d3f3543759f3aaf4f1b6fd',
+    );
+  });
+});
+
+describe('verifyDiditWebhook', () => {
+  const RAW_V3 = '{ "status" : "Approved" ,\n  "session_id" : "s1" }';
+  const CANONICAL = canonicalDiditJson(JSON.parse(RAW_V3));
+  const sign = (message: string, secret = SECRET): string =>
+    createHmac('sha256', secret).update(message, 'utf8').digest('hex');
+
+  it('accepts X-Signature-V2 over the canonical JSON', () => {
+    const result = verifyDiditWebhook({
+      raw: RAW_V3, v2: sign(CANONICAL), timestamp: NOW, secret: SECRET, now: NOW,
+    });
+    expect(result).toMatchObject({ ok: true, scheme: 'v2', authenticated: true });
+    // 원본 바이트로 서명한 값은 V2 헤더에서 통하지 않는다.
+    expect(verifyDiditWebhook({ raw: RAW_V3, v2: sign(RAW_V3), timestamp: NOW, secret: SECRET, now: NOW })).toEqual({
+      ok: false, code: 'signature_mismatch',
+    });
+  });
+
+  it('accepts X-Signature over the exact raw bytes', () => {
+    expect(
+      verifyDiditWebhook({ raw: RAW_V3, rawSignature: sign(RAW_V3), timestamp: NOW, secret: SECRET, now: NOW }),
+    ).toMatchObject({ ok: true, scheme: 'raw', authenticated: true });
+  });
+
+  it('accepts X-Signature-Simple only when neither other header is present, and never as authenticated', () => {
+    const raw = '{"session_id":"s1","status":"Approved","webhook_type":"status.updated"}';
+    const simple = sign(`${NOW}:s1:Approved:status.updated`);
+
+    const alone = verifyDiditWebhook({ raw, simple, timestamp: NOW, secret: SECRET, now: NOW });
+    expect(alone).toMatchObject({ ok: true, scheme: 'simple' });
+    // 결정을 인증하지 않는다 — 핸들러는 이 값을 보고 사람 문서를 건드리지 않는다.
+    expect(alone.ok && alone.authenticated).toBe(false);
+
+    // 강한 서명이 붙어 있는데 틀렸다면 그것은 위조다. 약한 서명으로 갈아타 통과시키지 않는다.
+    expect(verifyDiditWebhook({ raw, simple, v2: 'deadbeef', timestamp: NOW, secret: SECRET, now: NOW })).toEqual({
+      ok: false, code: 'signature_mismatch',
+    });
+    expect(
+      verifyDiditWebhook({ raw, simple, rawSignature: 'deadbeef', timestamp: NOW, secret: SECRET, now: NOW }),
+    ).toEqual({ ok: false, code: 'signature_mismatch' });
+  });
+
+  it('refuses a stale, a future, a missing and a zero timestamp with one clear code', () => {
+    const v2 = sign(CANONICAL);
+    for (const timestamp of [NOW - 301, NOW + 301, 0, Number.NaN]) {
+      expect(verifyDiditWebhook({ raw: RAW_V3, v2, timestamp, secret: SECRET, now: NOW })).toEqual({
+        ok: false, code: 'timestamp_out_of_window',
+      });
+    }
+    // 창 안이면 통과한다 — 300 초는 경계 포함이다.
+    expect(verifyDiditWebhook({ raw: RAW_V3, v2, timestamp: NOW - 300, secret: SECRET, now: NOW })).toMatchObject({
+      ok: true,
+    });
+  });
+
+  it('refuses a body with no signature header at all', () => {
+    expect(verifyDiditWebhook({ raw: RAW_V3, timestamp: NOW, secret: SECRET, now: NOW })).toEqual({
+      ok: false, code: 'no_signature',
+    });
+  });
+
+  it('refuses a signature made with another secret', () => {
+    expect(
+      verifyDiditWebhook({ raw: RAW_V3, v2: sign(CANONICAL, 'other'), timestamp: NOW, secret: SECRET, now: NOW }),
+    ).toEqual({ ok: false, code: 'signature_mismatch' });
+  });
+});
+
+describe('redactRawBody', () => {
+  it('drops the portrait base64 and every known PII value, and caps the length', () => {
+    const portrait = 'A'.repeat(4096);
+    const redacted = redactRawBody(
+      `{"session_id":"s1","decision":{"id_verifications":[{"first_name":"길동","portrait_image":"${portrait}"}]}}`,
+    );
+    expect(redacted).not.toContain(portrait.slice(0, 64));
+    expect(redacted).not.toContain('길동');
+    expect(redacted).toContain('"session_id":"s1"');
+    expect(redacted.length).toBeLessThanOrEqual(2100);
+  });
+
+  it('works on a body that is not JSON at all — that is often why the signature failed', () => {
+    expect(redactRawBody('not json')).toBe('not json');
+  });
+});
+
+describe('the V3 decision arrays', () => {
+  it('reads the id verification from id_verifications[0] and falls back to the singular key', () => {
+    expect(diditIdVerification({ id_verifications: [{ node_id: 'n1', first_name: '길동' }] })?.first_name).toBe('길동');
+    expect(diditIdVerification({ id_verification: { first_name: '단수' } })?.first_name).toBe('단수');
+    expect(diditIdVerification({})).toBeUndefined();
+  });
+
+  it('folds face_matches[0] onto the same clear/duplicate signal as the legacy face_search', () => {
+    expect(faceSearchStatus({ face_search: { status: 'clear' } })).toBe('clear');
+    expect(faceSearchStatus({ face_matches: [{ node_id: 'n2', status: 'Approved' }] })).toBe('clear');
+    expect(faceSearchStatus({ face_matches: [{ status: 'Declined' }] })).toBe('declined');
+    expect(faceSearchStatus({})).toBeNull();
+
+    expect(faceSearchClear({ face_matches: [{ status: 'Approved' }] })).toBe(true);
+    expect(faceSearchClear({})).toBe(false);
+  });
+
+  it('maps a duplicate-face warning on any array to duplicate_face', () => {
+    for (const key of ['face_matches', 'aml_screenings', 'id_verifications']) {
+      const decision = {
+        face_matches: [{ status: 'Approved' }],
+        [key]: [{ node_id: 'n3', warnings: [{ risk: 'DUPLICATE_FACE', short_description: 'Same face' }] }],
+      };
+      expect(declineReasonFromDecision('Approved', decision)).toBe('duplicate_face');
+      // 경고가 있으면 얼굴 신호가 깨끗해도 승인하지 않는다(fail-closed).
+      expect(faceSearchClear(decision)).toBe(false);
+    }
+  });
+
+  it('keeps the other three codes when there is no duplicate warning', () => {
+    expect(declineReasonFromDecision('Declined', { id_verifications: [{ status: 'Declined' }] })).toBe('declined');
+    expect(declineReasonFromDecision('Approved', {})).toBe('face_search_missing');
+    expect(declineReasonFromDecision('Approved', { face_matches: [{ status: 'In Review' }] })).toBe(
+      'face_search_not_clear',
+    );
   });
 });
 
@@ -155,12 +306,24 @@ function write(path: string, data: Record<string, unknown>, options?: { merge?: 
   docs.set(path, options?.merge ? mergeInto(docs.get(path) ?? {}, data) : { ...data });
 }
 
+/** Firestore 의 `create()` 는 문서가 이미 있으면 ALREADY_EXISTS(6) 으로 던진다. `event_id` 도장이 그것에 기댄다. */
+class AlreadyExists extends Error {
+  readonly code = 6;
+}
+
 function docRef(path: string) {
   return {
     path,
     id: path.slice(path.indexOf('/') + 1),
     get: async () => snapshot(path),
     set: async (data: Record<string, unknown>, options?: { merge?: boolean }) => write(path, data, options),
+    create: async (data: Record<string, unknown>) => {
+      if (docs.has(path)) throw new AlreadyExists(path);
+      write(path, data);
+    },
+    delete: async () => {
+      docs.delete(path);
+    },
   };
 }
 
@@ -207,6 +370,15 @@ vi.mock('../src/lib/chain.js', () => ({
 
 vi.mock('@google-cloud/kms', async () => await import('./helpers/fakeKms.js'));
 
+/**
+ * 구조화 로그를 가로챈다. firebase-functions 의 logger 는 모듈이 로드될 때 콘솔을 붙잡아 두므로
+ * (`UNPATCHED_CONSOLE`) 나중에 `console.warn` 을 감시해도 잡히지 않는다 — 모듈째 바꾼다.
+ */
+const logged = vi.hoisted(() => ({
+  debug: vi.fn(), log: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), write: vi.fn(),
+}));
+vi.mock('firebase-functions/logger', () => logged);
+
 const { KYC_SESSIONS, PERSONS } = await import('../src/lib/db.js');
 const { decryptField, piiAad } = await import('../src/lib/kms.js');
 const { diditWebhook } = await import('../src/functions/diditWebhook.js');
@@ -217,18 +389,40 @@ interface Delivery {
   timestamp?: number;
   secret?: string;
   method?: string;
+  /**
+   * 어느 헤더로 서명을 보낼지. 기본은 Didit 이 권하는 `v2`(정규화 JSON) 다.
+   * `both` 는 V2 와 원본 바이트를 같이 보내고, `none` 은 서명 헤더를 아예 빼 본다.
+   */
+  scheme?: 'v2' | 'raw' | 'simple' | 'both' | 'none';
+}
+
+/** `X-Signature-V2` 가 덮는 문자열. 본문이 JSON 이 아니면 정규화할 수 없으므로 원본 그대로 쓴다. */
+function v2Message(raw: string): string {
+  try {
+    return canonicalDiditJson(JSON.parse(raw));
+  } catch {
+    return raw;
+  }
 }
 
 async function deliver(body: unknown, override: Delivery = {}): Promise<FakeRes> {
   const raw = override.raw ?? JSON.stringify(body);
   const timestamp = override.timestamp ?? Math.floor(Date.now() / 1000);
-  const signature =
-    override.signature ?? createHmac('sha256', override.secret ?? SECRET).update(raw, 'utf8').digest('hex');
+  const secret = override.secret ?? SECRET;
+  const scheme = override.scheme ?? 'v2';
+  const sign = (message: string): string => createHmac('sha256', secret).update(message, 'utf8').digest('hex');
   const headers: Record<string, string> = {
     'content-type': 'application/json',
-    'x-signature-v2': signature,
     'x-timestamp': String(timestamp),
   };
+  if (scheme === 'v2' || scheme === 'both') headers['x-signature-v2'] = override.signature ?? sign(v2Message(raw));
+  if (scheme === 'raw' || scheme === 'both') headers['x-signature'] = override.signature ?? sign(raw);
+  if (scheme === 'simple') {
+    const envelope = JSON.parse(raw) as { session_id?: string; status?: string; webhook_type?: string };
+    headers['x-signature-simple'] =
+      override.signature ??
+      sign(`${timestamp}:${envelope.session_id ?? ''}:${envelope.status ?? ''}:${envelope.webhook_type ?? ''}`);
+  }
   const req = {
     method: override.method ?? 'POST',
     headers,
@@ -263,6 +457,7 @@ beforeEach(() => {
   sendAttesterTx.mockClear();
   waitForTransactionReceipt.mockClear();
   awaitFinalized.mockClear();
+  for (const spy of Object.values(logged)) spy.mockClear();
   // register 가 finalized 된 사람만 본인인증을 올릴 수 있다(pending → kyc_ok 는 막혀 있다).
   write(`${PERSONS}/${PERSON}`, { status: 'active', kycLevel: 0 });
 });
@@ -305,12 +500,28 @@ describe('diditWebhook', () => {
     expect(sendAttesterTx).not.toHaveBeenCalled();
   });
 
-  it('signs the raw bytes, not the re-serialised JSON', async () => {
-    // 같은 객체라도 키 순서가 다르면 다른 바이트다. 서명은 받은 바이트 그대로에 대해서만 맞는다.
+  it('accepts X-Signature over the exact raw bytes as an alternative to V2', async () => {
+    // 같은 객체라도 키 순서·공백이 다르면 다른 바이트다. `X-Signature` 는 받은 바이트 그대로에 맞는다.
     const raw = `{ "status" : "Approved" ,\n  "session_id" : "s1" ,\n  "vendor_data" : "${PERSON}" }`;
     expect(JSON.stringify(JSON.parse(raw))).not.toBe(raw);
-    const res = await deliver(null, { raw, signature: createHmac('sha256', SECRET).update(raw, 'utf8').digest('hex') });
+    const res = await deliver(null, { raw, scheme: 'raw' });
     expect(res.statusCode).toBe(200);
+    expect(snapshot(`${PERSONS}/${PERSON}`).get('status')).toBe('rejected'); // face_search 가 없다
+  });
+
+  it('accepts V2 over the canonical JSON of the same bytes, whatever their order and spacing', async () => {
+    // V2 는 **정규화한 뒤** 서명하므로 키 순서와 공백이 달라도 같은 서명이 나온다.
+    const raw = `{ "status" : "Approved" ,\n  "session_id" : "s1" ,\n  "vendor_data" : "${PERSON}" }`;
+    const res = await deliver(null, { raw, scheme: 'v2' });
+    expect(res.statusCode).toBe(200);
+
+    // 원본 바이트로 서명한 값을 V2 헤더에 넣으면 이제 통하지 않는다 — 정의가 다르다.
+    const wrong = await deliver(null, {
+      raw,
+      scheme: 'v2',
+      signature: createHmac('sha256', SECRET).update(raw, 'utf8').digest('hex'),
+    });
+    expect(wrong.statusCode).toBe(401);
   });
 
   it('refuses a non-JSON body and a body without a usable vendor_data with 400', async () => {
@@ -592,5 +803,309 @@ describe('diditWebhook', () => {
     expect(JSON.stringify([...docs.entries()])).not.toContain(webp);
     // 이름·문서번호 봉투는 평소대로 들어간다.
     expect((person.get('enc') as Record<string, string>).name).toBeTruthy();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Didit 통합 규격 감사 — 감사표의 각 줄에 테스트 하나
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('diditWebhook — the Didit integration spec', () => {
+  const EVENTS = 'diditEvents';
+
+  function v3Body(overrides: Record<string, unknown> = {}) {
+    return {
+      event_id: 'evt-1',
+      session_id: 's1',
+      status: 'Approved',
+      webhook_type: 'status.updated',
+      created_at: 1_789_862_400,
+      timestamp: 1_789_862_400,
+      application_id: 'app-1',
+      workflow_id: 'wf-1',
+      workflow_version: 3,
+      vendor_data: PERSON,
+      metadata: { plan: 'demo' },
+      decision: {
+        session_id: 's1',
+        id_verifications: [
+          {
+            node_id: 'id-1',
+            status: 'Approved',
+            first_name: NAME_FIRST,
+            last_name: NAME_LAST,
+            document_number: DOC_NUMBER,
+            date_of_birth: '1990-01-01',
+            portrait_image: PORTRAIT,
+          },
+        ],
+        face_matches: [{ node_id: 'fm-1', status: 'Approved', score: 98.2 }],
+        liveness_checks: [{ node_id: 'lv-1', status: 'Approved' }],
+        aml_screenings: [{ node_id: 'aml-1', status: 'Approved', warnings: [] }],
+        ip_analyses: [{ node_id: 'ip-1', status: 'Approved' }],
+        reviews: [{ node_id: 'rv-1', status: 'Approved' }],
+      },
+      ...overrides,
+    };
+  }
+
+  // ── (5) webhook_type 분배 ──────────────────────────────────────────────────
+
+  it('acknowledges every non-session webhook_type with 200 and writes nothing', async () => {
+    for (const webhookType of [
+      'user.created',
+      'user.updated',
+      'business.created',
+      'business.updated',
+      'activity.created',
+      'transaction.completed',
+      'transaction.failed',
+    ]) {
+      const res = await deliver({ webhook_type: webhookType, event_id: `e-${webhookType}`, id: 'x' });
+      expect(res.statusCode).toBe(200);
+      expect(res.body).toBe('ignored');
+    }
+    // 4xx·5xx 로 답하면 Didit 의 재시도 큐가 계속 두드린다. 아무것도 쓰이지 않았다.
+    expect(docs.size).toBe(1);
+    expect(sendAttesterTx).not.toHaveBeenCalled();
+  });
+
+  it('still treats a body without webhook_type as a session event', async () => {
+    const res = await deliver(approvedBody());
+    expect(res.statusCode).toBe(200);
+    expect(snapshot(`${PERSONS}/${PERSON}`).get('kycLevel')).toBe(1);
+  });
+
+  // ── (7) event_id 멱등 ──────────────────────────────────────────────────────
+
+  it('swallows a replayed event_id before it reaches the session guard', async () => {
+    const first = await deliver(v3Body());
+    expect(first.statusCode).toBe(200);
+    expect(first.body).toBe('ok');
+    expect(snapshot(`${EVENTS}/evt-1`).exists).toBe(true);
+    expect(snapshot(`${EVENTS}/evt-1`).get('sessionId')).toBe('s1');
+    // TTL 정책이 보는 필드. 이 장부는 스스로 지워져야 한다.
+    expect(snapshot(`${EVENTS}/evt-1`).get('expireAt')).toBeDefined();
+
+    // 같은 이벤트가 다시 왔다. 세션 id 나 상태가 무엇이든 여기서 끝난다.
+    const replay = await deliver(v3Body({ session_id: 'other-session' }));
+    expect(replay.statusCode).toBe(200);
+    expect(replay.body).toBe('duplicate');
+    expect(snapshot(`${KYC_SESSIONS}/other-session`).exists).toBe(false);
+    expect(sendAttesterTx).toHaveBeenCalledTimes(1);
+  });
+
+  it('hands the event_id back when the delivery blows up, so the retry is not swallowed', async () => {
+    // register 가 아직 finalized 되지 않은 사람. pending → kyc_ok 는 전이 표가 막는다.
+    docs.set(`${PERSONS}/${PERSON}`, { status: 'pending', kycLevel: 0 });
+    await expect(deliver(v3Body())).rejects.toThrow('BAD_STATUS_TRANSITION:pending->kyc_ok');
+    expect(snapshot(`${EVENTS}/evt-1`).exists).toBe(false);
+
+    // Didit 의 재배달(같은 event_id)이 "이미 처리됨"으로 삼켜지지 않고 정상 처리된다.
+    write(`${PERSONS}/${PERSON}`, { status: 'active' }, { merge: true });
+    const retry = await deliver(v3Body());
+    expect(retry.statusCode).toBe(200);
+    expect(retry.body).toBe('ok');
+    expect(snapshot(`${PERSONS}/${PERSON}`).get('kycLevel')).toBe(1);
+  });
+
+  it('keeps the session guard underneath for a redelivery that carries no event_id', async () => {
+    await deliver(approvedBody());
+    const again = await deliver(approvedBody());
+    expect(again.body).toBe('duplicate');
+    expect(docs.has(`${EVENTS}/undefined`)).toBe(false);
+  });
+
+  // ── (6) 상태 전체 ──────────────────────────────────────────────────────────
+
+  it('maps every Didit status onto kyc.status without ever raising kycLevel by itself', async () => {
+    const cases: Array<[string, string | null]> = [
+      ['In Review', 'in_review'],
+      ['Abandoned', 'abandoned'],
+      ['Expired', 'expired'],
+      ['KYC Expired', 'expired'],
+      ['In Progress', null],
+      ['Not Started', null],
+    ];
+    for (const [status, expected] of cases) {
+      docs.clear();
+      write(`${PERSONS}/${PERSON}`, { status: 'active', kycLevel: 0 });
+      const res = await deliver({ session_id: `s-${status}`, status, vendor_data: PERSON });
+
+      expect(res.statusCode).toBe(200);
+      const person = snapshot(`${PERSONS}/${PERSON}`);
+      // 진행 딱지만 바뀐다. 사람의 status 도 kycLevel 도 그대로다.
+      expect(person.get('status')).toBe('active');
+      expect(person.get('kycLevel')).toBe(0);
+      expect((person.get('kyc') as Record<string, unknown> | undefined)?.status ?? null).toBe(expected);
+      // 접수 사실은 남는다 — 같은 상태가 다시 오면 중복으로 삼켜진다.
+      expect(snapshot(`${KYC_SESSIONS}/s-${status}`).get('decision')).toBe(status);
+    }
+    expect(sendAttesterTx).not.toHaveBeenCalled();
+  });
+
+  it('opens the session again on Resubmitted and clears the last decline reason', async () => {
+    write(`${PERSONS}/${PERSON}`, { kyc: { status: 'rejected', lastReason: 'declined', sessionId: 's1' } }, { merge: true });
+
+    const res = await deliver({ session_id: 's1', status: 'Resubmitted', vendor_data: PERSON });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe('reopened');
+    const kyc = snapshot(`${PERSONS}/${PERSON}`).get('kyc') as Record<string, unknown>;
+    // `ensureKycSession` 은 'open' 을 보고 같은 링크를 돌려주고, 버려지면 스윕이 `openedAt` 으로 닫는다.
+    expect(kyc.status).toBe('open');
+    expect(kyc.lastReason).toBeNull();
+    expect(typeof kyc.openedAt).toBe('number');
+    expect(kyc.sessionId).toBe('s1'); // 파기가 Didit 의 얼굴 자료를 찾는 열쇠다 — 지우지 않는다
+    expect(snapshot(`${PERSONS}/${PERSON}`).get('kycLevel')).toBe(0);
+  });
+
+  it('never lets a late Expired or Resubmitted undo a person who already passed', async () => {
+    await deliver(approvedBody());
+    expect(snapshot(`${PERSONS}/${PERSON}`).get('kycLevel')).toBe(1);
+
+    for (const status of ['Expired', 'KYC Expired', 'Abandoned', 'In Review', 'Resubmitted']) {
+      const res = await deliver({ session_id: `late-${status}`, status, vendor_data: PERSON });
+      expect(res.statusCode).toBe(200);
+      const person = snapshot(`${PERSONS}/${PERSON}`);
+      expect(person.get('kycLevel')).toBe(1);
+      expect(person.get('status')).toBe('active');
+      expect((person.get('kyc') as Record<string, unknown>).status).toBe('approved');
+    }
+  });
+
+  it('acknowledges a status we have never heard of instead of answering 5xx', async () => {
+    const res = await deliver({ session_id: 's9', status: 'Bananas', vendor_data: PERSON });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe('ignored status');
+    const person = snapshot(`${PERSONS}/${PERSON}`);
+    expect(person.get('status')).toBe('active');
+    expect(person.get('kyc')).toBeUndefined();
+    expect(snapshot(`${KYC_SESSIONS}/s9`).get('decision')).toBe('Bananas');
+    expect(sendAttesterTx).not.toHaveBeenCalled();
+  });
+
+  // ── (6) V3 decision 배열 ───────────────────────────────────────────────────
+
+  it('reads the portrait, the name and the document number out of the V3 plural arrays', async () => {
+    const res = await deliver(v3Body());
+
+    expect(res.statusCode).toBe(200);
+    const person = snapshot(`${PERSONS}/${PERSON}`);
+    expect(person.get('kycLevel')).toBe(1);
+    // 얼굴 신호는 `face_matches[0].status === 'Approved'` 에서 왔다 — V3 에는 face_search 가 없다.
+    expect((person.get('kyc') as Record<string, unknown>).faceSearchOk).toBe(true);
+
+    const enc = person.get('enc') as Record<string, string>;
+    await expect(decryptField(enc.name as string, piiAad(PERSON, 'name'))).resolves.toBe(`${NAME_LAST}${NAME_FIRST}`);
+    await expect(decryptField(enc.docNumber as string, piiAad(PERSON, 'docNumber'))).resolves.toBe(DOC_NUMBER);
+    await expect(decryptField(person.get('photoEnc') as string, piiAad(PERSON, 'photo'))).resolves.toContain('/9j/');
+
+    // 배열 안의 개인정보도 어느 문서에도 평문으로 남지 않는다.
+    const written = JSON.stringify([...docs.entries()]);
+    for (const secret of [NAME_FIRST, NAME_LAST, DOC_NUMBER, '1990-01-01', PORTRAIT_BODY]) {
+      expect(written).not.toContain(secret);
+    }
+  });
+
+  it('declines a V3 approval whose aml_screenings warn about a duplicate face', async () => {
+    const body = v3Body();
+    (body.decision as Record<string, unknown>).aml_screenings = [
+      { node_id: 'aml-1', status: 'Declined', warnings: [{ risk: 'DUPLICATE_FACE', short_description: 'Same face seen' }] },
+    ];
+
+    const res = await deliver(body);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe('rejected');
+    const person = snapshot(`${PERSONS}/${PERSON}`);
+    expect(person.get('status')).toBe('rejected');
+    expect(person.get('kycLevel')).toBe(0);
+    expect((person.get('kyc') as Record<string, unknown>).lastReason).toBe('duplicate_face');
+    expect(sendAttesterTx).not.toHaveBeenCalled();
+  });
+
+  it('declines a V3 approval with no face node at all as face_search_missing', async () => {
+    const body = v3Body();
+    delete (body.decision as Record<string, unknown>).face_matches;
+
+    const res = await deliver(body);
+
+    expect(res.statusCode).toBe(200);
+    expect((snapshot(`${PERSONS}/${PERSON}`).get('kyc') as Record<string, unknown>).lastReason).toBe(
+      'face_search_missing',
+    );
+    expect(snapshot(`${PERSONS}/${PERSON}`).get('kycLevel')).toBe(0);
+  });
+
+  // ── (2) Simple 서명은 결정을 인증하지 않는다 ────────────────────────────────
+
+  it('never raises kycLevel from a Simple-signed event, and writes nothing at all', async () => {
+    const res = await deliver(v3Body(), { scheme: 'simple' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe('unauthenticated decision');
+    // `X-Signature-Simple` 은 vendor_data 도 decision 도 덮지 않는다. 사람 문서는 그대로다.
+    const person = snapshot(`${PERSONS}/${PERSON}`);
+    expect(person.get('kycLevel')).toBe(0);
+    expect(person.get('kyc')).toBeUndefined();
+    expect(sendAttesterTx).not.toHaveBeenCalled();
+    // 도장도 찍지 않는다 — 진짜 서명을 단 같은 이벤트가 뒤이어 오면 정상 처리돼야 한다.
+    expect(docs.size).toBe(1);
+
+    const authenticated = await deliver(v3Body());
+    expect(authenticated.body).toBe('ok');
+    expect(snapshot(`${PERSONS}/${PERSON}`).get('kycLevel')).toBe(1);
+  });
+
+  it('refuses a Simple signature while a real signature header is present but wrong', async () => {
+    const raw = JSON.stringify(v3Body());
+    const timestamp = Math.floor(Date.now() / 1000);
+    const simple = createHmac('sha256', SECRET)
+      .update(`${timestamp}:s1:Approved:status.updated`, 'utf8')
+      .digest('hex');
+    const headers: Record<string, string> = {
+      'x-signature-v2': 'deadbeef',
+      'x-signature-simple': simple,
+      'x-timestamp': String(timestamp),
+    };
+    const res = new FakeRes();
+    await (diditWebhook as unknown as (req: unknown, res: unknown) => Promise<void>)(
+      { method: 'POST', headers, rawBody: Buffer.from(raw, 'utf8'), get: (name: string) => headers[name.toLowerCase()] },
+      res,
+    );
+    expect(res.statusCode).toBe(401);
+    expect(docs.size).toBe(1);
+  });
+
+  // ── (2) 서명 실패 로그 ─────────────────────────────────────────────────────
+
+  it('logs the offending body on a signature failure, with the portrait base64 cut out', async () => {
+    const res = await deliver(approvedBody(), { signature: 'deadbeef' });
+
+    expect(res.statusCode).toBe(401);
+    expect(logged.warn).toHaveBeenCalledWith('didit.signature.rejected', expect.any(Object));
+    const entry = JSON.stringify(logged.warn.mock.calls);
+    expect(entry).toContain('signature_mismatch');
+    expect(entry).toContain('s1'); // 어떤 배달이었는지는 남는다
+    // 사진 base64 도 이름도 문서번호도 남지 않는다(스펙 §10.3).
+    expect(entry).not.toContain(PORTRAIT_BODY.slice(0, 64));
+    expect(entry).not.toContain(NAME_FIRST);
+    expect(entry).not.toContain(DOC_NUMBER);
+  });
+
+  it('answers 401 with a code that tells a stale timestamp apart from a forged signature', async () => {
+    const stale = await deliver(approvedBody(), { timestamp: Math.floor(Date.now() / 1000) - 301 });
+    expect(stale.statusCode).toBe(401);
+    expect(stale.body).toBe('timestamp_out_of_window');
+
+    const forged = await deliver(approvedBody(), { signature: 'deadbeef' });
+    expect(forged.body).toBe('signature_mismatch');
+
+    const unsigned = await deliver(approvedBody(), { scheme: 'none' });
+    expect(unsigned.statusCode).toBe(401);
+    expect(unsigned.body).toBe('no_signature');
+
+    expect(docs.size).toBe(1);
   });
 });
