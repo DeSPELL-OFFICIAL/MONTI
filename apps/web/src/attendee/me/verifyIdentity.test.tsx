@@ -80,6 +80,7 @@ async function comeBack(url = 'monti://kyc/callback') {
 
 beforeEach(() => {
   onDeepLink = null;
+  startKyc.mockClear();
   getSignupStatus.mockResolvedValue({ status: 'active', kycLevel: 0 });
 });
 
@@ -91,6 +92,27 @@ describe('VerifyIdentity', () => {
     // Browser.open resolves on presentation, not on dismissal: polling here burns the ceiling
     // while the person is still holding up their ID.
     expect(getSignupStatus).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Left off, the server falls back to `https://<rp>/kyc/callback` and the `returnTo` with it:
+   * on the web a verified person lands on the explore tab and every resumed claim after it is
+   * pointless. The address is the screen's own, marked, carrying where they were going.
+   */
+  it('tells the server where to send a web browser back to, returnTo and all', async () => {
+    renderScreen('/me/verify?returnTo=%2Fclaim%2F1%3Fintent%3Dclaim%26tier%3D0');
+    await userEvent.click(cta());
+    expect(startKyc).toHaveBeenCalledWith({
+      callbackUrl: `${window.location.origin}/me/verify?didit=done&returnTo=${encodeURIComponent('/claim/1?intent=claim&tier=0')}`,
+    });
+  });
+
+  it('falls back to the profile in the callback when nothing asked for the check', async () => {
+    renderScreen();
+    await userEvent.click(cta());
+    expect(startKyc).toHaveBeenCalledWith({
+      callbackUrl: `${window.location.origin}/me/verify?didit=done&returnTo=${encodeURIComponent('/me')}`,
+    });
   });
 
   it('says so plainly when the session could not be started', async () => {

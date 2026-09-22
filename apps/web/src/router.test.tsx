@@ -6,13 +6,18 @@ import { routes } from './router';
 import { queryClient } from './shared/query';
 import { bootSession, getSession, registerSessionHydrator, setSession } from './shared/session';
 
-function renderAt(path: string) {
+function routerAt(path: string) {
   const router = createMemoryRouter(routes, { initialEntries: [path] });
-  return render(
+  render(
     <QueryClientProvider client={queryClient}>
       <RouterProvider router={router} />
     </QueryClientProvider>,
   );
+  return router;
+}
+
+function renderAt(path: string) {
+  routerAt(path);
 }
 
 describe('router', () => {
@@ -41,6 +46,26 @@ describe('router', () => {
     expect(getSession().status).toBe('anonymous');
     renderAt('/tickets');
     expect(await screen.findByRole('heading', { name: '다시 오셨네요' })).toBeInTheDocument();
+  });
+
+  /**
+   * A session opened before the web return address existed comes back to the server's own
+   * default, `https://<rp>/kyc/callback`. Without this route the catch-all drops the person on
+   * the explore tab with no sign that the check ever finished.
+   */
+  it('forwards the hosted verification callback to the verification screen', async () => {
+    setSession({ status: 'signedIn', account: `0x${'33'.repeat(20)}`, personId: 'p3' });
+    const router = routerAt('/kyc/callback?returnTo=%2Fme%2Fverify%3FreturnTo%3D%2Fclaim%2F1');
+    await screen.findByRole('main');
+    expect(router.state.location.pathname).toBe('/me/verify');
+    expect(new URLSearchParams(router.state.location.search).get('returnTo')).toBe('/claim/1');
+  });
+
+  it('sends a callback with nowhere to go back to the profile', async () => {
+    setSession({ status: 'signedIn', account: `0x${'33'.repeat(20)}`, personId: 'p3' });
+    const router = routerAt('/kyc/callback');
+    await screen.findByRole('main');
+    expect(router.state.location.pathname).toBe('/me');
   });
 
   it('uses a registered hydrator when one exists', async () => {

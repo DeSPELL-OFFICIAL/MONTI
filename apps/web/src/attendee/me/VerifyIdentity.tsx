@@ -9,6 +9,7 @@ import {
   KYC_WEB_MARKER_DONE,
   closeHostedFlow,
   isKycCallback,
+  kycCallbackUrl,
   listenDeepLink,
   openHostedFlow,
 } from '../../shared/api/deepLink';
@@ -127,7 +128,10 @@ export function VerifyIdentity() {
     setTimedOut(false);
     setInFlight(false);
     try {
-      const { kycUrl } = await api.startKyc();
+      // Without this the server falls back to `https://<rp>/kyc/callback` and the `returnTo`
+      // is lost with it — on the web that drops a verified person on the explore tab.
+      const callbackUrl = kycCallbackUrl(returnTo);
+      const { kycUrl } = await api.startKyc(callbackUrl === undefined ? undefined : { callbackUrl });
       // Polling waits for the return. On native `Browser.open` resolves on presentation, not on
       // dismissal, so starting here would burn the whole 90 s ceiling while the person is still
       // holding up their ID; on the web this tab leaves for the hosted page altogether.

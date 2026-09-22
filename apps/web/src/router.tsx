@@ -30,6 +30,7 @@ import { Login } from './attendee/Login';
 import { Phone } from './attendee/signup/Phone';
 import { Verify } from './attendee/signup/Verify';
 import { VerifyIdentity } from './attendee/me/VerifyIdentity';
+import { KycCallback } from './attendee/me/KycCallback';
 import { PasskeyStep } from './attendee/signup/Passkey';
 import { DeviceStep } from './attendee/signup/Device';
 import { Done } from './attendee/signup/Done';
@@ -63,6 +64,9 @@ export const routes: RouteObject[] = [
       // Where the link in an invite text lands. Public on purpose: the person it was sent to
       // is usually not signed in yet, and this screen is what starts their signup.
       { path: '/i/:inviteId', element: <InviteLanding /> },
+      // Public on purpose: the hosted identity check returns a browser here, and a person whose
+      // session dropped while they were away must still be forwarded rather than bounced home.
+      { path: '/kyc/callback', element: <KycCallback /> },
       {
         element: <RequireSession />,
         children: [
