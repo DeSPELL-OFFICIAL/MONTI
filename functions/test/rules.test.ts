@@ -221,6 +221,37 @@ describe('pendingGates', () => {
   });
 });
 
+describe('orgProfiles', () => {
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (context) => {
+      await context
+        .firestore()
+        .doc('orgProfiles/42')
+        .set({ orgId: '42', name: '모나드 컴퍼니', ownerPersonId: '0xaa', ownerAccount: ACCOUNT });
+    });
+  });
+
+  // 주최사 이름은 공개 정보다 — 탐색·공연 화면이 "누가 여는 공연인가" 를 그리려면 읽혀야 한다.
+  it('lets any signed-in user read an organizer display name', async () => {
+    await assertSucceeds(owner().doc('orgProfiles/42').get());
+    await assertSucceeds(env.authenticatedContext('uid-9', {}).firestore().doc('orgProfiles/42').get());
+  });
+
+  it('blocks a signed-out reader', async () => {
+    await assertFails(env.unauthenticatedContext().firestore().doc('orgProfiles/42').get());
+  });
+
+  // 쓰는 길은 `createOrganizerForMe` 하나다. 클라이언트가 쓸 수 있으면 남의 주최사 이름을
+  // 바꾸거나 체인에 없는 주최사를 지어내 공연 화면에 띄울 수 있다.
+  it('blocks every client write — create, rename and delete alike', async () => {
+    const db = owner();
+    await assertFails(db.doc('orgProfiles/42').update({ name: '가짜 컴퍼니' }));
+    await assertFails(db.doc('orgProfiles/42').update({ ownerAccount: '0x02' }));
+    await assertFails(db.doc('orgProfiles/42').delete());
+    await assertFails(db.doc('orgProfiles/99').set({ orgId: '99', name: '없는 주최사' }));
+  });
+});
+
 describe('diditEvents', () => {
   const EVENT = 'evt-1';
 

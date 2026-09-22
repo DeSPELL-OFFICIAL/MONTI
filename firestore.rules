@@ -81,6 +81,16 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // 주최사의 표시 이름. 체인에는 이름이 없어서(`Organizers` 는 orgId·오너·권한 비트만 안다)
+    // 탐색·공연 화면이 "누가 여는 공연인가"를 그리려면 오프체인에 한 줄이 있어야 한다.
+    // 이름은 공개 정보라 로그인한 사람이면 누구나 읽고, 쓰는 길은 서버(`createOrganizerForMe`)
+    // 하나다 — 클라이언트가 쓸 수 있으면 남의 주최사 이름을 바꾸거나 없는 주최사를 지어낸다.
+    // 소유권·권한의 원본은 여기가 아니라 그대로 체인이다(스펙 §9.4).
+    match /orgProfiles/{orgId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
     // Didit 웹훅의 `event_id` 중복 방지 장부. 서버(`diditWebhook`)만 쓰고 아무도 읽지 않는다.
     // 아래 포괄 거부가 이미 막지만, 여기에 쓸 수 있으면 아직 오지 않은 event_id 를 미리 찍어
     // 진짜 배달을 "이미 처리됨"으로 삼키게 만들 수 있다 — 명시해 둔다.

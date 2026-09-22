@@ -26,6 +26,13 @@ export const TRANSFER_INVITES = 'transferInvites';
 export const EVENT_CHATS = 'eventChats';
 export const DELETION_REQUESTS = 'deletionRequests';
 export const PENDING_GATES = 'pendingGates';
+/**
+ * 주최사의 **표시 이름**. 체인에는 이름이 없다 — `Organizers` 가 아는 것은 `orgId` 와 오너·권한
+ * 비트뿐이라(스펙 §9.4) 화면에 그릴 이름은 어딘가 오프체인에 있어야 한다. 문서 id 는 체인이 정한
+ * `orgId`(십진 문자열)이고, 권한·소유권의 원본은 여기가 아니라 그대로 체인이다.
+ * 누구나 읽고(`firestore.rules`), 쓰는 길은 서버의 `createOrganizerForMe` 하나다.
+ */
+export const ORG_PROFILES = 'orgProfiles';
 /** 서버 내부 상태만 들어간다. 클라이언트는 규칙의 포괄 거부로 닿지 못한다(어테스터 리스). */
 export const SYSTEM = 'system';
 
@@ -47,6 +54,7 @@ export const ALLOWED_COLLECTIONS = [
   EVENT_CHATS,
   DELETION_REQUESTS,
   PENDING_GATES,
+  ORG_PROFILES,
   SYSTEM,
   'members',
   'messages',

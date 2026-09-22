@@ -138,6 +138,7 @@ describe('deploy bundle', () => {
       'reconcilePending',
       'dailyExport',
       'pinEventMetadata',
+      'createOrganizerForMe',
       'pinMessage',
       'listPinned',
       'listInvites',
