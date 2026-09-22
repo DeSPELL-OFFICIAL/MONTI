@@ -1,4 +1,5 @@
 import { cleanup, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -36,14 +37,30 @@ const CONTEXT = {
 };
 const LATE_EVENTS = { Event: [{ id: '8', status: 'Published' }, { id: '12', status: 'Cancelled' }] };
 
+/** The indexer answering every document by name — the state both screens start from. */
+async function answerIndexer(query: string) {
+  if (query.includes('OwnedTickets')) return { Ticket: OWNED, Offer: OFFERS };
+  if (query.includes('TicketContext')) return CONTEXT;
+  return LATE_EVENTS;
+}
+
+/**
+ * What `gql` rejects with. Built here rather than imported, because the module `EnvioError`
+ * lives in is mocked at the top of this file — which is exactly why `describeFailure` reads
+ * the shape (`name` + `kind`) instead of the class.
+ */
+function indexerFailure(kind: 'network' | 'http' | 'graphql' | 'empty', message: string): Error {
+  return Object.assign(new Error(message), { name: 'EnvioError', kind });
+}
+
+const COULD_NOT_FETCH = '정보를 가져오지 못했어요. 잠시 뒤 다시 시도해 주세요.';
+const NOT_RIGHT_NOW = '지금 정보를 가져올 수 없어요. 잠시 뒤 다시 시도해 주세요.';
+const GENERIC = '문제가 생겼어요. 잠시 뒤 다시 시도해 주세요.';
+
 beforeEach(() => {
   setSession({ status: 'signedIn', account: OWNER as `0x${string}` });
   gql.mockReset();
-  gql.mockImplementation(async (query: string) => {
-    if (query.includes('OwnedTickets')) return { Ticket: OWNED, Offer: OFFERS };
-    if (query.includes('TicketContext')) return CONTEXT;
-    return LATE_EVENTS;
-  });
+  gql.mockImplementation(answerIndexer);
 });
 
 afterEach(() => {
@@ -106,6 +123,15 @@ describe('TicketList', () => {
     renderList();
     expect(await screen.findByText('아직 티켓이 없어요.')).toBeInTheDocument();
   });
+
+  /** An indexer that answered badly is not the same thing as a phone with no connection. */
+  it('names the cause when the list cannot be read', async () => {
+    gql.mockReset();
+    gql.mockRejectedValue(indexerFailure('http', 'HTTP_502'));
+    renderList();
+    expect(await screen.findByRole('alert')).toHaveTextContent(NOT_RIGHT_NOW);
+    expect(screen.getByRole('button', { name: '다시 시도' })).toBeInTheDocument();
+  });
 });
 
 describe('TicketDetail', () => {
@@ -123,5 +149,37 @@ describe('TicketDetail', () => {
     expect(await screen.findByText('입장 완료')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '입장하기' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '양도' })).not.toBeInTheDocument();
+  });
+
+  /**
+   * The bug T-UX-8 fixed here: this screen looks its ticket up in a list it reads from the
+   * indexer, so a read that never arrived used to render as "there is no such ticket" — the
+   * owner of the ticket told they do not own it, with nothing to press. A failure and an
+   * absence are now two different answers.
+   */
+  it('says the read failed, and retries it, rather than calling the ticket missing', async () => {
+    gql.mockReset();
+    gql.mockRejectedValueOnce(indexerFailure('network', 'REQUEST_FAILED'));
+    gql.mockImplementation(answerIndexer);
+    renderDetail('1');
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(COULD_NOT_FETCH);
+    expect(screen.queryByText(GENERIC)).not.toBeInTheDocument();
+
+    // The retry is the point of the branch: the second read succeeds and the ticket appears.
+    await userEvent.click(screen.getByRole('button', { name: '다시 시도' }));
+    expect(await screen.findByText('입장 전')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  /**
+   * The other half of the same fix: the list really did arrive and really does not hold this
+   * id. Nothing to retry, so the way out is the list itself — and the button says so.
+   */
+  it('keeps the not-found path for a ticket the list simply does not hold', async () => {
+    renderDetail('999');
+    expect(await screen.findByRole('alert')).toHaveTextContent(GENERIC);
+    expect(screen.queryByRole('button', { name: '다시 시도' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '내 티켓' })).toBeInTheDocument();
   });
 });

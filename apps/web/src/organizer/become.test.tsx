@@ -25,7 +25,14 @@ vi.mock('react-router-dom', async (orig) => ({
 const { CallableError } = await import('../shared/api/functions');
 const { organizerCopy } = await import('./copy');
 const { Become } = await import('./Become');
+const { ko } = await import('../shared/copy');
 const copy = organizerCopy.ko.become;
+/**
+ * The sentence for every refusal the table does not name. It is the shared one, not an
+ * organiser sentence: since T-UX-8 this arm goes through `describeFailure`, which writes from
+ * `common` — and would write the offline or the indexer line instead, if either were true.
+ */
+const GENERIC = ko.common.error;
 
 function open() {
   render(
@@ -186,12 +193,12 @@ describe('what the server refuses', () => {
     expect(screen.queryByRole('button', { name: copy.resume })).not.toBeInTheDocument();
   });
 
-  /** The one line T-UX-8 replaces with `describeFailure`: every reason with nothing to say. */
+  /** Every reason with nothing to say, answered by `describeFailure` rather than by a table. */
   it('falls to the one generic sentence for a reason it has no sentence for', async () => {
     createOrganizerForMe.mockRejectedValue(new CallableError('internal', 'CREATE_ORG_REVERTED'));
     await press();
 
-    expect(await screen.findByText(copy.problems.failed)).toBeInTheDocument();
+    expect(await screen.findByText(GENERIC)).toBeInTheDocument();
     expect(navigate).not.toHaveBeenCalled();
   });
 
@@ -200,7 +207,26 @@ describe('what the server refuses', () => {
     createOrganizerForMe.mockRejectedValue(new Error('Failed to fetch'));
     await press();
 
-    expect(await screen.findByText(copy.problems.failed)).toBeInTheDocument();
+    expect(await screen.findByText(GENERIC)).toBeInTheDocument();
+  });
+
+  /**
+   * The point of routing the else arm through `describeFailure`: a phone with no connection
+   * gets told that, and not that making an organisation is the thing that cannot be done.
+   */
+  it('says the connection is missing when the phone is offline', async () => {
+    const onLine = Object.getOwnPropertyDescriptor(Navigator.prototype, 'onLine');
+    Object.defineProperty(navigator, 'onLine', { value: false, configurable: true });
+    try {
+      createOrganizerForMe.mockRejectedValue(new Error('Failed to fetch'));
+      await press();
+
+      expect(await screen.findByText(ko.common.offlineRetry)).toBeInTheDocument();
+      expect(screen.queryByText(GENERIC)).not.toBeInTheDocument();
+    } finally {
+      Reflect.deleteProperty(navigator, 'onLine');
+      if (onLine) Object.defineProperty(Navigator.prototype, 'onLine', onLine);
+    }
   });
 
   /** After a refusal the button is usable again — this one really is worth trying twice. */
@@ -209,7 +235,7 @@ describe('what the server refuses', () => {
     createOrganizerForMe.mockRejectedValue(new CallableError(code, 'CREATE_ORG_REVERTED'));
     await press();
 
-    expect(await screen.findByText(copy.problems.failed)).toBeInTheDocument();
+    expect(await screen.findByText(GENERIC)).toBeInTheDocument();
     expect(createButton()).toBeEnabled();
   });
 });

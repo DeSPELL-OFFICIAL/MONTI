@@ -5,6 +5,11 @@ export const ko = {
     retry: '다시 시도', save: '저장', loading: '불러오는 중이에요',
     error: '문제가 생겼어요. 잠시 뒤 다시 시도해 주세요.',
     offline: '인터넷에 연결되어 있지 않아요.',
+    // describeFailure(shared/errors.ts)가 고르는 세 문장. 원인이 셋 다 다르므로 문장도 셋이다 —
+    // 연결이 없다 / 못 가져왔다 / 지금은 없다. 화면별 문장은 이 셋 위에 더하지 않는다.
+    offlineRetry: '인터넷에 연결되어 있지 않아요. 연결되면 자동으로 다시 불러올게요.',
+    fetchFailed: '정보를 가져오지 못했어요. 잠시 뒤 다시 시도해 주세요.',
+    serviceDown: '지금 정보를 가져올 수 없어요. 잠시 뒤 다시 시도해 주세요.',
     contactHelp: '도움이 필요하면 메일로 연락해 주세요',
     contactEmail: 'info@despell.io',
   },

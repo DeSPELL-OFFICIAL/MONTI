@@ -7,6 +7,11 @@ export const en: typeof ko = {
     retry: 'Try again', save: 'Save', loading: 'Loading',
     error: 'Something went wrong. Please try again in a moment.',
     offline: 'You are not connected to the internet.',
+    // The three sentences describeFailure (shared/errors.ts) picks between: no connection /
+    // could not fetch / not available right now. No screen adds a fourth of its own.
+    offlineRetry: 'You are not connected to the internet. We will load this again once you are.',
+    fetchFailed: 'We could not load that. Please try again in a moment.',
+    serviceDown: 'That information is not available right now. Please try again in a moment.',
     contactHelp: 'Need a hand? Email us.',
     contactEmail: 'info@despell.io',
   },

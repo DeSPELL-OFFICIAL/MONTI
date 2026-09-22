@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Alert, Button, KycBadge, Screen, Spinner } from '../../shared/ui';
 import { fmt, useCopy, useLocale } from '../../shared/i18n';
 import { gql } from '../../shared/envio/client';
+import { describeFailure } from '../../shared/errors';
 import { EVENT_QUERY, type EnvioEvent, type EnvioTier } from '../../shared/envio/queries';
 import { fetchEventMetadata } from '../../shared/envio/ipfs';
 import { getConfig } from '../../shared/config';
@@ -37,7 +38,7 @@ export function EventDetail() {
   const signedIn = useSession().status === 'signedIn';
   const { kycLevel } = useKycLevel();
 
-  const { data, isLoading, isError, refetch } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['event', eventId],
     queryFn: async () => {
       // `id` is the text primary key, `eventId` the numeric column the tiers hang off.
@@ -58,7 +59,7 @@ export function EventDetail() {
   if (isError) {
     return (
       <Screen title={copy.discover.title}>
-        <Alert tone="error">{copy.common.error}</Alert>
+        <Alert tone="error">{describeFailure(error, copy)}</Alert>
         <Button onClick={() => void refetch()}>{copy.common.retry}</Button>
       </Screen>
     );

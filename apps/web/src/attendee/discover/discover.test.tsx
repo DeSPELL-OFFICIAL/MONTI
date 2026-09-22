@@ -60,6 +60,15 @@ const TIERS = [
   { id: '1-0', eventId: '1', idx: 0, name: '일반', priceUsdCents: '0', supply: '100', minted: '40', maxPerWallet: '2', seated: false },
 ];
 
+/**
+ * What `gql` rejects with. Built here rather than imported, because the module `EnvioError`
+ * lives in is mocked at the top of this file — which is exactly why `describeFailure` reads
+ * the shape (`name` + `kind`) instead of the class.
+ */
+function indexerFailure(kind: 'network' | 'http' | 'graphql' | 'empty', message: string): Error {
+  return Object.assign(new Error(message), { name: 'EnvioError', kind });
+}
+
 function metadataByCid(cid: string) {
   if (cid === 'cid-a') return Promise.resolve(META_A);
   if (cid === 'cid-b') return Promise.resolve(META_B);
@@ -200,11 +209,29 @@ describe('Discover', () => {
     expect(screen.getByText('제목을 불러오지 못했어요')).toBeInTheDocument();
   });
 
-  it('shows an error state when the indexer fails', async () => {
-    gql.mockRejectedValue(new Error('HTTP_500'));
+  /**
+   * Two failures, two sentences. The request that never arrived is worth pressing 다시 시도 on;
+   * the answer that came back broken is not, so it says "not right now" instead — which is the
+   * whole reason `describeFailure` exists rather than one line for both.
+   */
+  it('says the page did not arrive when the request never got there', async () => {
+    gql.mockRejectedValue(indexerFailure('network', 'REQUEST_FAILED'));
+    renderDiscover();
+    expect(await screen.findByRole('alert')).toHaveTextContent('정보를 가져오지 못했어요. 잠시 뒤 다시 시도해 주세요.');
+    expect(screen.getByRole('button', { name: '다시 시도' })).toBeInTheDocument();
+  });
+
+  it('says the information is not available right now when the indexer answers badly', async () => {
+    gql.mockRejectedValue(indexerFailure('http', 'HTTP_500'));
+    renderDiscover();
+    expect(await screen.findByRole('alert')).toHaveTextContent('지금 정보를 가져올 수 없어요. 잠시 뒤 다시 시도해 주세요.');
+    expect(screen.getByRole('button', { name: '다시 시도' })).toBeInTheDocument();
+  });
+
+  it('keeps the general line for a failure that is nobody\u2019s named cause', async () => {
+    gql.mockRejectedValue(new Error('boom'));
     renderDiscover();
     expect(await screen.findByRole('alert')).toHaveTextContent('문제가 생겼어요. 잠시 뒤 다시 시도해 주세요.');
-    expect(screen.getByRole('button', { name: '다시 시도' })).toBeInTheDocument();
   });
 });
 
@@ -378,8 +405,19 @@ describe('EventDetail', () => {
   });
 
   it('shows an error state when the event cannot be read', async () => {
-    gql.mockRejectedValue(new Error('HTTP_500'));
+    gql.mockRejectedValue(indexerFailure('graphql', 'QUERY_FAILED'));
     renderDetail();
+    expect(await screen.findByRole('alert')).toHaveTextContent('지금 정보를 가져올 수 없어요. 잠시 뒤 다시 시도해 주세요.');
+    expect(screen.getByRole('button', { name: '다시 시도' })).toBeInTheDocument();
+  });
+
+  /**
+   * The indexer answered and simply has no such event. That is this screen's own `Error`, not
+   * an indexer kind, so it keeps the general line rather than blaming the indexer.
+   */
+  it('keeps the general line for an event id the indexer does not know', async () => {
+    gql.mockResolvedValue({ Event: [], Tier: [] });
+    renderDetail('404');
     expect(await screen.findByRole('alert')).toHaveTextContent('문제가 생겼어요. 잠시 뒤 다시 시도해 주세요.');
   });
 });

@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Alert, Button, Field, KycBadge, Screen, Spinner } from '../../shared/ui';
 import { useCopy } from '../../shared/i18n';
 import { gql } from '../../shared/envio/client';
+import { describeFailure } from '../../shared/errors';
 import { EVENT_QUERY, type EnvioEvent, type EnvioTier } from '../../shared/envio/queries';
 import { ticketOp, OpReverted } from '../../shared/chain/ops';
 import { getAttendeeAccount } from '../../shared/chain/accounts';
@@ -77,7 +78,7 @@ export function Claim() {
   const [needsKyc, setNeedsKyc] = useState(false);
   const resumed = useRef(false);
 
-  const { data, isLoading, isError, refetch } = useQuery({
+  const { data, isLoading, isError, error: loadError, refetch } = useQuery({
     queryKey: ['claim', eventId],
     // `id` is the text primary key, `eventId` the numeric column the tiers hang off.
     queryFn: () => gql<{ Event: EnvioEvent[]; Tier: EnvioTier[] }>(EVENT_QUERY, { id: eventId, eventId }),
@@ -161,7 +162,7 @@ export function Claim() {
   if (isError || !event) {
     return (
       <Screen title={copy.claim.cta}>
-        <Alert tone="error">{copy.common.error}</Alert>
+        <Alert tone="error">{describeFailure(loadError, copy)}</Alert>
         <Button onClick={() => void refetch()}>{copy.common.retry}</Button>
       </Screen>
     );

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Alert, Button, Fab, Field, KycBadge, Screen, Spinner } from '../../shared/ui';
 import { useCopy, useLocale } from '../../shared/i18n';
+import { describeFailure } from '../../shared/errors';
 import { useSession } from '../../shared/session';
 import { useOrganizerEntry } from '../../organizer/useOrganizerEntry';
 import { useKycLevel } from '../me/useKycLevel';
@@ -27,7 +28,7 @@ export function Discover() {
   // `useOrganizerEntry`'s, and it sends a visitor to signing up rather than refusing them:
   // hiding the button is exactly how a founder with a fresh account finds nothing at all.
   const organizer = useOrganizerEntry();
-  const { data, isLoading, isError, refetch } = useEvents();
+  const { data, isLoading, isError, error, refetch } = useEvents();
   const items = applyFilters(data ?? [], filters);
 
   function update(next: DiscoverFilters): void {
@@ -52,7 +53,7 @@ export function Discover() {
 
       {isError ? (
         <>
-          <Alert tone="error">{copy.common.error}</Alert>
+          <Alert tone="error">{describeFailure(error, copy)}</Alert>
           <Button onClick={() => void refetch()}>{copy.common.retry}</Button>
         </>
       ) : null}

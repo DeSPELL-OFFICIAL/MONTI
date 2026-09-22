@@ -2,9 +2,11 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Alert, Button, Field, Screen, Spinner } from '../shared/ui';
 import { api, callableFailure } from '../shared/api/functions';
+import { describeFailure } from '../shared/errors';
+import { useCopy } from '../shared/i18n';
 import { useOrganizerCopy, type OrganizerCopy } from './copy';
 
-/** The five sentences this screen can end on; four of them the server named. */
+/** The four refusals the server named, each with a sentence of its own. */
 type BecomeProblem = keyof OrganizerCopy['become']['problems'];
 
 /**
@@ -24,7 +26,7 @@ function isGoodName(trimmed: string): boolean {
   return points >= NAME_MIN && points <= NAME_MAX && !CONTROL_RE.test(trimmed);
 }
 
-/** The four refusals worth a sentence of their own. Everything else shares one line. */
+/** The four refusals worth a sentence of their own. `describeFailure` answers the rest. */
 const REASONS: Readonly<Record<string, BecomeProblem>> = {
   NOT_ACTIVE: 'notActive',
   NO_SIGNUP: 'noSignup',
@@ -59,10 +61,18 @@ const RESUME: Readonly<Partial<Record<BecomeProblem, string>>> = {
  */
 export function Become() {
   const copy = useOrganizerCopy().become;
+  // `common` is nobody's screen: an organiser is told a read failed in the same words an
+  // attendee is, so this organiser screen reads the shared sentences rather than owning a
+  // fifth one of its own.
+  const shared = useCopy();
   const navigate = useNavigate();
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<BecomeProblem | ''>('');
+  // The other arm has no key to hold — `describeFailure` writes the sentence from the failure
+  // itself (offline, unreachable, the indexer, a reason nothing names), so the sentence is
+  // what is kept. The four named refusals stay a table either way.
+  const [failure, setFailure] = useState('');
 
   const trimmed = name.trim();
   const ready = isGoodName(trimmed);
@@ -71,6 +81,7 @@ export function Become() {
     if (busy || !ready) return;
     setBusy(true);
     setProblem('');
+    setFailure('');
     try {
       const { orgId } = await api.createOrganizerForMe({ name: trimmed });
       // `replace`, so Back cannot land on this form again and make a second organisation.
@@ -78,10 +89,12 @@ export function Become() {
       navigate(`/org?org=${orgId}`, { replace: true });
     } catch (error) {
       const { reason } = callableFailure(error);
-      // The four named refusals stay a table. Everything else — `AUTH_REQUIRED` behind the
-      // session guard, a reverted send, a dropped connection — falls to this one expression,
-      // which is what T-UX-8 replaces with `describeFailure(error, copy)`.
-      setProblem(REASONS[reason] ?? 'failed');
+      const named = REASONS[reason];
+      // Everything the table does not name — `AUTH_REQUIRED` behind the session guard, a
+      // reverted send, a dropped connection, a phone with no connection at all — is
+      // `describeFailure`'s to answer, in the same five steps every other screen uses.
+      if (named === undefined) setFailure(describeFailure(error, shared));
+      else setProblem(named);
     } finally {
       setBusy(false);
     }
@@ -97,6 +110,7 @@ export function Become() {
       <p className="muted">{copy.nameHelp}</p>
 
       {problem !== '' ? <Alert tone="error">{copy.problems[problem]}</Alert> : null}
+      {failure !== '' ? <Alert tone="error">{failure}</Alert> : null}
       {resumeTo !== undefined ? (
         <Button variant="ghost" onClick={() => navigate(resumeTo)}>
           {copy.resume}

@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { Alert, Button, Screen, Spinner } from '../../shared/ui';
 import { useCopy } from '../../shared/i18n';
+import { describeFailure } from '../../shared/errors';
 import { useMyTickets } from './useTickets';
 import type { TicketState } from './ticketState';
 
@@ -19,7 +20,7 @@ export function useStateLabel(): Record<TicketState, string> {
 export function TicketList() {
   const copy = useCopy();
   const labels = useStateLabel();
-  const { data, isLoading, isError, refetch } = useMyTickets();
+  const { data, isLoading, isError, error, refetch } = useMyTickets();
   const tickets = data ?? [];
 
   return (
@@ -27,7 +28,7 @@ export function TicketList() {
       {isLoading ? <Spinner /> : null}
       {isError ? (
         <>
-          <Alert tone="error">{copy.common.error}</Alert>
+          <Alert tone="error">{describeFailure(error, copy)}</Alert>
           <Button onClick={() => void refetch()}>{copy.common.retry}</Button>
         </>
       ) : null}

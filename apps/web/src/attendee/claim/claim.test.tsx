@@ -31,12 +31,13 @@ const RESUME = '/claim/5?intent=claim&tier=0';
 const ownedTickets: { rows: Array<Record<string, unknown>> } = { rows: [] };
 const tiers: { rows: Array<Record<string, unknown>> } = { rows: [TIER] };
 const event: { row: Record<string, unknown> } = { row: EVENT };
-const gql = vi.fn(async (query: string) => {
+async function answerIndexer(query: string) {
   if (query.includes('OwnedTickets')) return { Ticket: ownedTickets.rows, Offer: [] };
   if (query.includes('TicketContext')) return { CheckIn: [], Event: [], Ticket: [] };
   if (query.includes('EventStates')) return { Event: [] };
   return { Event: [event.row], Tier: tiers.rows };
-});
+}
+const gql = vi.fn(answerIndexer);
 vi.mock('../../shared/envio/client', () => ({ gql }));
 const kycLevel = { value: 1, loading: false };
 vi.mock('../me/useKycLevel', () => ({
@@ -74,6 +75,7 @@ beforeEach(() => {
   tiers.rows = [TIER];
   event.row = EVENT;
   navigate.mockReset();
+  gql.mockImplementation(answerIndexer);
   ticketOp.mockReset();
   ticketOp.mockResolvedValue({ success: true, txHash: '0x2', blockNumber: 1n });
 });
@@ -126,6 +128,24 @@ describe('Claim', () => {
     expect(cta).toBeDisabled();
     await userEvent.click(cta);
     expect(ticketOp).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * The swap T-UX-8 made on this screen. The event read failing is not "문제가 생겼어요": the
+   * indexer said which way it failed, and the sentence says the same thing back.
+   */
+  it('names the cause when the event cannot be read', async () => {
+    gql.mockImplementation(async (query: string) => {
+      if (query.includes('OwnedTickets')) return { Ticket: [], Offer: [] };
+      if (query.includes('TicketContext')) return { CheckIn: [], Event: [], Ticket: [] };
+      if (query.includes('EventStates')) return { Event: [] };
+      // Shaped, not constructed: `shared/envio/client` is mocked above, so the class is gone
+      // and `describeFailure` has only `name` and `kind` to read — which is the design.
+      throw Object.assign(new Error('REQUEST_FAILED'), { name: 'EnvioError', kind: 'network' });
+    });
+    renderClaim();
+    expect(await screen.findByRole('alert')).toHaveTextContent('정보를 가져오지 못했어요. 잠시 뒤 다시 시도해 주세요.');
+    expect(screen.getByRole('button', { name: '다시 시도' })).toBeInTheDocument();
   });
 
   it('claims nothing on a tier nobody may hold, the way the contract reads maxPerWallet 0', async () => {

@@ -57,8 +57,6 @@ const ko = {
       // 한 사람이 만들 수 있는 주최사는 3개다. 네 번째는 서버가 보내기 전에 거절한다.
       limit: '주최사는 3개까지 만들 수 있어요',
       badName: '이름을 2자에서 40자 사이로 적어 주세요',
-      // T-UX-8이 이 한 줄을 describeFailure로 갈아 끼운다.
-      failed: '지금은 만들 수 없어요. 잠시 뒤 다시 시도해 주세요',
     },
   },
 
@@ -347,8 +345,6 @@ const en: typeof ko = {
       // Three per person. The fourth is refused before anything is sent.
       limit: 'You can create up to three organisers',
       badName: 'Write a name of 2 to 40 characters',
-      // T-UX-8 swaps this one line for describeFailure.
-      failed: 'That cannot be done right now. Please try again in a moment',
     },
   },
 
