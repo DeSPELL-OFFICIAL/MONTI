@@ -84,6 +84,9 @@ export const ko = {
     enter: '입장하기', transfer: '양도',
     detailGuide: '입구에서 입장하기를 누르고 60초 안에 단말기에 휴대폰을 대세요.',
     noBarcode: '보여줄 코드는 없어요.',
+    artUsed: '사용됨',
+    artLabel: '{{title}} · {{tier}} 티켓 그림',
+    artLabelUsed: '{{title}} · {{tier}} 티켓 그림 · 사용됨',
   },
   claim: {
     cta: '티켓 받기', working: '받는 중이에요', done: '티켓을 받았어요', tierLabel: '티켓 종류',

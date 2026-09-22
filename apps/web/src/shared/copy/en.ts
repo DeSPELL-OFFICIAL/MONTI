@@ -86,6 +86,9 @@ export const en: typeof ko = {
     enter: 'Enter', transfer: 'Hand over',
     detailGuide: 'At the door, tap Enter and hold your phone to the reader within 60 seconds.',
     noBarcode: 'There is no code to show.',
+    artUsed: 'Used',
+    artLabel: '{{title}} · {{tier}} ticket art',
+    artLabelUsed: '{{title}} · {{tier}} ticket art · used',
   },
   claim: {
     cta: 'Get a ticket', working: 'Getting your ticket', done: 'You got the ticket', tierLabel: 'Ticket type',

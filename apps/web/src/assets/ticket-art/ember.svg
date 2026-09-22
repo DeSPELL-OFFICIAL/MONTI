@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 1754" width="1240" height="1754">
+  <defs>
+    <linearGradient id="em-bg" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0" stop-color="#140a0c"/>
+      <stop offset="0.52" stop-color="#7a1523"/>
+      <stop offset="1" stop-color="#f0842a"/>
+    </linearGradient>
+    <radialGradient id="em-sun" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ffd27a" stop-opacity="0.95"/>
+      <stop offset="0.7" stop-color="#ff7a3c" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#ff7a3c" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="em-soft" x="-25%" y="-25%" width="150%" height="150%">
+      <feGaussianBlur stdDeviation="26"/>
+    </filter>
+  </defs>
+  <rect width="1240" height="1754" fill="url(#em-bg)"/>
+  <circle cx="620" cy="1180" r="560" fill="url(#em-sun)"/>
+  <g fill="none" stroke="#ffe0b0" stroke-width="3" opacity="0.4" filter="url(#em-soft)">
+    <circle cx="620" cy="1180" r="300"/><circle cx="620" cy="1180" r="420"/><circle cx="620" cy="1180" r="540"/>
+  </g>
+  <g fill="none" stroke="#ffffff" stroke-width="2" opacity="0.22">
+    <path d="M-40 1180h1320"/><path d="M-40 1300h1320"/><path d="M-40 1060h1320"/>
+  </g>
+  <g opacity="0.5" transform="translate(96 112)">
+    <rect x="0" y="0" width="52" height="52" rx="14" fill="none" stroke="#ffe3c2" stroke-width="4"/>
+    <path d="M14 38V18l12 12 12-12v20" fill="none" stroke="#ffe3c2" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="72" y="39" font-family="system-ui, -apple-system, 'Helvetica Neue', sans-serif" font-size="30" font-weight="700" letter-spacing="8" fill="#ffe3c2">MONTI</text>
+  </g>
+</svg>

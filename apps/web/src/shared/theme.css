@@ -76,3 +76,33 @@ body {
   touch-action: none; user-select: none; -webkit-user-select: none;
 }
 .a4-frame img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+/* The ticket picture is the same A4 frame as the poster, so one crop serves both. */
+.ticket-art {
+  position: relative; overflow: hidden; width: 100%; aspect-ratio: 1240 / 1754;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  isolation: isolate;
+}
+.ticket-art__backdrop { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+/* Three of the four presets run bright at the foot; the scrim is what keeps white text on all four. */
+.ticket-art__scrim {
+  position: absolute; inset: 42% 0 0 0;
+  background: linear-gradient(180deg, rgba(8, 9, 12, 0) 0%, rgba(8, 9, 12, 0.8) 76%);
+}
+.ticket-art__caption { position: absolute; inset: auto 0 0 0; padding: 16px; }
+.ticket-art__tier {
+  margin: 0 0 6px; font-size: 12px; font-weight: 600; letter-spacing: 0.12em;
+  text-transform: uppercase; color: #cfd6e4;
+}
+.ticket-art__title {
+  margin: 0; font-size: 20px; font-weight: 700; line-height: 1.25; color: #fff;
+  /* A long event name wraps and then stops at three lines rather than growing out of the frame. */
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3;
+  overflow: hidden; overflow-wrap: anywhere;
+}
+/* Overhangs the frame on both sides so the band reads as painted across a torn ticket. */
+.ticket-art__band {
+  position: absolute; left: -10%; right: -10%; top: 46%; margin: 0;
+  transform: rotate(-18deg); background: #d92d20; color: #fff; text-align: center;
+  padding: 0.5rem 0; font-weight: 700; letter-spacing: 0.3em;
+}

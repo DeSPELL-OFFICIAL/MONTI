@@ -10,6 +10,9 @@ export { KycBadge } from './KycBadge';
 export { ContactLink } from './ContactLink';
 export { A4Cropper, type A4CropperProps } from './A4Cropper';
 export {
+  TicketArt, type TicketArtProps, type TicketArtPreset, type TicketArtSource,
+} from './TicketArt';
+export {
   cropToA4, A4_WIDTH, A4_HEIGHT, A4_MAX_BYTES, A4_QUALITY, A4_QUALITY_RESCUE,
   type CropView, type CropOptions, type CropSource, type CroppedPoster,
 } from './a4Crop';
