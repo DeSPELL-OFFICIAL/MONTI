@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { emptyEventDraft } from '../useEventDraft';
 import type { EventDraft } from '../../shared/api/firestore';
 import {
-  MAX_TAGS, eventProblems, normalizeTags, saleWindow,
+  MAX_TAGS, eventProblems, normalizeTags, paidTiers, saleWindow, tierArt, tierProblems,
 } from './draftRules';
 
 /** A draft with nothing left to fix, so each case below can break exactly one rule. */
@@ -87,5 +87,59 @@ describe('saleWindow', () => {
    */
   it('opens now and closes when the event ends', () => {
     expect(saleWindow(READY, 1_789_000_000)).toEqual({ saleStart: 1_789_000_000, saleEnd: READY.endsAt });
+  });
+});
+
+describe('tierProblems', () => {
+  const tier = { ...READY.tiers[0], name: '일반', supply: 100, maxPerWallet: 1 } as EventDraft['tiers'][number];
+  const withTiers = (tiers: EventDraft['tiers']): EventDraft => ({ ...READY, tiers });
+
+  it('finds nothing wrong with one named, free, countable kind', () => {
+    expect(tierProblems(withTiers([tier]))).toEqual([]);
+  });
+
+  it('names an unnamed kind, an empty run and an impossible per-person limit', () => {
+    expect(tierProblems(withTiers([{ ...tier, name: ' ' }]))).toEqual(['tierName']);
+    expect(tierProblems(withTiers([{ ...tier, supply: 0 }]))).toEqual(['tierSupply']);
+    expect(tierProblems(withTiers([{ ...tier, maxPerWallet: 65_536 }]))).toEqual(['tierMaxPerWallet']);
+  });
+
+  it('refuses a ninth kind, as `Ticket.createEvent` would', () => {
+    expect(tierProblems(withTiers(Array.from({ length: 8 }, () => tier)))).toEqual([]);
+    expect(tierProblems(withTiers(Array.from({ length: 9 }, () => tier)))).toEqual(['tiersTooMany']);
+  });
+
+  it('refuses a negative hand-over cut-off', () => {
+    expect(tierProblems({ ...withTiers([tier]), transferCutoffHours: -1 })).toEqual(['cutoff']);
+  });
+});
+
+describe('paidTiers', () => {
+  const tier = { ...READY.tiers[0], name: '일반', supply: 10, maxPerWallet: 1 } as EventDraft['tiers'][number];
+
+  /**
+   * `Ticket.claim` reverts `PaidTiersNotEnabled` on any tier whose `priceUsdCents` is not
+   * zero, and `updateEventMeta` closes at publish — so a paid kind is an event nobody can
+   * ever get a ticket for and nobody can repair. The card is blocked where it was chosen.
+   */
+  it('names every card that cannot be created, by index', () => {
+    const draft = { ...READY, tiers: [tier, { ...tier, currency: 'USDC' as const }, tier] };
+    expect(paidTiers(draft)).toEqual([1]);
+    expect(tierProblems(draft)).toContain('paidTier');
+    expect(paidTiers({ ...READY, tiers: [tier] })).toEqual([]);
+  });
+});
+
+describe('tierArt', () => {
+  const tier = READY.tiers[0] as EventDraft['tiers'][number];
+
+  it('is a letter, never a name — nothing else reaches `saveEventArt`', () => {
+    expect(tierArt({ ...tier, design: 'c', imageCid: '' })).toEqual({ preset: 'c' });
+    // A draft written before the presets were letters, or edited by hand.
+    expect(tierArt({ ...tier, design: 'aurora', imageCid: '' })).toEqual({ preset: 'a' });
+  });
+
+  it('lets an uploaded picture win, and keeps the design the draft still remembers', () => {
+    expect(tierArt({ ...tier, design: 'd', imageCid: 'bafkart' })).toEqual({ imageCid: 'bafkart' });
   });
 });

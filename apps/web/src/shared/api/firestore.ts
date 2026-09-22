@@ -164,8 +164,8 @@ const DEFAULT_TICKET_ART: TicketArtSource = { preset: 'a' };
 /**
  * The seam, and the reason this validation is here rather than in the component. What comes
  * back is whatever is in the document: a shape an older `saveEventArt` wrote, a hand edit made
- * in the console, or the draft screen's own default `design: 'aurora'` from before the presets
- * were named a–d. Anything this function does not recognise becomes the first bundled preset,
+ * in the console, or a draft written before the presets were named a–d (they were called
+ * `'aurora'` and friends). Anything this function does not recognise becomes the first preset,
  * so a stale document costs a ticket the picture its organiser picked and never its render.
  *
  * An upload wins over a design key when a document somehow carries both: choosing a picture is

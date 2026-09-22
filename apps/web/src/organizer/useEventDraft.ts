@@ -36,8 +36,13 @@ const MAX_TAGS = 5;
 const DEFAULT_CATEGORY = 0;
 const DEFAULT_REGION = 'KR-11';
 
-/** Named in the plan as one of the four bundled artworks; the set itself belongs to TicketArt. */
-const DEFAULT_DESIGN = 'aurora';
+/**
+ * The first of the four bundled artworks. It is the **letter** `saveEventArt` stores and
+ * `TicketArt` renders (`'a'|'b'|'c'|'d'`), not a name: a name in this field would reach
+ * Firestore, and the reader would fold every one of them back to `'a'` — so every event would
+ * ship the first picture whatever its organiser picked. The display names live in copy.
+ */
+const DEFAULT_DESIGN = 'a';
 
 const CURRENCIES: readonly EventDraftCurrency[] = ['free', 'MON', 'USDT', 'USDC'];
 

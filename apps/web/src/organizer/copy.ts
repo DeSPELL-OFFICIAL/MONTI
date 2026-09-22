@@ -289,6 +289,49 @@ const ko = {
       schedule: '종료 시각이 시작 시각보다 뒤여야 해요',
     },
 
+
+    tiers: {
+      title: '티켓',
+      create: '행사 만들기',
+      add: '종류 추가',
+      remove: '빼기',
+      kind: '{{index}}번째 종류',
+      name: '이름',
+      namePlaceholder: '예: 일반',
+      supply: '수량',
+      maxPerWallet: '1인당 한도',
+      price: '가격',
+      free: '무료',
+      amount: '금액',
+      art: '티켓 그림',
+      // 'Mint' 는 관객 금지어(`mint`)에 걸린다 — 색 이름은 '청록'/'Teal' 로 둔다.
+      artA: '오로라', artB: '잉걸', artC: '청록', artD: '어스름',
+      artUpload: '직접 올리기',
+      artUploadClose: '그만두기',
+      artWorking: '그림을 올리고 있어요',
+      // 유료 종류를 고른 그 자리에서 막는다 — 마지막에 거절당하는 게 제일 나쁘다(계획 B-3).
+      paidBlocked: '유료 티켓은 곧 열려요. 지금은 무료로만 만들 수 있어요',
+      rules: '행사 전체 규칙',
+      // transferable·transferCutoffSeconds·requireKyc 는 EventMeta 에 있고 Tier 에는 없다.
+      // 종류 카드 안에 두면 화면이 거짓말을 한다.
+      rulesHelp: '이 세 가지는 종류마다 다르게 둘 수 없어요. 행사 하나에 하나씩이에요',
+      transferable: '양도 가능',
+      cutoff: '양도 마감 (행사 시작 N시간 전)',
+      requireKyc: '본인 확인한 사람만',
+      requireKycHelp: '켜면 신분증·얼굴 확인을 마친 사람만 티켓을 받을 수 있어요. 가벼운 모임은 꺼두세요',
+      feeNote: '만드는 비용은 MONTI가 대신 내요',
+    },
+
+    tierProblems: {
+      eventIncomplete: '행사 정보에 아직 빠진 칸이 있어요',
+      tiersTooMany: '종류는 8개까지예요',
+      tierName: '모든 종류에 이름을 적어 주세요',
+      tierSupply: '수량을 1장 이상으로 적어 주세요',
+      tierMaxPerWallet: '1인당 한도를 1장에서 65535장 사이로 적어 주세요',
+      cutoff: '양도 마감 시간을 0시간 이상으로 적어 주세요',
+      paidTier: '무료가 아닌 종류가 있어요. 무료로 바꾸면 만들 수 있어요',
+    },
+
     imageProblems: {
       tooLarge: '사진이 너무 커요. 다른 사진을 골라 주세요',
       format: 'JPG·PNG 사진만 올릴 수 있어요',
@@ -647,6 +690,47 @@ const en: typeof ko = {
       startsAt: 'Please pick a start time',
       endsAt: 'Please pick an end time',
       schedule: 'The end has to come after the start',
+    },
+
+
+    tiers: {
+      title: 'Tickets',
+      create: 'Create the event',
+      add: 'Add a kind',
+      remove: 'Remove',
+      kind: 'Kind {{index}}',
+      name: 'Name',
+      namePlaceholder: 'e.g. General',
+      supply: 'How many',
+      maxPerWallet: 'Most one person may hold',
+      price: 'Price',
+      free: 'Free',
+      amount: 'Amount',
+      art: 'Ticket picture',
+      artA: 'Aurora', artB: 'Ember', artC: 'Teal', artD: 'Dusk',
+      artUpload: 'Upload your own',
+      artUploadClose: 'Never mind',
+      artWorking: 'Uploading the picture',
+      // Blocked where the choice was made, not at the end (plan section B-3).
+      paidBlocked: 'Paid tickets are coming soon. For now an event can only be free',
+      rules: 'Rules for the whole event',
+      // These three live on EventMeta and not on Tier, so a per-kind switch would be a lie.
+      rulesHelp: 'These three cannot differ by kind. There is one of each per event',
+      transferable: 'Can be handed over',
+      cutoff: 'Hand-over closes (hours before the event starts)',
+      requireKyc: 'Only people who passed the identity check',
+      requireKycHelp: 'With this on, only people who finished the ID and face check can get a ticket. Leave it off for casual meetups',
+      feeNote: 'MONTI covers the cost of creating it',
+    },
+
+    tierProblems: {
+      eventIncomplete: 'Some of the event details are still missing',
+      tiersTooMany: 'Up to eight kinds',
+      tierName: 'Give every kind a name',
+      tierSupply: 'Write how many as 1 or more',
+      tierMaxPerWallet: 'Write the per-person limit as a number from 1 to 65535',
+      cutoff: 'Write the hand-over cut-off as 0 hours or more',
+      paidTier: 'One of the kinds is not free. Make it free and you can create the event',
     },
 
     imageProblems: {

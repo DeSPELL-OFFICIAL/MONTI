@@ -1,4 +1,5 @@
-import type { EventDraft } from '../../shared/api/firestore';
+import type { EventDraft, EventDraftTier } from '../../shared/api/firestore';
+import type { TicketArtPreset, TicketArtSource } from '../../shared/ui';
 import { REGION_CODES } from '../wizard/regions';
 
 /**
@@ -112,3 +113,62 @@ export function eventProblems(draft: EventDraft): EventProblem[] {
 export function saleWindow(draft: EventDraft, now: number): { saleStart: number; saleEnd: number } {
   return { saleStart: now, saleEnd: draft.endsAt };
 }
+
+/** `Ticket.createEvent` refuses more than eight kinds with `InvalidTiers` (`Ticket.sol:193`). */
+export const MAX_TIERS = 8;
+
+/** The struct widths. A value past one of these does not revert — it fails to encode. */
+const UINT16_MAX = 65_535;
+const UINT32_MAX = 4_294_967_295;
+const SECONDS_PER_HOUR = 3_600;
+
+/** One named rule of SCENE 2; `organizer/copy.ts` owns a sentence for each. */
+export type TierProblem =
+  | 'tiersTooMany' | 'tierName' | 'tierSupply' | 'tierMaxPerWallet' | 'cutoff' | 'paidTier';
+
+/**
+ * Which ticket kinds cannot be created, by index. Today that is every kind whose currency is
+ * not `무료`: `Ticket.claim` is not `payable` and reverts `PaidTiersNotEnabled` on any tier
+ * whose `priceUsdCents` is not zero (`Ticket.sol:274`), so a paid kind is a kind nobody could
+ * ever get a ticket for — and after `publishEvent` there is no `updateEventMeta` to fix it
+ * with. The card says so where the choice was made rather than at the end (plan section B-3).
+ */
+export function paidTiers(draft: EventDraft): number[] {
+  return draft.tiers.flatMap((tier, index) => (tier.currency === 'free' ? [] : [index]));
+}
+
+function isWholeNumber(value: number, low: number, high: number): boolean {
+  return Number.isInteger(value) && value >= low && value <= high;
+}
+
+/** Everything SCENE 2 refuses, in the order the cards and then the event rules ask for it. */
+export function tierProblems(draft: EventDraft): TierProblem[] {
+  const problems: TierProblem[] = [];
+  if (draft.tiers.length > MAX_TIERS) problems.push('tiersTooMany');
+  if (draft.tiers.some((tier) => tier.name.trim() === '')) problems.push('tierName');
+  if (draft.tiers.some((tier) => !isWholeNumber(tier.supply, 1, UINT32_MAX))) problems.push('tierSupply');
+  if (draft.tiers.some((tier) => !isWholeNumber(tier.maxPerWallet, 1, UINT16_MAX))) {
+    problems.push('tierMaxPerWallet');
+  }
+  if (!isWholeNumber(draft.transferCutoffHours * SECONDS_PER_HOUR, 0, UINT32_MAX)) {
+    problems.push('cutoff');
+  }
+  if (paidTiers(draft).length > 0) problems.push('paidTier');
+  return problems;
+}
+
+/**
+ * The draft's two art fields folded into the one-or-the-other shape `saveEventArt` takes and
+ * `TicketArt` renders. They are kept apart in the draft on purpose — somebody who picks a
+ * design, uploads a picture and then changes their mind back should not have lost the design
+ * in between — so this fold happens at the two places the single value is needed: the preview
+ * and the publish call.
+ */
+export function tierArt(tier: EventDraftTier): TicketArtSource {
+  if (tier.imageCid !== '') return { imageCid: tier.imageCid };
+  const preset = TICKET_ART_PRESETS.find((key) => key === tier.design);
+  return { preset: preset ?? 'a' };
+}
+
+/** The alphabet, in the order the picker offers it. */
+export const TICKET_ART_PRESETS: readonly TicketArtPreset[] = ['a', 'b', 'c', 'd'];

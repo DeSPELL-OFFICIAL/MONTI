@@ -1,25 +1,9 @@
 import { useState } from 'react';
 import { A4Cropper, Button } from '../../shared/ui';
 import type { CroppedPoster } from '../../shared/ui';
-import { api, callableFailure } from '../../shared/api/functions';
 import { gatewayUrl } from '../../shared/envio/ipfs';
-import { useOrganizerCopy, type OrganizerCopy } from '../copy';
-
-type ImageProblem = keyof OrganizerCopy['scene']['imageProblems'];
-
-/**
- * The server's reason codes against the sentence each one deserves
- * (task-ev-b report §3.1). Anything not listed — `PIN_FAILED`, a dropped connection,
- * `BAD_IMAGE` — is the retryable one, because that is what every unlisted case actually is.
- */
-const IMAGE_PROBLEMS: Readonly<Record<string, ImageProblem>> = {
-  IMAGE_TOO_LARGE: 'tooLarge',
-  BAD_IMAGE_FORMAT: 'format',
-  BAD_IMAGE_DIMENSIONS: 'dimensions',
-  PIN_QUOTA: 'quota',
-  NOT_ACTIVE: 'notActive',
-  NO_SIGNUP: 'notActive',
-};
+import { useOrganizerCopy } from '../copy';
+import { usePinImage } from './usePinImage';
 
 export interface PosterCardProps {
   posterCid: string;
@@ -37,24 +21,13 @@ export interface PosterCardProps {
 export function PosterCard({ posterCid, onPinned }: PosterCardProps) {
   const copy = useOrganizerCopy().scene;
   const [editing, setEditing] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [problem, setProblem] = useState('');
+  const { pin, busy, problem } = usePinImage('poster');
 
-  async function upload(poster: CroppedPoster): Promise<void> {
-    setBusy(true);
-    setProblem('');
-    try {
-      const { cid } = await api.pinEventImage({ bytesBase64: poster.base64, kind: 'poster' });
-      onPinned(cid);
-      setEditing(false);
-    } catch (cause) {
-      // Caught here rather than thrown on: the cropper's own catch would replace a sentence
-      // that says which photo to pick next with one that only says it did not work.
-      const { reason } = callableFailure(cause);
-      setProblem(copy.imageProblems[IMAGE_PROBLEMS[reason] ?? 'failed']);
-    } finally {
-      setBusy(false);
-    }
+  async function upload(cropped: CroppedPoster): Promise<void> {
+    const cid = await pin(cropped);
+    if (cid === '') return;
+    onPinned(cid);
+    setEditing(false);
   }
 
   if (posterCid === '' || editing) {

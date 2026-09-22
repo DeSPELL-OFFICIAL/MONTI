@@ -11,6 +11,7 @@ import { Team } from './Team';
 import { Gates } from './gates/Gates';
 import { AcceptInvite } from './invites/Accept';
 import { CreateEvent } from './scene/CreateEvent';
+import { TicketSettings } from './scene/TicketSettings';
 import { useWizard } from './wizard/useWizard';
 import { Step1Basic } from './wizard/Step1Basic';
 import { Step2When } from './wizard/Step2When';
@@ -244,6 +245,7 @@ export function OrganizerRoutes() {
           wizard stays reachable here until T-EV-W10 deletes it; nothing links to it. */}
       <Route path="new/old" element={<Wizard />} />
       <Route path="new/:draftId" element={<CreateEvent />} />
+      <Route path="new/:draftId/tickets" element={<TicketSettings />} />
       <Route path="events/:eventId" element={<Dashboard />} />
       <Route path="events/:eventId/gates" element={<Gates />} />
       <Route path="team" element={<Team />} />

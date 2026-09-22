@@ -216,7 +216,7 @@ describe('opening the scene', () => {
     });
     expect(tiers[0]).toEqual({
       name: '일반', supply: 0, maxPerWallet: 0,
-      currency: 'free', amount: 0, design: 'aurora', imageCid: '',
+      currency: 'free', amount: 0, design: 'a', imageCid: '',
     });
   });
 });
