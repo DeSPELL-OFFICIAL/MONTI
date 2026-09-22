@@ -252,10 +252,12 @@ describe('organiser home', () => {
   });
 });
 
+/** The six-step wizard's own prefill. It answers at `/org/new/old` now that the creation
+ *  scene owns `/org/new`; the scene's own `?org=` handling is covered in `scene/`. */
 describe('wizard prefill', () => {
   it('fills step 1 with the organisation the home screen chose', async () => {
     localStorage.clear();
-    open('/org/new?org=7');
+    open('/org/new/old?org=7');
     expect(await screen.findByLabelText(organizerCopy.ko.wizard.orgId)).toHaveValue('7');
   });
 
@@ -263,7 +265,7 @@ describe('wizard prefill', () => {
     localStorage.clear();
     const { DRAFT_KEY } = await import('./wizard/useWizard');
     localStorage.setItem(DRAFT_KEY, JSON.stringify({ orgId: '3' }));
-    open('/org/new?org=7');
+    open('/org/new/old?org=7');
     expect(await screen.findByLabelText(organizerCopy.ko.wizard.orgId)).toHaveValue('3');
   });
 });

@@ -10,6 +10,7 @@ import { Dashboard } from './Dashboard';
 import { Team } from './Team';
 import { Gates } from './gates/Gates';
 import { AcceptInvite } from './invites/Accept';
+import { CreateEvent } from './scene/CreateEvent';
 import { useWizard } from './wizard/useWizard';
 import { Step1Basic } from './wizard/Step1Basic';
 import { Step2When } from './wizard/Step2When';
@@ -236,7 +237,13 @@ export function OrganizerRoutes() {
       {/* Where `주최사 만들기` lands — the organiser home's empty state, the explore FAB
           and the profile section all point here (`useOrganizerEntry`). */}
       <Route path="become" element={<Become />} />
-      <Route path="new" element={<Wizard />} />
+      {/* The creation scene. `/org/new` starts one (or carries on with the newest draft) and
+          `/org/new/<draftId>` opens a named one — which is what SCENE 2's back link uses. */}
+      <Route path="new" element={<CreateEvent />} />
+      {/* Static beats dynamic in the router's ranking, so this is not a draft id. The six-step
+          wizard stays reachable here until T-EV-W10 deletes it; nothing links to it. */}
+      <Route path="new/old" element={<Wizard />} />
+      <Route path="new/:draftId" element={<CreateEvent />} />
       <Route path="events/:eventId" element={<Dashboard />} />
       <Route path="events/:eventId/gates" element={<Gates />} />
       <Route path="team" element={<Team />} />

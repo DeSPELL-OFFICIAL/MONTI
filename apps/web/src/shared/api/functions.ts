@@ -368,6 +368,27 @@ export const api = {
    *  only read path they have to what they posted (functions/src/functions/pinMessage.ts). */
   listPinned: async (args: { eventId: string }): Promise<PinnedMessage[]> =>
     (await callListPinned(args)).messages,
+  /**
+   * One picture, pinned on its own and answered with its CID
+   * (functions/src/functions/organizer.ts). The creation scene calls this the moment a poster
+   * is cropped rather than at publish time, because a draft document stops at 1 MiB and a
+   * 600 KB JPEG is 800 KB once it is base64 — the CID is what the draft can carry.
+   *
+   * `bytesBase64` is standard base64 with the `data:<mime>;base64,` prefix already off, and
+   * there is no `mime` field: the server decides the format from the leading bytes and takes
+   * **JPEG and PNG only** (WebP is refused, which the old `pinEventMetadata` accepted).
+   * Caps are per kind — `poster` 600 KB, `ticket` 400 KB, either one at most 4000 px a side.
+   *
+   * Being an organiser is *not* required: a draft is written before an organisation exists.
+   * Any signed-in `active` person may call it, at most 20 pictures a day.
+   *
+   * Refusals worth their own sentence, by reason: `IMAGE_TOO_LARGE`, `BAD_IMAGE_FORMAT`,
+   * `BAD_IMAGE_DIMENSIONS` (all `invalid-argument`), `PIN_QUOTA` (`resource-exhausted`),
+   * `NOT_ACTIVE` (`failed-precondition`), `PIN_FAILED` (`internal`, and retryable).
+   */
+  pinEventImage: call<{ bytesBase64: string; kind: 'poster' | 'ticket' }, { cid: string }>(
+    'pinEventImage',
+  ),
   // The web never holds a pinning token. The organiser sends the cover picture and the two
   // readable fields; the server checks that this caller may create events for `orgId`, pins
   // the picture, then pins `{ name, description, image: "ipfs://<imageCid>" }` and answers

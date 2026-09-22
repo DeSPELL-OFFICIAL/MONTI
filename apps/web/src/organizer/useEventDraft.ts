@@ -201,13 +201,18 @@ export interface EventDraftState {
   discard: () => Promise<void>;
 }
 
-export function useEventDraft(orgId: string): EventDraftState {
+export function useEventDraft(orgId: string, wantedId?: string): EventDraftState {
   const [mirrored] = useState(readMirror);
+  // `/org/new/<id>` names the document to open — coming back from SCENE 2, or resuming from
+  // another tab. The device copy is only the right thing to show when it mirrors *that*
+  // document; for any other id the fields start empty and the read below fills them.
+  const [opened] = useState(() =>
+    (wantedId === undefined || mirrored?.id === wantedId ? mirrored : null));
   const [draft, setDraft] = useState<EventDraft>(() =>
-    withOrg(mirrored?.draft ?? emptyEventDraft, orgId));
+    withOrg(opened?.draft ?? emptyEventDraft, orgId));
   // The id is minted here rather than after the round trip, so a draft typed into while
   // Firestore is still answering already knows which document it is the mirror of.
-  const [draftId, setDraftId] = useState<string>(() => mirrored?.id ?? newDraftId());
+  const [draftId, setDraftId] = useState<string>(() => opened?.id ?? wantedId ?? newDraftId());
   const [loading, setLoading] = useState(true);
   const [resumed, setResumed] = useState(false);
   const [status, setStatus] = useState<EventDraftStatus>('saved');
@@ -215,6 +220,12 @@ export function useEventDraft(orgId: string): EventDraftState {
 
   const draftRef = useRef(draft);
   const idRef = useRef(draftId);
+  /**
+   * The id whose *contents* are on screen, which is not always {@link idRef}: opening
+   * `/org/new/<id>` with no device copy of that draft mints the id first and reads the fields
+   * a moment later. `''` means nothing has been opened, so the read below always lands.
+   */
+  const openedIdRef = useRef(opened?.id ?? '');
   const orgRef = useRef(orgId);
   /** Unsaved changes are waiting. Set on every change, cleared by a write that landed. */
   const dirtyRef = useRef(false);
@@ -298,6 +309,7 @@ export function useEventDraft(orgId: string): EventDraftState {
     await pruneDrafts(stored, 1);
     const next = newDraftId();
     idRef.current = next;
+    openedIdRef.current = next;
     if (liveRef.current) setDraftId(next);
   }, [clearTimer]);
 
@@ -316,18 +328,22 @@ export function useEventDraft(orgId: string): EventDraftState {
         // device copy is already on screen and the next write decides the rest.
       }
       if (!liveRef.current) return;
-      const newest = stored[0];
-      if (newest !== undefined && !touchedRef.current && newest.id !== idRef.current) {
+      // The named document when the route named one; otherwise whichever was written last.
+      const newest = wantedId === undefined
+        ? stored[0]
+        : stored.find((entry) => entry.id === wantedId);
+      if (newest !== undefined && !touchedRef.current && newest.id !== openedIdRef.current) {
         // Another device got further than this one. Typing that has already happened here
         // outranks it, which is why `touchedRef` is asked first.
-        const opened = withOrg(normalizeEventDraft(newest.data), orgRef.current);
-        draftRef.current = opened;
+        const resumedDraft = withOrg(normalizeEventDraft(newest.data), orgRef.current);
+        draftRef.current = resumedDraft;
         idRef.current = newest.id;
-        writeMirror(newest.id, opened);
-        setDraft(opened);
+        openedIdRef.current = newest.id;
+        writeMirror(newest.id, resumedDraft);
+        setDraft(resumedDraft);
         setDraftId(newest.id);
       }
-      setResumed(mirrored !== null || newest !== undefined);
+      setResumed(opened !== null || newest !== undefined);
       setLoading(false);
       // Nothing is being added here — the resumed draft is one of these — so the whole cap
       // is available to keep.
@@ -339,7 +355,7 @@ export function useEventDraft(orgId: string): EventDraftState {
       void runSave(false);
       clearTimer();
     };
-  }, [clearTimer, mirrored, runSave]);
+  }, [clearTimer, opened, runSave, wantedId]);
 
   useEffect(() => {
     const tick = setInterval(() => { void runSave(true); }, DRAFT_INTERVAL_MS);

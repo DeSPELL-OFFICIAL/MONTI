@@ -223,6 +223,82 @@ const ko = {
     failed: '공지를 올리지 못했어요. 잠시 뒤 다시 시도해 주세요',
   },
 
+  /**
+   * The creation scene: one scroll for the event, one for the tickets, and a done screen.
+   * It replaces the six-step wizard below, which stays reachable at `/org/new/old` until
+   * T-EV-W10 deletes it.
+   */
+  scene: {
+    title: '행사 만들기',
+    leave: '나가기',
+    resumed: '이어서 쓰는 중',
+    startOver: '처음부터',
+    next: '다음',
+    back: '행사 정보로',
+
+    saveAuto: '적는 대로 저장돼요',
+    saving: '저장 중…',
+    saveFailed: '저장 안 됨 · 다시 시도',
+    savedNow: '저장됨 · 방금',
+    savedAgo: '저장됨 · {{ago}}',
+    agoMinutes: '{{count}}분 전',
+    agoHours: '{{count}}시간 전',
+
+    poster: '포스터',
+    posterEmpty: '포스터를 올리면 여기에 보여요',
+    posterChange: '포스터 바꾸기',
+    posterWorking: '포스터를 올리고 있어요',
+    posterAlt: '포스터 미리보기',
+
+    titleLabel: '제목',
+    titlePlaceholder: '무슨 행사인가요?',
+    themeLabel: '테마',
+    theme0: '공연', theme1: '모임', theme2: '전시', theme3: '기타',
+    tagsLabel: '태그',
+    tagsHelp: '5개까지, 하나에 12자까지 적을 수 있어요. 탭하면 빼요',
+    tagPlaceholder: '예: 재즈',
+    tagAdd: '태그 더하기',
+    tagRemove: '{{tag}} 빼기',
+    bodyLabel: '소개',
+    bodyPlaceholder: '어떤 행사인지 알려주세요',
+    count: '{{count}}/{{max}}',
+
+    placeLabel: '장소',
+    regionLabel: '지역',
+    venuePlaceholder: '장소 이름이나 주소',
+    timeLabel: '시간',
+    startsAt: '시작',
+    endsAt: '종료',
+    holdersOnly: '티켓 소지자에게만 공개',
+    // 백엔드 T-EV-B 보고 9.3: 숨김 → 공개는 언제든 되지만 그 반대는 안 된다.
+    venueHiddenHelp: '탐색 화면에는 지역만 보여요. 자세한 장소는 티켓을 받은 사람에게만 알려줘요',
+    venueHiddenOneWay: '공개로 두고 만들면 나중에는 숨길 수 없어요. 숨겨 두었다가 공개로 바꾸는 건 언제든 돼요',
+    timeHiddenHelp: '탐색 화면에는 날짜만 보여요. 시작 시각은 티켓을 받은 사람에게만 알려줘요',
+    saleHelp: '신청은 행사를 만든 순간 열리고 행사가 끝날 때 닫혀요',
+
+    problems: {
+      poster: '포스터를 올려 주세요',
+      title: '제목을 2자에서 60자 사이로 적어 주세요',
+      tags: '태그는 5개까지, 하나에 12자까지예요',
+      body: '소개를 2000자 안으로 적어 주세요',
+      region: '지역을 골라 주세요',
+      venue: '장소를 적어 주세요',
+      venueTooLong: '장소는 200자 안으로 적어 주세요',
+      startsAt: '시작 시각을 골라 주세요',
+      endsAt: '종료 시각을 골라 주세요',
+      schedule: '종료 시각이 시작 시각보다 뒤여야 해요',
+    },
+
+    imageProblems: {
+      tooLarge: '사진이 너무 커요. 다른 사진을 골라 주세요',
+      format: 'JPG·PNG 사진만 올릴 수 있어요',
+      dimensions: '사진이 너무 커요. 한 변이 4000픽셀 안이어야 해요',
+      quota: '오늘은 사진을 더 올릴 수 없어요. 내일 다시 시도해 주세요',
+      notActive: '가입을 먼저 마무리해 주세요',
+      failed: '사진을 올리지 못했어요. 잠시 뒤 다시 시도해 주세요',
+    },
+  },
+
   wizard: {
     heading: '행사 만들기',
     step1: '기본 정보', step2: '일시·장소', step3: '티켓 종류', step4: '판매·양도 규칙',
@@ -509,6 +585,78 @@ const en: typeof ko = {
     notAllowed: 'You may not post notices for this event',
     chatClosed: 'The event is over and the room is closed',
     failed: 'Could not post the notice. Please try again in a moment',
+  },
+
+  /** See the Korean block above: one scroll for the event, one for the tickets, then done. */
+  scene: {
+    title: 'Create an event',
+    leave: 'Leave',
+    resumed: 'Carrying on where you left off',
+    startOver: 'Start over',
+    next: 'Next',
+    back: 'Back to the event',
+
+    saveAuto: 'Saved as you write',
+    saving: 'Saving…',
+    saveFailed: 'Not saved · try again',
+    savedNow: 'Saved · just now',
+    savedAgo: 'Saved · {{ago}}',
+    agoMinutes: '{{count}} min ago',
+    agoHours: '{{count}} h ago',
+
+    poster: 'Poster',
+    posterEmpty: 'Your poster appears here',
+    posterChange: 'Change the poster',
+    posterWorking: 'Uploading the poster',
+    posterAlt: 'Poster preview',
+
+    titleLabel: 'Title',
+    titlePlaceholder: 'What is the event?',
+    themeLabel: 'Theme',
+    theme0: 'Concert', theme1: 'Meetup', theme2: 'Exhibition', theme3: 'Other',
+    tagsLabel: 'Tags',
+    tagsHelp: 'Up to five, each up to 12 characters. Tap one to remove it',
+    tagPlaceholder: 'e.g. jazz',
+    tagAdd: 'Add a tag',
+    tagRemove: 'Remove {{tag}}',
+    bodyLabel: 'About this event',
+    bodyPlaceholder: 'Tell people what the event is',
+    count: '{{count}}/{{max}}',
+
+    placeLabel: 'Where',
+    regionLabel: 'Region',
+    venuePlaceholder: 'Venue name or address',
+    timeLabel: 'When',
+    startsAt: 'Starts',
+    endsAt: 'Ends',
+    holdersOnly: 'Only people with a ticket',
+    // Backend report 9.3: hidden can be opened up at any time, open can never be hidden again.
+    venueHiddenHelp: 'Explore screens show the region only. People who got a ticket are told the exact place',
+    venueHiddenOneWay: 'Create it open and it can never be hidden later. Hidden can be opened up at any time',
+    timeHiddenHelp: 'Explore screens show the date only. People who got a ticket are told the start time',
+    saleHelp: 'Sign-ups open the moment you create the event and close when it ends',
+
+    problems: {
+      poster: 'Please upload a poster',
+      title: 'Write a title of 2 to 60 characters',
+      tags: 'Up to five tags, each up to 12 characters',
+      body: 'Write the description in 2000 characters or fewer',
+      region: 'Please pick a region',
+      venue: 'Please write the venue',
+      venueTooLong: 'Write the venue in 200 characters or fewer',
+      startsAt: 'Please pick a start time',
+      endsAt: 'Please pick an end time',
+      schedule: 'The end has to come after the start',
+    },
+
+    imageProblems: {
+      tooLarge: 'That photo is too big. Please choose another one',
+      format: 'JPG and PNG photos only',
+      dimensions: 'That photo is too big. Each side has to be 4000 pixels or fewer',
+      quota: 'No more photos today. Please try again tomorrow',
+      notActive: 'Please finish signing up first',
+      failed: 'Could not upload the photo. Please try again in a moment',
+    },
   },
 
   wizard: {

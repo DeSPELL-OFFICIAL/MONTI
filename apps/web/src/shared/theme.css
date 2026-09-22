@@ -121,3 +121,49 @@ body {
 /* The detail screen shows one ticket, so it is the picture rather than a thumbnail — capped
    short of the full width so the state, the door guide and 입장하기 stay on the same screen. */
 .ticket-detail-art { max-width: 260px; margin: 0 auto 16px; }
+
+/* ── the creation scenes ───────────────────────────────────────────────────────────────────
+   One long scroll with a bar pinned to its foot, so the scroll pads itself by the bar's own
+   height. `.screen` already pads for the tab bar, which these scenes do not show — the sticky
+   bar sits in that same place instead. */
+:root { --sticky-bar-h: 72px; }
+.scene { padding-bottom: calc(env(safe-area-inset-bottom) + var(--sticky-bar-h) + 24px); }
+.scene section { margin: 24px 0; }
+.scene h2 { font-size: 15px; margin: 0 0 4px; }
+.sticky-bar {
+  position: fixed; inset: auto 0 0 0; z-index: 11;
+  max-width: 480px; margin: 0 auto;
+  display: flex; align-items: center; gap: 12px;
+  min-height: var(--sticky-bar-h);
+  padding: 10px 16px calc(env(safe-area-inset-bottom) + 10px);
+  background: var(--surface); border-top: 1px solid var(--line);
+}
+.sticky-bar__status { flex: 1; color: var(--muted); font-size: 13px; }
+.sticky-bar__action { flex: 0 0 auto; min-width: 128px; }
+.sticky-bar__action .btn { height: 44px; }
+
+.chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.chip {
+  border: 1px solid var(--line); background: var(--surface); color: var(--text);
+  border-radius: 999px; padding: 8px 14px; font-size: 14px; line-height: 1.2;
+}
+.chip--on { border-color: var(--accent); background: rgba(79, 125, 255, 0.16); color: var(--text); }
+.chip[disabled] { opacity: 0.45; }
+
+.toggle { margin: 12px 0; }
+.toggle__row { display: flex; align-items: center; gap: 10px; }
+.toggle__row input { width: 20px; height: 20px; accent-color: var(--accent); flex: 0 0 auto; }
+.toggle__help { margin: 6px 0 0; }
+
+/* The preview card is the poster upload: what the organiser is making is always on screen. */
+.poster-card { margin: 0 0 8px; }
+/* The A4 frame at the full 480px screen is ~679px tall — taller than a phone. The card caps it
+   so the first field is visible under the picture without a scroll. */
+.poster-card .a4-frame, .poster-card__filled { max-width: 240px; margin: 0 auto; }
+.poster-card__filled {
+  position: relative; overflow: hidden; width: 100%; aspect-ratio: 1240 / 1754;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+}
+.poster-card__filled img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+/* A rule the organiser is about to break, said under the field rather than in an alert box. */
+.problem { margin: 6px 0 0; color: var(--danger); font-size: 13px; }

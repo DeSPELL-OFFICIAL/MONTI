@@ -98,7 +98,9 @@ const READY = {
 function open(draft: unknown = READY) {
   if (draft !== null) localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
   render(
-    <MemoryRouter initialEntries={['/new']}>
+    // The six-step wizard moved aside when the creation scene took `/org/new` (T-EV-W3);
+    // it still stands at `/org/new/old` until T-EV-W10 deletes it.
+    <MemoryRouter initialEntries={['/new/old']}>
       <OrganizerRoutes />
     </MemoryRouter>,
   );
