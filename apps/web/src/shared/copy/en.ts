@@ -32,6 +32,7 @@ export const en: typeof ko = {
     deviceBusy: 'We are catching up on requests. Please tap again in a moment.',
     deviceSlow: 'Registration is taking a while. Please try again in a moment.',
     deviceSkip: 'Continue anyway',
+    deviceWebNote: "Browsers can't tap in at the gate — entry happens in the app.",
     restart: 'Please start sign-up again from the beginning.',
     retryStep: 'That took a little too long. Please tap again.',
     doneTitle: 'You are all set', doneBody: 'You can browse events and get tickets now.',

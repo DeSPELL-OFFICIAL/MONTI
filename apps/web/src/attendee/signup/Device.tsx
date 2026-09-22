@@ -63,9 +63,18 @@ async function refreshClaims(): Promise<void> {
 }
 
 /**
- * Signup step 3 of 3. The phone's secure chip mints a key that never leaves it, and the
- * attester writes its public half next to the account so the door can recognise this phone.
- * A browser has no such chip: that attendee finishes signup here and shows a code at the door.
+ * Signup step 3 of 3, and the step that makes a person `active`. The phone's secure chip mints a
+ * key that never leaves it, and the attester writes its public half next to the account so the
+ * door can recognise this phone.
+ *
+ * A browser has no such chip, so it mints a software P-256 key instead (shared/deviceKey/web.ts)
+ * and registers exactly the same way. That key is not proof of a device, so a browser is not
+ * offered the gate — the line under the title says so. What it buys is the rest of the product:
+ * before this, a browser skipped `registerIdentity` entirely and every web attendee stayed
+ * `pending`, which is what `startKyc` and every claim refuse.
+ *
+ * The skip path is now only for a browser that genuinely cannot make a key — a private window
+ * with no IndexedDB — and never the default.
  */
 export function DeviceStep() {
   const copy = useCopy();
@@ -115,6 +124,7 @@ export function DeviceStep() {
   return (
     <Screen title={copy.signup.deviceTitle}>
       <p>{copy.signup.deviceBody}</p>
+      {platform() === 'web' ? <p>{copy.signup.deviceWebNote}</p> : null}
       {error ? <Alert tone={unavailable ? 'warn' : 'error'}>{error}</Alert> : null}
       {busy ? (
         <div className="working">

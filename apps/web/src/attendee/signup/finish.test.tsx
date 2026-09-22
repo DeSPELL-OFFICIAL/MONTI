@@ -189,6 +189,41 @@ describe('device step', () => {
     expect(registerIdentity.mock.calls[0]![0]).toMatchObject({ platform: 'web' });
   });
 
+  /**
+   * The bug this step exists to close: a browser used to throw at `ensureDeviceKey` and skip
+   * `registerIdentity` altogether, so every web attendee finished signup as `pending` — which
+   * is exactly what `startKyc` and every claim refuse. The browser now registers a key of its
+   * own and takes the same path a phone takes.
+   */
+  it('registers the browser key on chain instead of skipping registration', async () => {
+    getPlatform.mockReturnValue('web');
+    renderScreen(<DeviceStep />);
+    await userEvent.click(screen.getByRole('button', { name: '등록하기' }));
+
+    await waitFor(() =>
+      expect(registerIdentity).toHaveBeenCalledWith({
+        personId: PERSON_ID,
+        deviceX: DEVICE_X,
+        deviceY: DEVICE_Y,
+        platform: 'web',
+      }),
+    );
+    // The skip button belongs to a browser that cannot make a key at all, not to every browser.
+    expect(screen.queryByRole('button', { name: '이대로 계속하기' })).toBeNull();
+    expect(navigate).toHaveBeenCalledWith('/signup/done');
+  });
+
+  it('tells a browser that the gate is an app thing, and says nothing of the sort on a phone', async () => {
+    getPlatform.mockReturnValue('web');
+    const { unmount } = renderScreen(<DeviceStep />);
+    expect(screen.getByText(ko.signup.deviceWebNote)).toBeInTheDocument();
+
+    unmount();
+    getPlatform.mockReturnValue('android');
+    renderScreen(<DeviceStep />);
+    expect(screen.queryByText(ko.signup.deviceWebNote)).toBeNull();
+  });
+
   it('asks the attendee to try again when the attester is busy, and succeeds on the retry', async () => {
     registerIdentity.mockRejectedValueOnce(callableError('resource-exhausted', 'ATTESTER_BUSY'));
     renderScreen(<DeviceStep />);

@@ -1,32 +1,18 @@
 import { bytesToHex, hexToBytes } from 'viem';
 import {
-  P256_HALF_ORDER,
-  P256_ORDER,
   base64UrlDecode,
   base64UrlEncode,
   derToRs,
   splitRs,
   type Hex,
 } from '@monti/shared';
+import { toLowS } from './lowS';
 import { generateKey, loadKey, sign } from './plugin';
 import { spkiToXy } from './spki';
 import type { DeviceKeyOptions, DeviceKeyPublic } from './types';
 
 /** Constant throwaway message, never a real digest and never leaves the device. */
 const ARM_DIGEST = base64UrlEncode(new Uint8Array(32).fill(0x6d));
-
-/**
- * Ticket.checkIn verifies through Solady's `P256.verifySignature`, which includes the
- * malleability check and rejects anything with `s > n/2`. A secure element's `s` is
- * uniform, so half of all real signatures land in the high half. `(r, n - s)` verifies for
- * the same message and key — that is exactly what ECDSA malleability means — so flipping
- * `s` into the low half is lossless, and skipping it would revert ~50% of check-ins.
- */
-function toLowS(s: Hex): Hex {
-  const value = BigInt(s);
-  if (value <= P256_HALF_ORDER) return s;
-  return `0x${(P256_ORDER - value).toString(16).padStart(64, '0')}`;
-}
 
 export async function ensureDeviceKeyNative(options: DeviceKeyOptions): Promise<DeviceKeyPublic> {
   // `null` is the only result that may mint a key. A cancelled prompt or a locked keychain
