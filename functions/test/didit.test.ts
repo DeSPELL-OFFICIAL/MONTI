@@ -121,6 +121,70 @@ describe('verifyDiditWebhook', () => {
   });
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 리뷰 fix round 1 — 인증 전에 **던지는** 길을 둘 다 막는다
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** `[[[…1…]]]` 를 `depth` 단으로 만든다. `JSON.stringify` 를 거치지 않는다 — 그것도 재귀다. */
+function nest(depth: number): unknown {
+  let value: unknown = 1;
+  for (let index = 0; index < depth; index += 1) value = [value];
+  return value;
+}
+
+describe('canonicalDiditJson depth limit', () => {
+  it('canonicalises up to 64 levels and refuses to go deeper', () => {
+    expect(canonicalDiditJson(nest(64))).toBe(`${'['.repeat(64)}1${']'.repeat(64)}`);
+    expect(() => canonicalDiditJson(nest(65))).toThrow('CANONICAL_TOO_DEEP');
+    expect(() => canonicalDiditJson(nest(20_000))).toThrow('CANONICAL_TOO_DEEP');
+  });
+
+  it('counts object nesting the same way', () => {
+    let value: unknown = 1;
+    for (let index = 0; index < 65; index += 1) value = { a: value };
+    expect(() => canonicalDiditJson(value)).toThrow('CANONICAL_TOO_DEEP');
+  });
+});
+
+describe('verifyDiditWebhook — inputs that used to throw', () => {
+  const RAW = '{"session_id":"s1","status":"Approved"}';
+  const MULTIBYTE = 'Ã'.repeat(64); // 64 글자, **128 바이트** — 글자 수로 재면 통과한다
+  const sign = (message: string): string => createHmac('sha256', SECRET).update(message, 'utf8').digest('hex');
+
+  it('treats a 64-character multibyte signature as a plain mismatch, not a RangeError', () => {
+    expect(Buffer.byteLength(MULTIBYTE)).toBe(128);
+    for (const header of ['v2', 'rawSignature', 'simple'] as const) {
+      expect(
+        verifyDiditWebhook({ raw: RAW, [header]: MULTIBYTE, timestamp: NOW, secret: SECRET, now: NOW }),
+      ).toEqual({ ok: false, code: 'signature_mismatch' });
+    }
+  });
+
+  it('refuses any signature that is not 64 hex characters', () => {
+    for (const signature of ['deadbeef', `${sign(RAW)}00`, 'z'.repeat(64), '', ' ']) {
+      const result = verifyDiditWebhook({ raw: RAW, rawSignature: signature, timestamp: NOW, secret: SECRET, now: NOW });
+      // 빈 문자열은 "서명 헤더가 없다" 로 갈린다. 나머지는 전부 불일치다.
+      expect(result.ok).toBe(false);
+    }
+    // 대문자 16진수는 Didit 이 실제로 보낼 수 있는 모양이다 — 받아야 한다.
+    expect(
+      verifyDiditWebhook({ raw: RAW, rawSignature: sign(RAW).toUpperCase(), timestamp: NOW, secret: SECRET, now: NOW }),
+    ).toMatchObject({ ok: true, scheme: 'raw' });
+  });
+
+  it('folds a body too deep to canonicalise into a V2 mismatch, and still honours the raw signature', () => {
+    const deep = `{"a":${'['.repeat(20_000)}${']'.repeat(20_000)}}`;
+    expect(verifyDiditWebhook({ raw: deep, v2: sign('anything'), timestamp: NOW, secret: SECRET, now: NOW })).toEqual({
+      ok: false,
+      code: 'signature_mismatch',
+    });
+    // 원본 바이트 서명은 정규화를 거치지 않으므로 깊이와 무관하게 그대로 통한다.
+    expect(
+      verifyDiditWebhook({ raw: deep, rawSignature: sign(deep), timestamp: NOW, secret: SECRET, now: NOW }),
+    ).toMatchObject({ ok: true, scheme: 'raw' });
+  });
+});
+
 describe('redactRawBody', () => {
   it('drops the portrait base64 and every known PII value, and caps the length', () => {
     const portrait = 'A'.repeat(4096);
@@ -1108,4 +1172,55 @@ describe('diditWebhook — the Didit integration spec', () => {
 
     expect(docs.size).toBe(1);
   });
+  // ── 리뷰 fix round 1 ───────────────────────────────────────────────────────
+
+  it('answers 401 to a 64-character multibyte signature on any of the three headers', async () => {
+    const multibyte = 'Ã'.repeat(64);
+    for (const scheme of ['v2', 'raw', 'simple'] as const) {
+      const res = await deliver(v3Body(), { scheme, signature: multibyte });
+      // 예전에는 `timingSafeEqual` 이 RangeError 로 터져 인증되지 않은 요청이 500 을 받아 갔다.
+      expect(res.statusCode).toBe(401);
+      expect(res.body).toBe('signature_mismatch');
+    }
+    expect(docs.size).toBe(1);
+    expect(sendAttesterTx).not.toHaveBeenCalled();
+  });
+
+  it('answers 401 — never 500 — to a body too deep to canonicalise, and 2xx when the raw signature is good', async () => {
+    // 2만 단 중첩. `JSON.parse` 는 이것을 견디므로 예전에는 정규화에서 스택이 넘쳤다.
+    const deep = `{"session_id":"deep","status":"Not Started","vendor_data":"${PERSON}","deep":${'['.repeat(
+      20_000,
+    )}${']'.repeat(20_000)}}`;
+
+    const v2 = await deliver(null, { raw: deep, scheme: 'v2' });
+    expect(v2.statusCode).toBe(401);
+    expect(docs.size).toBe(1);
+
+    // 원본 바이트 서명은 정규화를 거치지 않는다 — 평소처럼 접수된다.
+    const rawSigned = await deliver(null, { raw: deep, scheme: 'raw' });
+    expect(rawSigned.statusCode).toBe(200);
+    expect(rawSigned.body).toBe('pending');
+    expect(snapshot(`${PERSONS}/${PERSON}`).get('kycLevel')).toBe(0);
+    expect(sendAttesterTx).not.toHaveBeenCalled();
+  });
+
+  it('turns any unexpected throw in the verification phase into a 401, not a 500', async () => {
+    // `req.get` 이 문자열이 아닌 것을 돌려주는 요청. 검증기는 `.trim()` 에서 던진다.
+    const headers: Record<string, unknown> = { 'x-timestamp': String(Math.floor(Date.now() / 1000)) };
+    const res = new FakeRes();
+    await (diditWebhook as unknown as (req: unknown, res: unknown) => Promise<void>)(
+      {
+        method: 'POST',
+        headers,
+        rawBody: Buffer.from('{}', 'utf8'),
+        get: (name: string) => (name.toLowerCase() === 'x-signature-v2' ? 42 : headers[name.toLowerCase()]),
+      },
+      res,
+    );
+    expect(res.statusCode).toBe(401);
+    expect(res.body).toBe('verify_error');
+    expect(logged.warn).toHaveBeenCalledWith('didit.signature.rejected', expect.objectContaining({ code: 'verify_error' }));
+    expect(docs.size).toBe(1);
+  });
+
 });

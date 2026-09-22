@@ -5,6 +5,7 @@ import type { Hex, PersonStatus } from '@monti/shared';
 import { ATTESTER_PK, DIDIT_WEBHOOK_SECRET } from '../config.js';
 import { awaitFinalized, publicClient } from '../lib/chain.js';
 import { DIDIT_EVENTS, KYC_SESSIONS, PERSONS, assertStatusTransition, db } from '../lib/db.js';
+import type { DiditVerification } from '../lib/didit.js';
 import {
   DIDIT_SESSION_WEBHOOK_TYPES,
   declineReasonFromDecision,
@@ -147,15 +148,29 @@ export const diditWebhook = onRequest(
     }
 
     const raw = req.rawBody?.toString('utf8') ?? '';
-    const verification = verifyDiditWebhook({
-      raw,
-      v2: req.get('X-Signature-V2'),
-      rawSignature: req.get('X-Signature'),
-      simple: req.get('X-Signature-Simple'),
-      timestamp: Number(req.get('X-Timestamp') ?? '0'),
-      secret: DIDIT_WEBHOOK_SECRET.value(),
-      now: Math.floor(Date.now() / 1000),
-    });
+    let verification: DiditVerification;
+    try {
+      verification = verifyDiditWebhook({
+        raw,
+        v2: req.get('X-Signature-V2'),
+        rawSignature: req.get('X-Signature'),
+        simple: req.get('X-Signature-Simple'),
+        timestamp: Number(req.get('X-Timestamp') ?? '0'),
+        secret: DIDIT_WEBHOOK_SECRET.value(),
+        now: Math.floor(Date.now() / 1000),
+      });
+    } catch (cause) {
+      // 서명이 맞기 **전에는** 본문을 믿지 않는다. 검증 단계에서 예상 못 한 예외가 나오면 그것은
+      // 우리가 못 본 입력 모양이지 서버 고장이 아니다 — 여기서 500 을 주면 아무나 본문 하나로
+      // Didit 의 재시도 두 번을 끌어낼 수 있다(그리고 알림이 울린다). 거절로 접는다.
+      warn('didit.signature.rejected', {
+        code: 'verify_error',
+        reason: (cause as Error).message,
+        body: redactRawBody(raw),
+      });
+      res.status(401).send('verify_error');
+      return;
+    }
     if (!verification.ok) {
       // 규격이 요구하는 "서명 실패 시 원본 로그". 개인정보 키의 값과 base64 덩어리는 깎아 남긴다.
       warn('didit.signature.rejected', { code: verification.code, body: redactRawBody(raw) });

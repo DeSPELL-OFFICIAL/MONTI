@@ -39,13 +39,29 @@ function byCodePoint(a: string, b: string): number {
   return left.length - right.length;
 }
 
-function sortDeep(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(sortDeep);
+/**
+ * 정규화가 들어갈 수 있는 최대 깊이. Didit 의 봉투는 `decision.id_verifications[].warnings[]` 까지
+ * 세어도 대여섯 단이다. 상한이 없으면 `[[[[…]]]]` 2만 단짜리 본문 하나로 스택이 넘쳐
+ * **인증되지 않은** 요청이 500 을 받아 간다 — Didit 은 5xx 에 두 번 더 때린다.
+ */
+const CANONICAL_MAX_DEPTH = 64;
+
+/** 상한을 넘었다는 뜻. 서명을 맞출 수 없으므로 부르는 쪽은 그냥 불일치로 접는다. */
+class CanonicalDepthError extends Error {
+  constructor() {
+    super('CANONICAL_TOO_DEEP');
+    this.name = 'CanonicalDepthError';
+  }
+}
+
+function sortDeep(value: unknown, depth: number): unknown {
+  if (depth > CANONICAL_MAX_DEPTH) throw new CanonicalDepthError();
+  if (Array.isArray(value)) return value.map((item) => sortDeep(item, depth + 1));
   if (value !== null && typeof value === 'object') {
     const source = value as Record<string, unknown>;
     const out: Record<string, unknown> = {};
     // 배열은 **순서가 값**이다. 정렬하지 않는다 — 객체의 키만 정렬한다.
-    for (const key of Object.keys(source).sort(byCodePoint)) out[key] = sortDeep(source[key]);
+    for (const key of Object.keys(source).sort(byCodePoint)) out[key] = sortDeep(source[key], depth + 1);
     return out;
   }
   return value;
@@ -58,12 +74,13 @@ function sortDeep(value: unknown): unknown {
  *  - 키는 **재귀적으로** 코드 포인트 사전순. 배열 순서는 그대로 둔다.
  *  - 구분자는 `,` 와 `:` 뿐 — 공백을 넣지 않는다(`JSON.stringify` 의 기본값).
  *  - 유니코드는 **그대로** 둔다. `\uXXXX` 로 이스케이프하면 한글이 든 본문마다 서명이 깨진다.
+ *  - 깊이가 `CANONICAL_MAX_DEPTH` 를 넘으면 **던진다**. 그런 본문에는 맞출 서명이 없다.
  *
  * 순수 함수다. 들어온 값을 고치지 않고, 시계도 비밀값도 보지 않는다 — 테스트가 손으로 계산한
  * 벡터 하나로 이 정의 전체를 못 박는다.
  */
 export function canonicalDiditJson(value: unknown): string {
-  return JSON.stringify(sortDeep(value));
+  return JSON.stringify(sortDeep(value, 0));
 }
 
 export type DiditSignatureScheme = 'v2' | 'raw' | 'simple';
@@ -73,7 +90,9 @@ export type DiditRejection =
   | 'timestamp_out_of_window'
   | 'no_signature'
   | 'malformed_body'
-  | 'signature_mismatch';
+  | 'signature_mismatch'
+  /** 검증 단계에서 우리가 못 본 입력 모양을 만났다. 서버 고장이 아니라 거절이다. */
+  | 'verify_error';
 
 export type DiditVerification =
   | {
@@ -93,11 +112,21 @@ function hmacHex(secret: string, message: string): string {
   return createHmac('sha256', secret).update(message, 'utf8').digest('hex');
 }
 
-/** 길이를 먼저 맞춘 뒤 `timingSafeEqual` 로만 비교한다. 문자열 `===` 는 앞에서 끊긴다. */
+/** HMAC-SHA256 은 32바이트다. 서명 헤더가 이 모양이 아니면 비교할 것도 없다. */
+const HEX_SIGNATURE_RE = /^[0-9a-f]{64}$/i;
+
+/**
+ * 서명 비교. 양쪽을 **32바이트 버퍼로 풀어** `timingSafeEqual` 에 넘긴다 — 문자열 `===` 는
+ * 앞에서부터 짧게 끊겨 서명을 한 글자씩 맞힐 틈을 준다.
+ *
+ * 글자 수로 길이를 재면 안 된다. `timingSafeEqual` 은 **바이트**로 세므로, 멀티바이트 문자
+ * 64글자짜리 헤더(예: `Ã` × 64 = 128바이트)는 글자 수 검사를 통과한 뒤 `RangeError` 로 터진다 —
+ * 인증되지 않은 요청 하나가 500 을 받아 가는 길이다. 모양이 아니면 **조용히 불일치**다.
+ */
 function signatureMatches(expected: string, provided: string): boolean {
-  const candidate = provided.trim().toLowerCase();
-  if (candidate.length !== expected.length) return false;
-  return timingSafeEqual(Buffer.from(expected, 'utf8'), Buffer.from(candidate, 'utf8'));
+  const candidate = provided.trim();
+  if (!HEX_SIGNATURE_RE.test(candidate)) return false;
+  return timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(candidate.toLowerCase(), 'hex'));
 }
 
 /**
@@ -148,8 +177,18 @@ export function verifyDiditWebhook(input: {
   }
   if (rawMatched) return { ok: true, scheme: 'raw', authenticated: true, body };
 
-  if (v2 !== '' && signatureMatches(hmacHex(input.secret, canonicalDiditJson(body)), v2)) {
-    return { ok: true, scheme: 'v2', authenticated: true, body };
+  if (v2 !== '') {
+    // 정규화할 수 없는 본문에는 맞출 V2 서명이 없다. 던지지 말고 불일치로 접는다 —
+    // 원본 바이트 서명은 위에서 이미 봤고, 아래 Simple 분기도 그대로 돈다.
+    let canonical: string | null = null;
+    try {
+      canonical = canonicalDiditJson(body);
+    } catch {
+      canonical = null;
+    }
+    if (canonical !== null && signatureMatches(hmacHex(input.secret, canonical), v2)) {
+      return { ok: true, scheme: 'v2', authenticated: true, body };
+    }
   }
 
   if (v2 === '' && rawSignature === '' && simple !== '') {
