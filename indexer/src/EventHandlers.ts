@@ -10,6 +10,7 @@
  * (`functions/src/lib/envio.ts` 의 호출자들) 한쪽만 체크섬이면 조용히 0건이 된다.
  */
 import type { Gate, handlerContext } from 'generated';
+import type { Abi } from 'viem';
 
 // envio 는 이 파일을 ts-node 의 **CJS** 로더로 require 한다(`generated/src/Generated.res.js`
 // 의 registerContractHandlers). `generated/index.js` 는 `module.exports = {...handlers, …}`
@@ -19,12 +20,28 @@ import type { Gate, handlerContext } from 'generated';
 // 가져오고 값은 require 로 받으면 두 경로 모두에서 돈다. generated 의 `*.gen.ts` 들도
 // 똑같이 한다.
 const { Identity, Organizers, Ticket } = require('generated') as typeof import('generated');
-// 같은 이유로 viem 과 @monti/shared 도 require 다. 값 `import` 하나만 있어도 Node 22 의
-// 타입 스트리퍼가 이 파일을 ESM 으로 판정해 envio 의 require() 가 깨진다.
+// 같은 이유로 viem 도 require 다. 값 `import` 하나만 있어도 Node 22 의 타입 스트리퍼가
+// 이 파일을 ESM 으로 판정해 envio 의 require() 가 깨진다.
 const { createPublicClient, http } = require('viem') as typeof import('viem');
 const { createEffect, S } = require('envio') as typeof import('envio');
-const { EVENT_STATUS_BY_CODE, loadDeployment, ticketAbi } =
-  require('@monti/shared') as typeof import('@monti/shared');
+
+/**
+ * 워크스페이스 밖에서 가져오는 것이 하나도 없어야 한다. Envio 호스티드 서비스는 루트
+ * 디렉터리로 `indexer/` **하나만** 올려 거기서 `pnpm install` 을 돌리므로, 예전처럼
+ * `@monti/shared`(= `workspace:*`)를 require 하면 배포가 해석 실패로 죽는다. 그래서
+ * 핸들러가 쓰는 셋을 `scripts/gen-config.mjs` 가 `src/vendored/*.json` 으로 복제해
+ * 커밋한다 — 손으로 고치지 않는다(`pnpm indexer:check` 가 어긋남을 막는다).
+ *
+ * JSON 으로 둔 이유는 로더가 셋이기 때문이다: envio 의 ts-node, vitest, tsc. `.ts` 는
+ * 셋이 CJS/ESM 을 다르게 판정할 여지가 있지만 `.json` 은 어느 쪽에서도 같은 값이다.
+ */
+const { abi: ticketAbi } = require('./vendored/ticket-abi.json') as { abi: Abi };
+const { deployment } = require('./vendored/deployment.json') as {
+  deployment: { chainId: number; block: number; ticket: `0x${string}` };
+};
+const { byCode: EVENT_STATUS_BY_CODE } = require('./vendored/event-status.json') as {
+  byCode: readonly (string | undefined)[];
+};
 
 /** `register()` 가 기기 키를 이벤트에 싣지 않는 동안의 자리표시자. */
 const ZERO32 = `0x${'00'.repeat(32)}`;
@@ -218,7 +235,10 @@ Organizers.GateRevoked.handler(async ({ event, context }) => {
  * 테스트가 로컬 스텁을 물릴 자리가 없다(`test/ticket.test.ts`).
  */
 const DEFAULT_RPC_URL = 'https://testnet-rpc.monad.xyz';
-const deployment = loadDeployment(Number(process.env.CHAIN_ID ?? 10143));
+// 복제해 둔 배포 파일은 10143 하나다. 다른 체인을 요구하면 예전 `loadDeployment` 와
+// 똑같이 여기서 크게 실패한다 — 엉뚱한 주소를 읽는 조용한 폴백은 없다.
+const CHAIN_ID = Number(process.env.CHAIN_ID ?? 10143);
+if (CHAIN_ID !== deployment.chainId) throw new Error(`NO_DEPLOYMENT:${CHAIN_ID}`);
 
 let rpcClient: ReturnType<typeof createPublicClient> | undefined;
 function rpc(): ReturnType<typeof createPublicClient> {
@@ -312,7 +332,7 @@ const readEventState = createEffect(
     cache: true,
   },
   async ({ input }) => {
-    // ABI 는 리터럴 타입이 없는 JSON 이라 결과는 여기서 캐스팅한다(`packages/shared/src/abi.ts`).
+    // ABI 는 리터럴 타입이 없는 JSON 이라 결과는 여기서 캐스팅한다(`src/vendored/ticket-abi.json`).
     const [meta, tiers] = await Promise.all([
       rpc().readContract({
         address: deployment.ticket,

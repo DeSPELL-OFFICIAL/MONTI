@@ -71,9 +71,6 @@ importers:
 
   indexer:
     dependencies:
-      '@monti/shared':
-        specifier: workspace:*
-        version: link:../packages/shared
       envio:
         specifier: ^2.32.0
         version: 2.32.12(typescript@5.9.3)

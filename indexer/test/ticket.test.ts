@@ -1,8 +1,12 @@
 import { createServer, type Server } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { ticketAbi } from '@monti/shared';
-import { decodeFunctionData, encodeAbiParameters, type AbiFunction } from 'viem';
+import { decodeFunctionData, encodeAbiParameters, type Abi, type AbiFunction } from 'viem';
 import { TestHelpers } from 'generated';
+// 핸들러가 읽는 것과 **같은** 복제본이다(`scripts/gen-config.mjs` 생성물). 여기서
+// `@monti/shared` 를 다시 들이면 인덱서가 워크스페이스에 다시 묶인다.
+import ticketAbiJson from '../src/vendored/ticket-abi.json';
+
+const ticketAbi = ticketAbiJson.abi as unknown as Abi;
 
 const { Ticket, MockDb } = TestHelpers;
 type MockDbT = ReturnType<typeof MockDb.createMockDb>;

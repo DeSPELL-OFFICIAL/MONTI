@@ -7,10 +7,10 @@
     "dev": "pnpm codegen && envio dev",
     "start": "envio start",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "check": "node scripts/check-selfcontained.mjs"
   },
   "dependencies": {
-    "@monti/shared": "workspace:*",
     "envio": "^2.32.0",
     "generated": "link:./generated",
     "viem": "^2.21.0"
