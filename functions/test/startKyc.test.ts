@@ -131,6 +131,16 @@ vi.mock('../src/lib/didit.js', async (importOriginal) => ({
   createDiditSession: (...args: unknown[]) => createDiditSession(...args),
 }));
 
+/**
+ * 거절 로그. Callable 은 `invalid-argument` 와 `failed-precondition` 을 똑같이 HTTP 400 으로
+ * 내려보내므로, 이 한 줄이 없으면 프로덕션의 400 하나만 보고는 어느 거절인지 알 수 없다.
+ */
+const logWarn = vi.fn();
+vi.mock('firebase-functions/logger', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('firebase-functions/logger')>()),
+  warn: (...args: unknown[]) => logWarn(...args),
+}));
+
 const { PERSONS, USERS } = await import('../src/lib/db.js');
 const { startKyc } = await import('../src/functions/startKyc.js');
 const functionsTest = (await import('firebase-functions-test')).default();
@@ -161,6 +171,7 @@ beforeEach(() => {
   versions.clear();
   process.env.RP_ID = 'monti.despell.io';
   createDiditSession.mockClear();
+  logWarn.mockClear();
   createDiditSession.mockResolvedValue({ ...SESSION });
   process.env.DIDIT_API_KEY = 'didit-key';
   process.env.DIDIT_WORKFLOW_ID = 'wf-1';
@@ -226,6 +237,24 @@ describe('startKyc', () => {
       write(`${PERSONS}/${PERSON_ID}`, { status, kycLevel: 0 }, { merge: true });
       await expect(call()).rejects.toThrow('NOT_ACTIVE');
     }
+    expect(createDiditSession).not.toHaveBeenCalled();
+  });
+
+  /**
+   * 2026-09-22 프로덕션 회귀 테스트. `pending` 인 사람이 받은 400 은 Cloud Logging 에서
+   * 콜백 주소 거절(`BAD_CALLBACK_URL`)과 구분되지 않았다 — 두 코드가 같은 HTTP 400 으로
+   * 나가고 이 함수가 던지기 전에 아무것도 남기지 않았기 때문이다. `status` 한 칸이 그 진단을
+   * 몇 초로 줄인다. 이 로그가 사라지면 이 테스트가 깨져야 한다.
+   */
+  it('names the reason and the person status in the log when it refuses NOT_ACTIVE', async () => {
+    write(`${PERSONS}/${PERSON_ID}`, { status: 'pending', kycLevel: 0 }, { merge: true });
+
+    await expect(call()).rejects.toThrow('NOT_ACTIVE');
+    expect(logWarn).toHaveBeenCalledWith('kyc.start.rejected', {
+      code: 'failed-precondition',
+      reason: 'NOT_ACTIVE',
+      status: 'pending',
+    });
     expect(createDiditSession).not.toHaveBeenCalled();
   });
 
@@ -364,6 +393,15 @@ describe('startKyc callbackUrl', () => {
       await expect(call({ callbackUrl: bad })).rejects.toThrow('BAD_CALLBACK_URL');
     }
     expect(createDiditSession).not.toHaveBeenCalled();
+  });
+
+  /** 같은 400 이라도 로그에는 `invalid-argument` 와 사유가 그대로 찍혀야 한다. */
+  it('names the reason in the log when it refuses a callback', async () => {
+    await expect(call({ callbackUrl: 'https://evil.example/kyc' })).rejects.toThrow('BAD_CALLBACK_URL');
+    expect(logWarn).toHaveBeenCalledWith('kyc.start.rejected', {
+      code: 'invalid-argument',
+      reason: 'BAD_CALLBACK_URL',
+    });
   });
 
   /**
