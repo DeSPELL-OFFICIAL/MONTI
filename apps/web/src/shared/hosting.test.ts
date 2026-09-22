@@ -63,6 +63,18 @@ const envExample = readEnvFile(resolve(WEB_ROOT, '.env.example'));
 /** Every URL-valued `VITE_*` key, in the shape the app actually reads it. */
 const URL_KEYS = ['VITE_RPC_URLS', 'VITE_WS_URL', 'VITE_BUNDLER_URL', 'VITE_ENVIO_URL', 'VITE_IPFS_GATEWAY'] as const;
 
+/**
+ * Envio Cloud serves the same indexer deployment from two hosts — the free development tier
+ * (`indexer.dev.hyperindex.xyz`, the endpoint the docs' own example shows) and the paid
+ * production tier (`indexer.hyperindex.xyz`) — and which one a deployment lands on is a
+ * billing decision taken in a vendor dashboard, not a code change. Naming one host in the
+ * example would otherwise mean a headers redeploy the day the tier changes, so both are
+ * allowed and the example only has to name either of them. The pair is closed: it is written
+ * out host by host rather than as a `*.hyperindex.xyz` wildcard, because nothing else under
+ * that zone is ours.
+ */
+const ENVIO_TIER_ORIGINS = ['https://indexer.hyperindex.xyz', 'https://indexer.dev.hyperindex.xyz'];
+
 function envDerivedOrigins(): Set<string> {
   const origins = new Set<string>();
   for (const key of URL_KEYS) {
@@ -70,7 +82,11 @@ function envDerivedOrigins(): Set<string> {
     if (raw === undefined || raw.length === 0) throw new Error(`.env.example is missing ${key}`);
     for (const url of raw.split(',')) {
       const trimmed = url.trim();
-      if (trimmed.length > 0) origins.add(new URL(trimmed).origin);
+      if (trimmed.length === 0) continue;
+      const origin = new URL(trimmed).origin;
+      origins.add(origin);
+      // Whichever indexer tier the example names, the CSP carries its sibling too.
+      if (ENVIO_TIER_ORIGINS.includes(origin)) for (const tier of ENVIO_TIER_ORIGINS) origins.add(tier);
     }
   }
   return origins;
@@ -270,6 +286,15 @@ describe('security headers', () => {
     expect(connectSrc).toBeDefined();
     const expected = new Set<string>(["'self'", ...envDerivedOrigins(), ...FIREBASE_SDK_ORIGINS]);
     expect(new Set(connectSrc)).toEqual(expected);
+  });
+
+  it('allows both Envio indexer tiers, so switching tier is an env change and not a redeploy', () => {
+    const connectSrc = cspDirectives().get('connect-src') ?? [];
+    for (const origin of ENVIO_TIER_ORIGINS) expect(connectSrc).toContain(origin);
+    // And the example points at one of them: a stale localhost value would pass the set
+    // comparison above by widening the CSP instead of failing, which is the wrong direction.
+    const example = envExample.get('VITE_ENVIO_URL');
+    expect(ENVIO_TIER_ORIGINS).toContain(new URL(example ?? '').origin);
   });
 
   it('locks the page down by default', () => {
