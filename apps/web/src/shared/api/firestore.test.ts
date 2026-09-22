@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const addDoc = vi.fn();
 const setDoc = vi.fn();
+const deleteDoc = vi.fn();
 const getDoc = vi.fn();
 const getDocs = vi.fn();
 const onSnapshot = vi.fn();
@@ -17,6 +18,7 @@ const RULES_MESSAGE_FIELDS = ['createdAt', 'reported', 'text', 'uid'];
 vi.mock('firebase/firestore', () => ({
   addDoc,
   setDoc,
+  deleteDoc,
   getDoc,
   getDocs,
   onSnapshot,
@@ -35,8 +37,8 @@ vi.mock('./firebase', () => ({
 }));
 
 const {
-  loadChatMembers, loadChatRoom, saveUserProfile, savePushToken, sendChatMessage,
-  watchChatMessages, watchChatRoom,
+  deleteEventDraft, listEventDrafts, loadChatMembers, loadChatRoom, saveEventDraft,
+  saveUserProfile, savePushToken, sendChatMessage, watchChatMessages, watchChatRoom,
 } = await import('./firestore');
 
 /** A Firestore document snapshot, as thin as the helpers actually touch it. */
@@ -51,6 +53,7 @@ beforeEach(() => {
   getDoc.mockResolvedValue({ data: () => undefined });
   getDocs.mockResolvedValue({ docs: [] });
   onSnapshot.mockReturnValue(() => undefined);
+  deleteDoc.mockResolvedValue(undefined);
 });
 
 describe('sendChatMessage', () => {
@@ -182,5 +185,55 @@ describe('profile and push token writes', () => {
       { pushToken: 'fcm-token' },
       { merge: true },
     );
+  });
+});
+
+describe('event drafts', () => {
+  /** The draft the storage map describes, at its smallest: the poster is a CID, never bytes. */
+  const draft = {
+    orgId: '9', title: '재즈 나이트', description: '', posterCid: 'bafk1',
+    category: 0, tags: ['재즈'], regionCode: 'KR-11', venue: '한남동', venueHidden: true,
+    startsAt: 0, endsAt: 0, timeHidden: false,
+    transferable: true, transferCutoffHours: 2, requireKyc: false,
+    tiers: [], submittedOpHash: '',
+  };
+
+  it('lists this account own drafts newest first', async () => {
+    getDocs.mockResolvedValue({
+      docs: [docOf('d1', { title: 'a', updatedAt: { toMillis: () => 2000 } })],
+    });
+    await expect(listEventDrafts()).resolves.toEqual([
+      { id: 'd1', updatedAt: 2000, data: { title: 'a', updatedAt: expect.anything() } },
+    ]);
+    const [built] = getDocs.mock.calls[0] as [{ base: { path: string }; clauses: unknown[] }];
+    expect(built.base.path).toBe('eventDrafts/uid-1/drafts');
+    expect(built.clauses).toContainEqual({ orderBy: 'updatedAt', direction: 'desc' });
+  });
+
+  it('replaces the whole document and stamps it on the server clock', async () => {
+    await saveEventDraft('d1', draft);
+    const [ref, payload, options] = setDoc.mock.calls[0] as [
+      { path: string }, Record<string, unknown>, unknown,
+    ];
+    expect(ref.path).toBe('eventDrafts/uid-1/drafts/d1');
+    // No `{ merge: true }`: a ticket kind the organiser deleted has to actually leave.
+    expect(options).toBeUndefined();
+    expect(payload).toMatchObject({ ...draft, updatedAt: SERVER_TIME });
+    // The picture is a CID here and nowhere near the 1 MiB a document is capped at.
+    expect(JSON.stringify(payload)).not.toContain('base64');
+  });
+
+  it('deletes one draft, the only document this client may remove', async () => {
+    await deleteEventDraft('d1');
+    expect(deleteDoc).toHaveBeenCalledWith({ path: 'eventDrafts/uid-1/drafts/d1' });
+  });
+
+  it('refuses to touch drafts when nobody is signed in', async () => {
+    currentUser = null;
+    await expect(listEventDrafts()).rejects.toThrow();
+    await expect(saveEventDraft('d1', draft)).rejects.toThrow();
+    await expect(deleteEventDraft('d1')).rejects.toThrow();
+    expect(setDoc).not.toHaveBeenCalled();
+    expect(deleteDoc).not.toHaveBeenCalled();
   });
 });

@@ -1,13 +1,16 @@
 import {
-  addDoc, collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, serverTimestamp,
-  setDoc,
+  addDoc, collection, deleteDoc, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query,
+  serverTimestamp, setDoc,
 } from 'firebase/firestore';
 import type { Hex } from '@monti/shared';
 import { getDb, getFirebaseAuth } from './firebase';
 
 /**
- * The only three places the client is allowed to write to Firestore (firestore.rules):
- * its own `users/{uid}` profile fields, `devices/{account}.pushToken`, and event chat.
+ * The four places the client is allowed to write to Firestore (firestore.rules): its own
+ * `users/{uid}` profile fields, `devices/{account}.pushToken`, event chat, and its own event
+ * drafts under `eventDrafts/{uid}/drafts` — the fourth, and the only one it may also delete,
+ * because a draft is written every two seconds and a callable per keystroke costs both money
+ * and latency.
  * It also reads one collection it may never write: `orgProfiles/{orgId}`, the organiser
  * display names the chain has no room for — open to any signed-in reader and written by the
  * server alone. Everything else goes through a callable in ./functions.
@@ -190,4 +193,113 @@ export async function saveUserProfile(patch: { nickname?: string; locale?: 'ko' 
  */
 export async function savePushToken(account: Hex, token: string): Promise<void> {
   await setDoc(doc(getDb(), 'devices', account), { pushToken: token }, { merge: true });
+}
+
+/**
+ * The currencies SCENE 2 offers. Only `free` can be created today: `Ticket.claim` reverts
+ * `PaidTiersNotEnabled` on any tier whose `priceUsdCents` is not zero, so the rest are a
+ * promise the screen makes and then blocks on the spot. They never reach the chain or the
+ * public metadata — the amount lives in the draft and nowhere else.
+ */
+export type EventDraftCurrency = 'free' | 'MON' | 'USDT' | 'USDC';
+
+/** One ticket kind as SCENE 2 edits it. */
+export interface EventDraftTier {
+  name: string;
+  supply: number;
+  maxPerWallet: number;
+  currency: EventDraftCurrency;
+  /** Whole currency units, not cents. Display only, per {@link EventDraftCurrency}. */
+  amount: number;
+  /**
+   * The bundled artwork key, or `''` when the organiser uploaded a picture of their own.
+   * `design` and `imageCid` are kept apart here and folded into the one-or-the-other shape
+   * `saveEventArt` takes only when the event is created, because a draft is a half-made
+   * thing: somebody who picks a design, uploads a picture and then changes their mind back
+   * should not have lost the design in between.
+   */
+  design: string;
+  imageCid: string;
+}
+
+/**
+ * An event being written, as `eventDrafts/{uid}/drafts/{draftId}` holds it. Fields follow the
+ * storage map: everything the chain or the public metadata will carry is here in readable
+ * form, plus the two the draft alone remembers (the price, and the hash below).
+ *
+ * The poster is a CID, never bytes. A Firestore document stops at 1 MiB and a 600 KB JPEG is
+ * 800 KB as base64, so a draft that carried the picture would be a draft that sometimes
+ * cannot be saved at all. The crop is pinned the moment it is made and only its CID lands
+ * here, which keeps the whole document at roughly two kilobytes.
+ */
+export interface EventDraft {
+  orgId: string;
+  title: string;
+  description: string;
+  posterCid: string;
+  /** The theme, one of the four the discover filter offers. */
+  category: number;
+  tags: string[];
+  regionCode: string;
+  venue: string;
+  /** Ticket holders only. The chain still gets the real venue's hash, so the claim holds. */
+  venueHidden: boolean;
+  startsAt: number;
+  endsAt: number;
+  /** Ticket holders only, and a rendering rule rather than storage: the chain needs the truth. */
+  timeHidden: boolean;
+  transferable: boolean;
+  transferCutoffHours: number;
+  requireKyc: boolean;
+  tiers: EventDraftTier[];
+  /**
+   * The `userOpHash` of a `createEvent` whose `wait` gave up before it landed, or `''`. The
+   * draft outlives the page, so without it a second attempt is a second event.
+   */
+  submittedOpHash: string;
+}
+
+/**
+ * A stored draft on the way back in. `data` is deliberately `unknown`: the document is
+ * whatever is in Firestore — half-written by a crash, or edited by hand — and it is the
+ * reading hook that narrows every field back to its own type.
+ */
+export interface StoredEventDraft {
+  id: string;
+  /** Epoch ms of the last write. 0 while the server's stamp is still on its way. */
+  updatedAt: number;
+  data: unknown;
+}
+
+function draftsPath(): [string, string, string] {
+  const uid = getFirebaseAuth().currentUser?.uid;
+  if (!uid) throw new Error('NOT_SIGNED_IN');
+  return ['eventDrafts', uid, 'drafts'];
+}
+
+/**
+ * Every draft this account holds, newest first. The whole collection rather than a page: the
+ * caller both resumes the newest and keeps the collection at its cap, and a rule cannot count
+ * documents, so the count has to be the client's to see.
+ */
+export async function listEventDrafts(): Promise<StoredEventDraft[]> {
+  const drafts = query(collection(getDb(), ...draftsPath()), orderBy('updatedAt', 'desc'));
+  const snapshot = await getDocs(drafts);
+  return snapshot.docs.map((document) => {
+    const data = document.data() as { updatedAt?: unknown };
+    return { id: document.id, updatedAt: toMillis(data.updatedAt), data };
+  });
+}
+
+/**
+ * The whole document every time, not a merge: a ticket kind the organiser deleted has to
+ * actually leave, and a merge would keep it forever. `updatedAt` is the server's clock
+ * because it is what "newest draft" is decided on, across devices whose clocks disagree.
+ */
+export async function saveEventDraft(draftId: string, draft: EventDraft): Promise<void> {
+  await setDoc(doc(getDb(), ...draftsPath(), draftId), { ...draft, updatedAt: serverTimestamp() });
+}
+
+export async function deleteEventDraft(draftId: string): Promise<void> {
+  await deleteDoc(doc(getDb(), ...draftsPath(), draftId));
 }
