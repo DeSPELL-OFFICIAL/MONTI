@@ -208,4 +208,11 @@ export const en: typeof ko = {
     deleteScheduled: 'Your personal details will be erased on {{date}}. Signing you out now.',
     deleteFailed: 'That request did not go through. Please try again in a moment.',
   },
+  poster: {
+    pick: 'Add a poster',
+    frame: 'Poster preview',
+    adjust: 'Drag to move it, pinch to resize it',
+    crop: 'Crop', again: 'Pick another', working: 'Cropping',
+    failed: 'That picture could not be cropped. Please try again.',
+  },
 };

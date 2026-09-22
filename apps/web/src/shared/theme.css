@@ -67,3 +67,12 @@ body {
 .working { display: flex; align-items: center; gap: 10px; margin: 12px 0; color: var(--muted); font-size: 14px; }
 .working .spinner { width: 18px; height: 18px; margin: 0; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* The poster frame is A4 portrait and nothing resizes it: the picture moves inside it. */
+.a4-frame {
+  position: relative; overflow: hidden; width: 100%; aspect-ratio: 1240 / 1754;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  /* Without this the browser pans and zooms the page instead of the picture. */
+  touch-action: none; user-select: none; -webkit-user-select: none;
+}
+.a4-frame img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }

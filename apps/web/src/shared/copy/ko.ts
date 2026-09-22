@@ -205,4 +205,11 @@ export const ko = {
     deleteScheduled: '{{date}}에 개인정보를 지울게요. 지금 로그아웃합니다.',
     deleteFailed: '삭제 요청을 받지 못했어요. 잠시 뒤 다시 시도해 주세요.',
   },
+  poster: {
+    pick: '포스터 올리기',
+    frame: '포스터 미리보기',
+    adjust: '끌어서 옮기고, 두 손가락으로 크기를 맞춰요',
+    crop: '자르기', again: '다시 고르기', working: '자르고 있어요',
+    failed: '사진을 자르지 못했어요. 다시 시도해 주세요.',
+  },
 };
