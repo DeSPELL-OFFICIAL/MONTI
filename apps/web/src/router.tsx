@@ -1,5 +1,6 @@
 import { Navigate, Outlet, type RouteObject, useLocation } from 'react-router-dom';
 import { BottomTabs } from './shared/ui';
+import { useRegistration } from './shared/registration';
 import { useSession } from './shared/session';
 import { Spinner } from './shared/ui';
 
@@ -20,7 +21,24 @@ export function RequireSession() {
   const session = useSession();
   if (session.status === 'loading') return <Spinner />;
   if (session.status === 'anonymous') return <Navigate to="/login" replace />;
-  return <Outlet />;
+  return <FinishSignupFirst />;
+}
+
+/**
+ * The one place that knows a signed-in person may still be `pending`. It sits here rather than
+ * on each screen because the answer is the same everywhere: a person whose chain registration
+ * never happened is refused by `startKyc` and by every claim, and the fix is one screen away.
+ *
+ * Only `pending` redirects. `unknown` and `checking` render the screen the person asked for —
+ * an unanswered question is not grounds for interrupting anybody. Where they were going travels
+ * in `returnTo` so the device screen can put them back.
+ */
+function FinishSignupFirst() {
+  const registration = useRegistration();
+  const location = useLocation();
+  if (registration !== 'pending') return <Outlet />;
+  const returnTo = encodeURIComponent(`${location.pathname}${location.search}`);
+  return <Navigate to={`/signup/device?returnTo=${returnTo}`} replace />;
 }
 
 // 각 화면은 뒤 태스크에서 실제 구현으로 교체된다. 여기서는 라우트 표를 확정한다.

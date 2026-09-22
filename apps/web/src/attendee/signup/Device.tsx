@@ -1,12 +1,15 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { Alert, Button, Screen, Spinner } from '../../shared/ui';
 import { useCopy } from '../../shared/i18n';
+import type { Hex } from '@monti/shared';
 import type { Copy } from '../../shared/copy/index';
 import { ATTENDEE_KEY_ALIAS, DeviceKeyUnavailable, ensureDeviceKey } from '../../shared/deviceKey';
 import { api, callableFailure } from '../../shared/api/functions';
 import { getFirebaseAuth } from '../../shared/api/firebase';
+import { deferRegistration, markRegistered } from '../../shared/registration';
+import { getSession } from '../../shared/session';
 import { readSignup } from './useSignup';
 
 /** The three the server accepts; anything else (a desktop browser) registers as `web`. */
@@ -76,9 +79,21 @@ async function refreshClaims(): Promise<void> {
  * The skip path is now only for a browser that genuinely cannot make a key — a private window
  * with no IndexedDB — and never the default.
  */
+/**
+ * Where the person was headed when the guard sent them here. Its presence is also what says
+ * this is an unfinished account being finished rather than a signup running its third step —
+ * only the router's guard ever sets it (router.tsx `FinishSignupFirst`).
+ */
+function useReturnTo(): string | null {
+  const [params] = useSearchParams();
+  return params.get('returnTo');
+}
+
 export function DeviceStep() {
   const copy = useCopy();
   const navigate = useNavigate();
+  const returnTo = useReturnTo();
+  const finishing = returnTo !== null;
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   // True once this device is known to have no secure chip — retrying would fail identically,
@@ -86,12 +101,23 @@ export function DeviceStep() {
   const [unavailable, setUnavailable] = useState(false);
 
   function finish(): void {
-    // The signup state itself is dropped on the done screen, which is where signup ends.
+    // An account being finished is already past signup: it goes back to whatever it was trying
+    // to do. A signup in progress ends on the done screen, which is where its state is dropped.
+    if (finishing) {
+      navigate(returnTo || '/', { replace: true });
+      return;
+    }
     navigate('/signup/done');
   }
 
   async function run(): Promise<void> {
-    const { personId, account } = readSignup();
+    // Signup carries these from step to step in sessionStorage, but an account finished days
+    // later has none of that — only the claims the hydrator read, which are the same two values
+    // the server minted (`personId`, `account`) and validated on the way in.
+    const stored = readSignup();
+    const session = getSession();
+    const personId = (stored.personId ?? session.personId) as Hex | undefined;
+    const account = stored.account ?? session.account;
     if (!personId || !account) {
       setError(copy.signup.restart);
       return;
@@ -108,11 +134,16 @@ export function DeviceStep() {
       // on chain already and sent nothing — there is no hash to wait for and nothing to redo.
       await api.registerIdentity({ personId, deviceX: x, deviceY: y, platform: platform() });
       await refreshClaims();
+      // The guard asked the server once; saying so here is cheaper and truer than asking again.
+      markRegistered();
       finish();
     } catch (failure) {
       if (isDeviceKeyUnavailable(failure)) {
         setUnavailable(true);
         setError(copy.enter.deviceUnavailable);
+        // Nothing here can succeed on this browser, so the guard must stop sending them back —
+        // otherwise every screen they can still use bounces to a step they cannot pass.
+        deferRegistration();
         return;
       }
       setError(message(copy, failure));
@@ -123,6 +154,7 @@ export function DeviceStep() {
 
   return (
     <Screen title={copy.signup.deviceTitle}>
+      {finishing ? <Alert tone="info">{copy.signup.finishPending}</Alert> : null}
       <p>{copy.signup.deviceBody}</p>
       {platform() === 'web' ? <p>{copy.signup.deviceWebNote}</p> : null}
       {error ? <Alert tone={unavailable ? 'warn' : 'error'}>{error}</Alert> : null}

@@ -31,6 +31,7 @@ export const ko = {
     deviceSlow: '등록이 오래 걸리고 있어요. 잠시 뒤 다시 눌러 주세요.',
     deviceSkip: '이대로 계속하기',
     deviceWebNote: '브라우저에서는 입장 태그를 쓸 수 없어요. 입장은 앱에서 해요.',
+    finishPending: '가입을 마무리할게요. 잠깐이면 돼요.',
     restart: '가입을 처음부터 다시 해 주세요.',
     retryStep: '시간이 조금 지났어요. 다시 눌러 주세요.',
     doneTitle: '준비가 끝났어요', doneBody: '이제 행사를 둘러보고 티켓을 받을 수 있어요.',

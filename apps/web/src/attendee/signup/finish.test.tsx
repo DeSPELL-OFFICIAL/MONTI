@@ -74,8 +74,8 @@ function seedSignup(state: Record<string, unknown>): void {
   sessionStorage.setItem('monti.signup', JSON.stringify(state));
 }
 
-function renderScreen(element: React.ReactElement) {
-  return render(<MemoryRouter>{element}</MemoryRouter>);
+function renderScreen(element: React.ReactElement, at = '/signup/device') {
+  return render(<MemoryRouter initialEntries={[at]}>{element}</MemoryRouter>);
 }
 
 /** A callable rejection: an uppercase reason in `message`, the gRPC status in `code`. */
@@ -252,7 +252,52 @@ describe('device step', () => {
     expect(getSession().status).toBe('anonymous');
   });
 
+  /**
+   * The founder's own account: signup finished on a browser months of bugs ago and stopped at
+   * `pending`, so `startKyc` and every claim refuse it. The router's guard sends that person
+   * here with where they were going, and none of the sessionStorage signup state survives —
+   * the claims are all there is.
+   */
+  describe('finishing an account that stayed pending', () => {
+    beforeEach(() => {
+      sessionStorage.clear();
+      setSession({ status: 'signedIn', personId: PERSON_ID, account: ACCOUNT as `0x${string}` });
+    });
+
+    it('registers with the identity from the session and goes back where the person was headed', async () => {
+      renderScreen(<DeviceStep />, '/signup/device?returnTo=%2Fme%2Fverify');
+      expect(screen.getByRole('status')).toHaveTextContent(ko.signup.finishPending);
+
+      await userEvent.click(screen.getByRole('button', { name: '등록하기' }));
+
+      await waitFor(() =>
+        expect(registerIdentity).toHaveBeenCalledWith({
+          personId: PERSON_ID,
+          deviceX: DEVICE_X,
+          deviceY: DEVICE_Y,
+          platform: 'ios',
+        }),
+      );
+      expect(navigate).toHaveBeenCalledWith('/me/verify', { replace: true });
+      expect(navigate).not.toHaveBeenCalledWith('/signup/done');
+    });
+
+    it('lands on the explore tab when there was nowhere in particular to go back to', async () => {
+      renderScreen(<DeviceStep />, '/signup/device?returnTo=');
+      await userEvent.click(screen.getByRole('button', { name: '등록하기' }));
+
+      await waitFor(() => expect(navigate).toHaveBeenCalledWith('/', { replace: true }));
+    });
+
+    it('says nothing about finishing when this is an ordinary third step', async () => {
+      seedSignup({ personId: PERSON_ID, account: ACCOUNT });
+      renderScreen(<DeviceStep />);
+      expect(screen.queryByText(ko.signup.finishPending)).toBeNull();
+    });
+  });
+
   it('refuses to start without the account the passkey step produced', async () => {
+    setSession({ status: 'anonymous' });
     seedSignup({ personId: PERSON_ID });
     renderScreen(<DeviceStep />);
     await userEvent.click(screen.getByRole('button', { name: '등록하기' }));
