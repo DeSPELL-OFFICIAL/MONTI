@@ -91,6 +91,35 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // 행사 만들기 초안. **클라이언트가 직접 읽고 쓴다** — 2초 디바운스마다 콜러블을 부르면
+    // 비용도 지연도 나쁘다(계획 D절). 서버는 이 컬렉션에 닿지 않으므로 `lib/db.ts` 의
+    // 허용 목록에도 없다. 초안은 아직 아무것도 아닌 글이라 본인 말고는 누구도 읽지 못한다.
+    //
+    // 규칙에는 문서 크기를 재는 수단이 없다(`request.resource.size()` 는 없는 함수다).
+    // 그래서 칸마다 상한을 건다 — 상한이 없으면 한 사람이 자기 초안 하나로 1 MiB 를 채운다.
+    // 포스터는 CID 한 줄로만 들어온다(바이트는 `pinEventImage` 가 IPFS 로 보낸다).
+    match /eventDrafts/{uid}/drafts/{draftId} {
+      function mine() {
+        return signedIn() && request.auth.uid == uid;
+      }
+      function capped(field, limit) {
+        return !(field in request.resource.data)
+          || (request.resource.data[field] is string && request.resource.data[field].size() <= limit);
+      }
+      function listCapped(field, limit) {
+        return !(field in request.resource.data)
+          || (request.resource.data[field] is list && request.resource.data[field].size() <= limit);
+      }
+
+      allow read, delete: if mine();
+      allow create, update: if mine()
+        && capped('title', 80)
+        && capped('body', 5000)
+        && capped('posterCid', 80)
+        && listCapped('tags', 5)
+        && listCapped('tiers', 8);
+    }
+
     // 공연의 티켓 그림. 체인의 `Tier` 에 그림 칸이 없고(`Ticket.sol:40-47`) IPFS JSON 은
     // 공개 뒤 고칠 수 없으므로(`updateEventMeta` 는 Draft 전용) 여기가 유일하게 고칠 수 있는
     // 자리다. 그림은 공개 정보라 로그인한 사람이면 누구나 읽는다 — 티켓 목록은 한 화면에

@@ -321,3 +321,79 @@ describe('eventPrivate', () => {
     await assertFails(db.doc('eventPrivate/99').set({ venue: '없는 공연' }));
   });
 });
+
+describe('eventDrafts/{uid}/drafts/{draftId}', () => {
+  const MINE = 'eventDrafts/uid-1/drafts/d1';
+  const THEIRS = 'eventDrafts/uid-2/drafts/d1';
+  const draft = {
+    title: '모나드 데모 나이트',
+    body: '한 줄 소개',
+    tags: ['모나드', '해커톤'],
+    posterCid: `bafk${'a'.repeat(55)}`,
+    tiers: [{ name: '일반', supply: 100 }],
+  };
+
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (context) => {
+      await context.firestore().doc(MINE).set(draft);
+      await context.firestore().doc(THEIRS).set(draft);
+    });
+  });
+
+  // 초안은 클라이언트가 직접 쓴다 — 2초 디바운스마다 콜러블을 부르면 비용도 지연도 나쁘다.
+  it('lets the owner create, read, update and delete their own drafts', async () => {
+    const db = owner();
+    await assertSucceeds(db.doc(MINE).get());
+    await assertSucceeds(db.doc(MINE).update({ title: '이름을 바꿨다' }));
+    await assertSucceeds(db.doc('eventDrafts/uid-1/drafts/d2').set(draft));
+    await assertSucceeds(db.collection('eventDrafts/uid-1/drafts').get());
+    await assertSucceeds(db.doc(MINE).delete());
+  });
+
+  // 초안은 아직 아무것도 아닌 글이다. 남의 것은 읽지도 쓰지도 못한다.
+  it("blocks a stranger from every operation on somebody else's draft", async () => {
+    const db = owner();
+    await assertFails(db.doc(THEIRS).get());
+    await assertFails(db.collection('eventDrafts/uid-2/drafts').get());
+    await assertFails(db.doc(THEIRS).update({ title: '가로채기' }));
+    await assertFails(db.doc('eventDrafts/uid-2/drafts/d9').set(draft));
+    await assertFails(db.doc(THEIRS).delete());
+  });
+
+  it('blocks a signed-out client entirely', async () => {
+    const out = env.unauthenticatedContext().firestore();
+    await assertFails(out.doc(MINE).get());
+    await assertFails(out.doc(MINE).set(draft));
+  });
+
+  /**
+   * 규칙에는 문서 크기를 재는 수단이 없다(`request.resource.size()` 는 없는 함수다).
+   * 상한이 칸마다 걸려 있지 않으면 한 사람이 자기 초안 하나로 1 MiB 를 채운다.
+   */
+  it('blocks an oversize body, title, poster CID, tag list or tier list', async () => {
+    const db = owner();
+    await assertFails(db.doc(MINE).update({ body: 'x'.repeat(5001) }));
+    await assertFails(db.doc(MINE).update({ title: 'x'.repeat(81) }));
+    await assertFails(db.doc(MINE).update({ posterCid: 'x'.repeat(81) }));
+    await assertFails(db.doc(MINE).update({ tags: ['1', '2', '3', '4', '5', '6'] }));
+    await assertFails(db.doc(MINE).update({ tiers: Array.from({ length: 9 }, () => ({})) }));
+    await assertFails(db.doc('eventDrafts/uid-1/drafts/d3').set({ ...draft, body: 'x'.repeat(5001) }));
+  });
+
+  it('takes the limits exactly at the edge', async () => {
+    const db = owner();
+    await assertSucceeds(db.doc(MINE).update({ body: 'x'.repeat(5000) }));
+    await assertSucceeds(db.doc(MINE).update({ title: 'x'.repeat(80) }));
+    await assertSucceeds(db.doc(MINE).update({ tags: ['1', '2', '3', '4', '5'] }));
+    await assertSucceeds(db.doc(MINE).update({ tiers: Array.from({ length: 8 }, () => ({})) }));
+  });
+
+  // 포스터는 CID 한 줄로만 들어온다. 바이트를 담으려 하면 그 자리에서 막힌다 —
+  // 600 KB JPEG 의 base64 는 800 KB 라 Firestore 문서 상한 1 MiB 에 여유가 없다(계획 C절).
+  it('blocks a field of the wrong type, so bytes cannot be smuggled into a string slot', async () => {
+    const db = owner();
+    await assertFails(db.doc(MINE).update({ title: 7 }));
+    await assertFails(db.doc(MINE).update({ posterCid: { base64: 'x' } }));
+    await assertFails(db.doc(MINE).update({ tags: 'not-a-list' }));
+  });
+});
