@@ -1,7 +1,8 @@
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Alert, Button, Fab, Screen, Spinner } from '../../shared/ui';
+import { Alert, Button, Fab, Screen, Spinner, TicketArt } from '../../shared/ui';
 import { useCopy } from '../../shared/i18n';
 import { describeFailure } from '../../shared/errors';
+import { useTicketArtProps } from './useTicketArt';
 import { useMyTickets } from './useTickets';
 import { useStateLabel } from './List';
 
@@ -20,6 +21,9 @@ export function TicketDetail() {
   const { tokenId = '' } = useParams();
   const { data, isLoading, isError, error, refetch } = useMyTickets();
   const ticket = (data ?? []).find((entry) => entry.tokenId === tokenId);
+  // Before the three branches below, because a hook cannot be called after a return — and for
+  // this one ticket only, so a deep link into a ticket does not read every event's picture.
+  const artPropsOf = useTicketArtProps(ticket ? [ticket] : []);
 
   if (isLoading) {
     return (
@@ -51,6 +55,9 @@ export function TicketDetail() {
 
   return (
     <Screen title={`#${ticket.tokenId}`}>
+      <div className="ticket-detail-art">
+        <TicketArt {...artPropsOf(ticket)} />
+      </div>
       <p>{labels[ticket.state]}</p>
       <p>{copy.tickets.detailGuide}</p>
       <p className="muted">{copy.tickets.noBarcode}</p>

@@ -33,8 +33,10 @@ const tiers: { rows: Array<Record<string, unknown>> } = { rows: [TIER] };
 const event: { row: Record<string, unknown> } = { row: EVENT };
 async function answerIndexer(query: string) {
   if (query.includes('OwnedTickets')) return { Ticket: ownedTickets.rows, Offer: [] };
-  if (query.includes('TicketContext')) return { CheckIn: [], Event: [], Ticket: [] };
-  if (query.includes('EventStates')) return { Event: [] };
+  // The 내 티켓 documents select tiers too, so an answer without the key is one no indexer
+  // would ever give — and the ticket list reads it as an empty answer, not as a missing one.
+  if (query.includes('TicketContext')) return { CheckIn: [], Event: [], Tier: [], Ticket: [] };
+  if (query.includes('EventStates')) return { Event: [], Tier: [] };
   return { Event: [event.row], Tier: tiers.rows };
 }
 const gql = vi.fn(answerIndexer);
@@ -137,8 +139,8 @@ describe('Claim', () => {
   it('names the cause when the event cannot be read', async () => {
     gql.mockImplementation(async (query: string) => {
       if (query.includes('OwnedTickets')) return { Ticket: [], Offer: [] };
-      if (query.includes('TicketContext')) return { CheckIn: [], Event: [], Ticket: [] };
-      if (query.includes('EventStates')) return { Event: [] };
+      if (query.includes('TicketContext')) return { CheckIn: [], Event: [], Tier: [], Ticket: [] };
+      if (query.includes('EventStates')) return { Event: [], Tier: [] };
       // Shaped, not constructed: `shared/envio/client` is mocked above, so the class is gone
       // and `describeFailure` has only `name` and `kind` to read — which is the design.
       throw Object.assign(new Error('REQUEST_FAILED'), { name: 'EnvioError', kind: 'network' });

@@ -3,6 +3,7 @@ import {
   serverTimestamp, setDoc,
 } from 'firebase/firestore';
 import type { Hex } from '@monti/shared';
+import type { TicketArtPreset, TicketArtSource } from '../ui/TicketArt';
 import { getDb, getFirebaseAuth } from './firebase';
 
 /**
@@ -11,9 +12,10 @@ import { getDb, getFirebaseAuth } from './firebase';
  * drafts under `eventDrafts/{uid}/drafts` — the fourth, and the only one it may also delete,
  * because a draft is written every two seconds and a callable per keystroke costs both money
  * and latency.
- * It also reads one collection it may never write: `orgProfiles/{orgId}`, the organiser
- * display names the chain has no room for — open to any signed-in reader and written by the
- * server alone. Everything else goes through a callable in ./functions.
+ * It also reads two collections it may never write, both open to any signed-in reader and
+ * written by the server alone: `orgProfiles/{orgId}`, the organiser display names the chain
+ * has no room for, and `eventArt/{eventId}`, the ticket pictures `Tier` has no column for.
+ * Everything else goes through a callable in ./functions.
  */
 
 export interface ChatMessage {
@@ -145,6 +147,61 @@ export async function loadOrgName(orgId: string): Promise<string | null> {
     return typeof name === 'string' && name !== '' ? name : null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * The four bundled backdrops, by the letter `eventArt` stores. Spelled out here rather than
+ * imported as a value so that reading a document pulls in no pictures: this list is the
+ * validator's alphabet, and TypeScript fails the build if {@link TicketArtPreset} ever
+ * gains a letter this one does not.
+ */
+const TICKET_ART_PRESETS: readonly TicketArtPreset[] = ['a', 'b', 'c', 'd'];
+
+/** What a ticket looks like before anybody has chosen anything, and after anything went wrong. */
+const DEFAULT_TICKET_ART: TicketArtSource = { preset: 'a' };
+
+/**
+ * The seam, and the reason this validation is here rather than in the component. What comes
+ * back is whatever is in the document: a shape an older `saveEventArt` wrote, a hand edit made
+ * in the console, or the draft screen's own default `design: 'aurora'` from before the presets
+ * were named a–d. Anything this function does not recognise becomes the first bundled preset,
+ * so a stale document costs a ticket the picture its organiser picked and never its render.
+ *
+ * An upload wins over a design key when a document somehow carries both: choosing a picture is
+ * the more deliberate of the two acts, and the draft only ever keeps one of them filled in.
+ */
+function toTicketArt(entry: unknown): TicketArtSource {
+  const fields = (typeof entry === 'object' && entry !== null ? entry : {}) as {
+    design?: unknown;
+    imageCid?: unknown;
+  };
+  if (typeof fields.imageCid === 'string' && fields.imageCid !== '') {
+    return { imageCid: fields.imageCid };
+  }
+  const preset = TICKET_ART_PRESETS.find((key) => key === fields.design);
+  return preset ? { preset } : DEFAULT_TICKET_ART;
+}
+
+/**
+ * One event's ticket pictures in tier order, as `eventArt/{eventId}` holds them:
+ * `{ tiers: [ { design } | { imageCid }, ... ], updatedAt }`. `saveEventArt` writes the
+ * document and the rules open it to any signed-in reader, the same shape `orgProfiles` has.
+ *
+ * An empty list is the answer for a document that is not there, may not be read, or holds
+ * something else entirely. The missing document is the ordinary case rather than the failure
+ * case — most events have never been through `saveEventArt` — so a refusal is swallowed the
+ * way {@link loadOrgName} swallows its own: the picture a ticket could not be given is the
+ * bundled one, and it must never fail the screen it was being read for.
+ */
+export async function loadEventArt(eventId: string): Promise<TicketArtSource[]> {
+  try {
+    const snapshot = await getDoc(doc(getDb(), 'eventArt', eventId));
+    const tiers: unknown = (snapshot.data() as { tiers?: unknown } | undefined)?.tiers;
+    if (!Array.isArray(tiers)) return [];
+    return (tiers as unknown[]).map(toTicketArt);
+  } catch {
+    return [];
   }
 }
 

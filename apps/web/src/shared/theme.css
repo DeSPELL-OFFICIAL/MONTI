@@ -106,3 +106,18 @@ body {
   transform: rotate(-18deg); background: #d92d20; color: #fff; text-align: center;
   padding: 0.5rem 0; font-weight: 700; letter-spacing: 0.3em;
 }
+
+/* A ticket row: the picture as a thumbnail, the number and the state beside it. The column is
+   a fixed width rather than a share of the row because the art is 1.41x as tall as it is wide
+   — at the 480px the screen is, a full-width ticket would make one row taller than the phone. */
+.ticket-row { display: grid; grid-template-columns: 76px 1fr; gap: 12px; align-items: center; }
+/* The frame's own type is sized for a full-width ticket; at thumbnail width it has to shrink
+   with the frame, or the title alone fills the picture. Only the sizes change, never the
+   layout, so the thumbnail and the big ticket stay recognisably the same object. */
+.ticket-row__art .ticket-art__caption { padding: 7px; }
+.ticket-row__art .ticket-art__tier { margin-bottom: 2px; font-size: 8px; letter-spacing: 0.08em; }
+.ticket-row__art .ticket-art__title { font-size: 11px; -webkit-line-clamp: 2; line-clamp: 2; }
+.ticket-row__art .ticket-art__band { padding: 2px 0; font-size: 9px; letter-spacing: 0.16em; }
+/* The detail screen shows one ticket, so it is the picture rather than a thumbnail — capped
+   short of the full width so the state, the door guide and 입장하기 stay on the same screen. */
+.ticket-detail-art { max-width: 260px; margin: 0 auto 16px; }

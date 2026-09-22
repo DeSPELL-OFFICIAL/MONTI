@@ -87,6 +87,7 @@ export const ko = {
     artUsed: '사용됨',
     artLabel: '{{title}} · {{tier}} 티켓 그림',
     artLabelUsed: '{{title}} · {{tier}} 티켓 그림 · 사용됨',
+    artNoTitle: '이름 없는 행사', artNoTier: '티켓',
   },
   claim: {
     cta: '티켓 받기', working: '받는 중이에요', done: '티켓을 받았어요', tierLabel: '티켓 종류',

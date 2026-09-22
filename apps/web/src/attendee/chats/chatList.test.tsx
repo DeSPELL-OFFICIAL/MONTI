@@ -9,7 +9,8 @@ const DAY = 86_400;
 const now = () => Math.floor(Date.now() / 1000);
 
 function ticket(tokenId: string, eventId: string, state: MyTicket['state'] = 'before'): MyTicket {
-  return { tokenId, eventId, tier: 0, state, checkInTs: null };
+  // The art fields the ticket screens read; the chat list only ever looks at the event id.
+  return { tokenId, eventId, tier: 0, state, checkInTs: null, used: false, title: '', tierName: '' };
 }
 
 let tickets: MyTicket[] = [];
