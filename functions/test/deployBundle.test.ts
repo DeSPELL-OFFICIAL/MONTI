@@ -137,6 +137,7 @@ describe('deploy bundle', () => {
       'tenderlyWebhook',
       'reconcilePending',
       'dailyExport',
+      'pinEventImage',
       'pinEventMetadata',
       'createOrganizerForMe',
       'pinMessage',

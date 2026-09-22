@@ -33,6 +33,13 @@ export const PENDING_GATES = 'pendingGates';
  * 누구나 읽고(`firestore.rules`), 쓰는 길은 서버의 `createOrganizerForMe` 하나다.
  */
 export const ORG_PROFILES = 'orgProfiles';
+/**
+ * 사람 한 명의 **하루 핀 횟수**. 문서 id 는 `personId` 이고 값은 `{ day, count }` 하나뿐이다.
+ * `pinEventImage` 는 주최자 인가보다 앞에 있어(초안은 주최사를 만들기 전에 쓴다) 로그인한
+ * 아무나 부를 수 있다 — 이 장부가 우리 Pinata 저장 공간의 유일한 문지기다.
+ * 서버 전용이고, 클라이언트는 규칙의 포괄 거부로 닿지 못한다.
+ */
+export const PIN_QUOTA = 'pinQuota';
 /** 서버 내부 상태만 들어간다. 클라이언트는 규칙의 포괄 거부로 닿지 못한다(어테스터 리스). */
 export const SYSTEM = 'system';
 
@@ -55,6 +62,7 @@ export const ALLOWED_COLLECTIONS = [
   DELETION_REQUESTS,
   PENDING_GATES,
   ORG_PROFILES,
+  PIN_QUOTA,
   SYSTEM,
   'members',
   'messages',

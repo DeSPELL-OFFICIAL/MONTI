@@ -12,7 +12,7 @@ export { listPendingGates, submitPendingGate } from './functions/pendingGates.js
 export { listPinned, pinMessage } from './functions/pinMessage.js';
 export { lockDevice, startDeviceChange } from './functions/device.js';
 export { loginChallenge, loginVerify } from './functions/login.js';
-export { pinEventMetadata } from './functions/organizer.js';
+export { pinEventImage, pinEventMetadata } from './functions/organizer.js';
 export { reconcilePending } from './functions/reconcilePending.js';
 export { registerIdentity } from './functions/registerIdentity.js';
 export { registerPasskey } from './functions/registerPasskey.js';
