@@ -271,3 +271,53 @@ describe('diditEvents', () => {
     await assertFails(db.doc('diditEvents/evt-2').set({ sessionId: 's2', status: 'Approved' }));
   });
 });
+
+describe('eventArt', () => {
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (context) => {
+      await context
+        .firestore()
+        .doc('eventArt/11')
+        .set({ tiers: [{ preset: 'a' }, { imageCid: `bafk${'a'.repeat(55)}` }], updatedAt: 1 });
+    });
+  });
+
+  // 티켓 그림은 공개 정보다 — 목록 한 화면이 여러 공연의 그림을 그리므로 콜러블로 감싸면
+  // 콜드 스타트가 그대로 빈칸이 된다. `orgProfiles` 와 같은 모양이다.
+  it('lets any signed-in user read the art of an event', async () => {
+    await assertSucceeds(owner().doc('eventArt/11').get());
+    await assertSucceeds(env.authenticatedContext('uid-9', {}).firestore().doc('eventArt/11').get());
+  });
+
+  it('blocks a signed-out reader', async () => {
+    await assertFails(env.unauthenticatedContext().firestore().doc('eventArt/11').get());
+  });
+
+  // 쓰는 길은 `saveEventArt` 하나다 — 주최자 판정은 체인에서만 할 수 있고 규칙은 체인을 못 읽는다.
+  // 클라이언트가 쓸 수 있으면 남의 공연 티켓에 아무 그림이나 붙일 수 있다.
+  it('blocks every client write — create, change and delete alike', async () => {
+    const db = owner();
+    await assertFails(db.doc('eventArt/11').update({ tiers: [{ preset: 'd' }] }));
+    await assertFails(db.doc('eventArt/11').delete());
+    await assertFails(db.doc('eventArt/99').set({ tiers: [{ preset: 'a' }] }));
+  });
+});
+
+describe('eventPrivate', () => {
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (context) => {
+      await context.firestore().doc('eventPrivate/11').set({ venue: '올림픽공원 K-아트홀', updatedAt: 1 });
+    });
+  });
+
+  // 규칙은 체인을 읽을 수 없어 "티켓을 들고 있는가"를 판정하지 못한다. 그 판정은
+  // `getEventPrivate` 이 eth_call 로 하고, 문서 자체는 서버 말고 아무도 닿지 못한다.
+  it('blocks the client from reading or writing a private venue directly', async () => {
+    const db = owner();
+    await assertFails(db.doc('eventPrivate/11').get());
+    await assertFails(db.collection('eventPrivate').get());
+    await assertFails(db.doc('eventPrivate/11').update({ venue: '다른 곳' }));
+    await assertFails(db.doc('eventPrivate/11').delete());
+    await assertFails(db.doc('eventPrivate/99').set({ venue: '없는 공연' }));
+  });
+});

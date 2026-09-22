@@ -6,6 +6,7 @@ import { getAddress } from 'viem';
 import { organizersAbi, type Hex } from '@monti/shared';
 import { PINATA_JWT } from '../config.js';
 import { PERM_CREATE_EVENT, resolveCallerAccount } from '../lib/auth.js';
+import { CID_RE } from '../lib/cid.js';
 import { deployment, publicClient } from '../lib/chain.js';
 import { PERSONS, PIN_QUOTA, USERS, db } from '../lib/db.js';
 import { ImageProbeError, probeImage, type ImageProbe } from '../lib/imageProbe.js';
@@ -37,13 +38,6 @@ export const MAX_IMAGE_EDGE_PX = 4000;
  * 아무나 우리 Pinata 저장 공간을 채울 수 있으므로, 사람 단위 일일 한도가 유일한 문지기다.
  */
 export const MAX_PINS_PER_DAY = 20;
-
-/**
- * base32 CIDv1 59자. `bafy`(dag-pb) 또는 `bafk`(raw leaf — Pinata v3 가 작은 파일에 주는 것)로 시작한다.
- * 씨앗 스크립트(`contracts/script/Seed.s.sol`)가 체인에 넣기 전에 요구하는 모양과 같다 —
- * CIDv0(`Qm…`)를 그대로 흘려보내면 나중에 `createEvent` 가 이유 없이 거절당한다.
- */
-export const CID_RE = /^baf[ky][a-z2-7]{55}$/;
 
 /** 선택 칸 하나의 상한. 탐색 화면의 한 줄에 들어갈 만큼만 받는다. */
 export const MAX_META_FIELD_CHARS = 200;

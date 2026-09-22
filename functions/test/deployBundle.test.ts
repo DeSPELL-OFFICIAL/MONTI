@@ -134,6 +134,7 @@ describe('deploy bundle', () => {
       'listAttendees',
       'getEventPrivate',
       'setEventPrivate',
+      'saveEventArt',
       'listPendingGates',
       'submitPendingGate',
       'tenderlyWebhook',

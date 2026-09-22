@@ -34,6 +34,14 @@ export const PENDING_GATES = 'pendingGates';
  */
 export const ORG_PROFILES = 'orgProfiles';
 /**
+ * 공연의 **티켓 그림**. 문서 id 는 `eventId`(십진 문자열)이고 값은
+ * `{ tiers: [{ preset } | { imageCid }], updatedAt }` 다. 체인의 `Tier` 에 그림 칸이 없고
+ * (`Ticket.sol:40-47`) IPFS JSON 은 공개 뒤 고칠 수 없으므로, "나중에 수정 가능"을 지키는
+ * 자리가 여기 하나다. 로그인한 사람이면 누구나 읽고(`firestore.rules`), 쓰는 길은
+ * 서버의 `saveEventArt` 하나다 — `orgProfiles` 와 같은 모양이다.
+ */
+export const EVENT_ART = 'eventArt';
+/**
  * 공연의 **비공개 장소**. 문서 id 는 체인이 정한 `eventId`(십진 문자열)이고 값은
  * `{ venue?, note? }` 다. 공개 IPFS JSON 에서는 `venue` 키가 통째로 빠지고(계획 B-1)
  * 진짜 값은 여기에만 있다. **서버 전용이다** — 규칙 파일은 체인을 읽을 수 없어
@@ -68,6 +76,7 @@ export const ALLOWED_COLLECTIONS = [
   EVENT_CHATS,
   DELETION_REQUESTS,
   PENDING_GATES,
+  EVENT_ART,
   EVENT_PRIVATE,
   ORG_PROFILES,
   PIN_QUOTA,

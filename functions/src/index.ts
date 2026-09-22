@@ -16,6 +16,7 @@ export { loginChallenge, loginVerify } from './functions/login.js';
 export { pinEventImage, pinEventMetadata } from './functions/organizer.js';
 export { reconcilePending } from './functions/reconcilePending.js';
 export { registerIdentity } from './functions/registerIdentity.js';
+export { saveEventArt } from './functions/eventArt.js';
 export { registerPasskey } from './functions/registerPasskey.js';
 export { resolveRecipient } from './functions/resolveRecipient.js';
 export { startKyc } from './functions/startKyc.js';
