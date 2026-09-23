@@ -78,6 +78,17 @@ describe('getSmartAccount', () => {
     expect(toCoinbaseSmartAccount).toHaveBeenCalledTimes(1);
   });
 
+  it('holds both the staff passkey account and the gate account without evicting either', async () => {
+    // The staff build derives two accounts from two different owners and switches between them
+    // per screen; a single memo slot would re-ask the factory on every switch.
+    const passkey = { type: 'webAuthn', publicKey: OWNER } as never;
+    const gate = { type: 'webAuthn', publicKey: `0x${'11'.repeat(32)}${'22'.repeat(32)}` } as never;
+    const first = await getSmartAccount(passkey);
+    await getSmartAccount(gate);
+    expect(await getSmartAccount(passkey)).toBe(first);
+    expect(toCoinbaseSmartAccount).toHaveBeenCalledTimes(2);
+  });
+
   it('rebuilds for a different passkey, yielding a different account instance', async () => {
     const ownerA = { type: 'webAuthn', publicKey: OWNER } as never;
     const ownerB = { type: 'webAuthn', publicKey: `0x${OWNER_Y}${OWNER_X}` } as never;

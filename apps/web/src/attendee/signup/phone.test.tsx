@@ -34,6 +34,11 @@ function renderScreen(element: React.ReactElement) {
   return render(<MemoryRouter>{element}</MemoryRouter>);
 }
 
+/** Entered at a real address, because the return target lives in the query string. */
+function renderAt(element: React.ReactElement, entry: string) {
+  return render(<MemoryRouter initialEntries={[entry]}>{element}</MemoryRouter>);
+}
+
 /** Verify reads the state Phone left behind; every test says what that state is. */
 function seedSignup(state: Record<string, unknown>): void {
   sessionStorage.setItem('monti.signup', JSON.stringify(state));
@@ -68,7 +73,7 @@ describe('Phone screen', () => {
     await userEvent.click(screen.getByRole('button', { name: '인증번호 받기' }));
     // The screen hands its abort signal down so leaving mid-send cancels the native listeners.
     expect(sendOtp).toHaveBeenCalledWith('+821012345678', { signal: expect.any(AbortSignal) });
-    expect(navigate).toHaveBeenCalledWith('/signup/verify');
+    expect(navigate).toHaveBeenCalledWith({ pathname: '/signup/verify', search: '' });
   });
 
   it('uses the selected country code', async () => {
@@ -181,4 +186,41 @@ describe('Verify screen', () => {
     expect(confirmOtp).not.toHaveBeenCalled();
     expect(screen.queryByRole('textbox')).toBeNull();
   });
+});
+
+describe('sign-in return target', () => {
+  it('carries returnTo across the code step so the exit can honour it', async () => {
+    renderAt(<Phone />, '/signup/phone?returnTo=%2Fstaff%2Fsetup');
+    await userEvent.type(screen.getByRole('textbox'), '01012345678');
+    await userEvent.click(screen.getByRole('button', { name: '인증번호 받기' }));
+    expect(navigate).toHaveBeenCalledWith({ pathname: '/signup/verify', search: 'returnTo=%2Fstaff%2Fsetup' });
+  });
+
+  it('sends a staff member back to the gate instead of on to the attendee passkey step', async () => {
+    seedSignup({ verificationId: 'vid', phoneE164: PHONE });
+    renderAt(<Verify />, '/signup/verify?returnTo=%2Fstaff%2Fsetup');
+    await userEvent.type(screen.getByRole('textbox'), '123456');
+    await userEvent.click(screen.getByRole('button', { name: '확인' }));
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/staff/setup'));
+    expect(navigate).not.toHaveBeenCalledWith('/signup/passkey');
+  });
+
+  it('leaves an attendee with no return target on the passkey step', async () => {
+    seedSignup({ verificationId: 'vid', phoneE164: PHONE });
+    renderAt(<Verify />, '/signup/verify');
+    await userEvent.type(screen.getByRole('textbox'), '123456');
+    await userEvent.click(screen.getByRole('button', { name: '확인' }));
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/signup/passkey'));
+  });
+
+  it.each(['https%3A%2F%2Fevil.example%2Fx', '%2F%2Fevil.example%2Fx'])(
+    'refuses a return target that would leave the app: %s',
+    async (hostile) => {
+      seedSignup({ verificationId: 'vid', phoneE164: PHONE });
+      renderAt(<Verify />, `/signup/verify?returnTo=${hostile}`);
+      await userEvent.type(screen.getByRole('textbox'), '123456');
+      await userEvent.click(screen.getByRole('button', { name: '확인' }));
+      await waitFor(() => expect(navigate).toHaveBeenCalledWith('/signup/passkey'));
+    },
+  );
 });

@@ -55,6 +55,9 @@ importers:
       '@monti/device-key':
         specifier: workspace:*
         version: link:../../plugins/device-key
+      '@monti/hce-android':
+        specifier: workspace:*
+        version: link:../../plugins/hce-android
       '@monti/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -76,6 +79,9 @@ importers:
       i18next:
         specifier: 25.5.2
         version: 25.5.2(typescript@5.9.2)
+      idb:
+        specifier: 8.0.3
+        version: 8.0.3
       ox:
         specifier: 0.9.6
         version: 0.9.6(typescript@5.9.2)
@@ -125,6 +131,9 @@ importers:
       '@vitejs/plugin-react':
         specifier: 5.0.2
         version: 5.0.2(vite@7.1.5(@types/node@22.20.4)(tsx@4.23.15))
+      fake-indexeddb:
+        specifier: 6.2.5
+        version: 6.2.5
       jsdom:
         specifier: 26.1.0
         version: 26.1.0
@@ -248,6 +257,21 @@ importers:
       '@capacitor/core':
         specifier: 8.5.2
         version: 8.5.2
+      typescript:
+        specifier: 5.9.2
+        version: 5.9.2
+      vitest:
+        specifier: 3.2.4
+        version: 3.2.4(@types/node@22.20.4)(jsdom@26.1.0)(tsx@4.23.15)
+
+  plugins/hce-android:
+    devDependencies:
+      '@capacitor/core':
+        specifier: 8.5.2
+        version: 8.5.2
+      '@monti/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       typescript:
         specifier: 5.9.2
         version: 5.9.2
@@ -3156,6 +3180,10 @@ packages:
   extend@3.0.2:
     resolution: {integrity: sha512-fjquC59cD7CyW6urNXK0FBufkZcoiGG80wTuPujX590cB5Ttln20E2UB4S/WARVqhXffZl2LNgS+gQdPIIim/g==}
 
+  fake-indexeddb@6.2.5:
+    resolution: {integrity: sha512-CGnyrvbhPlWYMngksqrSSUT1BAVP49dZocrHuK0SvtR0D5TMs5wP0o3j7jexDJW01KSadjBp1M/71o/KR3nD1w==}
+    engines: {node: '>=18'}
+
   farmhash-modern@1.1.0:
     resolution: {integrity: sha512-6ypT4XfgqJk/F3Yuv4SX26I3doUjt0GTG4a+JgWxXQpxXzTBq8fPUeGHfcYMMDPHJHm3yPOSjaeBwBGAHWXCdA==}
     engines: {node: '>=18.0.0'}
@@ -3452,6 +3480,9 @@ packages:
 
   idb@7.1.1:
     resolution: {integrity: sha512-gchesWBzyvGHRO9W8tzUWFDycow5gwjvFKfyV9FF32Y7F50yZMp7mP+T2mJIWFx49zicqyC4uefHM17o6xKIVQ==}
+
+  idb@8.0.3:
+    resolution: {integrity: sha512-LtwtVyVYO5BqRvcsKuB2iUMnHwPVByPCXFXOpuU96IZPPoPN6xjOGxZQ74pgSVVLQWtUOYgyeL4GE98BY5D3wg==}
 
   ieee754@1.2.1:
     resolution: {integrity: sha512-dcyqhDvX1C46lXZcVqCpK+FtMRQVdIMN6/Df5js2zouUsqG7I6sFxitIC+7KYK29KdXOLHdu9zL4sFnoVQnqaA==}
@@ -8072,6 +8103,8 @@ snapshots:
 
   extend@3.0.2: {}
 
+  fake-indexeddb@6.2.5: {}
+
   farmhash-modern@1.1.0: {}
 
   fast-copy@3.1.0: {}
@@ -8494,6 +8527,8 @@ snapshots:
       safer-buffer: 2.1.2
 
   idb@7.1.1: {}
+
+  idb@8.0.3: {}
 
   ieee754@1.2.1: {}
 

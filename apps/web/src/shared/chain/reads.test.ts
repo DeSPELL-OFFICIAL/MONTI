@@ -117,6 +117,9 @@ describe('reads', () => {
       // 01b: the recovery undo and the ticket hand-over. Both go out through ops.ts
       // (`identityOp` / `ticketOp`), so neither belongs on a read helper.
       'cancelRotation', 'migrate',
+      // The gate's two writes and manual approval (04). `checkInLate` is the offline queue's
+      // flush target and takes `checkIn`'s three arguments; both go out through `checkInOp`.
+      'checkIn', 'checkInLate', 'requestOverride', 'manualOverride',
       'claim', 'safeTransferFrom', 'createOffer', 'cancelOffer', 'acceptOffer',
       'createEvent', 'publishEvent', 'cancelEvent', 'updateEventMeta',
       'setAdmin', 'setManager', 'registerGate', 'openGate', 'closeGate', 'revokeGate',

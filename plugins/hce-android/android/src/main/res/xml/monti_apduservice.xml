@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  리더(관객 폰)가 SELECT 로 부르는 AID 를 OS 에 등록한다. 이 파일이 없으면 MontiHostApduService
+  는 매니페스트에 선언돼 있어도 한 번도 깨어나지 않는다.
+
+  D2760000850101 은 NFC Forum 이 Type 4 Tag 에 배정한 표준 AID 다. 독자 AID 가 아니라 이것을
+  쓰는 이유는 관객 폰이 기본 NFC 리더로 — 앱 없이, 리더 모드 없이 — 이 태그를 그냥 태그로 읽게
+  하기 위해서다. @monti/shared 의 HCE_AID 와 같은 값이고, 그 일치를 테스트가 못 박는다.
+
+  category 는 "other" 다. "payment" 로 등록하면 OS 가 이 서비스를 결제 앱 목록에 올리고
+  기본 결제 앱 설정과 탭-투-페이 우선순위 싸움에 끌어들인다 — 게이트 태그는 결제가 아니다.
+
+  requireDeviceUnlock="false" 는 게이트에서 필요한 조건이다. 직원 폰은 화면이 잠긴 채 주머니나
+  거치대에 있을 수 있고, 관객이 태그할 때마다 직원이 폰을 풀어 줄 수는 없다. 여기서 내주는 건
+  3초마다 회전하는 게이트 코드뿐이고 비밀은 들어 있지 않다.
+-->
+<host-apdu-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/monti_hce_description"
+    android:requireDeviceUnlock="false">
+    <aid-group
+        android:description="@string/monti_hce_aid_group"
+        android:category="other">
+        <aid-filter android:name="D2760000850101" />
+    </aid-group>
+</host-apdu-service>

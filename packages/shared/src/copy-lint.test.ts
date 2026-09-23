@@ -96,6 +96,23 @@ describe('scanFolder', () => {
     expect(hits).toHaveLength(0);
   });
 
+  /**
+   * `staff` 는 한때 `organizer` 와 나란히 건너뛰는 폴더였다. 게이트 화면을 관객이 스태프 어깨
+   * 너머로 같이 읽는다는 이유로 그 면제가 걷혔으니, 걷혔다는 사실 자체에 테스트를 건다 —
+   * 이름이 `staff` 인 폴더가 다시 조용히 건너뛰어지면 스태프 화면의 금지어가 CI를 통과한다.
+   */
+  it('walks staff folders and still skips organizer ones', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'monti-copy-dirs-'));
+    await mkdir(join(root, 'staff'), { recursive: true });
+    await mkdir(join(root, 'organizer'), { recursive: true });
+    await writeFile(join(root, 'staff', 'deny.tsx'), '<p>토큰을 확인하세요</p>', 'utf8');
+    await writeFile(join(root, 'organizer', 'payout.tsx'), '<p>토큰을 확인하세요</p>', 'utf8');
+
+    const hits = await scanFolder(root);
+    expect(hits).toHaveLength(1);
+    expect(hits[0]!.file.includes('staff')).toBe(true);
+  });
+
   it('ignores *.test.* files', async () => {
     const root = await mkdtemp(join(tmpdir(), 'monti-copy-test-'));
     await writeFile(join(root, 'a.test.tsx'), '<p>가스</p>', 'utf8');

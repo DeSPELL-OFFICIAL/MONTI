@@ -43,14 +43,28 @@ export const USED_ABI = {
     registerGate: 4, openGate: 1, closeGate: 1, revokeGate: 1,
   },
   Ticket: {
-    eventOf: 1, tierOf: 1, eventStatus: 1, isRevoked: 1, transfersOf: 1, balanceOfEvent: 2,
+    eventOf: 1, eventOrg: 1, tierOf: 1, eventStatus: 1, isRevoked: 1, transfersOf: 1, balanceOfEvent: 2,
     checkInOf: 1, eventMeta: 1, tiers: 1, offerOf: 1,
+    checkIn: 3,
+    // 01b. The offline queue's flush target: the same three arguments as `checkIn` and the same
+    // twelve reverts, but it accepts a code issued up to `LATE_WINDOW` (12 h) before doors and a
+    // submission up to `LATE_WINDOW` after the event ended (abi-delta-01b.md §2).
+    // `hasLateCheckIn()` in `staff/queue/opQueue.ts` reads the generated ABI rather than a flag,
+    // and `CheckInFunction` reads this manifest — so listing the name here is the whole of what
+    // turns the drain from a dry run into real sends.
+    checkInLate: 3,
+    // Manual approval (04 T32). Both are sent from the staff member's OWN passkey account and
+    // never from the gate account: the chain records `msg.sender` as the approver, and a gate
+    // terminal is a device rather than a person who can stand behind letting somebody in.
+    requestOverride: 3, manualOverride: 3,
     claim: 3, safeTransferFrom: 3,
     createOffer: 3, cancelOffer: 1, acceptOffer: 2,
     createEvent: 2,
     // The event lifecycle. `updateEventMeta` reverts `NotDraft` once the event is published,
-    // which is why the organiser screen only offers it before publishing.
-    eventOrg: 1, publishEvent: 1, cancelEvent: 1, updateEventMeta: 3,
+    // which is why the organiser screen only offers it before publishing. `eventOrg` is
+    // declared once, above — the merge that brought the organiser block in unioned it a second
+    // time here, which is TS1117 and silently drops one of the two entries.
+    publishEvent: 1, cancelEvent: 1, updateEventMeta: 3,
     // 01b. `deviceDigest(tokenId, gateId, eventId, nonce, issuedAt)` is the parity target: the
     // contract fills in `block.chainid` and `address(this)` itself, which is exactly why a
     // hand-rolled sha256 passes every local test and fails at the door
@@ -94,6 +108,14 @@ export const USED_EVENTS = {
      * counting admissions still means counting `CheckedIn` alone.
      */
     CheckedInLate: 4,
+    /**
+     * `ManualOverride(uint256 indexed tokenId, uint256 indexed gateId, address indexed approver,
+     * uint8 role, uint8 reason)` — **five** parameters (`Ticket.sol:114-116`). A gate subscribes
+     * to it for one case only: after this terminal filed a `requestOverride`, it is the log that
+     * says somebody with the right approved it. Without it a filed request is a dead end on the
+     * phone — `requestOverride` writes no check-in, so nothing else will ever mention it again.
+     */
+    ManualOverride: 5,
   },
 } as const satisfies Record<UsedContract, Readonly<Record<string, number>>>;
 

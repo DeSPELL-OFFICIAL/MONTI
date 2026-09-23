@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Alert, Button, Field, Screen } from '../../shared/ui';
 import { useCopy } from '../../shared/i18n';
 import {
@@ -17,6 +17,7 @@ import { problemMessage, writeSignup } from './useSignup';
 export function Phone() {
   const copy = useCopy();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
   const [country, setCountry] = useState<string>(DEFAULT_COUNTRY);
   const [value, setValue] = useState('');
   const [error, setError] = useState('');
@@ -48,7 +49,9 @@ export function Phone() {
     try {
       const verificationId = await sendOtp(phoneE164, { signal: aborter.current?.signal });
       writeSignup({ phoneE164, verificationId });
-      navigate('/signup/verify');
+      // The return target rides the address to the next step, so the code screen is the only
+      // one that has to know what to do with it.
+      navigate({ pathname: '/signup/verify', search: params.toString() });
     } catch (failure) {
       setError(problemMessage(copy, phoneAuthProblem(failure)));
     } finally {

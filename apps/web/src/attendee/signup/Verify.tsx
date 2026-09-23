@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Alert, Button, Countdown, Field, Screen, Spinner } from '../../shared/ui';
 import { fmt, useCopy } from '../../shared/i18n';
 import {
@@ -10,6 +10,7 @@ import {
   resetRecaptcha,
   sendOtp,
 } from '../../shared/api/auth';
+import { safeReturnTo } from '../../shared/returnTo';
 import { finishSignup, isAlreadyRegistered, problemMessage, readSignup, writeSignup } from './useSignup';
 
 const CODE_LENGTH = 6;
@@ -20,6 +21,10 @@ const RESEND_COOLDOWN_SECONDS = 60;
 export function Verify() {
   const copy = useCopy();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  // Staff sign in through these two attendee screens (see `staffMain.tsx`), and the gate is
+  // where they must land — the passkey step that follows is attendee-only.
+  const exit = safeReturnTo(params.get('returnTo'), '/signup/passkey');
   const [signup, setSignup] = useState(readSignup);
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
@@ -58,7 +63,7 @@ export function Verify() {
       }
       // Creates persons/{personId} and users/{uid} from the number in the phone session.
       await finishSignup();
-      navigate('/signup/passkey');
+      navigate(exit);
     } catch (failure) {
       if (isAlreadyRegistered(failure)) {
         navigate('/login', { replace: true, state: { notice: copy.signup.alreadyRegistered } });

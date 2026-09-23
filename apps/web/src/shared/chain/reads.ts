@@ -137,7 +137,13 @@ export interface GateInfoStruct {
   revoked: boolean;
 }
 
-/** `Organizers.managerOf` returns two separate booleans, not a struct (spec 9.4). */
+/**
+ * `Organizers.managerOf` returns two booleans rather than a struct, so viem hands back a
+ * positional pair. `exists` is membership of the organizer's team and `canApprove` is the right
+ * to admit somebody by hand — they are genuinely independent, and the gap between them is the
+ * whole of `requestOverride`: a manager who exists without `canApprove` files a request that
+ * somebody else approves (`Ticket.sol:377`).
+ */
 export interface ManagerStruct {
   exists: boolean;
   canApprove: boolean;
@@ -147,6 +153,10 @@ export function readOrganizers() {
   const call = reader('Organizers', getConfig().addresses.organizers);
   return {
     isOpenGate: (eventId: bigint, gateAccount: Hex) => call<boolean>('isOpenGate', [eventId, gateAccount]),
+    managerOf: async (orgId: bigint, account: Hex): Promise<ManagerStruct> => {
+      const [exists, canApprove] = await call<[boolean, boolean]>('managerOf', [orgId, account]);
+      return { exists, canApprove };
+    },
     hasPermission: (orgId: bigint, account: Hex, bit: number) =>
       call<boolean>('hasPermission', [orgId, account, bit]),
     gateOf: (gateAccount: Hex) => call<bigint>('gateOf', [gateAccount]),
@@ -157,10 +167,6 @@ export function readOrganizers() {
      * is written by the Tenderly webhook and the UI must not wait on it.
      */
     adminBitsOf: (orgId: bigint, admin: Hex) => call<number>('adminBitsOf', [orgId, admin]),
-    managerOf: async (orgId: bigint, account: Hex): Promise<ManagerStruct> => {
-      const [exists, canApprove] = await call<[boolean, boolean]>('managerOf', [orgId, account]);
-      return { exists, canApprove };
-    },
     gateInfo: async (gateId: bigint): Promise<GateInfoStruct> => {
       const [eventId, account, kx, ky, open, revoked] =
         await call<[bigint, Hex, Hex, Hex, boolean, boolean]>('gateInfo', [gateId]);
