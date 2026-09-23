@@ -7,7 +7,13 @@ import {
   ticketAbi,
 } from './abi.js';
 
-type AbiItem = { type: string; name?: string; inputs?: Array<{ name?: string; indexed?: boolean }> };
+type AbiComponent = { name?: string; type?: string; components?: AbiComponent[] };
+type AbiItem = {
+  type: string;
+  name?: string;
+  inputs?: Array<{ name?: string; indexed?: boolean }>;
+  outputs?: AbiComponent[];
+};
 
 function names(abi: readonly unknown[], type: string): string[] {
   return (abi as AbiItem[]).filter((i) => i.type === type && i.name).map((i) => i.name as string);
@@ -30,10 +36,13 @@ describe('Identity ABI', () => {
         'register', 'rotateAccount', 'setActiveDevice', 'lockDevice', 'setKycLevel', 'setNickname',
         'accountOf', 'personOf', 'isMember', 'activeDevice', 'isLocked', 'deviceUpdatedAt',
         'kycLevelOf', 'nicknameOwner', 'nicknameOf', 'attester',
+        // 01b: 회전 되돌리기(C3)
+        'cancelRotation', 'rotatedAt', 'rotatedFrom', 'ROTATION_UNDO_WINDOW',
       ]),
     );
     expect(names(identityAbi, 'event')).toEqual(
-      expect.arrayContaining(['Registered', 'AccountRotated', 'DeviceChanged', 'DeviceLocked', 'NicknameSet', 'KycLevelSet']),
+      expect.arrayContaining(['Registered', 'AccountRotated', 'DeviceChanged', 'DeviceLocked', 'NicknameSet', 'KycLevelSet',
+        'RotationCancelled']),
     );
   });
 
@@ -60,13 +69,32 @@ describe('Ticket ABI', () => {
   it('carries every call the backend uses, including the ones added late', () => {
     expect(names(ticketAbi, 'function')).toEqual(
       expect.arrayContaining(['ownerOf', 'balanceOf', 'eventOf', 'tierOf', 'eventOrg', 'checkInOf',
-        'balanceOfEvent', 'eventMeta', 'eventStatus', 'tiers', 'createOffer', 'cancelOffer', 'acceptOffer', 'offerOf']),
+        'balanceOfEvent', 'eventMeta', 'eventStatus', 'tiers', 'createOffer', 'cancelOffer', 'acceptOffer', 'offerOf',
+        // 01b: 오프라인 큐 flush, EIP-712 오퍼 다이제스트, 7워드 기기 다이제스트, 두 상수
+        'checkInLate', 'offerDigest', 'eip712Domain', 'deviceDigest', 'LATE_WINDOW', 'MIGRATE_DELAY']),
     );
     expect(names(ticketAbi, 'event')).toEqual(
       expect.arrayContaining(['EventCreated', 'EventStatusChanged', 'Claimed', 'Transfer', 'CheckedIn',
         'OverrideRequested', 'ManualOverride', 'Revoked', 'Migrated',
-        'OfferCreated', 'OfferCancelled', 'OfferAccepted']),
+        'OfferCreated', 'OfferCancelled', 'OfferAccepted',
+        // 01b: 늦은 체크인은 CheckedIn 에 더해서 나온다 — 입장 수를 셀 때 두 번 세면 안 된다.
+        'CheckedInLate']),
     );
+  });
+
+  // abi-delta-01b §5. 같은 셀렉터, 두 번 바뀐 튜플. nonceHash 가 ts 앞으로 옮겨 가
+  // ts+manual+late 가 한 슬롯을 쓴다. Solidity 는 필드 이름으로 읽어 눈치채지 못했지만
+  // viem 과 Envio 는 위치로 디코드한다 — 이 순서가 틀리면 조용히 잘못 읽는다.
+  it('pins the checkInOf return tuple component order', () => {
+    const checkInOf = fn(ticketAbi, 'checkInOf');
+    expect(checkInOf?.outputs?.[0]?.type).toBe('tuple');
+    expect(checkInOf?.outputs?.[0]?.components?.map((c) => c.name)).toEqual([
+      'gateId',
+      'nonceHash',
+      'ts',
+      'manual',
+      'late',
+    ]);
   });
 
   it('matches sub-plan 01 offer event signatures exactly', () => {
@@ -91,7 +119,11 @@ describe('Ticket ABI', () => {
 
 describe('other ABIs', () => {
   it('exposes the paymaster budget calls and the Coinbase factory getAddress', () => {
-    expect(names(montiPaymasterAbi, 'function')).toEqual(expect.arrayContaining(['depositPlatform', 'budgetOf']));
+    expect(names(montiPaymasterAbi, 'function')).toEqual(
+      // 01b: 셀렉터 단위 킬 스위치와 인자 워드 조회
+      expect.arrayContaining(['depositPlatform', 'budgetOf', 'setAllowed', 'argWordOf']),
+    );
+    expect(names(montiPaymasterAbi, 'event')).toEqual(expect.arrayContaining(['SelectorAllowed']));
     expect(names(coinbaseFactoryAbi, 'function')).toEqual(expect.arrayContaining(['getAddress', 'createAccount']));
   });
 });

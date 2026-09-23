@@ -49,11 +49,20 @@ function requireName(value: unknown): string {
 /**
  * 로그인한 사람이 이름 하나로 **자기 주최사**를 만든다(MVP 창업자 판단).
  *
- * 01b 재배포 전까지 `Organizers.createOrganizer` 는 페이마스터가 후원하지 않는다. 그래서
- * 관객 키로는 보낼 방법이 없고 — 관객 계정에는 MON 이 없다 — 서버의 어테스터가 그 사람을
- * **오너로 지정해** 대신 보낸다. `createOrganizer(address owner)` 는 누구나 부를 수 있고
- * 오너를 인자로 받으므로(contracts/src/Organizers.sol), 어테스터가 보내도 주최사의 주인은
- * 언제나 그 사람이다. 01b 가 후원을 열면 이 함수는 통째로 지우고 클라이언트가 직접 보낸다.
+ * 어테스터가 그 사람을 **오너로 지정해** 대신 보낸다. `createOrganizer(address owner)` 는
+ * 누구나 부를 수 있고 오너를 인자로 받으므로(contracts/src/Organizers.sol), 어테스터가 보내도
+ * 주최사의 주인은 언제나 그 사람이다.
+ *
+ * **2026-09-23 01b 재배포로 전제 두 가지가 바뀌었다(abi-delta-01b.md §4·§10).**
+ *  1. `Organizers` 는 바이트 단위로 그대로다(§4). `createOrganizer(address)` 의 시그니처가
+ *     같으므로 이 어테스터 경로는 새 배포본에서도 그대로 동작한다.
+ *  2. 새 페이마스터(`0xBDDB…28B2`)가 이 셀렉터를 **후원한다** — `0x49cd9846`, ArgKind 1
+ *     (Platform), word 0. 배포된 페이마스터에서 `argKindOf`/`argWordOf` 를 되읽어 확인한 값이다(§10).
+ *     즉 관객 키로 직접 보내는 길(클라이언트 전송)이 열렸다.
+ *
+ * 그래도 이 callable 은 **일부러 남겨 둔다.** 지우는 것은 클라이언트가 UserOperation 을
+ * 보내도록 고치는 일과 함께 따로 판단할 변경이지, 이 파일의 부수 효과로 일어날 일이 아니다.
+ * 지금은 동작을 바꾸지 않는다.
  *
  * 체인에는 **이름이 없다**. `orgProfiles/{orgId}` 한 줄이 화면에 그릴 이름의 원본이고,
  * 권한·소유권의 원본은 그대로 체인이다(스펙 §9.4).

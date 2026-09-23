@@ -223,9 +223,11 @@ export const createTransferInvite = onCall(
  * `users/{uid}.phoneHmac`(Task 20 `startSignup` 이 써 둔 값)이 같아야 한다. 번호를 인자로
  * 받지 않으므로 남의 번호를 써넣어 볼 자리가 없다.
  *
- * 서명은 **호출자 계정**으로 묶는다. 컨트랙트가 검증하는 다이제스트는
- * `keccak256(abi.encode(tokenId, commitment, msg.sender))` 라서(EIP-191 접두사 없음),
- * 이 서명은 다른 계정이 주워도 쓸 수 없다. 서명은 저장하지 않고 호출마다 다시 만든다.
+ * 서명은 **호출자 계정**으로 묶는다. 컨트랙트가 검증하는 값은 `Ticket.offerDigest(...)` —
+ * EIP-712 `TransferApproval(uint256 tokenId, bytes32 recipientCommitment, address recipient)` 이고,
+ * 도메인이 `chainId` 와 **Ticket 주소**까지 함께 묶는다(EIP-191 접두사는 붙지 않는다).
+ * 그래서 이 서명은 다른 계정도, 다른 체인도, 옛 배포본의 Ticket 도 쓸 수 없다.
+ * 서명은 저장하지 않고 호출마다 다시 만든다.
  *
  * 체인이 진실이다 — `offerOf(tokenId)` 의 커밋먼트가 초대장의 것과 같고 아직 살아 있을 때만
  * 서명한다. 초대 상태(`accepted`)는 인덱서가 `OfferAccepted` 를 보고 바꾼다. 여기서는 쓰지 않는다.
@@ -277,11 +279,16 @@ export const pendingOffers = onCall(
       if (offer.expiresAt < BigInt(now)) continue;
 
       const digest = offerDigest({
+        chainId: contracts.chainId,
+        ticket: contracts.ticket,
         tokenId: BigInt(tokenId),
         recipientCommitment: commitment,
         recipientAccount: account,
       });
-      // 접두사 없는 원본 다이제스트 서명. `signMessage` 를 쓰면 컨트랙트가 다른 주소를 얻는다.
+      // 접두사 없는 원본 다이제스트 서명. `signMessage` 를 쓰면 EIP-191 접두사가 붙어
+      // 컨트랙트의 ECDSA.recover 가 다른 주소를 얻는다. 다이제스트 자체는 이제 EIP-712 라
+      // 배포 기록의 `chainId` 와 Ticket 주소에 묶인다 — 옛 배포본(또는 다른 체인)에 대고
+      // 만든 서명은 새 Ticket 에서 `BadAttesterSig` 로 죽는다.
       offers.push({ tokenId, attesterSig: await attester.sign({ hash: digest }), inviteId: doc.id });
       seen.add(tokenId);
     }

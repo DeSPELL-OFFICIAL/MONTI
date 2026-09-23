@@ -59,7 +59,7 @@ describe('deploy bundle', () => {
     // ABI 와 배포 주소는 JSON import 라 번들에 리터럴로 박혀야 한다.
     // 하나라도 런타임 파일 읽기로 남으면 Cloud Functions 에서 JSON 이 없어 죽는다.
     expect(bundleSource).toContain('deviceUpdatedAt'); // Identity ABI 항목
-    expect(bundleSource).toContain('0x226E2df68C41f61C781E5e2E426BEB0b0a56beD6'); // 10143 identity
+    expect(bundleSource).toContain('0x961a895b47Cf200C14acf38F5689979FF5bd8133'); // 10143 identity
     expect(bundleSource).not.toMatch(/readFileSync\(.*(abi|deployments)/i);
     expect(bundleSource).not.toMatch(/import\(\s*["'`]/); // 동적 import 로 빠져나간 모듈이 없다
   });

@@ -10,6 +10,8 @@ import {
   FIREBASE_REGION,
   GATE_CODE_ROTATE_MS,
   HCE_AID,
+  LATE_WINDOW_SECONDS,
+  MIGRATE_DELAY_SECONDS,
   identityAddress,
   MONAD_TESTNET_CHAIN_ID,
   organizersAddress,
@@ -49,6 +51,9 @@ describe('protocol timings', () => {
   it('matches spec §7.3', () => {
     expect(GATE_CODE_ROTATE_MS).toBe(3_000);
     expect(CODE_WINDOW_SECONDS).toBe(60);
+    // 01b: Ticket.LATE_WINDOW / Ticket.MIGRATE_DELAY 와 한 글자도 다르면 안 된다.
+    expect(LATE_WINDOW_SECONDS).toBe(43_200);
+    expect(MIGRATE_DELAY_SECONDS).toBe(86_400);
     expect(DEVICE_COOLDOWN_SECONDS).toBe(604_800);
     expect(HCE_AID).toBe('D2760000850101');
     expect(QR_PREFIX).toBe('MONTI1:');

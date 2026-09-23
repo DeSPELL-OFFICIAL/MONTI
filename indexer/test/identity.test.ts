@@ -219,9 +219,10 @@ describe('Identity handlers', () => {
     expect(previous?.locked).toBe(true);
   });
 
-  // 01b `RotationCancelled(personId, account)` 는 이 저장소의 ABI 에 아직 없다.
-  // 그럴 필요도 없다: cancelRotation 은 AccountRotated(personId, current, msg.sender)
-  // 를 **먼저** 내고 RotationCancelled 를 뒤에 낸다(MONTI-01b Identity.sol:160-162).
+  // 01b `RotationCancelled(personId, account)` 는 2026-09-23 재배포로 ABI·config 에
+  // 들어왔지만 전용 핸들러가 없다 — 있을 필요도 없다: cancelRotation 은
+  // AccountRotated(personId, current, msg.sender) 를 **먼저** 내고 RotationCancelled 를
+  // 뒤에 낸다(MONTI-01b Identity.sol:160-162). 되돌리기는 앞 이벤트가 전부 한다.
   // 아래가 그 시퀀스다 — 되돌린 계정의 기기와 잠금이 제 것으로 남아야 한다.
   it('restores the pushed-aside account when the 01b cancelRotation replays AccountRotated', async () => {
     const rotated = await rotatedAway();
@@ -251,7 +252,12 @@ describe('Identity handlers', () => {
   });
 });
 
-/** register → setNickname → 01b rotateAccount(= AccountRotated + DeviceLocked(old,true)). */
+/**
+ * register → setNickname → 01b rotateAccount.
+ * `rotateAccount` 는 `AccountRotated` 뒤에 밀려난 계정에 대한 `DeviceLocked(old, true)`
+ * 를 같은 트랜잭션에서 함께 낸다(01b 델타 §6). 2026-09-23 재배포로 실제로 도는
+ * 경로이므로, 여기서도 두 이벤트를 그 순서대로 흘려 보낸다.
+ */
 async function rotatedAway(): Promise<MockDbT> {
   let mockDb = await signedUp();
   mockDb = await Identity.NicknameSet.processEvent({

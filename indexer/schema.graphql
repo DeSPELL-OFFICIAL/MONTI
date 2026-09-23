@@ -111,11 +111,10 @@ type Ticket {
 
 # Ticket.CheckedIn(tokenId, eventId, gateId, nonceHash, ts) — manual false;
 # Ticket.ManualOverride writes the same row with manual true and a zero nonceHash.
-# late 는 01b 번들(checkInLate)이 채운다. 01b 의
-# `CheckedInLate(tokenId, gateId, issuedAt, ts)` 는 `CheckedIn` 과 같은 트랜잭션에서
-# **먼저** 오고(01b Ticket.sol:468-469), `CheckedIn` 핸들러가 그 행에서 late 를
-# 이어받는 규칙은 **이미 들어 있다**. 이 브랜치의 ABI 에 그 이벤트가 없어 결과가
-# 늘 false 일 뿐이고, 재배포 때 스키마도 핸들러도 고칠 것이 없다.
+# late 는 01b 의 checkInLate 가 채운다. `CheckedInLate(tokenId, gateId, issuedAt, ts)`
+# 는 `CheckedIn` 과 같은 트랜잭션에서 **먼저** 오고(01b Ticket.sol:468-469),
+# `CheckedIn` 핸들러가 그 행에서 late 를 이어받는다. 2026-09-23 재배포로 그 이벤트가
+# ABI·config 에 들어와 실제로 true 가 찍힌다 — 스키마는 그대로다.
 type CheckIn {
   id: ID!            # tokenId
   gateId: BigInt!

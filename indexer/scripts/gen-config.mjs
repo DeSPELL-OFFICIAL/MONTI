@@ -50,14 +50,16 @@ const CONTRACTS = [
     events: [
       'Registered',
       'AccountRotated',
+      // 01b C3: 회전 되돌리기. 2026-09-23 재배포로 ABI 에 들어와 실제 구독한다.
+      // `cancelRotation` 이 `AccountRotated(personId, current, msg.sender)` 를 **먼저**
+      // 내므로 "현재 계정" 되돌리기는 그 핸들러가 이미 한다. 이것은 감사 로그용이다.
+      'RotationCancelled',
       'DeviceChanged',
       'DeviceLocked',
       'NicknameSet',
       'KycLevelSet',
     ],
-    // 01b C3: 회전 되돌리기. AccountRotated 도 함께 나므로 "현재 계정" 로직은
-    // 그대로고, 이것은 감사 로그용이다.
-    reserved: ['RotationCancelled'],
+    reserved: [],
     // 어테스터 키 교체는 체인 밖 운영 사건이고 대응 엔티티가 없다.
     ignored: ['AttesterChanged'],
   },
@@ -87,6 +89,10 @@ const CONTRACTS = [
       'Claimed',
       'Transfer',
       'CheckedIn',
+      // 01b C1: 오프라인 큐 기록. 2026-09-23 재배포로 ABI 에 들어와 실제 구독한다.
+      // `CheckedIn` 과 같은 트랜잭션에 **먼저** 온다 — 입장 수는 `CheckedIn` 으로 세고,
+      // 이것으로 `CheckIn.late` 를 true 로 올린다.
+      'CheckedInLate',
       'OverrideRequested',
       'ManualOverride',
       'Revoked',
@@ -95,11 +101,11 @@ const CONTRACTS = [
       'OfferCancelled',
       'OfferAccepted',
     ],
-    // 01b C1: 오프라인 큐 기록. CheckedIn 과 같은 트랜잭션에 함께 온다 —
-    // 입장 수는 CheckedIn 으로 세고, 이것으로 CheckIn.late 를 true 로 올린다.
-    reserved: ['CheckedInLate'],
+    reserved: [],
     // ERC-721 승인 잡음. MONTI 는 approve 경로를 쓰지 않고 엔티티도 없다.
-    ignored: ['Approval', 'ApprovalForAll'],
+    // `EIP712DomainChanged` 는 ERC-5267 보일러플레이트다 — 우리 Ticket 은 도메인을
+    // 바꾸지 않아 실제로 나지 않는다(01b 델타 §2).
+    ignored: ['Approval', 'ApprovalForAll', 'EIP712DomainChanged'],
   },
 ];
 

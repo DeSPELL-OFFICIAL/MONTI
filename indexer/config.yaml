@@ -17,6 +17,7 @@ contracts:
     events:
       - event: Registered(bytes32 indexed personId, address indexed account)
       - event: AccountRotated(bytes32 indexed personId, address indexed oldAccount, address indexed newAccount)
+      - event: RotationCancelled(bytes32 indexed personId, address indexed account)
       - event: DeviceChanged(address indexed account, bytes32 x, bytes32 y)
       - event: DeviceLocked(address indexed account, bool locked)
       - event: NicknameSet(address indexed account, bytes32 indexed nicknameHash, string nickname)
@@ -41,6 +42,7 @@ contracts:
       - event: Claimed(uint256 indexed tokenId, uint256 indexed eventId, address indexed to, uint8 tier)
       - event: Transfer(address indexed from, address indexed to, uint256 indexed tokenId)
       - event: CheckedIn(uint256 indexed tokenId, uint256 indexed eventId, uint256 indexed gateId, bytes32 nonceHash, uint64 ts)
+      - event: CheckedInLate(uint256 indexed tokenId, uint256 indexed gateId, uint64 issuedAt, uint64 ts)
       - event: OverrideRequested(uint256 indexed tokenId, uint256 indexed gateId, address indexed requester, uint8 reason)
       - event: ManualOverride(uint256 indexed tokenId, uint256 indexed gateId, address indexed approver, uint8 role, uint8 reason)
       - event: Revoked(uint256 indexed tokenId, uint8 reason)
@@ -50,14 +52,14 @@ contracts:
       - event: OfferAccepted(uint256 indexed tokenId, address indexed from, address indexed to)
 networks:
   - id: 10143
-    start_block: 64385989
+    start_block: 64921775
     contracts:
       - name: Identity
         address:
-          - "0x226E2df68C41f61C781E5e2E426BEB0b0a56beD6"
+          - "0x961a895b47Cf200C14acf38F5689979FF5bd8133"
       - name: Organizers
         address:
-          - "0x9f0c3c8d87531Ae343f06223FcaA507E6Efb1Fb9"
+          - "0xa88C8D110Ca8f0c925A781AB8042bA012d7281F0"
       - name: Ticket
         address:
-          - "0xE9686503c4d675B0B1Ec9DE19AbEC51Fc59F1113"
+          - "0x4B8353C9F3503Cdbd011E8f35da0a955D95b1367"

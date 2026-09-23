@@ -79,8 +79,10 @@ Identity.KycLevelSet.handler(async ({ event, context }) => {
  * `rotateAccount(personId, newAccount)` — 그리고 01b 의 `cancelRotation()`, 이쪽은
  * `AccountRotated(personId, current, msg.sender)` 를 **먼저** 내고 그 뒤에
  * `RotationCancelled` 를 낸다(MONTI-01b `contracts/src/Identity.sol:160-162`).
- * 그래서 이 한 핸들러가 회전과 회전 취소를 모두 처리하고, `RotationCancelled` 는
- * 인덱서에게 순수한 감사 로그다 — 이 저장소의 ABI 에 들어오더라도 쓸 열이 없다.
+ * 그래서 이 한 핸들러가 회전과 회전 취소를 모두 처리한다. `RotationCancelled` 는
+ * 2026-09-23 재배포로 ABI·config 에 들어와 실제로 구독하지만, 인덱서에게는 순수한
+ * 감사 로그다 — 계정 상태는 앞선 `AccountRotated` 가 이미 되돌렸고 `IdentityAccount`
+ * 에 회전 대기 플래그 같은 쓸 열이 없어, 따로 핸들러를 달 것이 없다.
  *
  * 옮기는 것과 옮기지 않는 것을 갈라 두는 게 이 핸들러의 전부다:
  * - 사람(`personId`)과 kycLevel(`_kycLevel[personId]`)은 사람에 붙으므로 따라간다.
@@ -140,6 +142,11 @@ Identity.DeviceChanged.handler(async ({ event, context }) => {
 /**
  * `setActiveDevice` 의 해제, 그리고 01b 의 `rotateAccount` 가 밀려난 계정에 대해
  * 함께 내는 `DeviceLocked(oldAccount, true)` — 같은 시그니처라 같은 핸들러가 받는다.
+ * **2026-09-23 재배포로 실제로 도는 경로다**(01b 델타 §6): 같은 트랜잭션에서
+ * `AccountRotated` 바로 뒤에 오고, 대상은 회전이 만든 새 계정이 아니라 **밀려난 옛
+ * 계정**이라 두 핸들러의 쓰기가 겹치지 않는다. 이미 잠겨 있던 계정에는 컨트랙트가
+ * 이벤트를 내지 않고(Identity.sol:110-116), 내더라도 이 핸들러는 `locked` 를 같은
+ * 값으로 덮을 뿐이라 재생·중복에 안전하다.
  */
 Identity.DeviceLocked.handler(async ({ event, context }) => {
   const current = await context.IdentityAccount.get(addr(event.params.account));
@@ -539,31 +546,14 @@ Ticket.CheckedIn.handler(async ({ event, context }) => {
 
 /**
  * 01b 의 `CheckedInLate(tokenId, gateId, issuedAt, ts)` — 오프라인 큐가 복구 뒤에 밀어 넣은
- * 입장이다(`contracts/docs/abi-delta-01b.md` §2). 이 브랜치의 ABI 에는 아직 없어
- * `gen-config.mjs` 의 `reserved` 에 들어 있고, config 에 없으므로 생성물에도 없다.
- * 재배포로 ABI 가 갱신되면 이 등록이 **저절로** 살아난다 — 그때 고칠 것은 없다.
+ * 입장이다(`contracts/docs/abi-delta-01b.md` §2). **2026-09-23 재배포로 살아 있는
+ * 경로다**: ABI 에 들어왔고 `config.yaml` 도 실제로 구독한다.
  *
  * `CheckedIn` 보다 **먼저** 오므로(01b Ticket.sol:468-469) 여기서 행을 세우고,
- * 바로 뒤의 `CheckedIn` 이 진짜 nonceHash 로 덮으면서 `late` 를 지킨다.
+ * 바로 뒤의 `CheckedIn` 이 진짜 nonceHash·ts 로 덮으면서 `late` 를 지킨다.
+ * 입장 수는 `CheckedIn` 하나로 센다 — 여기서 두 번째 입장으로 세지 않는다.
  */
-interface CheckedInLateEvent {
-  readonly params: {
-    readonly tokenId: bigint;
-    readonly gateId: bigint;
-    readonly issuedAt: bigint;
-    readonly ts: bigint;
-  };
-  readonly transaction: { readonly hash: string };
-  readonly block: { readonly number: number };
-}
-type ReservedHandler<eventType> = {
-  handler: (h: (args: { event: eventType; context: handlerContext }) => Promise<void>) => void;
-};
-
-const checkedInLate = (Ticket as unknown as { CheckedInLate?: ReservedHandler<CheckedInLateEvent> })
-  .CheckedInLate;
-
-checkedInLate?.handler(async ({ event, context }) => {
+Ticket.CheckedInLate.handler(async ({ event, context }) => {
   const id = event.params.tokenId.toString();
   const prior = await context.CheckIn.get(id);
   context.CheckIn.set({

@@ -25,9 +25,9 @@ describe('schema.graphql', () => {
     expect(schema).toContain('kycLevel: Int!');
   });
 
-  // 01b 번들(2026-10-05 재배포)이 채울 열을 미리 만들어 둔다. 지금 없애면
-  // 그때 스키마 마이그레이션이 필요해진다.
-  it('reserves the fields the 01b bundle fills', async () => {
+  // 01b 번들이 채우는 열. 2026-09-23 재배포로 `CheckedInLate` 가 실제로 오므로
+  // 더 이상 늘 false 인 예약 열이 아니다.
+  it('carries the fields the 01b bundle fills', async () => {
     const schema = await readFile(schemaPath, 'utf8');
     expect(schema).toContain('late: Boolean!');
   });

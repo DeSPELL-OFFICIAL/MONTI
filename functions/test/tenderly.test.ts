@@ -197,6 +197,16 @@ const checkedIn = (tokenId: bigint) =>
     `0x${'11'.repeat(32)}`,
     1_789_862_400n,
   ]);
+/**
+ * 늦은 입장의 첫 로그. 체인은 `CheckedInLate` 를 낸 **바로 다음 줄에서** 같은 트랜잭션의
+ * `CheckedIn` 도 낸다(`contracts/src/Ticket.sol:468-469`) — 아래 테스트는 그 두 줄을
+ * 순서대로 한 배달에 담아 보낸다.
+ */
+const checkedInLate = (tokenId: bigint) =>
+  montiLog(TICKET, ticketAbi, 'CheckedInLate', { tokenId, gateId: 3n }, 'uint64 issuedAt, uint64 ts', [
+    1_789_819_200n,
+    1_789_862_400n,
+  ]);
 const registered = (personId: Hex, account: Hex) =>
   montiLog(IDENTITY, identityAbi, 'Registered', { personId, account });
 const nicknameSet = (account: Hex, nickname: string) =>
@@ -330,6 +340,52 @@ describe('tenderlyWebhook', () => {
     docs.delete(`${DEVICES}/${OWNER}`);
     expect((await deliver([checkedIn(7n)])).statusCode).toBe(200);
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it('sends exactly one push carrying late:1 for a late tap, not two', async () => {
+    chain.ownerOf.set('7', OWNER);
+    write(`${DEVICES}/${OWNER}`, { pushToken: 'fcm-1' });
+
+    // 체인이 실제로 내는 순서: CheckedInLate 다음에 CheckedIn, 같은 트랜잭션.
+    const res = await deliver([checkedInLate(7n), checkedIn(7n)]);
+    expect(res.statusCode).toBe(200);
+    // 두 이벤트를 모두 디코드했다는 것은 응답이 말해 준다 — 그래도 푸시는 하나뿐이어야 한다.
+    expect(res.body).toBe('ok:2');
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]?.[0]).toMatchObject({
+      token: 'fcm-1',
+      data: { tokenId: '7', late: '1' },
+    });
+
+    // 로그 순서가 뒤집혀 와도 결과는 같다 — 판단은 배열 전체를 보고 한다.
+    send.mockClear();
+    await deliver([checkedIn(7n), checkedInLate(7n)]);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]?.[0]).toMatchObject({ data: { tokenId: '7', late: '1' } });
+  });
+
+  it("leaves the late key off entirely on a normal tap — '0' is never sent", async () => {
+    chain.ownerOf.set('7', OWNER);
+    write(`${DEVICES}/${OWNER}`, { pushToken: 'fcm-1' });
+
+    await deliver([checkedIn(7n)]);
+    expect(send).toHaveBeenCalledTimes(1);
+    const data = (send.mock.calls[0]?.[0] as { data: Record<string, string> }).data;
+    expect(data).toEqual({ tokenId: '7' });
+    expect('late' in data).toBe(false);
+  });
+
+  it('does not suppress a different token that checked in normally in the same transaction', async () => {
+    chain.ownerOf.set('7', OWNER);
+    chain.ownerOf.set('8', OTHER);
+    write(`${DEVICES}/${OWNER}`, { pushToken: 'fcm-1' });
+    write(`${DEVICES}/${OTHER}`, { pushToken: 'fcm-2' });
+
+    await deliver([checkedInLate(7n), checkedIn(7n), checkedIn(8n)]);
+    expect(send).toHaveBeenCalledTimes(2);
+    const sent = send.mock.calls.map((call) => (call[0] as { data: Record<string, string> }).data);
+    expect(sent).toContainEqual({ tokenId: '7', late: '1' });
+    expect(sent).toContainEqual({ tokenId: '8' });
   });
 
   it('never 500s when Firebase Messaging rejects a stale token', async () => {

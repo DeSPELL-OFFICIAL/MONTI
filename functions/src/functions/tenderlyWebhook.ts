@@ -1,6 +1,13 @@
 import { getMessaging } from 'firebase-admin/messaging';
 import { onRequest } from 'firebase-functions/v2/https';
-import { EVENT_STATUS_BY_CODE, identityAbi, ticketAbi, type Hex, type PersonStatus } from '@monti/shared';
+import {
+  EVENT_STATUS_BY_CODE,
+  identityAbi,
+  ticketAbi,
+  type CheckInPush,
+  type Hex,
+  type PersonStatus,
+} from '@monti/shared';
 import { TENDERLY_WEBHOOK_SECRET } from '../config.js';
 import { deployment, publicClient } from '../lib/chain.js';
 import {
@@ -23,13 +30,23 @@ function log(fields: Record<string, unknown>): void {
   console.log(JSON.stringify(fields));
 }
 
+/** 결정된 이벤트 목록. 같은 트랜잭션의 형제 로그를 보려면 이 모양이 필요하다. */
+interface DecodedEvent {
+  name: string;
+  args: Record<string, unknown>;
+}
+
 /**
  * 입장 완료 푸시. 소유자는 체인에서 읽는다(우리 DB 에는 티켓이 없다, 스펙 §10.4 규칙 1).
  * 기기 문서 id 는 `ownerOf` 가 돌려주는 체크섬 주소 그대로고, 읽는 필드는 `pushToken` 하나다.
  * 토큰이 없으면 조용히 끝낸다. FCM 이 거절하면(죽은 토큰) 기록만 남기고 넘어간다 —
  * 푸시 하나 때문에 같은 트랜잭션의 나머지 이벤트가 재배달되면 안 된다.
+ *
+ * `late` 는 오프라인 큐를 뒤늦게 흘려보낸 입장(`Ticket.checkInLate`)이다. FCM `data` 의 값은
+ * **언제나 문자열**이라 `CheckInPush` 는 `late?: '1'` 로 못 박혀 있다 — 늦지 않은 입장은
+ * `'0'` 이 아니라 **키가 아예 없는 것**이다. 클라이언트는 키의 유무로만 갈라야 한다.
  */
-async function pushCheckedIn(tokenId: bigint): Promise<void> {
+async function pushCheckedIn(tokenId: bigint, late = false): Promise<void> {
   const owner = await publicClient().readContract({
     address: deployment().ticket,
     abi: ticketAbi,
@@ -39,11 +56,14 @@ async function pushCheckedIn(tokenId: bigint): Promise<void> {
   const device = await db.collection(DEVICES).doc(owner as string).get();
   const token = device.get('pushToken') as string | undefined;
   if (!token) return;
+  // 모양은 `CheckInPush` 로 고정한다 — 값은 언제나 문자열이고, "늦지 않음"은 `'0'` 이 아니라
+  // **키가 없는 것**이다. FCM 의 `data` 는 인덱스 시그니처를 요구하므로 보낼 때만 그 맵으로 넓힌다.
+  const data: CheckInPush = { tokenId: tokenId.toString(), ...(late ? { late: '1' as const } : {}) };
   try {
     await getMessaging().send({
       token,
       notification: { title: '입장 완료', body: '티켓이 입장 완료로 바뀌었습니다.' },
-      data: { tokenId: tokenId.toString() },
+      data: { ...data } as Record<string, string>,
     });
   } catch (error) {
     log({ tenderly: 'push_failed', tokenId: tokenId.toString(), error: (error as Error).message });
@@ -183,10 +203,33 @@ async function closePendingGate(gateAccount: Hex, gateId: bigint, eventId: bigin
   await ref.set({ status: 'registered', gateId: String(gateId) }, { merge: true });
 }
 
-async function applyEvent(event: { name: string; args: Record<string, unknown> }): Promise<void> {
+/**
+ * 늦은 입장(`Ticket.checkInLate`)은 체인이 `CheckedInLate` 를 낸 **바로 다음 줄에서**
+ * 같은 트랜잭션의 `CheckedIn` 도 낸다(`contracts/src/Ticket.sol:468-469`, abi-delta-01b.md §2).
+ * 스위치가 둘을 따로 처리하면 한 번의 입장에 푸시가 **두 개** 나간다.
+ *
+ * 그래서 `CheckedIn` 은 처리하기 전에 **같은 트랜잭션 안에 같은 tokenId 의 `CheckedInLate` 가
+ * 있는지**부터 본다. 있으면 그쪽이 `late: '1'` 을 달고 보내 주므로 여기서는 아무것도 하지 않는다.
+ * 타이머도 Firestore 읽기도 쓰지 않는다 — 웹훅이 이미 그 트랜잭션의 로그 전부를 `events` 로
+ * 디코드해 두었고, 판단에 필요한 것은 그 배열 하나뿐이다. 로그 순서에도 기대지 않는다.
+ *
+ * 입장 **집계**는 여전히 `CheckedIn` 하나만 센다(§2). 여기서 거르는 것은 푸시뿐이다.
+ */
+function hasLateSibling(events: readonly DecodedEvent[], tokenId: unknown): boolean {
+  return events.some(
+    (other) => other.name === 'CheckedInLate' && String(other.args.tokenId) === String(tokenId),
+  );
+}
+
+async function applyEvent(event: DecodedEvent, events: readonly DecodedEvent[]): Promise<void> {
   switch (event.name) {
     case 'CheckedIn':
+      // 늦은 입장이면 같은 트랜잭션의 `CheckedInLate` 가 `late: '1'` 로 보낸다. 두 번 보내지 않는다.
+      if (hasLateSibling(events, event.args.tokenId)) break;
       await pushCheckedIn(event.args.tokenId as bigint);
+      break;
+    case 'CheckedInLate':
+      await pushCheckedIn(event.args.tokenId as bigint, true);
       break;
     case 'Registered':
       await markRegistered(event.args.personId as Hex);
@@ -290,7 +333,7 @@ export const tenderlyWebhook = onRequest(
     ]);
     for (const event of events) {
       try {
-        await applyEvent(event);
+        await applyEvent(event, events);
       } catch (error) {
         // 한 이벤트의 실패가 같은 트랜잭션의 나머지를 막지 않는다.
         log({ tenderly: 'side_effect_failed', event: event.name, error: (error as Error).message });

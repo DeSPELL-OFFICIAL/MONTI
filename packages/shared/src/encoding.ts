@@ -1,5 +1,5 @@
 import { Encoder } from 'cbor-x';
-import { encodeAbiParameters, keccak256, parseAbiParameters, sha256, stringToBytes } from 'viem';
+import { encodeAbiParameters, hashTypedData, keccak256, parseAbiParameters, sha256, stringToBytes } from 'viem';
 import { QR_PREFIX } from './constants.js';
 import {
   isGateCodeWire,
@@ -31,11 +31,15 @@ export function gateCodeHash(input: {
 }
 
 /**
- * 관객 기기 키가 서명하는 값. Ticket.checkIn 이 체인 위에서
- * sha256(abi.encode(tokenId, g.gateId, g.eventId, g.nonce, g.issuedAt)) 로 다시 계산한다.
- * 인자 순서를 바꾸면 모든 체크인이 실패한다.
+ * 관객 기기 키가 서명하는 값. 일곱 워드다 — chainId 와 Ticket 주소가 앞에 붙는다.
+ * 체인 위에서는 Ticket.deviceDigest(tokenId, gateId, eventId, nonce, issuedAt) 이
+ * 같은 값을 돌려준다. 앞의 두 워드는 컨트랙트가 block.chainid 와 address(this) 로
+ * 직접 채우므로 호출자가 고를 수 없다 — 그래서 옛 배포본·다른 체인의 서명이 여기서 죽는다.
+ * deviceDigest(...) 가 유일한 정합성 기준이다. 인자 순서를 바꾸면 모든 체크인이 실패한다.
  */
 export function deviceSigHash(input: {
+  chainId: number;
+  ticket: Hex;
   tokenId: bigint;
   gateId: bigint;
   eventId: bigint;
@@ -43,10 +47,21 @@ export function deviceSigHash(input: {
   issuedAt: bigint;
 }): Hex {
   assertBytes32(input.nonce, 'BAD_NONCE');
+  if (!/^0x[0-9a-fA-F]{40}$/.test(input.ticket)) throw new Error('BAD_TICKET');
   return sha256(
     encodeAbiParameters(
-      parseAbiParameters('uint256 tokenId, uint256 gateId, uint256 eventId, bytes32 nonce, uint64 issuedAt'),
-      [input.tokenId, input.gateId, input.eventId, input.nonce, input.issuedAt],
+      parseAbiParameters(
+        'uint256 chainId, address ticket, uint256 tokenId, uint256 gateId, uint256 eventId, bytes32 nonce, uint64 issuedAt',
+      ),
+      [
+        BigInt(input.chainId),
+        input.ticket,
+        input.tokenId,
+        input.gateId,
+        input.eventId,
+        input.nonce,
+        input.issuedAt,
+      ],
     ),
   );
 }
@@ -72,20 +87,42 @@ export function recipientCommitment(hmacPhoneHex: string): Hex {
   return keccak256(`0x${bare.toLowerCase()}` as Hex);
 }
 
-/** 어테스터가 acceptOffer 용으로 서명하는 다이제스트. */
+/**
+ * 어테스터가 acceptOffer 용으로 서명하는 다이제스트.
+ * EIP-712 다. 도메인이 chainId 와 Ticket 주소를 묶으므로, 테스트넷 서명은 메인넷에서,
+ * 옛 배포본의 서명은 새 배포본에서 쓸 수 없다. Ticket.offerDigest(...) 와 같은 값이어야 한다.
+ */
 export function offerDigest(input: {
+  chainId: number;
+  ticket: Hex;
   tokenId: bigint;
   recipientCommitment: Hex;
   recipientAccount: Hex;
 }): Hex {
   assertBytes32(input.recipientCommitment, 'BAD_COMMITMENT');
   if (!/^0x[0-9a-fA-F]{40}$/.test(input.recipientAccount)) throw new Error('BAD_ACCOUNT');
-  return keccak256(
-    encodeAbiParameters(
-      parseAbiParameters('uint256 tokenId, bytes32 recipientCommitment, address recipientAccount'),
-      [input.tokenId, input.recipientCommitment, input.recipientAccount],
-    ),
-  );
+  if (!/^0x[0-9a-fA-F]{40}$/.test(input.ticket)) throw new Error('BAD_TICKET');
+  return hashTypedData({
+    domain: {
+      name: 'MONTI Ticket',
+      version: '1',
+      chainId: input.chainId,
+      verifyingContract: input.ticket,
+    },
+    types: {
+      TransferApproval: [
+        { name: 'tokenId', type: 'uint256' },
+        { name: 'recipientCommitment', type: 'bytes32' },
+        { name: 'recipient', type: 'address' },
+      ],
+    },
+    primaryType: 'TransferApproval',
+    message: {
+      tokenId: input.tokenId,
+      recipientCommitment: input.recipientCommitment,
+      recipient: input.recipientAccount,
+    },
+  });
 }
 
 /**

@@ -37,6 +37,10 @@ export const QR_PREFIX = 'MONTI1:';
 
 export const GATE_CODE_ROTATE_MS = 3_000;
 export const CODE_WINDOW_SECONDS = 60;
+/** 오프라인 큐가 늦게 올라올 때의 여유. Ticket.LATE_WINDOW 와 같아야 한다 — 코드의 하한이자 제출의 상한이다. */
+export const LATE_WINDOW_SECONDS = 43_200;
+/** 회전된 계정을 티켓이 따라가기 전에 기다리는 시간. Ticket.MIGRATE_DELAY 이자 Identity.ROTATION_UNDO_WINDOW 와 같은 값이다. */
+export const MIGRATE_DELAY_SECONDS = 86_400;
 export const ARM_WINDOW_SECONDS = 60;
 export const ROTATION_COOLDOWN_SECONDS = 7 * 24 * 60 * 60;
 export const DEVICE_COOLDOWN_SECONDS = 7 * 24 * 60 * 60;

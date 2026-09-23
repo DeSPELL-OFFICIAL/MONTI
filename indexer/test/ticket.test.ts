@@ -483,6 +483,57 @@ describe('Ticket handlers — check-ins and overrides', () => {
     expect(after.entities.Ticket.get('7')?.checkIn_id).toBe('7');
   });
 
+  // 2026-09-23 재배포로 CheckedInLate 가 ABI·config 에 들어왔다. 진짜 핸들러 둘을
+  // 실제 순서대로 — CheckedInLate 먼저, 같은 트랜잭션의 CheckedIn 이 뒤에 — 돌린다.
+  it('flips late on CheckedInLate and lets the paired CheckedIn fill the real nonceHash', async () => {
+    const mockDb = await claimed(await created());
+
+    // checkInLate 는 CheckedInLate 를 **먼저** 낸다(01b Ticket.sol:468-469).
+    const early = await Ticket.CheckedInLate.processEvent({
+      event: Ticket.CheckedInLate.createMockEvent({
+        tokenId: TOKEN,
+        gateId: 3n,
+        issuedAt: BigInt(T0 - 3600),
+        ts: BigInt(T0),
+        ...at(TX, 1),
+      }),
+      mockDb,
+    });
+    expect(early.entities.CheckIn.get('7')).toEqual({
+      id: '7',
+      gateId: 3n,
+      ts: BigInt(T0),
+      // 지각 이벤트는 nonceHash 를 싣지 않는다 — 바로 뒤 CheckedIn 이 채운다.
+      nonceHash: ZERO32,
+      manual: false,
+      late: true,
+      txHash: TX,
+      block: BigInt(BLOCK),
+    });
+    expect(early.entities.Ticket.get('7')?.checkIn_id).toBe('7');
+
+    const after = await Ticket.CheckedIn.processEvent({
+      event: Ticket.CheckedIn.createMockEvent({
+        tokenId: TOKEN,
+        eventId: EVENT_ID,
+        gateId: 3n,
+        nonceHash: NONCE,
+        ts: BigInt(T0 + 5),
+        ...at(TX, 2),
+      }),
+      mockDb: early,
+    });
+    // late 는 살아남고, nonceHash·ts 는 CheckedIn 것으로 덮인다.
+    expect(after.entities.CheckIn.get('7')).toMatchObject({
+      late: true,
+      nonceHash: NONCE,
+      ts: BigInt(T0 + 5),
+      manual: false,
+    });
+    // 두 번째 입장으로 세지 않는다 — 체크인 행은 tokenId 로 하나뿐이다.
+    expect(after.entities.CheckIn.getAll().filter((row) => row.id === '7')).toHaveLength(1);
+  });
+
   it('keeps late true only when it came from the same transaction', async () => {
     // 01b 의 CheckedInLate 가 CheckedIn 보다 먼저 와서 남긴 행을 흉내 낸다.
     // (목 DB 의 set 은 **새 DB 를 돌려준다** — 제자리에서 고치지 않는다.)

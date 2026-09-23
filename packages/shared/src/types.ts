@@ -18,7 +18,7 @@ export interface GateCodeWire {
 export interface GateResponseWire {
   v: 1;
   tokenId: string;
-  /** r||s 64B over sha256(abi.encode(tokenId,gateId,eventId,nonce,issuedAt)) */
+  /** r||s 64B over sha256(abi.encode(chainid,ticket,tokenId,gateId,eventId,nonce,issuedAt)) — Ticket.deviceDigest(...) */
   deviceSig: Hex;
 }
 
@@ -59,6 +59,19 @@ export type EventStatus = (typeof EVENT_STATUS_BY_CODE)[number];
 
 /** Firestore `transferInvites/{inviteId}.status` */
 export type TransferInviteStatus = 'sent' | 'accepted' | 'expired';
+
+/**
+ * 입장 완료 푸시(FCM)의 `data` 페이로드. 서버(`tenderlyWebhook`)가 보내고
+ * 관객 화면이 받는 **한 가지** 모양이라 여기 한 곳에만 둔다.
+ *
+ * FCM 의 `data` 는 값이 전부 문자열이다 — `late` 가 `boolean` 이 아니라 `'1'` 인 이유고,
+ * "지각 아님"은 `late: '0'` 이 아니라 **키가 없는 것**으로 나타낸다.
+ * 01b 의 `CheckedInLate`(오프라인 큐가 복구 뒤 밀어 넣은 입장)일 때만 `late: '1'` 이 붙는다.
+ */
+export interface CheckInPush {
+  tokenId: string;
+  late?: '1';
+}
 
 /** Firestore `users/{uid}.locale` */
 export const SUPPORTED_LOCALES = ['en', 'ko'] as const;

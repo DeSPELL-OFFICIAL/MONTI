@@ -23,6 +23,16 @@ const attester = privateKeyToAccount(PK);
 
 const KEY = 'monti-test-key';
 const TICKET = '0x3333333333333333333333333333333333333333';
+/** 같은 체인의 다른 Ticket. EIP-712 도메인이 정말 주소를 묶는지 보는 데만 쓴다. */
+const OTHER_TICKET = '0x4444444444444444444444444444444444444444' as Hex;
+/** 배포 기록이 내놓는 체인 id. `offerDigest` 의 EIP-712 도메인에 그대로 들어간다. */
+const CHAIN_ID = 31337;
+/**
+ * 위 fixture(체인 31337 · Ticket 0x3333… · tokenId 7 · 커밋먼트 = recipientCommitment(hmacPhone(PHONE, KEY))
+ * · 받는 사람 0x8888…)에 대한 `Ticket.offerDigest` 값. 어테스터가 **실제로 서명하는 바로 그 32바이트**다.
+ * `offerDigest` 의 필드가 하나 빠지거나 순서가 바뀌면 테스트가 함께 따라가지 못하도록 못으로 박는다.
+ */
+const PINNED_DIGEST = '0x234d92510a7c4d02d3fffcb85be1eed34ad5193666e57dd9c846a6ad75e2c7c3' as Hex;
 /** `eventOf(tokenId)` 가 돌려주는 공연 id. `eventMeta` 가 이 값으로 불려야 한다. */
 const EVENT_ID = 42n;
 /** 티켓 주인이자 보내는 사람. 숫자만 쓰는 주소라 EIP-55 체크섬이 대소문자를 바꾸지 않는다. */
@@ -122,7 +132,7 @@ const chain = { owner: OWNER as string, offers: new Map<string, ChainOffer>(), r
 const reads: Array<{ functionName: string; args: readonly unknown[] }> = [];
 
 vi.mock('../src/lib/chain.js', () => ({
-  deployment: () => ({ ticket: TICKET }),
+  deployment: () => ({ chainId: CHAIN_ID, ticket: TICKET }),
   publicClient: () => ({
     readContract: async ({
       functionName,
@@ -382,18 +392,39 @@ describe('pendingOffers', () => {
     expect(result.offers[0]?.tokenId).toBe('7');
     expect(result.offers[0]?.inviteId).toBe(invite.inviteId);
 
-    // Ticket.acceptOffer 가 검증하는 값 그대로: keccak256(abi.encode(tokenId, commitment, msg.sender)).
+    // Ticket.acceptOffer 가 검증하는 값 그대로: EIP-712 `TransferApproval`, 도메인에
+    // chainId 와 Ticket 주소가 들어간다(`Ticket.offerDigest(...)` 와 같은 값이어야 한다).
     const digest = offerDigest({
+      chainId: CHAIN_ID,
+      ticket: TICKET,
       tokenId: 7n,
       recipientCommitment: invite.commitment,
       recipientAccount: RECIPIENT,
     });
+    // 다이제스트를 못으로 박는다. 테스트가 같은 함수로 기대값을 다시 계산하기만 하면
+    // 모양이 바뀌어도 양쪽이 함께 따라가 조용히 통과한다 — 이 한 줄이 그 길을 막는다.
+    expect(digest).toBe(PINNED_DIGEST);
     const signature = result.offers[0]?.attesterSig as Hex;
-    expect(await recoverAddress({ hash: digest, signature })).toBe(attester.address);
+    expect(await recoverAddress({ hash: PINNED_DIGEST, signature })).toBe(attester.address);
     // EIP-191 접두사가 붙으면 컨트랙트의 ECDSA.recover 가 다른 주소를 얻는다.
     expect(await recoverAddress({ hash: hashMessage({ raw: digest }), signature })).not.toBe(
       attester.address,
     );
+    // 도메인이 정말 묶여 있다 — 체인이나 Ticket 주소가 다르면 같은 서명이 어테스터를 내놓지 않는다.
+    // 옛 배포본에 대고 만든 서명이 새 Ticket 에서 죽는 이유가 이것이다.
+    for (const strayedDomain of [
+      { chainId: CHAIN_ID + 1, ticket: TICKET as Hex },
+      { chainId: CHAIN_ID, ticket: OTHER_TICKET },
+    ]) {
+      const strayed = offerDigest({
+        ...strayedDomain,
+        tokenId: 7n,
+        recipientCommitment: invite.commitment,
+        recipientAccount: RECIPIENT,
+      });
+      expect(strayed).not.toBe(digest);
+      expect(await recoverAddress({ hash: strayed, signature })).not.toBe(attester.address);
+    }
   });
 
   it('signs for the caller account, so another account cannot reuse the signature', async () => {
@@ -403,6 +434,8 @@ describe('pendingOffers', () => {
     };
 
     const otherDigest = offerDigest({
+      chainId: CHAIN_ID,
+      ticket: TICKET,
       tokenId: 7n,
       recipientCommitment: invite.commitment,
       recipientAccount: OUTSIDER,
