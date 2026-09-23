@@ -185,3 +185,15 @@ body {
 .tier-card__art .ticket-art__title { font-size: 13px; -webkit-line-clamp: 2; line-clamp: 2; }
 .tier-card__pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .tier-card .a4-frame { max-width: 200px; margin: 8px auto; }
+
+/* The address goes into a message or onto a poster, so it is shown in full and breaks anywhere
+   rather than being trimmed to something nobody can read back. */
+.event-link {
+  margin: 8px 0; padding: 12px; border-radius: var(--radius);
+  background: var(--surface); border: 1px solid var(--line);
+  font-size: 14px; overflow-wrap: anywhere;
+}
+.event-qr {
+  display: block; width: 100%; max-width: 240px; margin: 16px auto;
+  border-radius: var(--radius); background: #fff;
+}

@@ -134,7 +134,7 @@ describe('the publish path', () => {
   it('pins, creates, saves the pictures and throws the draft away, in that order', async () => {
     open();
     await create();
-    await waitFor(() => expect(screen.getByText('landed:/org/events/12')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('landed:/org/new/done/12')).toBeInTheDocument());
 
     // 1. the readable half, with the tags normalised exactly as the server would.
     expect(pinEventMetadata).toHaveBeenCalledWith({
@@ -211,7 +211,7 @@ describe('the publish path', () => {
     saveEventArt.mockRejectedValue(new Error('offline'));
     open();
     await create();
-    await waitFor(() => expect(screen.getByText('landed:/org/events/12')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('landed:/org/new/done/12')).toBeInTheDocument());
     expect(deleteEventDraft).toHaveBeenCalledWith('d-42');
   });
 });
@@ -235,7 +235,7 @@ describe('when it does not land', () => {
     resolveSubmittedOp.mockResolvedValue({ state: 'landed', logs: [CREATED_LOG] });
     open({ ...READY, submittedOpHash: SUBMITTED });
     await create();
-    await waitFor(() => expect(screen.getByText('landed:/org/events/12')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('landed:/org/new/done/12')).toBeInTheDocument());
     expect(ticketOp).not.toHaveBeenCalled();
     expect(saveEventArt).toHaveBeenCalled();
   });

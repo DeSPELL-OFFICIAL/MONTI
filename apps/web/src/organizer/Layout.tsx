@@ -12,6 +12,7 @@ import { Gates } from './gates/Gates';
 import { AcceptInvite } from './invites/Accept';
 import { CreateEvent } from './scene/CreateEvent';
 import { TicketSettings } from './scene/TicketSettings';
+import { Created } from './scene/Created';
 import { useWizard } from './wizard/useWizard';
 import { Step1Basic } from './wizard/Step1Basic';
 import { Step2When } from './wizard/Step2When';
@@ -244,6 +245,8 @@ export function OrganizerRoutes() {
       {/* Static beats dynamic in the router's ranking, so this is not a draft id. The six-step
           wizard stays reachable here until T-EV-W10 deletes it; nothing links to it. */}
       <Route path="new/old" element={<Wizard />} />
+      {/* Where `행사 만들기` lands. Static again, so it is not a draft id. */}
+      <Route path="new/done/:eventId" element={<Created />} />
       <Route path="new/:draftId" element={<CreateEvent />} />
       <Route path="new/:draftId/tickets" element={<TicketSettings />} />
       <Route path="events/:eventId" element={<Dashboard />} />

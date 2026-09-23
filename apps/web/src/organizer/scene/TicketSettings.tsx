@@ -29,10 +29,17 @@ export function TicketSettings() {
     draft,
     patch,
     discard,
-    // The event exists by now and the draft is gone. A `wait` that gave up carries no log to
-    // read the id out of, and the organiser home takes the number by hand for exactly that.
+    // The event exists by now and the draft is gone, so the title and the poster travel in the
+    // navigation — there is nowhere left to read them from. A `wait` that gave up carries no
+    // log to read the id out of, and the organiser home takes the number by hand for that.
     onCreated: (created) =>
-      navigate(created.eventId === '' ? '/org' : `/org/events/${created.eventId}`),
+      navigate(created.eventId === '' ? '/org' : `/org/new/done/${created.eventId}`, {
+        state: {
+          posterCid: created.posterCid,
+          title: created.title,
+          followUpFailed: created.followUpFailed,
+        },
+      }),
   });
 
   const problems = tierProblems(draft);

@@ -323,6 +323,23 @@ const ko = {
     },
 
 
+
+    done: {
+      title: '행사를 만들었어요',
+      // createEvent 는 Draft 로 만들고(Ticket.sol:196) claim 은 Published 가 아니면 거절한다(:265).
+      notYetPublic: '아직은 아무도 볼 수 없어요. 준비가 되면 행사 화면에서 발행해 주세요',
+      manage: '행사 화면 열기',
+      link: '행사 주소',
+      copy: '주소 복사',
+      copied: '복사했어요',
+      copyFailed: '복사하지 못했어요. 주소를 길게 눌러 복사해 주세요',
+      qr: '행사 주소 QR 코드',
+      view: '행사 보기',
+      home: '주최자 홈',
+      artFailed: '티켓 그림이나 장소를 저장하지 못했어요. 행사 화면에서 다시 저장해 주세요',
+      untitled: '이름 없는 행사',
+    },
+
     publish: {
       pinning: '행사 정보를 올리고 있어요',
       sending: '행사를 만들고 있어요',
@@ -743,6 +760,23 @@ const en: typeof ko = {
       feeNote: 'MONTI covers the cost of creating it',
     },
 
+
+
+    done: {
+      title: 'Your event is made',
+      // createEvent makes it a Draft (Ticket.sol:196) and claim refuses anything but Published.
+      notYetPublic: 'Nobody can see it yet. Publish it from the event screen when you are ready',
+      manage: 'Open the event screen',
+      link: 'Event address',
+      copy: 'Copy the address',
+      copied: 'Copied',
+      copyFailed: 'Could not copy it. Press and hold the address to copy it',
+      qr: 'QR code for the event address',
+      view: 'See the event',
+      home: 'Organiser home',
+      artFailed: 'The ticket pictures or the venue did not save. Save them again from the event screen',
+      untitled: 'Unnamed event',
+    },
 
     publish: {
       pinning: 'Uploading the event details',
