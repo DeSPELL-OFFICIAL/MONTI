@@ -84,7 +84,7 @@ describe('saleWindow', () => {
   /**
    * `Ticket.createEvent` only asks that `saleStart < saleEnd`, and the rule above has already
    * put `endsAt` after `startsAt` — so a window derived this way is always acceptable, which
-   * is why the wizard's two extra date fields are gone.
+   * is why the deleted wizard's two extra date fields are gone.
    */
   it('opens now and closes when the event ends', () => {
     expect(saleWindow(READY, 1_789_000_000)).toEqual({ saleStart: 1_789_000_000, saleEnd: READY.endsAt });

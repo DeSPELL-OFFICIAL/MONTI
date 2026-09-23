@@ -4,7 +4,7 @@ import { getConfig } from '../config';
  * The chain carries only hashes of an event's title, description and venue, so the readable
  * half lives in one JSON document on IPFS whose CID is `Event.imageCid`. This is the shape the
  * app uses after normalising it; the document itself may name the title `name` (the fixture
- * pinned for the seeded event) or `title` (what the organiser wizard writes).
+ * pinned for the seeded event) or `title` (what an older organiser document used).
  */
 export interface EventMetadata {
   title: string;

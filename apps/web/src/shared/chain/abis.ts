@@ -69,7 +69,7 @@ export const USED_EVENTS = {
     /**
      * `EventCreated(uint256 indexed eventId, uint256 indexed orgId, address indexed creator)`.
      * `createEvent` returns the new id, but a sponsored operation gives back a receipt rather
-     * than a return value — so this log is the only way the wizard learns which event it just
+     * than a return value — so this log is the only way the scene learns which event it just
      * made without waiting for the indexer.
      */
     EventCreated: 3,

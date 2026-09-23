@@ -239,18 +239,19 @@ describe('organiser home', () => {
   });
 
   /**
-   * Where that address actually lands. `/org/new` is the creation scene now (T-EV-W3), not
-   * the six-step wizard — the entry points from T-UX-5 and T-UX-6 both point here and neither
-   * had to change, so this is what proves they open the new screen.
+   * Where that address actually lands. `/org/new` is the creation scene (T-EV-W3) and, since
+   * T-EV-W10, the only creation screen there is — the entry points from T-UX-5 and T-UX-6 both
+   * point here and neither had to change, so this is what proves they open it.
    */
-  it('opens the creation scene at `/org/new`, not the six-step wizard', () => {
+  it('opens the creation scene at `/org/new`, which is the only creation screen there is', () => {
     withOrgs([ORG_A]);
     open('/org/new?org=3');
     expect(screen.getByRole('heading', { name: organizerCopy.ko.scene.title, level: 1 }))
       .toBeInTheDocument();
     expect(screen.getByRole('heading', { name: organizerCopy.ko.scene.poster, level: 2 }))
       .toBeInTheDocument();
-    expect(screen.queryByText(organizerCopy.ko.wizard.stepOf.replace('{{step}}', '1'))).toBeNull();
+    // T-EV-W10 deleted the six-step wizard; nothing answers at its old address any more.
+    expect(screen.queryByText(/1단계/)).toBeNull();
   });
 
   it('refuses the floating action to somebody who may not create events, and says why', () => {
@@ -267,20 +268,3 @@ describe('organiser home', () => {
   });
 });
 
-/** The six-step wizard's own prefill. It answers at `/org/new/old` now that the creation
- *  scene owns `/org/new`; the scene's own `?org=` handling is covered in `scene/`. */
-describe('wizard prefill', () => {
-  it('fills step 1 with the organisation the home screen chose', async () => {
-    localStorage.clear();
-    open('/org/new/old?org=7');
-    expect(await screen.findByLabelText(organizerCopy.ko.wizard.orgId)).toHaveValue('7');
-  });
-
-  it('never overwrites an organisation the organiser has already typed', async () => {
-    localStorage.clear();
-    const { DRAFT_KEY } = await import('./wizard/useWizard');
-    localStorage.setItem(DRAFT_KEY, JSON.stringify({ orgId: '3' }));
-    open('/org/new/old?org=7');
-    expect(await screen.findByLabelText(organizerCopy.ko.wizard.orgId)).toHaveValue('3');
-  });
-});

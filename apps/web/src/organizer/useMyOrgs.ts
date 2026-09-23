@@ -98,7 +98,7 @@ function foldOrgs(
 
 /**
  * The organisations this person may act for, and whether any of them lets them create an event
- * — which is what the organiser home asks before it offers the wizard at all.
+ * — which is what the organiser home asks before it offers 만들기 at all.
  *
  * One round trip to the indexer, then one Firestore read per organisation for the display
  * name. A name that will not load is not an error: the organisation is still listed, by number.

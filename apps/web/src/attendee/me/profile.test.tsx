@@ -286,7 +286,7 @@ describe('Profile', () => {
     loadOrgName.mockResolvedValue('재즈 컴퍼니');
     wrap(<Profile />);
     await userEvent.click(await screen.findByRole('button', { name: ko.me.organizerOpen }));
-    // Manage, not make: the profile never drops anybody straight into the wizard, even an owner.
+    // Manage, not make: the profile never drops anybody straight into creating, even an owner.
     expect(navigate).toHaveBeenCalledWith('/org');
     expect(screen.queryByText(ko.me.organizerHint)).not.toBeInTheDocument();
   });

@@ -8,7 +8,7 @@ import { revertMatch } from '../../shared/chain/revert';
 import { isUnsponsored } from '../../shared/chain/unsponsored';
 import { api, callableFailure } from '../../shared/api/functions';
 import type { EventDraft } from '../../shared/api/firestore';
-import { buildEventMeta, buildTiers, type WizardDraft } from '../wizard/buildEventMeta';
+import { buildEventMeta, buildTiers, type ChainDraft } from './buildEventMeta';
 import type { OrganizerCopy } from '../copy';
 import { saveDraft, type LifecycleProblem } from '../lifecycle';
 import { eventProblems, normalizeTags, saleWindow, tierProblems } from './draftRules';
@@ -89,26 +89,25 @@ export interface PublishState {
 }
 
 /**
- * The draft as `Ticket.EventMeta` wants it. It goes through the wizard's own `buildEventMeta`
- * rather than a second copy of the hashing: the two must agree byte for byte, because
+ * The draft as `Ticket.EventMeta` wants it. The hashing lives in `buildEventMeta` and not in
+ * this file, so the create path and the update path can never disagree by a byte:
  * `titleHash`, `descHash` and `venueHash` are written once and can never be repaired.
  *
  * Three values are constants here rather than switches on the scene. `approvalRequired` must
  * be false — `Ticket.claim` reverts `ApprovalRequiredNotSupported` on a true one, so the
- * switch the old wizard offered built events nobody could ever get a ticket for. `seated` has
+ * switch the deleted wizard offered built events nobody could ever get a ticket for. `seated` has
  * no screen behind it, and `maxTransfers` has no question worth asking yet.
  *
  * Every readable field is trimmed *here*, so the string that is hashed onto the chain is the
- * same one that is pinned to IPFS. `image` is never read by `buildEventMeta`; the poster's CID
- * travels in the pinned document, and the poster itself was uploaded when it was cropped.
+ * same one that is pinned to IPFS. The poster is not among them: its CID travels in the pinned
+ * document, and the picture itself was uploaded the moment it was cropped.
  */
-function toChainDraft(draft: EventDraft, now: number): WizardDraft {
+function toChainDraft(draft: EventDraft, now: number): ChainDraft {
   const { saleStart, saleEnd } = saleWindow(draft, now);
   return {
     orgId: draft.orgId.trim(),
     title: draft.title.trim(),
     description: draft.description.trim(),
-    image: null,
     venue: draft.venue.trim(),
     regionCode: draft.regionCode,
     category: draft.category,
@@ -127,8 +126,6 @@ function toChainDraft(draft: EventDraft, now: number): WizardDraft {
       maxPerWallet: tier.maxPerWallet,
       seated: SEATED,
     })),
-    gates: [],
-    submittedOpHash: draft.submittedOpHash,
   };
 }
 

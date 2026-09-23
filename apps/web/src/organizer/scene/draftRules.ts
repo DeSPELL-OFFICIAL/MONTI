@@ -1,6 +1,6 @@
 import type { EventDraft, EventDraftTier } from '../../shared/api/firestore';
 import type { TicketArtPreset, TicketArtSource } from '../../shared/ui';
-import { REGION_CODES } from '../wizard/regions';
+import { REGION_CODES } from './regions';
 
 /**
  * Every rule SCENE 1 enforces, and the one normalisation both this side and the server run.
@@ -108,7 +108,7 @@ export function eventProblems(draft: EventDraft): EventProblem[] {
  * event is made and closes when the event ends. `Ticket.createEvent` only asks that
  * `saleStart < saleEnd`, and `endsAt` is already past `startsAt` by the rule above, so a window
  * derived this way is always one the contract accepts — which is why the two date fields the
- * old wizard asked for are gone.
+ * deleted wizard asked for are gone.
  */
 export function saleWindow(draft: EventDraft, now: number): { saleStart: number; saleEnd: number } {
   return { saleStart: now, saleEnd: draft.endsAt };

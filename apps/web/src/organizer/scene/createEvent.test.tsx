@@ -103,7 +103,8 @@ describe('SCENE 1 layout', () => {
   it('shows the organisation number nowhere: the address already carries it', async () => {
     open('/org/new?org=7');
     await waitFor(() => expect(listEventDrafts).toHaveBeenCalled());
-    expect(screen.queryByLabelText(organizerCopy.ko.wizard.orgId)).toBeNull();
+    // Named rather than keyed off the deleted wizard's copy: no box asks for it at all.
+    expect(screen.queryByLabelText(/조직/)).toBeNull();
 
     // It still reaches the draft, which is the only thing that needed it.
     await userEvent.setup().type(screen.getByLabelText(copy.titleLabel), '재');

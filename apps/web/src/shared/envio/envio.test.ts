@@ -108,7 +108,7 @@ describe('fetchEventMetadata', () => {
     expect(metadata.category).toBe(0);
   });
 
-  it('accepts the wizard document, which names the title `title`', () => {
+  it('accepts a document that names the title `title` rather than `name`', () => {
     expect(normalizeMetadata({ title: '재즈 나이트', venue: '한남', category: 2, region: 'KR-11' })).toEqual({
       title: '재즈 나이트',
       description: '',

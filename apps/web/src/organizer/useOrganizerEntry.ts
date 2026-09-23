@@ -10,7 +10,7 @@ export interface OrganizerEntry {
   to: string;
   /**
    * Where the 주최자 section on 프로필 goes. It is a "manage" button, not a "make" one, so it
-   * never lands in the wizard: somebody who belongs anywhere gets the organiser home, and
+   * never lands in the creation scene: somebody who belongs anywhere gets the organiser home, and
    * everybody else gets the same door {@link to} would have given them.
    */
   profileTo: string;

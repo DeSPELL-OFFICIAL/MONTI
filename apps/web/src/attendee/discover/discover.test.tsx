@@ -256,7 +256,7 @@ describe('Discover · 만들기', () => {
     expect(seen.at(-1)).toBe('/signup/phone');
   });
 
-  it('goes straight to the wizard for somebody who may create an event', async () => {
+  it('goes straight to creating for somebody who may create an event', async () => {
     setSession({ status: 'signedIn', account: ME });
     myOrgs({ orgs: [ORG], canCreateEvent: true });
     const seen = renderDiscoverTracked();

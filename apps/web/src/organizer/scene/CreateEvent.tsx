@@ -4,8 +4,8 @@ import { Button, Chip, Field, Screen, StickyBar, Toggle } from '../../shared/ui'
 import { fmt, useLocale } from '../../shared/i18n';
 import { useOrganizerCopy, type OrganizerCopy } from '../copy';
 import { useEventDraft } from '../useEventDraft';
-import { KR_REGIONS } from '../wizard/regions';
-import { fromLocalInput, toLocalInput } from '../wizard/datetime';
+import { KR_REGIONS } from './regions';
+import { fromLocalInput, toLocalInput } from './datetime';
 import { PosterCard } from './PosterCard';
 import { SaveStatus } from './SaveStatus';
 import {

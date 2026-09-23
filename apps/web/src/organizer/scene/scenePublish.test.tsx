@@ -163,7 +163,7 @@ describe('the publish path', () => {
       },
     });
 
-    // 2. one sponsored `createEvent`, built by the same helper the wizard uses.
+    // 2. one sponsored `createEvent`, built by the one helper that owns the hashing.
     const sent = ticketOp.mock.calls[0]?.[0] as SentOp;
     expect(sent.functionName).toBe('createEvent');
     expect(sent.orgId).toBe(9n);
@@ -289,7 +289,7 @@ describe('when it does not land', () => {
     ticketOp.mockRejectedValue(new Error('AA33 reverted: SelectorNotAllowed'));
     open();
     await create();
-    expect(await screen.findByText(new RegExp(organizerCopy.ko.wizard.unsponsored))).toBeInTheDocument();
+    expect(await screen.findByText(new RegExp(organizerCopy.ko.unsponsored.notice))).toBeInTheDocument();
     expect(deleteEventDraft).not.toHaveBeenCalled();
   });
 

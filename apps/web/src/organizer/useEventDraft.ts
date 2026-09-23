@@ -20,7 +20,7 @@ import {
  * on another device.
  */
 
-/** One mirror per device: the scene edits one draft at a time. Not the wizard's old key. */
+/** One mirror per device: the scene edits one draft at a time. */
 export const EVENT_DRAFT_KEY = 'monti.eventDraft';
 
 export const DRAFT_DEBOUNCE_MS = 2_000;
@@ -32,7 +32,7 @@ export const MAX_EVENT_DRAFTS = 5;
 /** What the security rule caps the list at, so a sixth tag is a refusal, not a message. */
 const MAX_TAGS = 5;
 
-/** The four themes the discover filter offers, and the region the wizard has always started on. */
+/** The four themes the discover filter offers, and the region the scene starts on. */
 const DEFAULT_CATEGORY = 0;
 const DEFAULT_REGION = 'KR-11';
 

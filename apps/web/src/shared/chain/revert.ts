@@ -4,7 +4,7 @@ import { encodeErrorResult, type Abi, type Hex } from 'viem';
  * Reading a contract's refusal out of the four bytes it reverted with.
  *
  * It lives here rather than beside any one screen because three of them now need it against
- * three different ABIs: the hand-over reads `Ticket`'s eight transfer rules, the wizard reads
+ * three different ABIs: the hand-over reads `Ticket`'s eight transfer rules, the scene reads
  * `Ticket.createEvent`'s three, and the organiser's gate screen reads `Organizers`. The table
  * of names stays with the screen that owns the sentences; only the lookup is shared.
  */

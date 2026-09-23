@@ -1,8 +1,8 @@
 /**
  * ISO-3166-2:KR. `EventMeta.regionCode` is `keccak256(<code>)` on chain, never the label, so
- * the codes below are what the wizard hashes and `attendee/discover/useEvents.ts` hashes back
+ * the codes below are what the scene hashes and `attendee/discover/useEvents.ts` hashes back
  * to filter on. A code that is not in this list would hash to something no filter can produce,
- * which is why `validateDraft` refuses one.
+ * which is why the scene's own rules refuse one.
  */
 export const KR_REGIONS: ReadonlyArray<{ code: string; labelKo: string; labelEn: string }> = [
   { code: 'KR-11', labelKo: '서울', labelEn: 'Seoul' },

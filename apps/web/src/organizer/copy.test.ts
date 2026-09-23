@@ -26,7 +26,7 @@ describe('organizer copy', () => {
   it('uses no attendee-banned vocabulary outside the ruled fee notice', () => {
     for (const locale of ['ko', 'en'] as const) {
       const copy = organizerCopy[locale];
-      const allowed: string[] = [copy.wizard.unsponsored];
+      const allowed: string[] = [copy.unsponsored.notice];
       const offenders = sentences(copy)
         .filter((line) => !allowed.includes(line))
         .filter((line) => BANNED_ATTENDEE_WORDS.some((word) => line.toLowerCase().includes(word.toLowerCase())));
@@ -35,7 +35,7 @@ describe('organizer copy', () => {
   });
 
   it('carries the ruled notice for an organiser write nothing sponsors yet', () => {
-    expect(organizerCopy.ko.wizard.unsponsored).toBe('주최자 작업은 지금은 수수료 지갑이 필요해요');
-    expect(organizerCopy.en.wizard.unsponsored).toContain('wallet');
+    expect(organizerCopy.ko.unsponsored.notice).toBe('주최자 작업은 지금은 수수료 지갑이 필요해요');
+    expect(organizerCopy.en.unsponsored.notice).toContain('wallet');
   });
 });

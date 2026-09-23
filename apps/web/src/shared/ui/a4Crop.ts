@@ -76,7 +76,7 @@ function drawAndEncode(bitmap: ImageBitmap, rect: CropSource, quality: number): 
   return new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
 }
 
-/** The data URL is base64 already; only the prefix comes off (as `wizard/pinata.ts` does). */
+/** The data URL is base64 already; only the prefix comes off — the server wants raw base64. */
 function toBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();

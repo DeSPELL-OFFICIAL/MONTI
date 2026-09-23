@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Alert, Button, Fab, Field, Screen, Spinner } from '../shared/ui';
 import { fmt, useLocale } from '../shared/i18n';
@@ -14,74 +14,6 @@ import { CreateEvent } from './scene/CreateEvent';
 import { TicketSettings } from './scene/TicketSettings';
 import { Created } from './scene/Created';
 import { EditEvent } from './scene/EditEvent';
-import { useWizard } from './wizard/useWizard';
-import { Step1Basic } from './wizard/Step1Basic';
-import { Step2When } from './wizard/Step2When';
-import { Step3Tiers } from './wizard/Step3Tiers';
-import { Step4Rules } from './wizard/Step4Rules';
-import { Step5Staff } from './wizard/Step5Staff';
-import { Step6Review } from './wizard/Step6Review';
-
-const LAST_STEP = 6;
-
-/**
- * The six steps, over one draft. The draft is kept on this device (`useWizard`), so a reload
- * — or an organiser who closed the tab to go and find the venue address — comes back to what
- * they had typed. Only the last step sends anything anywhere.
- */
-function Wizard() {
-  const copy = useOrganizerCopy().wizard;
-  const navigate = useNavigate();
-  const { draft, patch, reset } = useWizard();
-  const [step, setStep] = useState(1);
-  // `/org/new?org=3` — the organisation picked on the home screen, so step 1's number is
-  // already filled in. Only ever on the way in: the latch survives StrictMode's second run of
-  // this effect, and a draft that already names an organisation is never overwritten.
-  const asked = useSearchParams()[0].get('org') ?? '';
-  const prefilled = useRef(false);
-
-  useEffect(() => {
-    if (prefilled.current) return;
-    prefilled.current = true;
-    if (asked !== '' && draft.orgId === '') patch({ orgId: asked });
-  }, [asked, draft.orgId, patch]);
-
-  const onNext = useCallback(() => setStep((current) => Math.min(LAST_STEP, current + 1)), []);
-  const onBack = useCallback(() => setStep((current) => Math.max(1, current - 1)), []);
-  const steps = { draft, patch, onNext, onBack };
-
-  return (
-    <Screen title={copy.heading}>
-      <p style={{ color: 'var(--muted)', fontSize: 13 }}>{fmt(copy.stepOf, { step })}</p>
-      {step === 1 ? <Step1Basic draft={draft} patch={patch} onNext={onNext} /> : null}
-      {step === 2 ? <Step2When {...steps} /> : null}
-      {step === 3 ? <Step3Tiers {...steps} /> : null}
-      {step === 4 ? <Step4Rules {...steps} /> : null}
-      {step === 5 ? <Step5Staff {...steps} /> : null}
-      {step === 6 ? (
-        <Step6Review
-          draft={draft}
-          patch={patch}
-          onBack={onBack}
-          onPublished={reset}
-          // Straight to the new event when its log named it; otherwise the home screen, where
-          // the number can be typed in (a `wait` that gave up carries no log to read).
-          onDone={(eventId) => navigate(eventId === '' ? '/org' : `/org/events/${eventId}`)}
-        />
-      ) : null}
-      <p style={{ color: 'var(--muted)', fontSize: 13 }}>{copy.saveDraft}</p>
-      <Button
-        variant="ghost"
-        onClick={() => {
-          reset();
-          setStep(1);
-        }}
-      >
-        {copy.startOver}
-      </Button>
-    </Screen>
-  );
-}
 
 /** The indexer's own words for an event's state; anything else is shown exactly as it came. */
 function statusLabel(status: string, labels: OrganizerCopy['home']['status']): string {
@@ -243,10 +175,8 @@ export function OrganizerRoutes() {
       {/* The creation scene. `/org/new` starts one (or carries on with the newest draft) and
           `/org/new/<draftId>` opens a named one — which is what SCENE 2's back link uses. */}
       <Route path="new" element={<CreateEvent />} />
-      {/* Static beats dynamic in the router's ranking, so this is not a draft id. The six-step
-          wizard stays reachable here until T-EV-W10 deletes it; nothing links to it. */}
-      <Route path="new/old" element={<Wizard />} />
-      {/* Where `행사 만들기` lands. Static again, so it is not a draft id. */}
+      {/* Where `행사 만들기` lands. Static beats dynamic in the router's ranking, so this is
+          not read as a draft id. */}
       <Route path="new/done/:eventId" element={<Created />} />
       <Route path="new/:draftId" element={<CreateEvent />} />
       <Route path="new/:draftId/tickets" element={<TicketSettings />} />

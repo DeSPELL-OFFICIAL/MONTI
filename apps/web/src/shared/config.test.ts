@@ -37,8 +37,8 @@ describe('getConfig', () => {
     expect(() => getConfig()).toThrow('VITE_ADDR_TICKET');
   });
 
-  // Pinning is a backend callable (`pinEventMetadata`), so no build of this app carries a
-  // pinning token — see `organizer/wizard/pinata.test.ts`, which greps for the variable.
+  // Pinning is a backend callable (`pinEventImage` / `pinEventMetadata`), so no build of this
+  // app carries a pinning token and nothing in `src` may ever read one.
   it('carries no pinning token at all', () => {
     for (const [key, value] of Object.entries(BASE)) vi.stubEnv(key, value);
     expect(Object.keys(getConfig())).not.toContain('pinataJwt');

@@ -1,7 +1,7 @@
 /**
  * `<input type="datetime-local">` speaks the organiser's own clock and the chain speaks epoch
  * seconds, so the two conversions live here rather than in five step components. A blank or
- * half-typed field reads back as 0, which `validateDraft` refuses as a missing time.
+ * half-typed field reads back as 0, which `draftRules` refuses as a missing time.
  */
 export function toLocalInput(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return '';

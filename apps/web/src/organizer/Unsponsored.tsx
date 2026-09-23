@@ -7,14 +7,14 @@ import { useOrganizerCopy } from './copy';
  * every write on these screens is refused while it is still being simulated, so the honest
  * thing is to say what is missing rather than "try again in a moment".
  *
- * The sentence lives in `copy.wizard` because the wizard said it first and there is only one
- * of it; `copy.test.ts` allows that single string and no other.
+ * The two sentences are a group of their own; `copy.test.ts` allows that single string and no
+ * other anywhere in the organiser copy.
  */
 export function UnsponsoredNotice() {
-  const copy = useOrganizerCopy().wizard;
+  const copy = useOrganizerCopy().unsponsored;
   return (
     <Alert tone="warn">
-      {copy.unsponsored} {copy.unsponsoredHelp}
+      {copy.notice} {copy.help}
     </Alert>
   );
 }
