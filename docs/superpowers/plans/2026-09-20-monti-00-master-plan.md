@@ -424,3 +424,49 @@ function offerOf(uint256 tokenId) external view returns (Offer memory);
 
 - The passkey login custom token carries only `{ personId, account }` (account checksummed). It never carries `phone_number`: a custom-token claim is client-readable PII and would force a KMS decrypt on every login. Functions that previously read `request.auth.token.phone_number` (Tasks 21, 25, 42) resolve the caller via `personId`/`account` and read `users/{uid}.phoneHmac` (the same HMAC used as the `phoneIndex/{hmac}` document id; Task 16 stores it on the user document if absent) whenever they need the phone index. `startSignup` remains the only function that reads `token.phone_number`, because that session comes from Firebase phone auth itself.
 - `authChallenges` documents get a TTL sweep (fold into the reconcile task or a scheduled function); `loginChallenge` rate limiting is post-MVP.
+
+## 01b delta (2026-09-21)
+
+01b 재배포 번들(`docs/superpowers/plans/2026-09-22-monti-01b-redeploy-bundle.md`)이 네 컨트랙트를 바꿨다. **아직 배포되지 않았다** — 01b Task 15가 새 주소로 올린 뒤에야 아래가 사실이 된다. 인터페이스 원본은 **`contracts/docs/abi-delta-01b.md`** 한 곳이고, 이 절은 그 문서의 어디를 읽을지만 가리킨다. **위 본문은 고치지 않는다**(같은 파일이 소비자 브랜치에도 있어 본문을 고치면 병합에서 충돌한다). 스펙 쪽 대응은 기획서 v2.6(§10.2 "v2.6 추가(컨트랙트)" 블록)이다.
+
+**Shared Interfaces에 붙는 것 (Contracts)**
+
+| 무엇 | 새 인터페이스 | 델타 문서 |
+|---|---|---|
+| 오프라인 큐 입장 기록 | `Ticket.checkInLate(uint256,(uint256,uint256,uint64,bytes32),bytes)` `0x47a7fad1`, `LATE_WINDOW() = 43200`, 이벤트 `CheckedInLate(tokenId, gateId, issuedAt, ts)` | §2 |
+| 입장 기록 조회 | `checkInOf(tokenId)` 셀렉터 그대로, **반환 구조 `(gateId, nonceHash, ts, manual, late)`** — 자리로 해체하는 코드는 전부 깨진다(컴파일러가 못 잡는다) | **§5** |
+| 기기 서명 다이제스트 | `sha256(abi.encode(chainid, ticket, tokenId, gateId, eventId, nonce, issuedAt))` 일곱 낱말. 조회 `deviceDigest(uint256,uint256,uint256,bytes32,uint64)` `0x7c23b77a`가 정본, low-`s`만 통과 | **§7.2** |
+| 양도 승인 서명 | EIP-712. `offerDigest(uint256,bytes32,address)` `0x50ba8511`, `eip712Domain()`, 도메인 `("MONTI Ticket","1",chainId,ticket)` | **§7.1** |
+| 계정 교체 되돌리기 | `Identity.cancelRotation()` `0xc64bf27a`, `rotatedAt(bytes32)`, `rotatedFrom(bytes32)`, `ROTATION_UNDO_WINDOW() = 86400`, 이벤트 `RotationCancelled` | §1 |
+| 이동 타임락·격리 | `Ticket.MIGRATE_DELAY() = 86400`, 에러 `RotationPending()` — `migrate` 타임락 **이자** 교체 직후 24시간 동안 새 계정의 수신 차단 | §1 · §6 |
+| ABI 신호 없는 동작 변화 | `checkIn`의 `NotMember`, 양방향 `DeviceLocked`, 취소된 행사의 `EventCancelled`, `requestOverride`의 행사 상태 검사, `rotateAccount`가 `DeviceLocked(old,true)`를 함께 emit, `registerGate` 반쪽 0 키 거부, `revokeGate`가 `gateOf`를 비워 재등록 가능 | **§6** |
+| 페이마스터 | `setAllowed(bytes4,uint8,uint8)`(deployer 전용 킬 스위치), `argWordOf(bytes4)`, 이벤트 `SelectorAllowed`. 새 스폰서 셀렉터 6개: `checkInLate`, `Ticket.revoke`, `revokeGate`, `createOrganizer`, `transferOwner`, `cancelRotation` | §3 |
+| 크기 | `Ticket` 런타임 26,351 / 이니트코드 27,665바이트 — EIP-170을 넘었고 **Monad 전용**이다. 실제 게이트는 Monad 128 KB(`test/ContractSize.t.sol`) | §9 |
+
+`Organizers`와 `CoinbaseSmartWalletFactory`의 ABI는 **바이트 단위로 그대로**다(§4).
+
+**재배포 런북 (01b Task 15 — 이 순서를 지킨다)**
+
+| Step | 하는 일 |
+|---|---|
+| 0 | 폐기용 `SizeProbe`로 Monad 노드의 실제 크기 한도를 실증하고, **현재** 배포에서 스폰서 UserOp 한 건을 Pimlico로 통과시킨다(번들러 거부는 온체인 흔적을 남기지 않는다) |
+| 1 | 전제 조건: 02/03/04가 **현재 배포**에서 엔드투엔드 탭 한 번 성공(R-F1), 게이트 키·계정 확보, `forge test` 초록, 옛 `deployments/10143.json` 백업 |
+| 2 | `forge script Deploy.s.sol --broadcast --slow --gas-limit 30000000` → 새 네 주소 + 새 `block` |
+| 3 | `Seed.s.sol` 재시드(새 컨트랙트라 상태가 비어 있다). `MEMBER_FUND_WEI` 기본값 **0.1 MON** |
+| 4 | 체인에서 확인: `LATE_WINDOW()=43200`, `MIGRATE_DELAY()=86400`, 새 셀렉터 6개의 `argKindOf`, 페이마스터 스테이크. **새 배포에서 스폰서 UserOp 한 건을 더 통과시키고 04가 UserOp 가스 4필드를 받아 적는다** |
+| 5 | 새 주소를 세 소비자 저장소에 복사 + `sync-deployments.mjs`. **웹·스태프 두 앱의 `VITE_ADDR_*` 네 개를 로컬 `.env`와 배포 환경 양쪽에서 갈아준다**(`config.ts`가 `loadDeployment`를 거치지 않는다) |
+| 6 | 인덱서 시작 블록 = 새 `deployments/10143.json`의 **`.block`**. 그사이 인덱서가 떠 있었다면 옛 배포를 인덱싱한 데이터를 **반드시 비우고** 재시작한다 |
+| 7 | 게이트 추가는 재시드가 아니라 `registerGate` + `openGate` 직접 호출 |
+| 8 | 옛 `Identity`의 `Registered` 로그로 진짜 계정을 새 `Identity`에 다시 등록. **티켓·닉네임·기기 잠금은 따라오지 않는다**(사람들에게 미리 알린다) |
+| 9 | 옛 페이마스터의 스테이크·예치금 회수(`unlockStake`는 Step 2 직후에 불러 24시간 지연을 병렬로 돌린다) |
+
+**바뀌는 환경변수**: `VITE_ADDR_IDENTITY` / `VITE_ADDR_ORGANIZERS` / `VITE_ADDR_TICKET` / `VITE_ADDR_PAYMASTER`(MONTI-web·MONTI-staff 양쪽, 로컬 + 호스팅). 시드 입력 `SEED_GATE_KX` / `SEED_GATE_KY` / `GATE_ACCOUNT` / `SEED_IMAGE_CID` / `MEMBER_FUND_WEI`. `VITE_BUNDLER_URL`은 그대로.
+
+**창업자 입력 (이게 없으면 Task 15가 시작되지 않는다)**
+
+- 실제 스태프 단말기의 **게이트 계정 주소와 진짜 P-256 공개키**(`SEED_GATE_KX`/`SEED_GATE_KY`). 계정은 채택된 팩토리 `0xBA5ED110eFDBa3D005bfC882d75358ACBbB85842`로 `factoryAddress`를 명시해 유도한 것이어야 한다. `registerGate`는 한 주소를 한 번만 받는다.
+- **가스 예산 (이 줄이 정본이다. 다른 곳은 여기를 참조하고 숫자를 다시 적지 않는다)** — 배포자 계정 **4 MON 이상**: 컨트랙트 네 건 배포 + 페이마스터 스테이크 1 MON + EntryPoint 예치금 1 MON + 데모 멤버 자금 3 × 0.1 MON, 여유 포함(Monad는 한도 × 100 gwei로 문다). 어테스터 계정 **1 MON 이상**(Step 8의 재등록 트랜잭션). 옛 배포의 스테이크·예치 1 + 1 MON은 Step 9에서 회수하지만 **24시간 지연이 있어 이번 재배포의 재원으로 쓸 수 없다.**
+- **Tenderly 알림을 새 주소로 다시 겨눈다**(기획서 §8.6). 옛 네 주소를 보는 알림·시뮬레이션·웹훅은 재배포 즉시 조용해진다 — 02의 `tenderlyWebhook`이 새 `Ticket`/`Identity` 주소를 받아야 입장 푸시가 다시 산다.
+- 인덱서 재시작 블록 = 새 `.block`. 옛 데이터는 비운다.
+
+**병합 순서**: `mvp-01b` → `mvp` → `mvp-backend` → `mvp-web` → `mvp-staff`. `mvp`는 Task 15 전까지 **배포된 상태**로 남는다.

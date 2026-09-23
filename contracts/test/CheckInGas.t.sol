@@ -26,6 +26,10 @@ abstract contract CheckInGasBase is MontiTest {
     uint256 internal tokenId;
     uint256 internal gateId;
 
+    /// @dev 서명은 픽스처에서 만든다. 측정 트랜잭션 안에서 만들면 sha256 프리컴파일이 미리
+    ///      따뜻해져 `checkIn` 이 내야 할 콜드 비용이 사라지고, 덤으로 prank 까지 먹힌다.
+    bytes internal gateSig;
+
     /// @dev One holder with the vector device key, one published free event, one claimed ticket, one
     ///      open gate. This must run in `setUp`, i.e. in a transaction of its own: run it in the same
     ///      transaction as the measurement and every account and slot it touched is already warm,
@@ -47,6 +51,13 @@ abstract contract CheckInGasBase is MontiTest {
         assertEq(eventId, P256Vectors.EVENT_ID, "vectors were generated for event 1");
         assertEq(tokenId, P256Vectors.TOKEN_ID, "vectors were generated for token 1");
         assertEq(gateId, P256Vectors.GATE1_ID, "vectors were generated for gate 1");
+
+        gateSig = _deviceSig(
+            tokenId,
+            Ticket.GateCode({
+                gateId: gateId, eventId: P256Vectors.EVENT_ID, issuedAt: P256Vectors.ISSUED_AT, nonce: P256Vectors.NONCE
+            })
+        );
     }
 
     /// @dev Only the `checkIn` call sits inside the window; the fixture does not. The window does
@@ -56,7 +67,7 @@ abstract contract CheckInGasBase is MontiTest {
         Ticket.GateCode memory g = Ticket.GateCode({
             gateId: gateId, eventId: P256Vectors.EVENT_ID, issuedAt: P256Vectors.ISSUED_AT, nonce: P256Vectors.NONCE
         });
-        bytes memory sig = abi.encode(P256Vectors.GATE1_R, P256Vectors.GATE1_S);
+        bytes memory sig = gateSig;
         // Cache the test's own bookkeeping so its SLOADs are not billed to `checkIn`.
         Ticket t = ticket;
         uint256 id = tokenId;

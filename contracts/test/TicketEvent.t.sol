@@ -3,7 +3,6 @@ pragma solidity 0.8.31;
 
 import {MontiTest} from "./Base.t.sol";
 import {Ticket} from "../src/Ticket.sol";
-import {Organizers} from "../src/Organizers.sol";
 
 contract TicketEventTest is MontiTest {
     event EventCreated(uint256 indexed eventId, uint256 indexed orgId, address indexed creator);
@@ -37,6 +36,8 @@ contract TicketEventTest is MontiTest {
         assertEq(ticket.name(), "MONTI Ticket");
         assertEq(ticket.symbol(), "MONTI");
         assertEq(ticket.CODE_WINDOW(), 60);
+        // Both windows are part of the ABI surface the staff device hard-codes against (spec 7.3).
+        assertEq(ticket.CLOCK_SKEW(), 5);
     }
 
     function test_createEventNeedsCreatePermission() public {
