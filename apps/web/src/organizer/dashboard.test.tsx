@@ -28,9 +28,23 @@ const pinMessage = vi.fn(async () => ({ ok: true as const, messageId: 'm1' }));
 // It is stubbed empty here rather than left out: an absent mock is a `TypeError` inside an
 // effect, which vitest reports as an unhandled rejection long after the assertion it broke.
 const listPinned = vi.fn(async () => []);
+// The ticket-picture section below the table writes through this one; its own screen is tested
+// in `eventArt.test.tsx`, so here it only has to exist.
+const saveEventArt = vi.fn(async () => ({ ok: true as const }));
 vi.mock('../shared/api/functions', async (orig) => ({
   ...(await orig<typeof import('../shared/api/functions')>()),
-  api: { listAttendees, pinMessage, listPinned },
+  api: { listAttendees, pinMessage, listPinned, saveEventArt },
+}));
+
+// Two reads the picture section makes on its own. Stubbed rather than left out: both swallow
+// their own failures, so an unmocked one would be a real network call inside a unit test.
+const loadEventArt = vi.fn(async () => [{ preset: 'c' as const }]);
+vi.mock('../shared/api/firestore', () => ({ loadEventArt }));
+
+const fetchEventMetadata = vi.fn(async () => ({ title: '재즈 나이트', tags: [] }));
+vi.mock('../shared/envio/ipfs', async (orig) => ({
+  ...(await orig<typeof import('../shared/envio/ipfs')>()),
+  fetchEventMetadata,
 }));
 
 const DRAFT_EVENT = {
@@ -192,5 +206,19 @@ describe('an event the indexer has no row for', () => {
     open();
     expect(await screen.findByText(dash.failed)).toBeInTheDocument();
     expect(screen.queryByText(dash.notIndexed)).not.toBeInTheDocument();
+  });
+
+  /**
+   * T-EV-W13. The founder's requirement is that the picture can be changed later, so the
+   * section is on this screen and not only in the creation scene — and it is here for a Draft
+   * event just as it is for a published one, because `saveEventArt` never closes.
+   */
+  it('offers the ticket pictures, named by the event the indexer and the document agree on', async () => {
+    open();
+    expect(await screen.findByRole('heading', { name: dash.art.title })).toBeInTheDocument();
+    expect(await screen.findByRole('img', { name: /재즈 나이트 · 일반/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: dash.art.change })).toBeInTheDocument();
+    expect(loadEventArt).toHaveBeenCalledWith('5');
+    expect(fetchEventMetadata).toHaveBeenCalledWith('bafy');
   });
 });

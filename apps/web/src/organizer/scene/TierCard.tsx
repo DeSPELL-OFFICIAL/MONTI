@@ -1,22 +1,12 @@
-import { useState } from 'react';
-import { A4Cropper, Alert, Button, Chip, Field, TicketArt } from '../../shared/ui';
-import type { CroppedPoster, TicketArtPreset } from '../../shared/ui';
+import { Alert, Button, Chip, Field, TicketArt } from '../../shared/ui';
 import { fmt } from '../../shared/i18n';
 import type { EventDraftCurrency, EventDraftTier } from '../../shared/api/firestore';
-import { useOrganizerCopy, type OrganizerCopy } from '../copy';
-import { MAX_TIER_NAME_CHARS, TICKET_ART_PRESETS, tierArt } from './draftRules';
-import { usePinImage } from './usePinImage';
+import { useOrganizerCopy } from '../copy';
+import { ArtPicker } from '../ArtPicker';
+import { MAX_TIER_NAME_CHARS, tierArt } from './draftRules';
 
 /** The four the draft can hold. Only the first can be created today; see {@link paidTiers}. */
 const CURRENCIES: readonly EventDraftCurrency[] = ['free', 'MON', 'USDT', 'USDC'];
-
-/** Flat keys rather than a map, so a locale missing one fails the build. */
-function presetLabel(copy: OrganizerCopy['scene']['tiers'], preset: TicketArtPreset): string {
-  if (preset === 'b') return copy.artB;
-  if (preset === 'c') return copy.artC;
-  if (preset === 'd') return copy.artD;
-  return copy.artA;
-}
 
 /** A whole number out of a box somebody may have emptied; a blank box is zero, not NaN. */
 function whole(value: string): number {
@@ -46,20 +36,8 @@ export interface TierCardProps {
  */
 export function TierCard({ index, tier, title, removable, onPatch, onRemove }: TierCardProps) {
   const copy = useOrganizerCopy().scene.tiers;
-  const [uploading, setUploading] = useState(false);
-  const { pin, busy, problem } = usePinImage('ticket');
   const paid = tier.currency !== 'free';
   const art = tierArt(tier);
-  // `null` while a picture of their own is in place: the design chips then show nothing chosen,
-  // which is the truth — the upload is what the ticket will carry.
-  const chosen = 'preset' in art ? art.preset : null;
-
-  async function upload(cropped: CroppedPoster): Promise<void> {
-    const cid = await pin(cropped);
-    if (cid === '') return;
-    onPatch({ imageCid: cid });
-    setUploading(false);
-  }
 
   return (
     <li className="tier-card">
@@ -76,30 +54,13 @@ export function TierCard({ index, tier, title, removable, onPatch, onRemove }: T
         <TicketArt art={art} title={title} tierName={tier.name} />
       </div>
       <p className="muted">{copy.art}</p>
-      <div className="chip-row">
-        {TICKET_ART_PRESETS.map((preset) => (
-          <Chip
-            key={preset}
-            label={presetLabel(copy, preset)}
-            selected={chosen === preset}
-            // Picking a design puts the uploaded picture aside rather than deleting the draft's
-            // memory of it — the two fields are kept apart until the event is created.
-            onClick={() => onPatch({ design: preset, imageCid: '' })}
-          />
-        ))}
-        <Chip
-          label={uploading ? copy.artUploadClose : copy.artUpload}
-          selected={tier.imageCid !== ''}
-          onClick={() => setUploading((open) => !open)}
-        />
-      </div>
-      {uploading ? (
-        <>
-          <A4Cropper onCropped={upload} busy={busy} />
-          {busy ? <p className="muted">{copy.artWorking}</p> : null}
-        </>
-      ) : null}
-      {problem !== '' ? <p className="problem">{problem}</p> : null}
+      <ArtPicker
+        art={art}
+        // Picking a design puts the uploaded picture aside rather than deleting the draft's
+        // memory of it — the two fields are kept apart until the event is created.
+        onPreset={(preset) => onPatch({ design: preset, imageCid: '' })}
+        onUploaded={(imageCid) => onPatch({ imageCid })}
+      />
 
       <Field label={copy.name}>
         <input

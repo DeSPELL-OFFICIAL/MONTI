@@ -6,8 +6,10 @@ import { api } from '../shared/api/functions';
 import { readTicket } from '../shared/chain/reads';
 import { gql } from '../shared/envio/client';
 import { EVENT_QUERY, type EnvioEvent, type EnvioTier } from '../shared/envio/queries';
+import { fetchEventMetadata } from '../shared/envio/ipfs';
 import { Announce } from './Announce';
 import { useOrganizerCopy } from './copy';
+import { EventArt } from './EventArt';
 import { cancelEvent, publishEvent, type LifecycleResult } from './lifecycle';
 import { UnsponsoredNotice } from './Unsponsored';
 
@@ -40,6 +42,7 @@ export function Dashboard() {
   const [event, setEvent] = useState<EnvioEvent | null>(null);
   const [tiers, setTiers] = useState<EnvioTier[]>([]);
   const [attendees, setAttendees] = useState<AttendeeRow[]>([]);
+  const [title, setTitle] = useState('');
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [pending, setPending] = useState<Pending>('');
@@ -69,6 +72,24 @@ export function Dashboard() {
       cancelled = true;
     };
   }, [eventId, reload]);
+
+  // The event's readable name, for the ticket pictures below — the only thing on this screen
+  // that needs it. It is asked for after the indexer answers because the CID comes from there,
+  // and it never gates the screen: a gateway that will not answer costs the preview its title
+  // and nothing else.
+  const imageCid = event?.imageCid ?? '';
+  useEffect(() => {
+    if (imageCid === '') return undefined;
+    let cancelled = false;
+    void fetchEventMetadata(imageCid)
+      .then((meta) => {
+        if (!cancelled) setTitle(meta.title);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [imageCid]);
 
   async function run(which: Exclude<Pending, ''>): Promise<void> {
     setBusy(true);
@@ -171,6 +192,10 @@ export function Dashboard() {
           </li>
         ))}
       </ul>
+
+      {/* Shown whatever the status is: the picture is the one part of a ticket that stays
+          editable once the event is public, which is exactly why it is not on the chain. */}
+      <EventArt eventId={eventId} tiers={tiers} title={title === '' ? dash.art.untitled : title} />
 
       <Announce eventId={eventId} />
 

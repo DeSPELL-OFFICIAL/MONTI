@@ -206,6 +206,24 @@ const ko = {
     gates: '입구 단말기',
     notIndexed: '없는 행사 번호이거나 아직 색인 전이에요',
     failed: '현황을 불러오지 못했어요. 잠시 뒤 다시 시도해 주세요',
+
+    /**
+     * 창업자 요구 "이미지는 나중에 수정 가능". 티켓 그림만 공개 뒤에도 바꿀 수 있다 —
+     * Tier 에 그림 칸이 없고(Ticket.sol:40-47) updateEventMeta 는 Draft 에서만 되므로
+     * 그림은 체인이 아니라 eventArt/{eventId} 에 있다(계획 B-4).
+     */
+    art: {
+      title: '티켓 이미지',
+      help: '행사를 공개한 뒤에도 언제든 바꿀 수 있어요',
+      kind: '{{index}}번째 종류',
+      change: '바꾸기',
+      close: '그만두기',
+      saving: '저장하고 있어요',
+      saved: '저장했어요',
+      notAllowed: '이 행사의 티켓 그림을 바꿀 권한이 없어요',
+      failed: '티켓 그림을 저장하지 못했어요. 잠시 뒤 다시 시도해 주세요',
+      untitled: '이름 없는 행사',
+    },
   },
 
   announce: {
@@ -658,6 +676,20 @@ const en: typeof ko = {
     gates: 'Entry terminals',
     notIndexed: 'No event has that number, or it has not been indexed yet',
     failed: 'Could not load the status. Please try again in a moment',
+
+    /** See the Korean block: the picture is the one part of a ticket editable after publishing. */
+    art: {
+      title: 'Ticket pictures',
+      help: 'You can change these at any time, even after the event is public',
+      kind: 'Kind {{index}}',
+      change: 'Change',
+      close: 'Done',
+      saving: 'Saving',
+      saved: 'Saved',
+      notAllowed: 'You may not change the pictures for this event',
+      failed: 'Could not save the picture. Please try again in a moment',
+      untitled: 'Unnamed event',
+    },
   },
 
   announce: {
