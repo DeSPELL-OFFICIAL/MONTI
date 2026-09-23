@@ -79,10 +79,7 @@ contract DeployCoinbaseFactory is Script {
 
         _log();
 
-        // A dry run simulates the deployment but changes nothing on chain, so recording its
-        // addresses would overwrite the tracked record with contracts that do not exist. Only a
-        // real broadcast earns the write; the tests call `record()` themselves.
-        if (vm.isContext(VmSafe.ForgeContext.ScriptBroadcast)) record();
+        record();
     }
 
     /// @notice Adopts or deploys the factory, whichever the chain calls for.
@@ -182,11 +179,25 @@ contract DeployCoinbaseFactory is Script {
     }
 
     /// @notice Records the factory where sub-plans 02 and 03 look for it.
-    /// @dev    `Deploy.s.sol` writes the other keys of this file and carries `coinbaseFactory` over;
-    ///         this is the mirror of that, so the two scripts can run in either order without either
-    ///         one erasing the other's addresses. Public for the same reason `resolve` is.
+    /// @dev    A dry run simulates the deployment but changes nothing on chain, so recording its
+    ///         addresses would overwrite the tracked record with a factory that does not exist. The
+    ///         guard is inside this function rather than at its call site because
+    ///         `forge script --sig 'record()'` reaches it directly -- and a dry run of that signature
+    ///         would zero `coinbaseFactory` in the tracked deployments/10143.json, taking sub-plan
+    ///         03's account factory with it. The same guard Deploy.s.sol and Seed.s.sol carry; the
+    ///         tests reach the writing half through a harness.
     function record() public {
-        string memory path = string.concat("deployments/", vm.toString(block.chainid), ".json");
+        if (!vm.isContext(VmSafe.ForgeContext.ScriptBroadcast)) {
+            console2.log("not a broadcast: nothing was recorded");
+            return;
+        }
+        _record(string.concat("deployments/", vm.toString(block.chainid), ".json"));
+    }
+
+    /// @dev `Deploy.s.sol` writes the other keys of this file and carries `coinbaseFactory` over;
+    ///      this is the mirror of that, so the two scripts can run in either order without either one
+    ///      erasing the other's addresses.
+    function _record(string memory path) internal {
         string memory existing = vm.exists(path) ? vm.readFile(path) : "{}";
 
         string memory obj = "monti";

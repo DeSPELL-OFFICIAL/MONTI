@@ -93,7 +93,7 @@ contract TicketClaimTest is MontiTest {
         assertEq(ticket.balanceOfEvent(address(0xD1), eventId), 1);
     }
 
-    function test_claimRejectedWhenSoldOutAndOnUnknownTier() public {
+    function test_claimRejectedOnUnknownTierAndWithAVoucher() public {
         vm.prank(ALICE);
         vm.expectRevert(Ticket.UnknownTier.selector);
         ticket.claim(eventId, 3, "");
@@ -101,5 +101,28 @@ contract TicketClaimTest is MontiTest {
         vm.prank(ALICE);
         vm.expectRevert(Ticket.PaidTiersNotEnabled.selector);
         ticket.claim(eventId, 0, hex"1234");
+    }
+
+    /// @dev The shared fixture sells 100 seats, so running a tier out needs an event of its own.
+    function _oneSeatEvent() internal returns (uint256 soldOutEventId) {
+        Ticket.EventMeta memory m = ticket.eventMeta(eventId);
+        Ticket.Tier[] memory t = new Ticket.Tier[](1);
+        t[0] = Ticket.Tier({name: "Only seat", priceUsdCents: 0, supply: 1, minted: 0, maxPerWallet: 1, seated: false});
+        vm.prank(ORG_OWNER);
+        soldOutEventId = ticket.createEvent(m, t);
+        vm.prank(ORG_OWNER);
+        ticket.publishEvent(soldOutEventId);
+    }
+
+    function test_claimRejectedWhenTheTierIsSoldOut() public {
+        uint256 soldOut = _oneSeatEvent();
+
+        vm.prank(ALICE);
+        ticket.claim(soldOut, 0, "");
+        assertEq(ticket.tiers(soldOut)[0].minted, 1);
+
+        vm.prank(BOB);
+        vm.expectRevert(Ticket.SoldOut.selector);
+        ticket.claim(soldOut, 0, "");
     }
 }

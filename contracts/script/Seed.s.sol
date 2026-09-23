@@ -4,6 +4,7 @@ pragma solidity 0.8.31;
 import {Script} from "forge-std/Script.sol";
 import {VmSafe} from "forge-std/Vm.sol";
 import {console2} from "forge-std/console2.sol";
+import {LibString} from "solady/utils/LibString.sol";
 import {Identity} from "../src/Identity.sol";
 import {Organizers} from "../src/Organizers.sol";
 import {Ticket} from "../src/Ticket.sol";
@@ -29,18 +30,30 @@ import {P256Vectors} from "../test/utils/P256Vectors.sol";
 ///           DEPLOYER_PK      broadcast key; owns the demo organizer and pays for the demo members' gas
 ///           ATTESTER_PK      the key behind Identity's attester; the only account that may register
 ///           GATE_ACCOUNT     the staff device's account, which becomes this event's open gate
-///           MEMBER_FUND_WEI  optional, defaults to 0.02 MON per demo member
+///           SEED_GATE_KX     the gate device's P-256 public key X, as 0x-prefixed 32 bytes. The
+///           SEED_GATE_KY     attendee phone verifies the gate's signature against these before it
+///                            writes anything back (spec 7.2 step 3, T14 defence 1), so a placeholder
+///                            here means that defence does not exist on the demo gate. Required, and
+///                            generated on the Android device by sub-plan 04
+///           SEED_IMAGE_CID   the demo event's metadata JSON, pinned to Pinata before the seed is run:
+///                            `{ name, description, image }`, which is where the attendee app reads the
+///                            event's name and picture from. Required — the chain has only the hashes
+///           MEMBER_FUND_WEI  optional, defaults to 0.1 MON per demo member
 contract Seed is Script {
     /// @notice Enough demo attendees to show a list rather than a single row, few enough to seed in one
     ///         run on a testnet.
     uint256 public constant DEMO_MEMBERS = 3;
 
-    /// @notice One claim costs well under this at any testnet gas price; the rest stays in the account
-    ///         for whatever sub-plan 03 demos next.
-    uint256 public constant DEFAULT_MEMBER_FUND_WEI = 0.02 ether;
+    /// @notice One claim finishes inside this and the rest stays in the account for whatever sub-plan
+    ///         03 demos next. Monad charges `gas_limit x 100 gwei` rather than gas used, so 0.02 MON
+    ///         was not enough: the 2026-09-22 testnet seed had to finish three claims by hand.
+    uint256 public constant DEFAULT_MEMBER_FUND_WEI = 0.1 ether;
 
     /// @notice Spec 9.2's verified level: the demo attendees pass an event that demands ID and face.
     uint8 public constant DEMO_KYC_LEVEL = 1;
+
+    /// @notice A base32 CIDv1 of a sha2-256 digest, which is what Pinata hands back.
+    uint256 public constant CID_LENGTH = 59;
 
     /// @notice The demo event opens its doors a month out and sells until then, so one seeding lasts the
     ///         hackathon. An event that ended the same afternoon would take sub-plans 03 and 04 down
@@ -52,6 +65,11 @@ contract Seed is Script {
     ///      They exist so the seed can send a claim from each member without the founder minding three
     ///      more secrets, and they hold nothing but a free ticket and a few cents of testnet gas. The
     ///      real attendee phone registers its own passkey account through the app (sub-plan 03).
+    ///
+    ///      The device keys are just as public: all three demo members are registered with the same
+    ///      P256Vectors.DEVICE_X/Y, whose private key is printed in script/gen-p256-vectors.mjs. Anyone
+    ///      who reads this repository can sign a check-in for any of them. **This must never reach
+    ///      mainnet** -- it is a fixture for sub-plans 03 and 04 to tap against, not an account model.
     string internal constant MEMBER_LABEL = "monti.seed.demo.member";
     string internal constant PERSON_LABEL = "monti.seed.demo.person";
 
@@ -69,13 +87,21 @@ contract Seed is Script {
 
     /// @notice The deployments file still holds zeros, so Deploy has not run on this chain yet.
     error StackNotDeployed();
+    /// @notice The deployer could not wire a demo member the gas for its own claim.
     error MemberFundingFailed();
 
     function run() external {
         uint256 deployerPk = vm.envUint("DEPLOYER_PK");
         uint256 attesterPk = vm.envUint("ATTESTER_PK");
         address gate = vm.envAddress("GATE_ACCOUNT");
+        // No default, and no placeholder: see the header. A gate the attendee phone cannot verify is a
+        // gate that check-in defence 1 does not cover.
+        bytes32 gateKx = vm.envBytes32("SEED_GATE_KX");
+        bytes32 gateKy = vm.envBytes32("SEED_GATE_KY");
         uint256 memberFundWei = vm.envOr("MEMBER_FUND_WEI", DEFAULT_MEMBER_FUND_WEI);
+        // No default: an event whose metadata is not pinned yet has no name and no image on the
+        // attendee's screen, and the founder is the only one who can pin it.
+        string memory imageCid = vm.envString("SEED_IMAGE_CID");
 
         string memory raw = vm.readFile(string.concat("deployments/", vm.toString(block.chainid), ".json"));
         seed(
@@ -83,6 +109,9 @@ contract Seed is Script {
             vm.parseJsonAddress(raw, ".organizers"),
             vm.parseJsonAddress(raw, ".ticket"),
             gate,
+            gateKx,
+            gateKy,
+            imageCid,
             deployerPk,
             attesterPk,
             memberFundWei
@@ -96,10 +125,7 @@ contract Seed is Script {
             console2.log("member      ", members[i], "holds ticket", tokenIds[i]);
         }
 
-        // A dry run simulates the whole seeding but leaves nothing on chain, so recording its ids would
-        // replace the tracked record with an event that does not exist. Only a real broadcast earns the
-        // write; the tests call `record()` themselves.
-        if (vm.isContext(VmSafe.ForgeContext.ScriptBroadcast)) record();
+        record();
     }
 
     /// @notice Creates the organizer, the event, the gate and the demo members' tickets.
@@ -113,6 +139,9 @@ contract Seed is Script {
         address organizers_,
         address ticket_,
         address gateAccount_,
+        bytes32 gateKx_,
+        bytes32 gateKy_,
+        string memory imageCid_,
         uint256 deployerPk,
         uint256 attesterPk,
         uint256 memberFundWei
@@ -120,11 +149,17 @@ contract Seed is Script {
         if (identity_ == address(0) || organizers_ == address(0) || ticket_ == address(0)) {
             revert StackNotDeployed();
         }
+        _requireGateKey(gateKx_, gateKy_);
+        _requireCid(imageCid_);
 
         identity = Identity(identity_);
         organizers = Organizers(organizers_);
         ticket = Ticket(ticket_);
         gateAccount = gateAccount_;
+
+        // Identity.register takes writes from the attester and nobody else, so a mismatched key does not
+        // fail here but eight calls deep, on the first demo member, as an opaque NotAttester.
+        require(vm.addr(attesterPk) == identity.attester(), "ATTESTER_PK does not match Identity.attester()");
 
         address deployer = vm.addr(deployerPk);
         delete members;
@@ -135,9 +170,9 @@ contract Seed is Script {
 
         vm.startBroadcast(deployerPk);
         orgId = organizers.createOrganizer(deployer);
-        eventId = ticket.createEvent(_meta(), _tiers());
+        eventId = ticket.createEvent(_meta(imageCid_), _tiers());
         ticket.publishEvent(eventId);
-        gateId = organizers.registerGate(eventId, gateAccount, keccak256("gate-kx"), keccak256("gate-ky"));
+        gateId = organizers.registerGate(eventId, gateAccount, gateKx_, gateKy_);
         organizers.openGate(gateId);
         for (uint256 i; i < members.length; ++i) {
             if (members[i].balance >= memberFundWei) continue;
@@ -162,11 +197,21 @@ contract Seed is Script {
     }
 
     /// @notice Records the demo where sub-plans 03 and 04 look for it.
-    /// @dev    Public, and called by `run` only under a broadcast, so the tests can write the file on
-    ///         their own chain id without a dry run ever reaching the tracked one.
+    /// @dev    The broadcast gate is inside this function rather than at its call site, because
+    ///         `forge script --sig 'record()'` reaches it directly: a dry run of that signature would
+    ///         otherwise flatten the tracked deployments/seed-10143.json with the zeros of a script that
+    ///         seeded nothing. A dry run of `run` is the same hazard — it simulates the whole seeding but
+    ///         leaves no event on chain. Only a real broadcast earns the write. Tests reach the writing
+    ///         half through a harness, so no public entry point can be pointed at an arbitrary path.
     function record() public {
-        string memory path = string.concat("deployments/seed-", vm.toString(block.chainid), ".json");
+        if (!vm.isContext(VmSafe.ForgeContext.ScriptBroadcast)) {
+            console2.log("not a broadcast: nothing was recorded");
+            return;
+        }
+        _record(string.concat("deployments/seed-", vm.toString(block.chainid), ".json"));
+    }
 
+    function _record(string memory path) internal {
         string memory obj = "seed";
         vm.serializeUint(obj, "orgId", orgId);
         vm.serializeUint(obj, "eventId", eventId);
@@ -194,13 +239,37 @@ contract Seed is Script {
         return keccak256(abi.encodePacked(PERSON_LABEL, index));
     }
 
-    function _meta() private view returns (Ticket.EventMeta memory) {
+    /// @dev Organizers.registerGate refuses a half-zero key, but only after the organizer, the event
+    ///      and the funding are already on chain, and as an opaque InvalidGateKey. An unset
+    ///      SEED_GATE_KX/KY arrives here as a zero word, so this is where the founder is told which
+    ///      variable is empty -- before anything is broadcast.
+    function _requireGateKey(bytes32 kx, bytes32 ky) private pure {
+        require(
+            kx != bytes32(0) && ky != bytes32(0),
+            "SEED_GATE_KX and SEED_GATE_KY must be the gate device's P-256 public key"
+        );
+    }
+
+    /// @dev The chain carries only `titleHash` and `descHash`, so this CID is where the attendee app
+    ///      gets the event's name and picture from (sub-plan 03 reads it as the metadata JSON's CID).
+    ///      A base32 CIDv1 of a sha2-256 digest is 59 characters and starts with `bafy` (dag-pb) or
+    ///      `bafk` (raw leaf, what Pinata's v3 upload returns for small files) — anything else is a
+    ///      placeholder that would leave the demo event nameless on the first screen.
+    function _requireCid(string memory cid) private pure {
+        require(bytes(cid).length == CID_LENGTH, "SEED_IMAGE_CID must be a 59-character base32 CIDv1");
+        require(
+            LibString.startsWith(cid, "bafy") || LibString.startsWith(cid, "bafk"),
+            "SEED_IMAGE_CID must be a base32 CIDv1 starting with bafy or bafk"
+        );
+    }
+
+    function _meta(string memory imageCid_) private view returns (Ticket.EventMeta memory) {
         uint64 nowTs = uint64(block.timestamp);
         return Ticket.EventMeta({
             orgId: orgId,
             titleHash: keccak256("MONTI Demo Night"),
             descHash: keccak256("Monad Metropolis demo event"),
-            imageCid: "bafybeigdyrztseedimageplaceholdercid",
+            imageCid: imageCid_,
             startsAt: nowTs + DOORS_IN,
             endsAt: nowTs + DOORS_IN + RUNS_FOR,
             venueHash: keccak256("Seoul, Gangnam"),

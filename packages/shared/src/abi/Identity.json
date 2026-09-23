@@ -38,6 +38,19 @@
   },
   {
     "type": "function",
+    "name": "ROTATION_UNDO_WINDOW",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "accountOf",
     "inputs": [
       {
@@ -91,6 +104,13 @@
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "cancelRotation",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -301,6 +321,44 @@
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "rotatedAt",
+    "inputs": [
+      {
+        "name": "personId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "rotatedFrom",
+    "inputs": [
+      {
+        "name": "personId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -521,6 +579,25 @@
     "anonymous": false
   },
   {
+    "type": "event",
+    "name": "RotationCancelled",
+    "inputs": [
+      {
+        "name": "personId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
     "type": "error",
     "name": "AccountAlreadyRegistered",
     "inputs": []
@@ -553,6 +630,11 @@
   {
     "type": "error",
     "name": "NicknameTaken",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NoRotationToCancel",
     "inputs": []
   },
   {

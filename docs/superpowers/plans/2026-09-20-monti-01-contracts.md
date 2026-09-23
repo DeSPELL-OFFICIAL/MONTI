@@ -45,7 +45,7 @@ contracts/
   foundry.toml                     solc 0.8.31, evm_version osaka, optimizer, rpc aliases 10143/143
   remappings.txt                   @openzeppelin, solady, account-abstraction, smart-wallet, forge-std
   .gitignore                       out/ cache/ broadcast/ .env
-  .env.example                     MONAD_TESTNET_RPC, MONAD_MAINNET_RPC, DEPLOYER_PK, ATTESTER
+  .env.example                     MONAD_TESTNET_RPC, MONAD_MAINNET_RPC, DEPLOYER_PK, ATTESTER_ADDRESS
   lib/                             git submodules (forge install)
   src/
     Identity.sol                   personId ↔ account ↔ active device key, 7-day cooldowns, lock
@@ -185,8 +185,9 @@ MONAD_TESTNET_RPC=https://testnet-rpc.monad.xyz
 MONAD_MAINNET_RPC=https://rpc.monad.xyz
 # Deployer EOA private key (0x-prefixed). Testnet only.
 DEPLOYER_PK=0x0000000000000000000000000000000000000000000000000000000000000000
-# Attester EOA address. Production key lives in Cloud KMS, never here.
-ATTESTER=0x0000000000000000000000000000000000000000
+# Attester EOA address. MVP: the key itself lives in Secret Manager as a raw EOA (ATTESTER_PK), never
+# here; KMS signing is the production path.
+ATTESTER_ADDRESS=0x0000000000000000000000000000000000000000
 # EntryPoint v0.6 (Coinbase Smart Wallet v1)
 ENTRYPOINT=0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789
 EOF
@@ -2403,7 +2404,6 @@ contract Ticket is ERC721, ITicket {
     error WrongEvent();
     error CodeExpired();
     error DeviceLocked();
-    error NoActiveDevice();
     error BadDeviceSignature();
     error NoOffer();
     error OfferExpired();
@@ -3641,11 +3641,11 @@ import {P256} from "solady/utils/P256.sol";
 
         if (!organizers.isOpenGate(eventId, msg.sender)) revert GateNotOpen();
         if (organizers.gateOf(msg.sender) != g.gateId) revert GateMismatch();
-        if (block.timestamp < g.issuedAt || block.timestamp - g.issuedAt > CODE_WINDOW) revert CodeExpired();
+        if (g.issuedAt > block.timestamp + CLOCK_SKEW) revert CodeExpired();
+        if (uint256(g.issuedAt) + CODE_WINDOW < block.timestamp) revert CodeExpired();
 
         if (identity.isLocked(holder)) revert DeviceLocked();
         (bytes32 x, bytes32 y) = identity.activeDevice(holder);
-        if (x == bytes32(0) && y == bytes32(0)) revert NoActiveDevice();
 
         bytes32 h = sha256(abi.encode(tokenId, g.gateId, g.eventId, g.nonce, g.issuedAt));
         (bytes32 r, bytes32 s) = abi.decode(deviceSig, (bytes32, bytes32));
@@ -5949,7 +5949,7 @@ Expected: ABI 네 개, 배포 주소 여섯 개(`identity`, `organizers`, `ticke
 | §6.3 T13 두 게이트 동시 | 하나만 성공 | Task 21 `test_T13_secondGateRevertsForTheSameTicket` |
 | §6.3 T14 가짜 게이트 | allowlist 없는 발신자 거부 | Task 13 `isOpenGate`, Task 21 `test_T14_fakeGateRejected`·`test_closedGateRejected`·`test_revokedGateRejected` |
 | §6.3 T15 단말기 도난 후 큐 조작 | 관객 기기 서명 없이는 체인이 안 받는다 | Task 20 `BadDeviceSignature` 경로 |
-| §7.2 ①~⑤ | 게이트 권한·기기 서명·gate_id 일치·60초·티켓 상태 | Task 20 `checkIn` 본문(검사 순서 그대로), Task 21 전 항목 |
+| §7.2 ①~⑤ | 게이트 권한·기기 서명·gate_id 일치·60초·티켓 상태 | Task 20 `checkIn` 본문(다섯 항목 모두 검사한다. 순서는 스펙 나열과 다르다 — 티켓 존재·이벤트 일치·이벤트 상태·취소·중복 입장을 먼저 보고, 그다음 게이트 권한·gate_id·60초·기기 잠금, 가장 비싼 기기 서명 검증이 마지막이다), Task 21 전 항목 |
 | §7.3 번호 유효기간 60초 | `CODE_WINDOW = 60` | Task 14 상수, Task 21 `test_codeAtExactlySixtySecondsStillWorks` |
 | §8.3 가스 | 체크인 275k 예산 | Task 29 포크 테스트(< 200k) |
 | §8.4 페이마스터 | 예산 칸 2종, 대상·함수 허용 목록, `postOp` 없음, 스테이킹 | Task 25~28 |
@@ -5984,7 +5984,7 @@ Expected: ABI 네 개, 배포 주소 여섯 개(`identity`, `organizers`, `ticke
 - `Organizers`: 권한 상수 5개 값(1·2·4·8·16), 함수 13개, 이벤트 8종 — 마스터와 동일. `registerGate(eventId, gateAccount, kx, ky)`의 인자 순서도 그대로다(orgId를 받지 않고 `ticket.eventOrg(eventId)`로 찾는다).
 - `Ticket`: `EventMeta`·`Tier`·`GateCode`·`CheckIn` 필드 이름·타입·순서가 마스터와 동일하고, 델타가 `EventMeta` **끝에** `category`·`regionCode`만 덧붙였다(앞 13개 필드는 그대로라 기존 ABI 순서가 보존된다). `CODE_WINDOW = 60`. 함수 시그니처 13개와 이벤트 8종 동일. 델타로 `EventStatus`·`publishEvent`·`cancelEvent`·`updateEventMeta`·`eventStatus`·`EventStatusChanged`·`Offer`·`createOffer`·`cancelOffer`·`acceptOffer`·`offerOf`·오퍼 이벤트 3종이 추가됨.
 - KYC 등급: `Identity.kycLevelOf`는 `uint8`이고 0과 1만 쓴다(0 = 문자+패스키, 1 = 신분증+얼굴). `Ticket`은 `< 1`로만 비교하므로 나중에 2단계를 더해도 기존 규칙이 깨지지 않는다. `setKycLevel`은 어테스터 EOA가 부르므로 `register`·`rotateAccount`과 마찬가지로 페이마스터 허용 목록에 넣지 않았다.
-- `MontiPaymaster`: `depositPlatform`, `deposit`, `withdraw`, `setSelfSponsored`, `budgetOf`, 이벤트 3종이 마스터와 동일. `paymasterAndData = abi.encodePacked(address(this), uint256 orgId)`(52바이트)와 "검증 단계에서 `maxCost` 차감, `postOp` 없음"도 그대로다. 허용 목록은 마스터의 15개를 모두 포함하고 델타의 7개(`setNickname`, `createOffer`, `cancelOffer`, `acceptOffer`, `publishEvent`, `cancelEvent`, `updateEventMeta`)를 더해 23개다.
+- `MontiPaymaster`: `depositPlatform`, `deposit`, `withdraw`, `setSelfSponsored`, `budgetOf`, 이벤트 3종이 마스터와 동일. `paymasterAndData = abi.encodePacked(address(this), uint256 orgId)`(52바이트)와 "검증 단계에서 `maxCost` 차감, `postOp` 없음"도 그대로다. 허용 목록은 마스터의 15개 이름을 모두 포함하고(`safeTransferFrom`이 오버로드 두 개라 셀렉터로는 16개다) 델타의 7개(`setNickname`, `createOffer`, `cancelOffer`, `acceptOffer`, `publishEvent`, `cancelEvent`, `updateEventMeta`)를 더해 셀렉터 23개다. `revoke`는 어느 쪽에도 없다 — 주최자 자신의 관리 동작이라 후원 대상이 아니다.
 - 서명 다이제스트: `sha256(abi.encode(tokenId, g.gateId, g.eventId, g.nonce, g.issuedAt))` — 마스터 주석과 한 글자도 다르지 않으며 Task 19의 생성 스크립트와 Task 20의 `test_digestMatchesTheSpecFormula`가 서로를 검증한다.
 - 이름 충돌 점검: `Ticket.DeviceLocked`는 **에러**, `Identity.DeviceLocked`는 **이벤트**다. 서로 다른 컨트랙트라 충돌하지 않지만 ABI 소비자(서브플랜 04)가 혼동하지 않도록 Task 33 Step 3의 검사 목록에 둘 다 명시했다.
 - 이 플랜이 마스터에 **없던 것을 추가한 목록**(변경이 아니라 추가): `AttesterRole`(`attester`, `deployer`, `setAttester`, `AttesterChanged`, `NotAttester`, `NotDeployer`, `ZeroAddress`), `Organizers.adminBitsOf`·`Organizers.ticket`·`Organizers.deployer`, `Ticket.eventStatus`·`Ticket.offerOf`·커스텀 에러 전체(`KycRequired` 포함), `MontiPaymaster.setTargets`·`allowedSelector`·`selfSponsored`·`addStake`·`unlockStake`·`withdrawStake`·`depositToEntryPoint`·`entryPointBalance`·`PLATFORM`. 마스터에 정의된 이름은 하나도 바꾸지 않았다.

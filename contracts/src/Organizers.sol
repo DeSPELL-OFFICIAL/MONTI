@@ -121,7 +121,7 @@ contract Organizers is IOrganizers {
     {
         if (ticket == address(0)) revert TicketNotSet();
         if (gateAccount == address(0)) revert ZeroAddress();
-        if (kx == 0 && ky == 0) revert InvalidGateKey();
+        if (kx == 0 || ky == 0) revert InvalidGateKey();
         if (_gateOf[gateAccount] != 0) revert GateAccountInUse();
 
         uint256 orgId = ITicket(ticket).eventOrg(eventId);
@@ -159,10 +159,16 @@ contract Organizers is IOrganizers {
         emit GateClosed(gateId);
     }
 
+    /// @notice T14 의 대응 수단. 도난당한 단말기를 여기서 끊는다.
+    /// @dev    _gateOf 를 지우는 것이 핵심이다(I3): 남겨두면 (a) MontiPaymaster 가 폐기된 계정을
+    ///         영원히 스폰서된 송신자로 받아 되돌아가는 op 로 예치금을 태울 수 있고, (b) 그 주소를
+    ///         두 번 다시 게이트로 등록할 수 없다. 게이트 기록 자체(gateInfo)는 남으므로 지난
+    ///         입장 기록의 gateId 는 계속 해석된다.
     function revokeGate(uint256 gateId) external {
         Gate storage g = _mutateGate(gateId);
         g.revoked = true;
         g.open = false;
+        delete _gateOf[g.account];
         emit GateRevoked(gateId);
     }
 
