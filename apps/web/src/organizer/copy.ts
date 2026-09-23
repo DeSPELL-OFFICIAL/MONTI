@@ -73,6 +73,9 @@ const ko = {
     cancelled: '취소했어요',
     confirming: '아직 확인 중이에요. 잠시 뒤 이 화면을 다시 열어 주세요',
     notDraft: '이미 발행한 행사예요',
+    // updateEventMeta 가 낼 수 있는 나머지 두 되돌림(Ticket.sol:208). 발행·취소에서는 안 난다.
+    schedule: '행사 시간이 이미 지났어요',
+    tiers: '티켓 종류를 확인해 주세요',
     closed: '이미 끝났거나 취소된 행사예요',
     notAllowed: '이 행사를 다룰 권한이 없어요',
     failed: '보내지 못했어요. 잠시 뒤 다시 시도해 주세요',
@@ -220,6 +223,10 @@ const ko = {
       kind: '{{index}}번째 종류',
       change: '바꾸기',
       close: '그만두기',
+      // 읽기 실패는 '그림 없음'이 아니다 — saveEventArt 는 문서를 통째로 덮어쓰므로
+      // 못 읽은 채로 저장하면 올려 둔 그림이 기본값으로 지워진다.
+      loadFailed: '지금 티켓 그림을 불러올 수 없어요. 덮어쓰지 않도록 바꾸기를 잠가 뒀어요',
+      retry: '다시 시도',
       saving: '저장하고 있어요',
       saved: '저장했어요',
       notAllowed: '이 행사의 티켓 그림을 바꿀 권한이 없어요',
@@ -257,7 +264,6 @@ const ko = {
       title: '행사 정보 고치기',
       loading: '행사 정보를 불러오고 있어요',
       notDraft: '이미 공개한 행사는 고칠 수 없어요',
-      failed: '행사 정보를 불러오지 못했어요. 잠시 뒤 다시 시도해 주세요',
       back: '행사 화면으로',
     },
 
@@ -377,6 +383,7 @@ const ko = {
       updating: '행사 정보를 저장하고 있어요',
       // 시간 초과는 실패가 아니다. 두 번 보내면 행사가 두 개가 된다.
       confirming: '만드는 중이에요. 화면을 나가도 돼요. 잠시 뒤 주최자 화면에서 확인해 주세요',
+      confirmingEdit: '저장하는 중이에요. 화면을 나가도 돼요. 잠시 뒤 행사 화면에서 확인해 주세요',
     },
 
     publishProblems: {
@@ -389,6 +396,9 @@ const ko = {
       badTags: '태그를 다시 확인해 주세요',
       badPoster: '포스터를 다시 올려 주세요',
       notDraft: '이미 공개한 행사는 고칠 수 없어요',
+      // 초안인 채로 종료 시각이 지나면 신청 기간(지금~종료)이 거꾸로가 되어 InvalidSchedule 이 난다.
+      eventPast: '행사 시간이 이미 지났어요. 종료 시각을 고치고 다시 저장해 주세요',
+      tiersInvalid: '티켓 종류를 확인해 주세요',
       followUpFailed: '티켓 그림이나 장소를 저장하지 못했어요. 저장을 한 번 더 눌러 주세요',
       schedule: '종료 시각이 시작 시각보다 뒤여야 해요',
       tiersEmpty: '티켓 종류를 하나 이상 만들어 주세요',
@@ -493,6 +503,9 @@ const en: typeof ko = {
     cancelled: 'Cancelled',
     confirming: 'Still confirming. Please open this screen again in a moment',
     notDraft: 'This event is already published',
+    /** The other two `updateEventMeta` can revert with; publish and cancel never raise them. */
+    schedule: 'This event\'s time has already passed',
+    tiers: 'Please check the ticket kinds',
     closed: 'This event is already over or cancelled',
     notAllowed: 'You may not manage this event',
     failed: 'Could not send that. Please try again in a moment',
@@ -636,6 +649,9 @@ const en: typeof ko = {
       kind: 'Kind {{index}}',
       change: 'Change',
       close: 'Done',
+      // A failed read is not "no picture": saving on top of one would erase uploaded art.
+      loadFailed: 'Could not load the ticket pictures right now. Changing them is locked so nothing is overwritten',
+      retry: 'Try again',
       saving: 'Saving',
       saved: 'Saved',
       notAllowed: 'You may not change the pictures for this event',
@@ -673,7 +689,6 @@ const en: typeof ko = {
       title: 'Edit this event',
       loading: 'Loading the event',
       notDraft: 'An event that is already public cannot be edited',
-      failed: 'Could not load the event. Please try again in a moment',
       back: 'Back to the event',
     },
 
@@ -791,6 +806,7 @@ const en: typeof ko = {
       updating: 'Saving the event',
       // A timeout is not a failure. Sending it twice would be two events.
       confirming: 'Still being created. You can leave this screen — check your organiser screen in a moment',
+      confirmingEdit: 'Still being saved. You can leave this screen — check the event screen in a moment',
     },
 
     publishProblems: {
@@ -803,6 +819,9 @@ const en: typeof ko = {
       badTags: 'Please check the tags again',
       badPoster: 'Please upload the poster again',
       notDraft: 'An event that is already public cannot be edited',
+      /** A Draft left past its end date makes the derived sign-up window run backwards. */
+      eventPast: 'This event\'s time has already passed. Please fix the end time and save again',
+      tiersInvalid: 'Please check the ticket kinds',
       followUpFailed: 'Could not save the ticket picture or the venue. Please press Save once more',
       schedule: 'The end has to come after the start',
       tiersEmpty: 'Add at least one ticket kind',

@@ -70,6 +70,7 @@ const META = {
 };
 
 const { EditEvent } = await import('./EditEvent');
+const { ko: sharedCopy } = await import('../../shared/copy/index');
 const { CreateEvent } = await import('./CreateEvent');
 const { TicketSettings } = await import('./TicketSettings');
 const { organizerCopy } = await import('../copy');
@@ -171,8 +172,32 @@ describe('reopening the scene on an event that already exists', () => {
   it('refuses rather than prefilling blanks when the document cannot be read', async () => {
     fetchEventMetadata.mockRejectedValue(new Error('IPFS_504'));
     open();
-    expect(await screen.findByText(copy.edit.failed)).toBeInTheDocument();
+    expect(await screen.findByText(sharedCopy.common.error)).toBeInTheDocument();
     expect(saveEventDraft).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The same rule for the pictures as for the words. `saveEventArt` replaces the document, so
+   * a prefill that read `[]` from a failed read and then saved would write every kind back as
+   * the first preset and erase whatever an organiser had uploaded.
+   */
+  it('refuses when the stored pictures cannot be read, and never saves defaults over them', async () => {
+    loadEventArt.mockRejectedValue(new Error('offline'));
+    open();
+    expect(await screen.findByText(sharedCopy.common.error)).toBeInTheDocument();
+    expect(saveEventDraft).not.toHaveBeenCalled();
+    expect(saveEventArt).not.toHaveBeenCalled();
+  });
+
+  it('offers a retry that runs the whole prefill again once the read comes back', async () => {
+    const user = userEvent.setup();
+    loadEventArt.mockRejectedValueOnce(new Error('offline'));
+    open();
+    await screen.findByText(sharedCopy.common.error);
+
+    await user.click(screen.getByRole('button', { name: sharedCopy.common.retry }));
+    await waitFor(() => expect(saveEventDraft).toHaveBeenCalled());
+    expect((saveEventDraft.mock.calls[0]?.[1] as EventDraft).tiers[0]?.design).toBe('c');
   });
 });
 

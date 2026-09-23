@@ -23,7 +23,10 @@ function useEventArt(eventIds: readonly string[]): (eventId: string, tier: numbe
   const results = useQueries({
     queries: ids.map((eventId) => ({
       queryKey: ['eventArt', eventId],
-      queryFn: () => loadEventArt(eventId),
+      // A read that failed is "no picture" **here** and nowhere else: this screen only draws
+      // them. The screens that write the list back must tell a failed read from an absent
+      // document, which is why `loadEventArt` throws rather than swallowing its own.
+      queryFn: () => loadEventArt(eventId).catch(() => [] as TicketArtSource[]),
     })),
   });
   const byEvent = new Map(ids.map((eventId, index) => [eventId, results[index]?.data ?? []]));

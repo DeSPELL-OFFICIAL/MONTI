@@ -13,7 +13,7 @@ import { isUnsponsored } from '../shared/chain/unsponsored';
  */
 
 /** A named rule the organiser can understand, rather than one sentence for every refusal. */
-export type LifecycleProblem = 'notDraft' | 'closed' | 'notAllowed' | 'failed';
+export type LifecycleProblem = 'notDraft' | 'closed' | 'notAllowed' | 'schedule' | 'tiers' | 'failed';
 
 export type LifecycleResult =
   /** The chain has it. */
@@ -29,11 +29,19 @@ export type LifecycleResult =
  * `_requireEventPermission` raises `Unauthorized`; `publishEvent` and `updateEventMeta` raise
  * `NotDraft` once the event is out; `cancelEvent` raises `EventAlreadyClosed` for an event
  * that has already ended or already been cancelled.
+ *
+ * The last two belong to `updateEventMeta` alone — it re-checks the schedule and the kinds the
+ * way `createEvent` did (`Ticket.sol:208`). A Draft left sitting past its own end date is the
+ * way an organiser actually reaches `InvalidSchedule`: the sign-up window is derived as
+ * now → `endsAt`, so an event that has ended derives one that runs backwards. Without these
+ * two rows that revert reads as "행사를 만들지 못했어요" and pressing again fails forever.
  */
 const LIFECYCLE_REVERTS: ReadonlyArray<readonly [string, LifecycleProblem]> = [
   ['NotDraft', 'notDraft'],
   ['EventAlreadyClosed', 'closed'],
   ['Unauthorized', 'notAllowed'],
+  ['InvalidSchedule', 'schedule'],
+  ['InvalidTiers', 'tiers'],
   ['UnknownEvent', 'failed'],
 ];
 

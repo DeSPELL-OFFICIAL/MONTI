@@ -50,6 +50,10 @@ const UPDATE_PROBLEMS: Readonly<Record<LifecycleProblem, PublishProblem>> = {
   notDraft: 'notDraft',
   closed: 'notDraft',
   notAllowed: 'notYourOrg',
+  // Reachable without the organiser changing anything: the sign-up window is derived as
+  // now -> `endsAt`, so a Draft left past its own end date derives one that runs backwards.
+  schedule: 'eventPast',
+  tiers: 'tiersInvalid',
   failed: 'failed',
 };
 

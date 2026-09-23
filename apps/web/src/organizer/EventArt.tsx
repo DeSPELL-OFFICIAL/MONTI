@@ -46,20 +46,31 @@ export function EventArt({ eventId, tiers, title }: EventArtProps) {
   const [art, setArt] = useState<TicketArtSource[]>([]);
   const [open, setOpen] = useState(NONE);
   const [state, setState] = useState<SaveState>('');
+  /** The stored list could not be read, so nothing here may be written back. See below. */
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      // A missing document is the ordinary case — most events have never been through
-      // `saveEventArt` — and `loadEventArt` already answers it with an empty list rather than
-      // a failure, so there is nothing here to tell the organiser about.
-      const stored = await loadEventArt(eventId);
-      if (!cancelled) setArt(stored);
+      try {
+        // A missing document is the ordinary case — most events have never been through
+        // `saveEventArt` — and it comes back as an empty list, which needs no sentence.
+        const stored = await loadEventArt(eventId);
+        if (cancelled) return;
+        setArt(stored);
+        setLoadFailed(false);
+      } catch {
+        // A read that failed is **not** an empty list. Every change here sends the whole array
+        // and `saveEventArt` replaces the document, so saving on top of a failed read would
+        // write every kind back as the first preset and erase pictures somebody uploaded.
+        if (!cancelled) setLoadFailed(true);
+      }
     })();
     return () => {
       cancelled = true;
     };
-  }, [eventId]);
+  }, [eventId, attempt]);
 
   const artOf = (index: number): TicketArtSource => art[index] ?? DEFAULT_ART;
 
@@ -78,6 +89,20 @@ export function EventArt({ eventId, tiers, title }: EventArtProps) {
       const { code } = callableFailure(cause);
       setState(code === 'permission-denied' ? 'notAllowed' : 'failed');
     }
+  }
+
+  // Nothing is offered on top of a read that failed: the pictures on screen would not be the
+  // ones stored, and the first change would save those wrong ones over the real ones.
+  if (loadFailed) {
+    return (
+      <section className="event-art">
+        <h2>{copy.title}</h2>
+        <Alert tone="error">{copy.loadFailed}</Alert>
+        <Button variant="ghost" onClick={() => setAttempt((count) => count + 1)}>
+          {copy.retry}
+        </Button>
+      </section>
+    );
   }
 
   return (

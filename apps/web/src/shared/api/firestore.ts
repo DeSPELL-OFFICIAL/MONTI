@@ -188,21 +188,22 @@ function toTicketArt(entry: unknown): TicketArtSource {
  * `{ tiers: [ { design } | { imageCid }, ... ], updatedAt }`. `saveEventArt` writes the
  * document and the rules open it to any signed-in reader, the same shape `orgProfiles` has.
  *
- * An empty list is the answer for a document that is not there, may not be read, or holds
- * something else entirely. The missing document is the ordinary case rather than the failure
- * case — most events have never been through `saveEventArt` — so a refusal is swallowed the
- * way {@link loadOrgName} swallows its own: the picture a ticket could not be given is the
- * bundled one, and it must never fail the screen it was being read for.
+ * **An empty list means the document is not there; a failed read throws.** The two are not the
+ * same answer and this function must never blur them, because `saveEventArt` *replaces* the
+ * document: a caller that read `[]` from a network blip and then saved would write every kind
+ * back as the first preset and erase pictures an organiser uploaded. The missing document is
+ * the ordinary case — most events have never been through `saveEventArt` — so it is an empty
+ * list rather than a refusal, and a screen that only draws pictures (the ticket list) can go
+ * on treating a rejection as "no picture" itself.
+ *
+ * This is why it does **not** swallow its own failure the way {@link loadOrgName} does: a name
+ * that could not be read is only ever shown, while this list is also written back.
  */
 export async function loadEventArt(eventId: string): Promise<TicketArtSource[]> {
-  try {
-    const snapshot = await getDoc(doc(getDb(), 'eventArt', eventId));
-    const tiers: unknown = (snapshot.data() as { tiers?: unknown } | undefined)?.tiers;
-    if (!Array.isArray(tiers)) return [];
-    return (tiers as unknown[]).map(toTicketArt);
-  } catch {
-    return [];
-  }
+  const snapshot = await getDoc(doc(getDb(), 'eventArt', eventId));
+  const tiers: unknown = (snapshot.data() as { tiers?: unknown } | undefined)?.tiers;
+  if (!Array.isArray(tiers)) return [];
+  return (tiers as unknown[]).map(toTicketArt);
 }
 
 /**
