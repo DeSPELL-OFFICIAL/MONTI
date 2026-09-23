@@ -87,6 +87,10 @@ export const NON_GATE_ERRORS = [
   'ERC721NonexistentToken',
   'EventAlreadyClosed',
   'InvalidSchedule',
+  // 01b's EIP-712 domain, inherited from OpenZeppelin's ShortStrings. They are raised while a
+  // contract *constructs* its domain separator, never by a call — and certainly never by one a
+  // door makes.
+  'InvalidShortString',
   'InvalidTiers',
   'KycRequired',
   'MaxPerWalletExceeded',
@@ -96,8 +100,14 @@ export const NON_GATE_ERRORS = [
   'NothingToMigrate',
   'OfferExpired',
   'PaidTiersNotEnabled',
+  // 01b's 24-hour quarantine after a recovery (`abi-delta-01b.md` §6). It is raised from
+  // `_update` — mint, transfer and `migrate` — so it belongs to the attendee's phone. `checkIn`
+  // and `checkInLate` move no token and write no owner, so no gate call can reach it.
+  'RotationPending',
   'SaleClosed',
   'SoldOut',
+  // The other half of the ShortStrings pair, and the only 01b error that carries an argument.
+  'StringTooLong',
   'TransferCutoffPassed',
   'TransferLimitReached',
   'TransfersDisabled',

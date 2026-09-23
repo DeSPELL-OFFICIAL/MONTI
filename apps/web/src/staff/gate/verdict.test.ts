@@ -76,21 +76,26 @@ describe('nonceHashOf', () => {
 });
 
 describe('checkedInTopics', () => {
-  it('filters on the CheckedIn signature and this ticket in topic 1', () => {
+  it('filters on both check-in signatures and this ticket in topic 1', () => {
     const [signatures, token] = checkedInTopics(TOKEN_ID) ?? [];
-    expect(signatures).toEqual([CHECKED_IN]);
+    expect(signatures).toEqual([CHECKED_IN, CHECKED_IN_LATE]);
     expect(token).toBe(TOKEN_TOPIC);
   });
 
   /**
-   * The pending-event guard from the consumer's side. `CheckedInLate` is declared in
-   * `USED_EVENTS` and listed in `PENDING_EVENTS`, so the filter carries one signature today
-   * and two the day the 01b ABI lands — with nothing in this file changing.
+   * The pending-event mechanism from the consumer's side, now that it has been through its one
+   * transition. `CheckedInLate` was declared in `USED_EVENTS` and listed in `PENDING_EVENTS`
+   * before the 2026-09-23 redeploy, so the filter carried one signature; the redeploy put the
+   * event in the generated ABI, `PENDING_EVENTS.Ticket` was emptied, and the filter carries two
+   * — with nothing in `verdict.ts` changing, which was the whole point of the guard.
+   *
+   * `tokenId` is the only indexed position the two events share, so topic 1 stays the filter on
+   * this ticket for both of them.
    */
-  it('carries one signature while CheckedInLate is still pending', () => {
+  it('carries both signatures now that CheckedInLate is deployed', () => {
     const [signatures] = checkedInTopics(TOKEN_ID) ?? [];
-    expect(signatures).toHaveLength(1);
-    expect(signatures).not.toContain(CHECKED_IN_LATE);
+    expect(signatures).toHaveLength(2);
+    expect(signatures).toContain(CHECKED_IN_LATE);
   });
 });
 
@@ -106,7 +111,7 @@ describe('the chain verdict', () => {
     watchCheckedIn(TAP, () => {});
     const args = subscribeLogs.mock.calls[0]?.[0] as { address: Hex; topics: unknown[] };
     expect(args.address).toBe(TICKET);
-    expect(args.topics).toEqual([[CHECKED_IN], TOKEN_TOPIC]);
+    expect(args.topics).toEqual([[CHECKED_IN, CHECKED_IN_LATE], TOKEN_TOPIC]);
   });
 
   it('turns a speculative log into an unfinalized admit and the finalized repeat into a final one', () => {

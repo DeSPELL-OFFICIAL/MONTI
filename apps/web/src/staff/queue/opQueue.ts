@@ -93,14 +93,15 @@ export const QUEUE_WAIT_TIMEOUT_MS = 20_000;
 export const LATE_CHECK_IN_FUNCTION = 'checkInLate' as const;
 
 /**
- * The name, typed for `sendCheckIn`. `USED_ABI.Ticket` (the app's usage manifest) does not list
- * `checkInLate` yet, so `CheckInFunction` resolves to `'checkIn'` alone and this cast is the
- * marker for that gap — not a way around it. {@link hasLateCheckIn} guards it at runtime: the
- * value never reaches `encodeFunctionData` while the generated ABI lacks the function.
+ * The name, typed for `sendCheckIn`. It is a plain annotation now: the 2026-09-23 01b redeploy
+ * put `checkInLate` in the generated ABI and `USED_ABI.Ticket` declares it, so `CheckInFunction`
+ * admits the name and the cast that used to mark that gap is gone.
  *
- * The day sub-plan 01b redeploys: add `checkInLate: 3` to `USED_ABI.Ticket` and delete the cast.
+ * {@link hasLateCheckIn} still guards the send at runtime, because the manifest says what this
+ * build intends to call and the generated ABI says what the deployment actually carries — and a
+ * gate reading an older bundle is a real thing, not a hypothetical.
  */
-const CHECK_IN_LATE = LATE_CHECK_IN_FUNCTION as unknown as CheckInFunction;
+const CHECK_IN_LATE: CheckInFunction = LATE_CHECK_IN_FUNCTION;
 
 /**
  * One queued entry as it is stored. `seq` is the only addition to Task 14's {@link QueueEntry}:

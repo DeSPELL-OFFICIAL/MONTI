@@ -184,7 +184,7 @@ const EVENT_META = {
   descHash: ZERO32,
   imageCid: '',
   startsAt: 1_700_000_000n,
-  endsAt: 1_790_000_000n,
+  endsAt: 4_102_444_800n,
   venueHash: ZERO32,
   saleStart: 0n,
   saleEnd: 0n,
@@ -329,7 +329,7 @@ async function openGate(over: Partial<typeof params> = {}) {
  * A check-in already written down, as a restart finds it: taken during a signal drop, committed,
  * and still owed to the chain with no connectivity edge left to carry it out.
  */
-async function seedQueueRow(): Promise<void> {
+async function seedQueueRow(over: { nextAttemptAt?: number } = {}): Promise<void> {
   const db = await staffDb();
   await db.put('queue', {
     id: `${TOKEN_ID}-0xfeed`,
@@ -341,6 +341,7 @@ async function seedQueueRow(): Promise<void> {
     attempts: 0,
     nextAttemptAt: 0,
     status: 'pending',
+    ...over,
   });
 }
 
@@ -580,10 +581,12 @@ describe('one tap, offline', () => {
       window.dispatchEvent(new Event('online'));
     });
 
-    // The header follows the one watcher this screen owns, and the drain reads that same answer:
-    // the dry-run mark on the row is a pass that actually ran, not a badge that turned green.
+    // The header follows the one watcher this screen owns, and the drain reads that same
+    // answer. Since the 01b redeploy the proof is the send itself: the row goes out through
+    // `checkInLate` and comes back `confirmed`, where before it could only be marked.
     await waitFor(() => expect(result.current.online).toBe(true));
-    await waitFor(async () => expect((await allEntries())[0]?.lastError).toBe(DRY_RUN_MARK));
+    await waitFor(async () => expect((await allEntries())[0]?.status).toBe('confirmed'));
+    expect((await allEntries())[0]?.lastError).toBeUndefined();
   });
 });
 
@@ -678,13 +681,15 @@ describe('what the gate still owes the chain', () => {
    * already on disk, already online, and no rising edge left to fire. Before this they sat there
    * for the rest of the shift.
    *
-   * The observable proof is the dry-run mark: this build's ABI has no `checkInLate`, so the drain
-   * marks the row instead of sending it — which only a pass that actually ran can do.
+   * The observable proof is the row: since the 01b redeploy `checkInLate` is in the ABI, so the
+   * drain sends it and the row comes back `confirmed` — which only a pass that actually ran can
+   * do. Before the redeploy the same proof was the dry-run mark.
    */
   it('drains on mount when the connection is already up', async () => {
     await seedQueueRow();
     await openGate();
-    await waitFor(async () => expect((await allEntries())[0]?.lastError).toBe(DRY_RUN_MARK));
+    await waitFor(async () => expect((await allEntries())[0]?.status).toBe('confirmed'));
+    expect(sendSponsoredOp).toHaveBeenCalled();
   });
 
   it('drains again on every status tick, without waiting for a disconnection', async () => {
@@ -695,11 +700,16 @@ describe('what the gate still owes the chain', () => {
     await act(async () => {
       vi.advanceTimersByTime(GATE_STATUS_POLL_MS);
     });
-    await waitFor(async () => expect((await allEntries())[0]?.lastError).toBe(DRY_RUN_MARK));
+    await waitFor(async () => expect((await allEntries())[0]?.status).toBe('confirmed'));
   });
 
+  /**
+   * The row is seeded with its backoff still ahead of it, so the drain that runs on mount skips
+   * it and it stays `pending` — which is what the count is about. Before the 01b redeploy any
+   * seeded row stayed pending, because nothing could be sent at all.
+   */
   it('counts what is waiting so the screen can offer a way to it', async () => {
-    await seedQueueRow();
+    await seedQueueRow({ nextAttemptAt: Date.now() + 60 * 60 * 1000 });
     const { result } = await openGate();
     await waitFor(() => expect(result.current.pendingCount).toBe(1));
     expect(result.current.parkedCount).toBe(0);

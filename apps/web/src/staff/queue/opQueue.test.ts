@@ -412,9 +412,16 @@ describe('durable check-in queue', () => {
       warned.mockRestore();
     });
 
-    it('is the generated ABI and not a flag: this fails the day 01b redeploys', async () => {
+    /**
+     * The gate is the generated ABI and never a flag, which is what let the drain switch itself
+     * on: 01b redeployed on 2026-09-23, `checkInLate` is in `Ticket.json`, and the dry run above
+     * is now reachable only by emptying the ABI the way those two tests do. It reads `false`
+     * again the day somebody ships a bundle built against an older export — which is the case
+     * the runtime guard is still there for.
+     */
+    it('is the generated ABI and not a flag: 01b redeployed, so this reads true', async () => {
       const shared = await vi.importActual<{ ticketAbi: Abi }>('@monti/shared');
-      expect(shared.ticketAbi.some((e) => e.type === 'function' && e.name === 'checkInLate')).toBe(false);
+      expect(shared.ticketAbi.some((e) => e.type === 'function' && e.name === 'checkInLate')).toBe(true);
     });
   });
 });

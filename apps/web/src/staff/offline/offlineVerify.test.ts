@@ -86,10 +86,14 @@ describe('the digest the gate recomputes', () => {
     );
   });
 
-  it('is still the five-field form, because that is what is deployed today', () => {
-    // Flip this line together with DEVICE_DIGEST_FORM when 01b redeploys (its Task 15).
-    expect(DEVICE_DIGEST_FORM).toBe('v1-fiveField');
-    expect(checkInDigest({ tokenId: '7', code: VECTOR_CODE, domain: DOMAIN })).toBe(V1_VECTOR);
+  it('is the domain-separated form, because that is what is deployed today', () => {
+    // Pinned to the deployment, not to a plan: 01b went out on 2026-09-23 (chain 10143, Ticket
+    // 0x4B8353C9F3503Cdbd011E8f35da0a955D95b1367) and its `_deviceDigest` is the seven-word
+    // form. The attendee app flipped the same day — the two halves of a tap have to agree on
+    // the digest form or every check-in is refused `BadDeviceSignature`. This line moves again
+    // only when a redeploy moves the contract.
+    expect(DEVICE_DIGEST_FORM).toBe('v2-domainSeparated');
+    expect(checkInDigest({ tokenId: '7', code: VECTOR_CODE, domain: DOMAIN })).toBe(V2_VECTOR);
   });
 
   it('hashes the message WebCrypto is handed — the verifier hashes it itself', async () => {
