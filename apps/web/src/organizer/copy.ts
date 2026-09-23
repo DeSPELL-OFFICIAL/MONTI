@@ -354,8 +354,9 @@ const ko = {
 
     publishProblems: {
       notYourOrg: '이 주최사에서 행사를 만들 권한이 없어요',
-      // 행사는 만들어졌는데 영수증에서 번호를 못 읽은 경우. 초안은 남겨 둔다.
-      noEventId: '행사는 만들어졌는데 번호를 읽지 못했어요. 이 화면을 나가지 말고 잠시 뒤 다시 눌러 주세요',
+      // 행사는 만들어졌는데 영수증에서 번호를 못 읽은 경우. 초안과 오퍼레이션 해시를 남겨 두고,
+      // 버튼을 다시 누르면 그 해시로 번호를 찾아온다 — 새 행사를 만들지 않는다.
+      noEventId: '행사는 만들어졌어요. 번호만 아직 못 읽었으니 아래 \'행사 만들기\'를 한 번 더 눌러 번호를 찾아 주세요. 행사가 두 개로 만들어지지는 않아요',
       pinFailed: '지금은 저장할 수 없어요. 잠시 뒤 다시 시도해 주세요',
       badMeta: '제목이나 소개가 너무 길어요. 줄이고 다시 시도해 주세요',
       badTags: '태그를 다시 확인해 주세요',
@@ -799,8 +800,9 @@ const en: typeof ko = {
 
     publishProblems: {
       notYourOrg: 'You may not create events for this organiser',
-      // The event was made but the receipt did not name it. The draft is kept.
-      noEventId: 'The event was created but its number could not be read. Stay on this screen and press again in a moment',
+      // The event was made but the receipt did not name it. The draft and the operation hash
+      // are kept, and pressing again looks the number up by that hash — it makes no new event.
+      noEventId: 'Your event was created. Only its number has not come back yet — press "Create the event" once more to look it up. It will not create a second event',
       pinFailed: 'Cannot save that right now. Please try again in a moment',
       badMeta: 'The title or the description is too long. Please shorten it and try again',
       badTags: 'Please check the tags again',

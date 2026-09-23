@@ -74,7 +74,10 @@ describe('sendSponsoredOp', () => {
     expect(sent.paymasterAndData).toBe(encodePaymasterAndData(PAYMASTER, 7n));
     expect(handle.userOpHash).toBe('0xuserophash');
     await expect(handle.wait()).resolves.toEqual({
-      success: true, txHash: '0xtx', blockNumber: 42n, revertReason: undefined, logs: [],
+      // The hash is on the receipt as well as on the handle: a caller whose operation landed
+      // without readable logs has nothing else to ask the bundler with.
+      success: true, userOpHash: '0xuserophash', txHash: '0xtx',
+      blockNumber: 42n, revertReason: undefined, logs: [],
     });
   });
 
@@ -91,7 +94,8 @@ describe('sendSponsoredOp', () => {
       const waited = handle.wait(15_000);
       await vi.advanceTimersByTimeAsync(15_000);
       await expect(waited).resolves.toEqual({
-        success: false, txHash: '0x', blockNumber: 0n, revertReason: 'TIMEOUT', logs: [],
+        success: false, userOpHash: '0xslow', txHash: '0x',
+        blockNumber: 0n, revertReason: 'TIMEOUT', logs: [],
       });
     } finally {
       vi.useRealTimers();
@@ -112,7 +116,8 @@ describe('sendSponsoredOp', () => {
       const waited = handle.wait(15_000);
       await vi.advanceTimersByTimeAsync(1_000); // two poll intervals (~600ms), well under the deadline
       await expect(waited).resolves.toEqual({
-        success: true, txHash: '0xtx', blockNumber: 42n, revertReason: undefined, logs: [],
+        success: true, userOpHash: '0xflaky', txHash: '0xtx',
+        blockNumber: 42n, revertReason: undefined, logs: [],
       });
     } finally {
       vi.useRealTimers();

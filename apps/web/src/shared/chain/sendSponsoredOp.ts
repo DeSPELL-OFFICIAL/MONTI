@@ -40,6 +40,13 @@ export interface SponsoredOpLog { address: Hex; topics: readonly Hex[]; data: He
  * `logs` is empty for anything that did not land, and for a bundler that answers without them. */
 export interface SponsoredOpReceipt {
   success: boolean;
+  /**
+   * The operation's own hash, carried on the receipt and not only on the handle. A caller that
+   * succeeded still needs it: `eth_getUserOperationReceipt` is the only way back to an
+   * operation whose logs this side could not read, and without the hash on the receipt the
+   * only way to ask again would be to send the operation a second time.
+   */
+  userOpHash: Hex;
   txHash: Hex;
   blockNumber: bigint;
   revertReason?: Hex | 'TIMEOUT';
@@ -154,6 +161,7 @@ export async function sendSponsoredOp({ account, calls, orgId }: SendSponsoredOp
         if (result) {
           return {
             success: result.success,
+            userOpHash,
             txHash: result.receipt.transactionHash,
             blockNumber: hexToBigInt(result.receipt.blockNumber),
             revertReason: result.reason,
@@ -168,7 +176,9 @@ export async function sendSponsoredOp({ account, calls, orgId }: SendSponsoredOp
 
       // The op never landed within the deadline. Not a revert, but the caller must be
       // unblocked; sendOp() maps success:false -> OpReverted with this sentinel reason.
-      return { success: false, txHash: '0x', blockNumber: 0n, revertReason: 'TIMEOUT', logs: [] };
+      return {
+        success: false, userOpHash, txHash: '0x', blockNumber: 0n, revertReason: 'TIMEOUT', logs: [],
+      };
     },
   };
 }

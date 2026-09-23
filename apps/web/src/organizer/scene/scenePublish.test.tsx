@@ -46,7 +46,10 @@ const CREATED_LOG = {
   data: '0x',
 };
 
-const ticketOp = vi.fn(async (_options: SentOp) => ({ success: true, logs: [CREATED_LOG] }));
+const OP_HASH = `0x${'22'.repeat(32)}` as const;
+const ticketOp = vi.fn(async (_options: SentOp) => ({
+  success: true, userOpHash: OP_HASH, logs: [CREATED_LOG],
+}));
 const resolveSubmittedOp = vi.fn(async (_hash: string) => ({
   state: 'pending' as 'pending' | 'landed' | 'failed',
   logs: [] as unknown[],
@@ -131,7 +134,7 @@ beforeEach(() => {
   localStorage.clear();
   store = [];
   handed = null;
-  ticketOp.mockResolvedValue({ success: true, logs: [CREATED_LOG] });
+  ticketOp.mockResolvedValue({ success: true, userOpHash: OP_HASH, logs: [CREATED_LOG] });
   resolveSubmittedOp.mockResolvedValue({ state: 'pending', logs: [] });
   pinEventMetadata.mockResolvedValue({ metadataCid: 'bafyMeta' });
   saveEventArt.mockResolvedValue({ ok: true });
@@ -305,13 +308,70 @@ describe('when it does not land', () => {
    * stays, and the organiser is told rather than dropped on the home screen without a word.
    */
   it('says so when the event was made but its number could not be read', async () => {
-    ticketOp.mockResolvedValue({ success: true, logs: [] });
+    ticketOp.mockResolvedValue({ success: true, userOpHash: OP_HASH, logs: [] });
     open();
     await create();
     expect(await screen.findByText(copy.publishProblems.noEventId)).toBeInTheDocument();
     expect(screen.queryByText(/^landed:/)).toBeNull();
     expect(deleteEventDraft).not.toHaveBeenCalled();
     expect(saveEventArt).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The operation landed — the event is on chain — but its logs named nothing this side could
+   * read. The only safe way on is to ask the bundler again **by hash**, so the hash is the
+   * first thing written, and the button that invites another press can only resolve.
+   */
+  it('records the operation hash before anything else and never sends a second createEvent', async () => {
+    const user = userEvent.setup();
+    ticketOp.mockResolvedValue({ success: true, userOpHash: OP_HASH, logs: [] });
+    open();
+    await create();
+    await screen.findByText(copy.publishProblems.noEventId);
+
+    await waitFor(() => expect(saveEventDraft).toHaveBeenCalled());
+    const written = saveEventDraft.mock.calls.at(-1)?.[1] as { submittedOpHash?: string };
+    expect(written.submittedOpHash).toBe(OP_HASH);
+
+    // The press the copy asks for. It resolves; it does not create.
+    expect(screen.getByRole('button', { name: copy.tiers.create })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: copy.tiers.create }));
+    await waitFor(() => expect(resolveSubmittedOp).toHaveBeenCalledWith(OP_HASH));
+    expect(ticketOp).toHaveBeenCalledTimes(1);
+    expect(pinEventMetadata).toHaveBeenCalledTimes(1);
+  });
+
+  it('finds the id on that second press and finishes the event', async () => {
+    const user = userEvent.setup();
+    ticketOp.mockResolvedValue({ success: true, userOpHash: OP_HASH, logs: [] });
+    resolveSubmittedOp.mockResolvedValue({ state: 'landed', logs: [CREATED_LOG] });
+    open();
+    await create();
+    await screen.findByText(copy.publishProblems.noEventId);
+
+    await user.click(screen.getByRole('button', { name: copy.tiers.create }));
+    await waitFor(() => expect(saveEventArt).toHaveBeenCalledWith({
+      eventId: '12', tiers: [{ preset: 'c' }, { imageCid: 'bafkart' }],
+    }));
+    expect(await screen.findByText('landed:/org/new/done/12')).toBeInTheDocument();
+    expect(ticketOp).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays on the resolve route when the bundler still cannot name it', async () => {
+    const user = userEvent.setup();
+    ticketOp.mockResolvedValue({ success: true, userOpHash: OP_HASH, logs: [] });
+    resolveSubmittedOp.mockResolvedValue({ state: 'landed', logs: [] });
+    open();
+    await create();
+    await screen.findByText(copy.publishProblems.noEventId);
+
+    await user.click(screen.getByRole('button', { name: copy.tiers.create }));
+    await waitFor(() => expect(resolveSubmittedOp).toHaveBeenCalled());
+    // Still no id, still no second operation, and the hash is still on the draft.
+    expect(ticketOp).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(copy.publishProblems.noEventId)).toBeInTheDocument();
+    const written = saveEventDraft.mock.calls.at(-1)?.[1] as { submittedOpHash?: string };
+    expect(written.submittedOpHash).toBe(OP_HASH);
   });
 
   it('names a refused tag rather than blaming the connection', async () => {

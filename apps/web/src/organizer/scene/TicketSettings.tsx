@@ -146,7 +146,11 @@ export function TicketSettings() {
         {stopped ? <Alert tone="warn">{copy.tierProblems.paidTier}</Alert> : null}
         {unsponsored ? <UnsponsoredNotice /> : null}
         {problem !== '' ? <Alert tone="error">{copy.publishProblems[problem]}</Alert> : null}
-        {phase === 'confirming' ? <Alert tone="info">{copy.publish.confirming}</Alert> : null}
+        {/* `confirming` covers two things — an operation still in flight, and one that landed
+            without naming its event. The second says so itself, so only one line shows. */}
+        {phase === 'confirming' && problem === '' ? (
+          <Alert tone="info">{copy.publish.confirming}</Alert>
+        ) : null}
         {phase === 'pinning' || phase === 'sending' || phase === 'finishing' ? (
           <p className="working">
             <Spinner />

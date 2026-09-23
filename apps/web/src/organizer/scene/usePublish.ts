@@ -174,10 +174,12 @@ export function usePublish(
   const finish = useCallback(
     async (eventId: string): Promise<void> => {
       // The receipt landed but no `EventCreated` came out of its logs. The event exists and
-      // nothing can address it, so the draft is the only place its venue and its pictures
-      // still are — it stays, and the organiser is told rather than dropped on the home screen.
+      // nothing here can address it, so the draft — the only place its venue and its pictures
+      // still are — stays, and the screen goes to `confirming`, not `idle`: from that state
+      // the button asks `resolveSubmittedOp` what the operation produced, and there is no
+      // path from it that sends a second `createEvent`.
       if (eventId === '') {
-        setPhase('idle');
+        setPhase('confirming');
         setProblem('noEventId');
         return;
       }
@@ -227,9 +229,13 @@ export function usePublish(
       if (submitted.state === 'pending') return;
       if (submitted.state === 'landed') {
         // It did land after all. Same rule as below: the id is recorded before anything else.
+        // An empty one leaves `submittedOpHash` in place, so the next press asks again rather
+        // than falling through to a fresh `createEvent`.
         const landed = createdEventId(submitted.logs);
-        patch({ createdEventId: landed });
-        await save().catch(() => undefined);
+        if (landed !== '') {
+          patch({ createdEventId: landed });
+          await save().catch(() => undefined);
+        }
         await finish(landed);
         return;
       }
@@ -260,12 +266,16 @@ export function usePublish(
       // `createEvent` returns the new id, but a sponsored operation gives back a receipt — so
       // the id comes out of the operation's own `EventCreated` log.
       const eventId = createdEventId(receipt.logs);
-      // Written to the draft **and flushed** before the follow-ups run. A page that dies here
-      // comes back to a draft that knows its event, rather than to one that would make a
-      // second. (A successful receipt carries no `userOpHash` — `sendOp` only passes one on a
-      // revert — so the id is the fact there is to record; the hash is already stored on the
-      // timeout path, which is the one it exists for.)
-      patch({ createdEventId: eventId });
+      // **The first thing written, before anything that could still fail.** One of the two is
+      // always recorded here, so from this line on every route back into `publish()` goes
+      // either to the follow-ups (`createdEventId`) or to `resolveSubmittedOp`
+      // (`submittedOpHash`) — and never to a second `createEvent`.
+      //
+      // The empty-id case is the one this exists for: the operation landed, the event is on
+      // chain, and the only way to find out which one is to ask the bundler again by hash.
+      patch(eventId === ''
+        ? { submittedOpHash: receipt.userOpHash }
+        : { createdEventId: eventId });
       await save().catch(() => undefined);
       await finish(eventId);
     } catch (cause) {
