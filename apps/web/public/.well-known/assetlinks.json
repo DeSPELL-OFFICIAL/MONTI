@@ -1,0 +1,24 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls",
+      "delegate_permission/common.get_login_creds"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "app.monti",
+      "sha256_cert_fingerprints": ["REPLACE_WITH_SIGNING_CERT_SHA256"]
+    }
+  },
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls",
+      "delegate_permission/common.get_login_creds"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "app.monti.staff",
+      "sha256_cert_fingerprints": ["REPLACE_WITH_SIGNING_CERT_SHA256"]
+    }
+  }
+]

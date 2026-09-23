@@ -119,6 +119,17 @@ export function formatEventDate(startsAt: string, locale: string): string {
 }
 
 /**
+ * The same moment with the clock left off, for an event whose organiser chose to tell only
+ * ticket holders when it starts. The day itself stays public: an event nobody can date is an
+ * event nobody can plan around, and the date is what a discover screen sorts and filters on.
+ */
+export function formatEventDay(startsAt: string, locale: string): string {
+  const at = Number(startsAt) * 1000;
+  if (!Number.isFinite(at) || at <= 0) return '';
+  return new Date(at).toLocaleDateString(locale, { dateStyle: 'medium' });
+}
+
+/**
  * `Promise.all` over a page would open one request per row at once. This runs at most `limit`
  * of them, each worker taking the next index as it frees up, and writes every answer back at
  * its own index — so results keep the page's order however the requests interleave.

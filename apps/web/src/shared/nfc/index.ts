@@ -1,8 +1,8 @@
 import { Capacitor } from '@capacitor/core';
 import type { GateCodeWire, GateResponseWire } from '@monti/shared';
 import { NFC_ERROR, NfcError } from './errors';
-import { readGateCodeNative, readThenWriteNative, writeGateResponseNative } from './native';
-import { readGateCodeWebNfc, readThenWriteWebNfc, writeGateResponseWebNfc } from './webnfc';
+import { readGateCodeNative, readThenWriteNative } from './native';
+import { readGateCodeWebNfc, readThenWriteWebNfc } from './webnfc';
 import type { NfcTapOptions } from './session';
 
 export * from './errors';
@@ -40,18 +40,5 @@ export function readGateCode(options: NfcTapOptions = {}): Promise<GateCodeWire>
   const capability = nfcCapability();
   if (capability === 'native') return readGateCodeNative(options);
   if (capability === 'webnfc') return readGateCodeWebNfc(options);
-  return Promise.reject(new NfcError(NFC_ERROR.unavailable));
-}
-
-/**
- * Writes the answer into a reader session that is **already open**. On native that is the
- * plugin's own contract — `write` targets the last discovered tag — and no exported function
- * here leaves such a session open, so this is for a caller that drives the session itself. The
- * one-tap gate flow is {@link readThenWrite}.
- */
-export function writeGateResponse(wire: GateResponseWire): Promise<void> {
-  const capability = nfcCapability();
-  if (capability === 'native') return writeGateResponseNative(wire);
-  if (capability === 'webnfc') return writeGateResponseWebNfc(wire);
   return Promise.reject(new NfcError(NFC_ERROR.unavailable));
 }

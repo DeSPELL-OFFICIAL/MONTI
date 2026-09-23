@@ -11,16 +11,18 @@ export const EventStatus = { Draft: 0, Published: 1, Cancelled: 2, Ended: 3 } as
 export type EventStatusValue = (typeof EventStatus)[keyof typeof EventStatus];
 
 /**
- * `Ticket.checkInOf`. `nonceHash` is `keccak256(abi.encode(nonce))` of the code the gate served
- * (`Ticket.sol:360`) and is what the gate's verdict matches a tap on; a manual override writes
- * `bytes32(0)` there, which answers no code at all. An unchecked ticket reads back as the zero
- * struct, so `ts === 0n` — not an absent value — is how a screen reads "nobody came in on this".
+ * `Ticket.checkInOf`. The 01b order: `nonceHash` sits **in front of** `ts` so that
+ * `ts + manual + late` share one storage slot (`contracts/docs/abi-delta-01b.md` §5). Solidity
+ * reads the struct by field name and never noticed; viem decodes positionally, so this
+ * interface and `CHECK_IN_FIELDS` move together or not at all.
  */
 export interface CheckInStruct {
   gateId: bigint;
-  ts: bigint;
   nonceHash: Hex;
+  ts: bigint;
   manual: boolean;
+  /** The tap was recorded through `checkInLate`, outside the code window. Still an entry. */
+  late: boolean;
 }
 
 export interface EventMetaStruct {
@@ -73,19 +75,54 @@ function reader<C extends UsedContract>(contract: C, address: Hex) {
     getPublicClient().readContract({ address, abi, functionName, args }) as Promise<T>;
 }
 
+/** `Identity.activeDevice` answers with two separate `bytes32` outputs, not a struct. */
+export interface DeviceKeyPoint {
+  x: Hex;
+  y: Hex;
+}
+
 export function readIdentity() {
   const call = reader('Identity', getConfig().addresses.identity);
   return {
     isMember: (account: Hex) => call<boolean>('isMember', [account]),
     isLocked: (account: Hex) => call<boolean>('isLocked', [account]),
     kycLevelOf: (account: Hex) => call<number>('kycLevelOf', [account]),
-    /**
-     * When this account's device key was last replaced, unix **seconds** (`0` for an account
-     * that has never rotated). Spec §13: the gate puts an amber note on the admit card when a
-     * phone changed inside the last day, because a stolen-ticket handover looks exactly like a
-     * legitimate new phone and the only person who can tell them apart is standing at the door.
-     */
+    /** Zero means nobody holds this name yet — how the profile blocks `NicknameTaken` early. */
+    nicknameOwner: (nicknameHash: Hex) => call<Hex>('nicknameOwner', [nicknameHash]),
+    /** `uint64` seconds. The device cooldown is counted from here, never from Firestore. */
     deviceUpdatedAt: (account: Hex) => call<bigint>('deviceUpdatedAt', [account]),
+    /** The P-256 point `Ticket.checkIn` verifies the device signature against. */
+    activeDevice: async (account: Hex): Promise<DeviceKeyPoint> => {
+      const [x, y] = await call<[Hex, Hex]>('activeDevice', [account]);
+      return { x, y };
+    },
+    /**
+     * `uint64` seconds — when this person's account last moved. Note the argument is a
+     * **personId** (`bytes32`), not an account address, unlike every read above.
+     *
+     * `register` stamps this too (`contracts/docs/abi-delta-01b.md` §1), so a non-zero
+     * `rotatedAt` is *not* on its own "there is a rotation to undo" — every registered person
+     * has one. {@link rotatedFrom} is the flag; this only bounds the window.
+     */
+    rotatedAt: (personId: Hex) => call<bigint>('rotatedAt', [personId]),
+    /**
+     * The account a rotation pushed aside, or the zero address once the window closed or the
+     * undo already happened. **This is the flag.** Takes a **personId** (`bytes32`).
+     *
+     * For the account asking, "may I undo right now?" is the whole of:
+     * `rotatedFrom(personId) === me && now < rotatedAt(personId) + ROTATION_UNDO_WINDOW`.
+     */
+    rotatedFrom: (personId: Hex) => call<Hex>('rotatedFrom', [personId]),
+    /**
+     * `86400` (1 day), and equal to `Ticket.MIGRATE_DELAY` by construction — a contracts test
+     * asserts it. Read rather than interpolated, so no screen carries an hour count of its own.
+     *
+     * The undo itself, `Identity.cancelRotation()`, is a **write**, not a read: it takes no
+     * argument (the contract reads the caller) and goes out through `identityOp` in `ops.ts`
+     * like every other Identity write. It is sponsored, which is the point — the pushed-aside
+     * account has no gas.
+     */
+    rotationUndoWindow: () => call<bigint>('ROTATION_UNDO_WINDOW', []),
   };
 }
 
@@ -124,6 +161,12 @@ export function readOrganizers() {
       call<boolean>('hasPermission', [orgId, account, bit]),
     gateOf: (gateAccount: Hex) => call<bigint>('gateOf', [gateAccount]),
     ownerOf: (orgId: bigint) => call<Hex>('ownerOf', [orgId]),
+    /**
+     * The bits an admin actually holds. Zero is "not an admin of this organisation" — this is
+     * how the team screen sees an invite finish, because the invite document's own `done` flag
+     * is written by the Tenderly webhook and the UI must not wait on it.
+     */
+    adminBitsOf: (orgId: bigint, admin: Hex) => call<number>('adminBitsOf', [orgId, admin]),
     gateInfo: async (gateId: bigint): Promise<GateInfoStruct> => {
       const [eventId, account, kx, ky, open, revoked] =
         await call<[bigint, Hex, Hex, Hex, boolean, boolean]>('gateInfo', [gateId]);
@@ -136,8 +179,8 @@ export function readTicket() {
   const call = reader('Ticket', getConfig().addresses.ticket);
   return {
     eventOf: (tokenId: bigint) => call<bigint>('eventOf', [tokenId]),
-    // The organization that owns an event. `Organizers` keys permissions by org, not event,
-    // so every screen that starts from an event id and needs a permission passes through here.
+    /** The organisation an event belongs to. Zero means there is no such event — the same
+     *  answer the backend turns into `UNKNOWN_EVENT` rather than "you have no permission". */
     eventOrg: (eventId: bigint) => call<bigint>('eventOrg', [eventId]),
     tierOf: (tokenId: bigint) => call<number>('tierOf', [tokenId]),
     eventStatus: (eventId: bigint) => call<number>('eventStatus', [eventId]),
@@ -148,6 +191,25 @@ export function readTicket() {
     eventMeta: (eventId: bigint) => call<EventMetaStruct>('eventMeta', [eventId]),
     tiers: (eventId: bigint) => call<readonly TierStruct[]>('tiers', [eventId]),
     offerOf: (tokenId: bigint) => call<OfferStruct>('offerOf', [tokenId]),
+    /**
+     * `86400` (1 day). How long a ticket waits before it will follow a rotated account:
+     * `migrate` inside that window reverts `RotationPending`
+     * (`contracts/docs/abi-delta-01b.md` §6), so the "티켓 가져오기" button counts from here.
+     */
+    migrateDelay: () => call<bigint>('MIGRATE_DELAY', []),
+    /**
+     * **The parity target.** The exact 32 bytes the attendee phone must sign for `checkIn` /
+     * `checkInLate` (`contracts/docs/abi-delta-01b.md` §7.2):
+     * `sha256(abi.encode(block.chainid, address(this), tokenId, gateId, eventId, nonce,
+     * issuedAt))` — seven words, 224 bytes.
+     *
+     * The two inputs a client cannot choose — `block.chainid` and `address(this)` — are filled
+     * in by the contract, not passed. That is exactly why a hand-rolled sha256 that omits them
+     * passes every local test and then fails at the door, and why `deviceDigest.parity.test.ts`
+     * pins one vector against this deployed view rather than against another local function.
+     */
+    deviceDigest: (tokenId: bigint, gateId: bigint, eventId: bigint, nonce: Hex, issuedAt: bigint) =>
+      call<Hex>('deviceDigest', [tokenId, gateId, eventId, nonce, issuedAt]),
   };
 }
 
@@ -170,27 +232,54 @@ const TIER_FIELDS = [
   'name', 'priceUsdCents', 'supply', 'minted', 'maxPerWallet', 'seated',
 ] as const satisfies readonly (keyof TierStruct)[];
 
-// 01b: (gateId, nonceHash, ts, manual, late) — the redeploy reorders `ts` and `nonceHash` and
-// adds `late: bool` for a tap recorded outside the code window
-// (`MONTI-01b/contracts/docs/abi-delta-01b.md` §5; the selector does not change, so nothing
-// else can catch it). The CURRENT order is pinned below on purpose: the day the regenerated ABI
-// lands, the test above fails rather than decoding `ts` out of `nonceHash`'s slot — and this
-// list and `CheckInStruct` move together.
+// The 01b order (`contracts/docs/abi-delta-01b.md` §5): `nonceHash` in front of `ts`, and
+// `late` at the end. `checkInOf`'s selector `0xdb7b7d7e` did **not** change, so nothing about
+// this reorder can surface as a compile error, a revert, or a decode failure — a wrong list
+// here just reads `ts` out of `nonceHash`'s slot, same width, no error, wrong value.
+// `STRUCT_SHAPES` below and `abis.test.ts` are the only thing standing between this app and
+// exactly that.
 const CHECK_IN_FIELDS = [
-  'gateId', 'ts', 'nonceHash', 'manual',
+  'gateId', 'nonceHash', 'ts', 'manual', 'late',
 ] as const satisfies readonly (keyof CheckInStruct)[];
 
 const OFFER_FIELDS = [
   'from', 'recipientCommitment', 'expiresAt',
 ] as const satisfies readonly (keyof OfferStruct)[];
 
-const MANAGER_FIELDS = [
-  'exists', 'canApprove',
-] as const satisfies readonly (keyof ManagerStruct)[];
-
 const GATE_INFO_FIELDS = [
   'eventId', 'account', 'kx', 'ky', 'open', 'revoked',
 ] as const satisfies readonly (keyof GateInfoStruct)[];
+
+// Two `bytes32` of the same width: a swap here would hand WebCrypto and the P-256 precompile a
+// mirrored point and every check-in would read as a bad device signature.
+const ACTIVE_DEVICE_FIELDS = ['x', 'y'] as const satisfies readonly (keyof DeviceKeyPoint)[];
+
+// Two booleans of the same width: swapped, a manager who may only file a request would read as
+// one who may approve an entry exception outright.
+const MANAGER_FIELDS = ['exists', 'canApprove'] as const satisfies readonly (keyof ManagerStruct)[];
+
+/**
+ * The same pin, for the structs this app **sends**. `Ticket.createEvent` takes an `EventMeta`
+ * and a `Tier[]` as calldata, and viem encodes an object positionally out of the ABI's
+ * components exactly as it decodes one: a field sub-plan 01 reordered would be encoded into
+ * the neighbouring slot at the same width, with no error on the way — an event published with
+ * its sale window where its schedule should be. `abis.test.ts` pins both lists, reading the
+ * function's *inputs* rather than its outputs.
+ *
+ * The two lists are the same ones the reads use, so a struct can never drift between the
+ * screen that writes it and the screen that reads it back.
+ */
+export const STRUCT_INPUT_SHAPES = {
+  Ticket: {
+    createEvent: { meta: EVENT_META_FIELDS, tiers_: TIER_FIELDS },
+    // The edit path sends the same two structs as the create path and has to be pinned too —
+    // otherwise a reordered `EventMeta` is caught when an event is made and missed when it is
+    // edited. Both rows reference the same two lists, and so do the reads above, so a struct
+    // cannot drift between the screen that creates one, the screen that edits it, and the
+    // screen that reads it back.
+    updateEventMeta: { meta: EVENT_META_FIELDS, tiers_: TIER_FIELDS },
+  },
+} as const;
 
 export const STRUCT_SHAPES = {
   Ticket: {
@@ -198,4 +287,5 @@ export const STRUCT_SHAPES = {
     offerOf: OFFER_FIELDS,
   },
   Organizers: { gateInfo: GATE_INFO_FIELDS, managerOf: MANAGER_FIELDS },
+  Identity: { activeDevice: ACTIVE_DEVICE_FIELDS },
 } as const;

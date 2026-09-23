@@ -60,10 +60,34 @@ export interface UserOperationV06 {
 }
 
 export interface SponsoredCall { to: Hex; data: Hex; value?: bigint }
+
+/**
+ * One log this operation emitted, in the three fields `parseEventLogs` decodes from. The
+ * bundler's `eth_getUserOperationReceipt` carries these at the top level — the logs of *this*
+ * operation, not of the whole bundled transaction — which is what makes them safe to read: a
+ * neighbouring operation in the same bundle cannot put its `EventCreated` in here.
+ */
+export interface SponsoredOpLog { address: Hex; topics: readonly Hex[]; data: Hex }
+
 /** `revertReason` is the on-chain reason for a real revert, or the sentinel `'TIMEOUT'`
  * when `wait` gave up before the op landed. Callers (see `sendOp`) treat any
- * `success: false` as a failure; the sentinel lets them tell "reverted" from "never landed". */
-export interface SponsoredOpReceipt { success: boolean; txHash: Hex; blockNumber: bigint; revertReason?: Hex | 'TIMEOUT' }
+ * `success: false` as a failure; the sentinel lets them tell "reverted" from "never landed".
+ *
+ * `logs` is empty for anything that did not land, and for a bundler that answers without them. */
+export interface SponsoredOpReceipt {
+  success: boolean;
+  /**
+   * The operation's own hash, carried on the receipt and not only on the handle. A caller that
+   * succeeded still needs it: `eth_getUserOperationReceipt` is the only way back to an
+   * operation whose logs this side could not read, and without the hash on the receipt the
+   * only way to ask again would be to send the operation a second time.
+   */
+  userOpHash: Hex;
+  txHash: Hex;
+  blockNumber: bigint;
+  revertReason?: Hex | 'TIMEOUT';
+  logs: readonly SponsoredOpLog[];
+}
 export interface SponsoredOpHandle {
   userOpHash: Hex;
   wait(timeoutMs?: number): Promise<SponsoredOpReceipt>;
@@ -87,7 +111,13 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 interface RawReceipt {
   success: boolean;
   reason?: Hex;
+  logs?: SponsoredOpLog[];
   receipt: { transactionHash: Hex; blockNumber: Hex };
+}
+
+/** A bundler that omits `logs`, or sends something other than an array, yields none. */
+export function readOpLogs(raw: { logs?: unknown } | null | undefined): readonly SponsoredOpLog[] {
+  return Array.isArray(raw?.logs) ? (raw.logs as SponsoredOpLog[]) : [];
 }
 
 export async function sendSponsoredOp({ account, calls, orgId, gasFloors }: SendSponsoredOpArgs): Promise<SponsoredOpHandle> {
@@ -183,9 +213,11 @@ export async function sendSponsoredOp({ account, calls, orgId, gasFloors }: Send
         if (result) {
           return {
             success: result.success,
+            userOpHash,
             txHash: result.receipt.transactionHash,
             blockNumber: hexToBigInt(result.receipt.blockNumber),
             revertReason: result.reason,
+            logs: readOpLogs(result),
           };
         }
 
@@ -196,7 +228,9 @@ export async function sendSponsoredOp({ account, calls, orgId, gasFloors }: Send
 
       // The op never landed within the deadline. Not a revert, but the caller must be
       // unblocked; sendOp() maps success:false -> OpReverted with this sentinel reason.
-      return { success: false, txHash: '0x', blockNumber: 0n, revertReason: 'TIMEOUT' };
+      return {
+        success: false, userOpHash, txHash: '0x', blockNumber: 0n, revertReason: 'TIMEOUT', logs: [],
+      };
     },
   };
 }

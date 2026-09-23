@@ -13,6 +13,19 @@ export const KYC_CALLBACK_URL = 'monti://kyc/callback';
 export const KYC_WEB_MARKER = 'didit';
 export const KYC_WEB_MARKER_DONE = 'done';
 
+/**
+ * The return address handed to the hosted flow. Native keeps the custom scheme the app shell
+ * registered — the server picks that one by itself — so nothing is sent for it. The web has no
+ * scheme: the person comes back as a plain page load on the verification screen, marked, still
+ * carrying where they were going. The server checks the origin and nothing else
+ * (`functions/src/lib/kycSession.ts` assertCallbackUrl), so the path and the query survive.
+ */
+export function kycCallbackUrl(returnTo: string): string | undefined {
+  if (Capacitor.isNativePlatform()) return undefined;
+  const query = `${KYC_WEB_MARKER}=${KYC_WEB_MARKER_DONE}&returnTo=${encodeURIComponent(returnTo)}`;
+  return `${window.location.origin}/me/verify?${query}`;
+}
+
 /** True for either return address: the native deep link, or the web marker. */
 export function isKycCallback(url: string): boolean {
   return url.includes('kyc/callback') || url.includes(`${KYC_WEB_MARKER}=${KYC_WEB_MARKER_DONE}`);

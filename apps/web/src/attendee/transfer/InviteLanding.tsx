@@ -45,6 +45,9 @@ export function InviteLanding() {
     // Still hydrating: deciding now would send a signed-in person through signup.
     if (session.status === 'loading') return;
     if (session.status === 'signedIn') {
+      // Consumed here too: nobody signs up after this, so a kept id would only mislead the
+      // next signup that happens in this tab.
+      takeInvite();
       navigate('/tickets/inbox', { replace: true });
       return;
     }

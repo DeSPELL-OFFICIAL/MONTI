@@ -13,8 +13,24 @@
 //   DeviceKey.sign({ tag, data })                            -> { signature }
 // `publicKey` is a base64url P-256 SubjectPublicKeyInfo, `data` the base64url 32-byte digest
 // signed as-is, `signature` a base64url DER signature. Failures reject with a typed code.
-import { DEVICE_KEY_ERROR, DeviceKey } from '@monti/device-key';
+import { DEVICE_KEY_ERROR, DeviceKey, type DeviceKeyErrorCode } from '@monti/device-key';
 import type { DeviceKeyBacking } from './types';
+
+/**
+ * The plugin's own error codes, re-exported here rather than imported from `@monti/device-key`
+ * elsewhere: this file is the only one in the app allowed to name the native plugin, and a
+ * caller that has to tell a lapsed arm window from a destroyed key needs those codes.
+ */
+export { DEVICE_KEY_ERROR, type DeviceKeyErrorCode };
+
+const CODES = new Set<string>(Object.values(DEVICE_KEY_ERROR));
+
+/** The plugin's typed code, or `undefined` for a rejection that did not come from it. */
+export function deviceKeyErrorCode(error: unknown): DeviceKeyErrorCode | undefined {
+  if (typeof error !== 'object' || error === null) return undefined;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' && CODES.has(code) ? (code as DeviceKeyErrorCode) : undefined;
+}
 
 export interface KeyOptions {
   alias: string;

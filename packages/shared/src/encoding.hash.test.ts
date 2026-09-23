@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { keccak256, sha256 } from 'viem';
-import { DEVICE_DIGEST_FORM } from './constants.js';
+import {
+  DEVICE_DIGEST_FORM,
+  MONAD_TESTNET_CHAIN_ID,
+  P256_HALF_ORDER,
+  P256_ORDER,
+  ticketAddress,
+} from './constants.js';
 import {
   deviceDigest,
   deviceDigestPreimage,
-  deviceDigestPreimageV2,
   deviceDigestV2,
+  deviceDigestPreimageV2,
   deviceSigHash,
   deviceSigPreimage,
   gateCodeHash,
@@ -55,7 +61,7 @@ describe('gateCodeHash', () => {
 });
 
 describe('deviceSigHash', () => {
-  it('matches the fixed vector Ticket.checkIn recomputes on chain', () => {
+  it('matches the fixed vector the retired Ticket.checkIn recomputed on chain', () => {
     expect(
       deviceSigHash({ tokenId: 7n, gateId: 3n, eventId: 11n, nonce: NONCE, issuedAt: ISSUED_AT }),
     ).toBe('0xc99dfaef599235b36414480bc53054182d5f7fc67a33c60233f3f73f7fc560c7');
@@ -123,6 +129,47 @@ describe('deviceDigestV2', () => {
   });
 });
 
+/**
+ * 같은 공식을 두 도메인에서 못 박는다. 둘 다 필요하다.
+ *
+ * - 위 `V2_INPUT` 은 컨트랙트 테스트가 쓰는 가상의 배포본(chain 31337, Ticket 0x7111…1111)이라
+ *   Solidity 쪽 고정 벡터(`P256Vectors.SHARED_DIGEST`)와 1:1 로 맞춰 볼 수 있다. 존재하지
+ *   않는 주소이므로 체인에 물어볼 수는 없다.
+ * - 아래 `LIVE_INPUT` 은 2026-09-23 에 실제로 올라간 Ticket 이 `deviceDigest(...)` 뷰로
+ *   되돌려준 값이다(abi-delta-01b §10). 다섯 개의 caller 입력은 위와 똑같고, 앞의 두 워드
+ *   —`chainid` 와 `address(this)`— 만 다르다.
+ *
+ * 그 두 워드가 바로 클라이언트가 고를 수 없는 입력이고, 로컬 재구현이 틀리는 곳도 정확히
+ * 거기다. 한쪽만 남기면 "도메인 워드가 정말 다이제스트를 바꾸는가"와 "그 바꾸는 방식이
+ * 배포된 컨트랙트와 같은가" 중 하나를 잃는다.
+ */
+describe('deviceDigestV2 against the deployed Ticket', () => {
+  const LIVE_INPUT = {
+    chainId: 10143n,
+    ticket: '0x4B8353C9F3503Cdbd011E8f35da0a955D95b1367' as Hex,
+    tokenId: 7n,
+    gateId: 3n,
+    eventId: 11n,
+    nonce: NONCE,
+    issuedAt: ISSUED_AT,
+  };
+
+  it('reproduces what the live deviceDigest(...) view returned on 10143', () => {
+    expect(deviceDigestV2(LIVE_INPUT)).toBe(
+      '0xec0c84e899cdacfab3dc560fc6ad89a3db7800cd07154b5ad3f24d0d4f46f8e9',
+    );
+  });
+
+  it('names the Ticket the deployment record names, so a redeploy cannot leave this behind', () => {
+    expect(ticketAddress(MONAD_TESTNET_CHAIN_ID)).toBe(LIVE_INPUT.ticket);
+  });
+
+  it('differs from the 31337 vector on the two domain words alone', () => {
+    expect({ ...LIVE_INPUT, chainId: V2_INPUT.chainId, ticket: V2_INPUT.ticket }).toEqual(V2_INPUT);
+    expect(deviceDigestV2(LIVE_INPUT)).not.toBe(deviceDigestV2(V2_INPUT));
+  });
+});
+
 describe('deviceSigPreimage (v1)', () => {
   it('is what the deprecated five-field hash is sha256 of', () => {
     expect(sha256(deviceSigPreimage(V2_INPUT))).toBe(deviceSigHash(V2_INPUT));
@@ -136,9 +183,18 @@ describe('the form this build signs', () => {
     expect(sha256(deviceDigestPreimage(V2_INPUT))).toBe(deviceDigest(V2_INPUT));
   });
 
-  it('is still the five-field form, because the deployed Ticket.checkIn verifies that one', () => {
-    // Flip this line together with DEVICE_DIGEST_FORM when 01b redeploys (its Task 15).
-    expect(DEVICE_DIGEST_FORM).toBe('v1-fiveField');
+  it('is the domain-separated form, because that is what the deployed Ticket verifies', () => {
+    // Pinned to the deployment, not to a plan: 01b went out on 2026-09-23 (chain 10143, Ticket
+    // 0x4B8353C9…1367) and its `_deviceDigest` is the seven-word form. This line and
+    // DEVICE_DIGEST_FORM move together, and only when a redeploy moves the contract.
+    expect(DEVICE_DIGEST_FORM).toBe('v2-domainSeparated');
+  });
+});
+
+describe('the secp256r1 order', () => {
+  it('is SEC 2 n, and half of it is the low-s boundary Solady enforces', () => {
+    expect(P256_ORDER).toBe(0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551n);
+    expect(P256_HALF_ORDER).toBe(P256_ORDER / 2n);
   });
 });
 

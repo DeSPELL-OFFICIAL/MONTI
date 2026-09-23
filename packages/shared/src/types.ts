@@ -16,20 +16,16 @@ export interface GateCodeWire {
 }
 
 /**
- * The answer's wire version. **2**, and version 1 is refused rather than migrated.
- *
- * v1 was `{ v, tokenId, deviceSig }` — no nonce. An answer without one cannot name the code it
- * answers: the gate serves a new code every 3 seconds and the HCE plugin swaps the served
- * payload only *between* taps, so a write landing just after a rotation answers the code before
- * it, and the gate cannot see which side of the swap the read fell on. Nothing was ever on a
- * device, so there is no compatibility to keep.
+ * 이 빌드가 말하는 게이트 응답 형식. 기기에 나간 v1 은 없으므로 하위 호환 경로도 없다 —
+ * v1 페이로드는 {@link GateResponseVersionError} 로 끊는다.
  */
 export const GATE_RESPONSE_VERSION = 2;
 
 /**
- * 관객 기기가 게이트에 돌려주는 답. **필드 순서가 계약이다** — CBOR 맵은 이 순서 그대로
- * 인코딩되고, 관객 앱(03)과 스태프 앱(04)이 같은 바이트열을 재현한다. 순서를 바꾸면 고정
- * 벡터가 깨진다.
+ * 관객 기기가 게이트에 돌려주는 답. **키 순서가 계약이다** — 스태프 앱(04)이 같은 바이트열을
+ * 재현한다. 다만 그 순서를 실제로 정하는 곳은 이 선언이 아니라 `encodeGateResponse` 안의
+ * 표준 순서 literal 이다(이 선언과 같은 순서로 적혀 있다). 순서를 바꾸려면 그 literal 과
+ * 고정 벡터를 함께 바꿔야 한다.
  */
 export interface GateResponseWire {
   v: typeof GATE_RESPONSE_VERSION;
@@ -42,6 +38,21 @@ export interface GateResponseWire {
   nonce: Hex;
   /** r||s 64B over sha256(abi.encode(tokenId,gateId,eventId,nonce,issuedAt)) */
   deviceSig: Hex;
+}
+
+/**
+ * 백엔드의 Tenderly 웹훅이 `CheckedIn` 에서 쏘는 FCM **data** 페이로드. 값이 전부 문자열인
+ * 것은 취향이 아니라 제약이다 — FCM data 페이로드는 문자열만 실을 수 있어서 `tokenId` 도
+ * 숫자가 아니라 십진 문자열로 온다.
+ *
+ * `late` 는 01b 의 `CheckedInLate` 경로에서 웹훅이 얹어 주는 참고값일 뿐이다. 화면의 초록은
+ * 그것과 무관하게 뜬다 — 01b 는 늦은 체크인에서도 `CheckedInLate` 와 **함께** `CheckedIn` 을
+ * 내보내므로, 이 푸시가 도착했다는 사실 자체가 이미 입장 확정이다. 거절을 실어 나르는 필드는
+ * 여기 없고, 있어서도 안 된다.
+ */
+export interface CheckInPush {
+  tokenId: string;
+  late?: '1';
 }
 
 export interface SnapshotTicket {

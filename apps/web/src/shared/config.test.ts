@@ -11,9 +11,8 @@ const BASE = {
   VITE_ADDR_TICKET: `0x${'33'.repeat(20)}`,
   VITE_ADDR_PAYMASTER: `0x${'44'.repeat(20)}`,
   VITE_ENVIO_URL: 'https://indexer.example/v1/graphql',
-  VITE_RP_ID: 'monti.app',
+  VITE_RP_ID: 'monti.despell.io',
   VITE_IPFS_GATEWAY: 'https://gateway.pinata.cloud/ipfs/',
-  VITE_PINATA_JWT: 'jwt',
 };
 
 afterEach(() => {
@@ -38,10 +37,11 @@ describe('getConfig', () => {
     expect(() => getConfig()).toThrow('VITE_ADDR_TICKET');
   });
 
-  it('boots without a Pinata token: the attendee app never pins', () => {
+  // Pinning is a backend callable (`pinEventImage` / `pinEventMetadata`), so no build of this
+  // app carries a pinning token and nothing in `src` may ever read one.
+  it('carries no pinning token at all', () => {
     for (const [key, value] of Object.entries(BASE)) vi.stubEnv(key, value);
-    vi.stubEnv('VITE_PINATA_JWT', '');
-    expect(getConfig().pinataJwt).toBe('');
+    expect(Object.keys(getConfig())).not.toContain('pinataJwt');
   });
 
   it('never hardcodes the chain id in logic', () => {

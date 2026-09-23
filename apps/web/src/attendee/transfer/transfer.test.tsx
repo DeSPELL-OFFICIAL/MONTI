@@ -42,6 +42,8 @@ const { TransferConfirm } = await import('./Confirm');
 const { CallableError } = await import('../../shared/api/functions');
 const { OpReverted } = await import('../../shared/chain/ops');
 const { revertMatch, revertRule } = await import('./useTransfer');
+const { acceptFailure } = await import('./offers');
+const { ko } = await import('../../shared/copy/index');
 
 const NOW = Math.floor(Date.now() / 1000);
 const TIER = { name: '일반', priceUsdCents: 0n, supply: 100, minted: 1, maxPerWallet: 2, seated: false };
@@ -277,5 +279,53 @@ describe('a handover the contract refuses', () => {
     await userEvent.click(screen.getByRole('button', { name: '양도하기' }));
     expect(await screen.findByText('아직 확인 중이에요. 잠시 뒤 내 티켓에서 확인해 주세요.')).toBeInTheDocument();
     expect(screen.queryByText(GENERIC)).not.toBeInTheDocument();
+  });
+
+  /**
+   * 01b's rotation quarantine is read off the RECIPIENT's person, and the pre-check cannot ask
+   * the same question — it would need `Identity.personOf`, which this app does not read — so it
+   * is the one refusal here that arrives without a rule behind it.
+   */
+  it('names the move the recipient just made when the quarantine refuses a handover', async () => {
+    ticketOp.mockRejectedValueOnce(new OpReverted('safeTransferFrom', toFunctionSelector('RotationPending()')));
+    renderFlow(CONFIRM);
+    await userEvent.click(screen.getByRole('button', { name: '양도하기' }));
+    expect(await screen.findByText(ko.transfer.alertRecipientMoved)).toBeInTheDocument();
+    expect(screen.queryByText(GENERIC)).not.toBeInTheDocument();
+  });
+
+  it('keeps the generic sentence for a lock, rather than naming a phone it cannot know', async () => {
+    // `_update` raises `DeviceLocked` for the sender and the recipient alike, and
+    // `alertLocked` names the recipient's phone. Half the time that would be the wrong phone,
+    // which is worse than saying less. The recipient's lock is caught before the send anyway.
+    ticketOp.mockRejectedValueOnce(new OpReverted('safeTransferFrom', toFunctionSelector('DeviceLocked()')));
+    renderFlow(CONFIRM);
+    await userEvent.click(screen.getByRole('button', { name: '양도하기' }));
+    expect(await screen.findByText(GENERIC)).toBeInTheDocument();
+    expect(screen.queryByText(ko.transfer.alertLocked)).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * The same two reverts on the other side of a handover, where 01b made both newly reachable:
+ * `_update`'s quarantine holds a freshly moved account at arm's length on mint and transfer
+ * alike, and the device freeze became bidirectional, so a locked phone is now refused as the
+ * RECIPIENT and not only as the sender.
+ */
+describe('an offer the contract refuses to hand over', () => {
+  const ACCEPT_SENTENCES: ReadonlyArray<readonly [string, string]> = [
+    ['RotationPending()', ko.transfer.offerRotationPending],
+    ['DeviceLocked()', ko.transfer.offerDeviceLocked],
+  ];
+
+  for (const [signature, sentence] of ACCEPT_SENTENCES) {
+    it(`reads ${signature} in the receiver's own voice`, () => {
+      const cause = new OpReverted('acceptOffer', toFunctionSelector(signature));
+      expect(acceptFailure(ko, cause)).toBe(sentence);
+    });
+  }
+
+  it('keeps the generic sentence for a refusal nobody here knows', () => {
+    expect(acceptFailure(ko, new OpReverted('acceptOffer', '0xdeadbeef'))).toBe(ko.transfer.acceptFailed);
   });
 });

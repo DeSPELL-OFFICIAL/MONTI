@@ -7,6 +7,8 @@ import {
   CREATE2_DEPLOYER_ADDRESS,
   DEVICE_COOLDOWN_SECONDS,
   ENTRY_POINT_V06_ADDRESS,
+  LATE_WINDOW_SECONDS,
+  MIGRATE_DELAY_SECONDS,
   EVENT_CHAT_MESSAGE_MAX_CHARS,
   FIREBASE_REGION,
   GATE_CODE_ROTATE_MS,
@@ -54,6 +56,11 @@ describe('protocol timings', () => {
     // code by anything else either signs a code the chain will reject or refuses a good one.
     expect(CLOCK_SKEW_SECONDS).toBe(5);
     expect(DEVICE_COOLDOWN_SECONDS).toBe(604_800);
+    // 01b: `Ticket.LATE_WINDOW = 43200` and `Ticket.MIGRATE_DELAY = 86400`. The second is equal
+    // to `Identity.ROTATION_UNDO_WINDOW` by construction — a contract test asserts that equality,
+    // and a screen that hard-codes one of the two without the other will contradict the chain.
+    expect(LATE_WINDOW_SECONDS).toBe(43_200);
+    expect(MIGRATE_DELAY_SECONDS).toBe(86_400);
     expect(HCE_AID).toBe('D2760000850101');
     expect(QR_PREFIX).toBe('MONTI1:');
     expect(FIREBASE_REGION).toBe('us-east1');

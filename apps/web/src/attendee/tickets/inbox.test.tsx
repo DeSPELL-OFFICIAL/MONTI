@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -22,6 +22,14 @@ vi.mock('../../shared/chain/ops', async (orig) => ({
   ticketOp,
 }));
 vi.mock('../../shared/chain/accounts', () => ({ getAttendeeAccount: async () => ({ address: ME }) }));
+
+// The readable half of an event lives in one IPFS document; the row asks for it by the CID
+// `eventMeta` already handed over, so naming the event costs no extra chain read.
+const fetchEventMetadata = vi.fn();
+vi.mock('../../shared/envio/ipfs', async (orig) => ({
+  ...(await orig<typeof import('../../shared/envio/ipfs')>()),
+  fetchEventMetadata,
+}));
 
 const ticket = { eventOf: vi.fn(), eventMeta: vi.fn() };
 const identity = { kycLevelOf: vi.fn() };
@@ -58,8 +66,10 @@ beforeEach(() => {
   ticketOp.mockReset();
   ticketOp.mockResolvedValue({ success: true, txHash: '0x2', blockNumber: 1n });
   ticket.eventOf.mockResolvedValue(5n);
-  ticket.eventMeta.mockResolvedValue({ orgId: 9n, requireKyc: false });
+  ticket.eventMeta.mockResolvedValue({ orgId: 9n, requireKyc: false, imageCid: 'bafkcid' });
   identity.kycLevelOf.mockResolvedValue(0);
+  fetchEventMetadata.mockReset();
+  fetchEventMetadata.mockResolvedValue({ title: '한여름 밤의 재즈', description: '', image: '', venue: '', category: 0, region: '' });
 });
 
 afterEach(() => {
@@ -72,6 +82,42 @@ describe('Inbox', () => {
     pendingOffers.mockResolvedValue([]);
     renderInbox();
     expect(await screen.findByText('받은 티켓이 없어요.')).toBeInTheDocument();
+  });
+
+  it('names the event, because its reader has never seen it', async () => {
+    renderInbox();
+    expect(await screen.findByText('한여름 밤의 재즈')).toBeInTheDocument();
+    expect(fetchEventMetadata).toHaveBeenCalledWith('bafkcid');
+    expect(screen.queryByText('#1')).toBeNull();
+  });
+
+  it('falls back to the ticket number when the document will not load', async () => {
+    fetchEventMetadata.mockRejectedValue(new Error('IPFS_404'));
+    renderInbox();
+    // A document nobody can load is not a reason to hide an invite.
+    expect(await screen.findByText('#1')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '받기' })).toBeInTheDocument();
+  });
+
+  it('keeps every row answering for itself', async () => {
+    pendingOffers.mockResolvedValue([
+      { tokenId: '1', attesterSig: SIG, inviteId: 'i1' },
+      { tokenId: '7', attesterSig: SIG, inviteId: 'i2' },
+    ]);
+    ticketOp.mockRejectedValueOnce(new OpReverted('acceptOffer', toFunctionSelector('OfferExpired()')));
+    renderInbox();
+    const rows = await screen.findAllByRole('listitem');
+    const expired = '초대가 만료됐어요. 다시 보내 달라고 해 주세요.';
+
+    await userEvent.click(within(rows[0]!).getByRole('button', { name: '받기' }));
+    expect(await within(rows[0]!).findByText(expired)).toBeInTheDocument();
+    // One refusal says nothing about the row next to it, and does not disable its button.
+    expect(within(rows[1]!).queryByText(expired)).toBeNull();
+    expect(within(rows[1]!).getByRole('button', { name: '받기' })).toBeEnabled();
+
+    await userEvent.click(within(rows[1]!).getByRole('button', { name: '받기' }));
+    expect(await within(rows[1]!).findByText('티켓을 받았어요')).toBeInTheDocument();
+    expect(within(rows[0]!).queryByText('티켓을 받았어요')).toBeNull();
   });
 
   it('lists what is waiting and takes one', async () => {

@@ -19,7 +19,7 @@ const PREDICTED = `0x${'ab'.repeat(20)}` as Hex;
 
 const calls: Array<{ to: Hex; data: Hex }> = [];
 
-vi.mock('../config', () => ({ getConfig: () => ({ rpId: 'monti.app' }) }));
+vi.mock('../config', () => ({ getConfig: () => ({ rpId: 'monti.despell.io' }) }));
 vi.mock('@capacitor/core', () => ({ Capacitor: { isNativePlatform: () => false } }));
 vi.mock('./client', () => ({ getPublicClient: () => client }));
 

@@ -67,3 +67,144 @@ body {
 .working { display: flex; align-items: center; gap: 10px; margin: 12px 0; color: var(--muted); font-size: 14px; }
 .working .spinner { width: 18px; height: 18px; margin: 0; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* The poster frame is A4 portrait and nothing resizes it: the picture moves inside it. */
+.a4-frame {
+  position: relative; overflow: hidden; width: 100%; aspect-ratio: 1240 / 1754;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  /* Without this the browser pans and zooms the page instead of the picture. */
+  touch-action: none; user-select: none; -webkit-user-select: none;
+}
+.a4-frame img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+/* The ticket picture is the same A4 frame as the poster, so one crop serves both. */
+.ticket-art {
+  position: relative; overflow: hidden; width: 100%; aspect-ratio: 1240 / 1754;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  isolation: isolate;
+}
+.ticket-art__backdrop { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+/* Three of the four presets run bright at the foot; the scrim is what keeps white text on all four. */
+.ticket-art__scrim {
+  position: absolute; inset: 42% 0 0 0;
+  background: linear-gradient(180deg, rgba(8, 9, 12, 0) 0%, rgba(8, 9, 12, 0.8) 76%);
+}
+.ticket-art__caption { position: absolute; inset: auto 0 0 0; padding: 16px; }
+.ticket-art__tier {
+  margin: 0 0 6px; font-size: 12px; font-weight: 600; letter-spacing: 0.12em;
+  text-transform: uppercase; color: #cfd6e4;
+}
+.ticket-art__title {
+  margin: 0; font-size: 20px; font-weight: 700; line-height: 1.25; color: #fff;
+  /* A long event name wraps and then stops at three lines rather than growing out of the frame. */
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3;
+  overflow: hidden; overflow-wrap: anywhere;
+}
+/* Overhangs the frame on both sides so the band reads as painted across a torn ticket. */
+.ticket-art__band {
+  position: absolute; left: -10%; right: -10%; top: 46%; margin: 0;
+  transform: rotate(-18deg); background: #d92d20; color: #fff; text-align: center;
+  padding: 0.5rem 0; font-weight: 700; letter-spacing: 0.3em;
+}
+
+/* A ticket row: the picture as a thumbnail, the number and the state beside it. The column is
+   a fixed width rather than a share of the row because the art is 1.41x as tall as it is wide
+   — at the 480px the screen is, a full-width ticket would make one row taller than the phone. */
+.ticket-row { display: grid; grid-template-columns: 76px 1fr; gap: 12px; align-items: center; }
+/* The frame's own type is sized for a full-width ticket; at thumbnail width it has to shrink
+   with the frame, or the title alone fills the picture. Only the sizes change, never the
+   layout, so the thumbnail and the big ticket stay recognisably the same object. */
+.ticket-row__art .ticket-art__caption { padding: 7px; }
+.ticket-row__art .ticket-art__tier { margin-bottom: 2px; font-size: 8px; letter-spacing: 0.08em; }
+.ticket-row__art .ticket-art__title { font-size: 11px; -webkit-line-clamp: 2; line-clamp: 2; }
+.ticket-row__art .ticket-art__band { padding: 2px 0; font-size: 9px; letter-spacing: 0.16em; }
+/* The detail screen shows one ticket, so it is the picture rather than a thumbnail — capped
+   short of the full width so the state, the door guide and 입장하기 stay on the same screen. */
+.ticket-detail-art { max-width: 260px; margin: 0 auto 16px; }
+
+/* ── the creation scenes ───────────────────────────────────────────────────────────────────
+   One long scroll with a bar pinned to its foot, so the scroll pads itself by the bar's own
+   height. `.screen` already pads for the tab bar, which these scenes do not show — the sticky
+   bar sits in that same place instead. */
+:root { --sticky-bar-h: 72px; }
+.scene { padding-bottom: calc(env(safe-area-inset-bottom) + var(--sticky-bar-h) + 24px); }
+.scene section { margin: 24px 0; }
+.scene h2 { font-size: 15px; margin: 0 0 4px; }
+.sticky-bar {
+  position: fixed; inset: auto 0 0 0; z-index: 11;
+  max-width: 480px; margin: 0 auto;
+  display: flex; align-items: center; gap: 12px;
+  min-height: var(--sticky-bar-h);
+  padding: 10px 16px calc(env(safe-area-inset-bottom) + 10px);
+  background: var(--surface); border-top: 1px solid var(--line);
+}
+.sticky-bar__status { flex: 1; color: var(--muted); font-size: 13px; }
+.sticky-bar__action { flex: 0 0 auto; min-width: 128px; }
+.sticky-bar__action .btn { height: 44px; }
+
+.chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.chip {
+  border: 1px solid var(--line); background: var(--surface); color: var(--text);
+  border-radius: 999px; padding: 8px 14px; font-size: 14px; line-height: 1.2;
+}
+.chip--on { border-color: var(--accent); background: rgba(79, 125, 255, 0.16); color: var(--text); }
+.chip[disabled] { opacity: 0.45; }
+
+.toggle { margin: 12px 0; }
+.toggle__row { display: flex; align-items: center; gap: 10px; }
+.toggle__row input { width: 20px; height: 20px; accent-color: var(--accent); flex: 0 0 auto; }
+.toggle__help { margin: 6px 0 0; }
+
+/* The preview card is the poster upload: what the organiser is making is always on screen. */
+.poster-card { margin: 0 0 8px; }
+/* The A4 frame at the full 480px screen is ~679px tall — taller than a phone. The card caps it
+   so the first field is visible under the picture without a scroll. */
+.poster-card .a4-frame, .poster-card__filled { max-width: 240px; margin: 0 auto; }
+.poster-card__filled {
+  position: relative; overflow: hidden; width: 100%; aspect-ratio: 1240 / 1754;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+}
+.poster-card__filled img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+/* A rule the organiser is about to break, said under the field rather than in an alert box. */
+.problem { margin: 6px 0 0; color: var(--danger); font-size: 13px; }
+
+/* One ticket kind: a card, because the same block repeats up to eight times and the eye needs
+   a boundary to count them by. */
+.tier-list-cards { list-style: none; margin: 0; padding: 0; display: grid; gap: 16px; }
+.tier-card {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 14px;
+}
+.tier-card__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.tier-card__head h3 { font-size: 14px; margin: 0; }
+.tier-card__head .btn { width: auto; height: 36px; padding: 0 14px; font-size: 14px; }
+/* The picture is A4, so at card width it would be taller than the phone. It is a preview. */
+.tier-card__art { max-width: 150px; margin: 12px auto 4px; }
+.tier-card__art .ticket-art__caption { padding: 9px; }
+.tier-card__art .ticket-art__tier { margin-bottom: 3px; font-size: 9px; letter-spacing: 0.08em; }
+.tier-card__art .ticket-art__title { font-size: 13px; -webkit-line-clamp: 2; line-clamp: 2; }
+.tier-card__pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.tier-card .a4-frame { max-width: 200px; margin: 8px auto; }
+
+/* The address goes into a message or onto a poster, so it is shown in full and breaks anywhere
+   rather than being trimmed to something nobody can read back. */
+.event-link {
+  margin: 8px 0; padding: 12px; border-radius: var(--radius);
+  background: var(--surface); border: 1px solid var(--line);
+  font-size: 14px; overflow-wrap: anywhere;
+}
+.event-qr {
+  display: block; width: 100%; max-width: 240px; margin: 16px auto;
+  border-radius: var(--radius); background: #fff;
+}
+
+/* An event's own tags, on the detail screen. Reading only: nothing filters on them. */
+.tag-row { list-style: none; display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; padding: 0; }
+/* The same chips on an explore card, where they are the smallest line rather than a heading:
+   two of them plus a `+N`, on one row that never wraps the card taller. */
+.tag-row--card { margin: 4px 0 0; gap: 4px; }
+.tag-row--card li { padding: 2px 8px; font-size: 12px; }
+.tag-row li {
+  border: 1px solid var(--line); border-radius: 999px;
+  padding: 4px 10px; font-size: 13px; color: var(--muted);
+}

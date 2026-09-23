@@ -8,13 +8,19 @@ import { api, type PendingOffer } from '../../shared/api/functions';
 import { getAttendeeAccount } from '../../shared/chain/accounts';
 import { ticketOp } from '../../shared/chain/ops';
 import { readIdentity, readTicket } from '../../shared/chain/reads';
+import { fetchEventMetadata } from '../../shared/envio/ipfs';
 import { useSession } from '../../shared/session';
-import { acceptFailure, isStillConfirming, orgIdOfTicket } from '../transfer/offers';
+import { acceptFailure, isStillConfirming } from '../transfer/offers';
+
+// The one screen whose reader has never seen the event, so it is the one that has to name it.
+export { acceptPendingOffers, type OrgIdOf } from '../transfer/offers';
 
 export interface InboxRow {
   offer: PendingOffer;
   /** The event's organisation sponsors the operation that collects the ticket. */
   orgId: bigint;
+  /** Empty when the document did not load; the row then falls back to the ticket number. */
+  title: string;
   /** The event asks for identity verification and this attendee has not done it, so
    *  `acceptOffer` would revert with `KycRequired`. The row offers the check instead. */
   needsKyc: boolean;
@@ -23,7 +29,9 @@ export interface InboxRow {
 /**
  * What is waiting, with the one rule that decides whether it can be collected at all. The
  * verification level comes from `Identity` rather than from the signup record: the contract
- * reads the chain, and so must the gate that predicts it.
+ * reads the chain, so the gate that predicts it must too. The title comes from the metadata
+ * document the same `eventMeta` call already hands over the CID for, memoised per CID for the
+ * session — a document that will not load is not a reason to hide the invite.
  */
 async function loadInbox(account: Hex): Promise<InboxRow[]> {
   const offers = await api.pendingOffers();
@@ -33,39 +41,22 @@ async function loadInbox(account: Hex): Promise<InboxRow[]> {
   return Promise.all(
     offers.map(async (offer) => {
       const meta = await ticket.eventMeta(await ticket.eventOf(BigInt(offer.tokenId)));
-      return { offer, orgId: meta.orgId, needsKyc: meta.requireKyc && kycLevel < 1 };
+      const metadata = await fetchEventMetadata(meta.imageCid).catch(() => null);
+      return {
+        offer,
+        orgId: meta.orgId,
+        title: metadata?.title ?? '',
+        needsKyc: meta.requireKyc && kycLevel < 1,
+      };
     }),
   );
 }
 
-export type OrgIdOf = (tokenId: bigint) => Promise<bigint>;
+/** One row's own answer. Keyed by invite id so collecting one says nothing about the others. */
+type ByRow = Readonly<Record<string, string>>;
 
-/**
- * Called the moment signup finishes, so somebody who arrived from a text finds the ticket
- * already theirs. Rows go one at a time on purpose: a single refusal — a verification not
- * done, an invite that expired, one already collected — must not abort the rest of the inbox.
- * Returns how many were really collected.
- */
-export async function acceptPendingOffers(orgIdOf: OrgIdOf = orgIdOfTicket): Promise<number> {
-  const offers = await api.pendingOffers();
-  if (offers.length === 0) return 0;
-  const account = await getAttendeeAccount();
-  let accepted = 0;
-  for (const offer of offers) {
-    const tokenId = BigInt(offer.tokenId);
-    try {
-      await ticketOp({
-        account,
-        orgId: await orgIdOf(tokenId),
-        functionName: 'acceptOffer',
-        args: [tokenId, offer.attesterSig],
-      });
-      accepted += 1;
-    } catch {
-      /* leave it in the inbox; the screen below says why when the person opens it */
-    }
-  }
-  return accepted;
+function withRow(current: ByRow, inviteId: string, value: string): ByRow {
+  return { ...current, [inviteId]: value };
 }
 
 export function Inbox() {
@@ -74,9 +65,9 @@ export function Inbox() {
   const session = useSession();
   const queryClient = useQueryClient();
   const account = session.account;
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
+  const [busy, setBusy] = useState<ByRow>({});
+  const [message, setMessage] = useState<ByRow>({});
+  const [error, setError] = useState<ByRow>({});
 
   const { data, isLoading } = useQuery({
     queryKey: ['pendingOffers', account ?? ''],
@@ -86,9 +77,10 @@ export function Inbox() {
   const rows = data ?? [];
 
   async function take(row: InboxRow): Promise<void> {
-    setBusy(true);
-    setError('');
-    setMessage('');
+    const key = row.offer.inviteId;
+    setBusy((current) => withRow(current, key, key));
+    setError((current) => withRow(current, key, ''));
+    setMessage((current) => withRow(current, key, ''));
     try {
       await ticketOp({
         account: await getAttendeeAccount(),
@@ -96,15 +88,18 @@ export function Inbox() {
         functionName: 'acceptOffer',
         args: [BigInt(row.offer.tokenId), row.offer.attesterSig],
       });
-      setMessage(copy.transfer.accepted);
+      setMessage((current) => withRow(current, key, copy.transfer.accepted));
       await queryClient.invalidateQueries({ queryKey: ['pendingOffers'] });
       await queryClient.invalidateQueries({ queryKey: ['tickets'] });
     } catch (cause) {
       // Still on its way is not a denial: the ticket may well be here in a moment.
-      if (isStillConfirming(cause)) setMessage(copy.transfer.confirming);
-      else setError(acceptFailure(copy, cause));
+      if (isStillConfirming(cause)) {
+        setMessage((current) => withRow(current, key, copy.transfer.confirming));
+      } else {
+        setError((current) => withRow(current, key, acceptFailure(copy, cause)));
+      }
     } finally {
-      setBusy(false);
+      setBusy((current) => withRow(current, key, ''));
     }
   }
 
@@ -113,26 +108,31 @@ export function Inbox() {
       {isLoading ? <Spinner /> : null}
       {!isLoading && rows.length === 0 ? <p className="muted">{copy.tickets.inboxEmpty}</p> : null}
       {rows.length > 0 ? <p>{fmt(copy.tickets.inboxCount, { count: rows.length })}</p> : null}
-      {message ? <Alert tone="info">{message}</Alert> : null}
-      {error ? <Alert tone="error">{error}</Alert> : null}
       <ul className="event-list">
-        {rows.map((row) => (
-          <li key={row.offer.inviteId}>
-            <span>#{row.offer.tokenId}</span>
-            {row.needsKyc ? (
-              <>
-                <Alert tone="warn">{copy.kyc.offerNeedsKyc}</Alert>
-                <Button variant="ghost" onClick={() => navigate('/me/verify?returnTo=/tickets/inbox')}>
-                  {copy.kyc.cta}
+        {rows.map((row) => {
+          const key = row.offer.inviteId;
+          return (
+            <li key={key}>
+              {/* The number is all there is when the document did not load — better than a
+                  blank line, and the person can still see which invite is which. */}
+              <span>{row.title === '' ? `#${row.offer.tokenId}` : row.title}</span>
+              {message[key] ? <Alert tone="info">{message[key]}</Alert> : null}
+              {error[key] ? <Alert tone="error">{error[key]}</Alert> : null}
+              {row.needsKyc ? (
+                <>
+                  <Alert tone="warn">{copy.kyc.offerNeedsKyc}</Alert>
+                  <Button variant="ghost" onClick={() => navigate('/me/verify?returnTo=/tickets/inbox')}>
+                    {copy.kyc.cta}
+                  </Button>
+                </>
+              ) : (
+                <Button onClick={() => void take(row)} disabled={busy[key] === key}>
+                  {copy.transfer.accept}
                 </Button>
-              </>
-            ) : (
-              <Button onClick={() => void take(row)} disabled={busy}>
-                {copy.transfer.accept}
-              </Button>
-            )}
-          </li>
-        ))}
+              )}
+            </li>
+          );
+        })}
       </ul>
     </Screen>
   );

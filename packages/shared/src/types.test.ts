@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   EVENT_STATUS_BY_CODE,
+  GATE_DENY_CODES,
+  GATE_RESPONSE_VERSION,
   SUPPORTED_LOCALES,
   isGateCodeWire,
+  isGateDenyCode,
   isGateResponseWire,
   isHex32,
   isHex64,
@@ -64,17 +67,16 @@ describe('wire guards', () => {
     expect(isGateResponseWire({ ...validResponse, deviceSig: B32 })).toBe(false);
   });
 
-  /**
-   * The nonce is what makes an answer traceable to the code it answers. A response missing it
-   * is the pre-v2 shape, and accepting one would put the gate back to guessing which of its
-   * rotating codes a tap belongs to.
-   */
-  it('isGateResponseWire refuses the v1 shape and a nonce that is not 32 bytes', () => {
-    expect(isGateResponseWire({ v: 1, tokenId: '7', deviceSig: B64 })).toBe(false);
-    expect(isGateResponseWire({ v: 1, tokenId: '7', nonce: B32, deviceSig: B64 })).toBe(false);
+  it('isGateResponseWire requires the gate code nonce, which is what matches answer to code', () => {
     const { nonce: _nonce, ...withoutNonce } = validResponse;
     expect(isGateResponseWire(withoutNonce)).toBe(false);
     expect(isGateResponseWire({ ...validResponse, nonce: B64 })).toBe(false);
+  });
+
+  it('isGateResponseWire rejects the v1 shape outright — no device ever carried one', () => {
+    expect(isGateResponseWire({ v: 1, tokenId: '7', deviceSig: B64 })).toBe(false);
+    expect(isGateResponseWire({ ...validResponse, v: 1 })).toBe(false);
+    expect(isGateResponseWire({ ...validResponse, v: 3 })).toBe(false);
   });
 });
 
@@ -87,7 +89,45 @@ describe('enumerations', () => {
     expect(EVENT_STATUS_BY_CODE).toHaveLength(4);
   });
 
+  it('pins the gate response wire version the staff app must speak', () => {
+    expect(GATE_RESPONSE_VERSION).toBe(2);
+  });
+
   it('supports exactly the two locales the app ships', () => {
     expect([...SUPPORTED_LOCALES]).toEqual(['en', 'ko']);
+  });
+});
+
+describe('gate DENY codes', () => {
+  it('freezes the spec §13 list, in the order the spec prints it', () => {
+    // 스태프 화면과 관객 화면이 같은 코드를 말해야 한다. 한쪽에만 있는 코드는 관객에게
+    // 빈 문장이 되고, 순서가 아니라 값이 계약이므로 목록 전체를 그대로 못 박는다.
+    expect([...GATE_DENY_CODES]).toEqual([
+      'ALREADY_USED', 'WRONG_EVENT', 'REVOKED', 'EXPIRED_CODE', 'NO_TICKET', 'GATE_CLOSED',
+      'DEVICE_LOCKED', 'DEVICE_MISMATCH', 'GATE_MISMATCH', 'EVENT_ENDED', 'EVENT_CANCELLED',
+      'TX_FAILED', 'UNKNOWN_REVERT',
+    ]);
+  });
+
+  it('counts a revert it cannot read as a refusal of its own', () => {
+    // 이유를 못 읽었다는 것은 이유가 없었다는 것과 다른 사건이다: `TX_FAILED` 는 체인이
+    // 사유를 주지 않은 경우이고, `UNKNOWN_REVERT` 는 사유는 왔는데 이 빌드가 그 셀렉터를
+    // 모르는 경우 — 컨트랙트가 앱보다 앞서 나갔다는 뜻이다. 둘을 한 코드로 합치면
+    // 스태프 화면이 "배포가 밀렸다"는 사실을 영영 말할 수 없게 된다.
+    expect(isGateDenyCode('UNKNOWN_REVERT')).toBe(true);
+    expect(GATE_DENY_CODES).toHaveLength(13);
+  });
+
+  it('isGateDenyCode accepts every frozen code and nothing else', () => {
+    for (const code of GATE_DENY_CODES) expect(isGateDenyCode(code)).toBe(true);
+    expect(isGateDenyCode('already_used')).toBe(false);
+    expect(isGateDenyCode('')).toBe(false);
+    expect(isGateDenyCode(undefined)).toBe(false);
+  });
+
+  it('does not count TIMEOUT as a refusal', () => {
+    // 스펙 §13 의 DENY 표에 TIMEOUT 은 없다. 쓰기 결과의 'TIMEOUT' 은 "아직 확인 중"이지
+    // 거절이 아니므로, 관객 화면이 이것을 거절 문장으로 번역하면 안 된다.
+    expect(isGateDenyCode('TIMEOUT')).toBe(false);
   });
 });

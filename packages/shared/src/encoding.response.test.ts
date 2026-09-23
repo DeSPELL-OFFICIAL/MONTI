@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  GateResponseVersionError,
   base64UrlDecode,
   base64UrlEncode,
   decodeGateResponse,
@@ -7,17 +8,10 @@ import {
   fromQrPayload,
   toQrPayload,
 } from './encoding.js';
-import { GateResponseVersionError } from './encoding.js';
-import { GATE_RESPONSE_VERSION } from './types.js';
 import type { GateResponseWire, Hex } from './types.js';
 
 const NONCE = ('0x' + '11'.repeat(32)) as Hex;
 
-/**
- * The cross-branch vector. These exact bytes are what the attendee phone writes, what the staff
- * gate reads out of its HCE file, and what sub-plan 04's APDU write vectors carry — so they are
- * pinned here, in the one package all three import, rather than re-derived on either side.
- */
 const wire: GateResponseWire = {
   v: 2,
   tokenId: '7',
@@ -25,17 +19,33 @@ const wire: GateResponseWire = {
   deviceSig: ('0x' + '22'.repeat(32) + '33'.repeat(32)) as Hex,
 };
 
-/** `a4` = a 4-entry map, then `v`, `tokenId`, `nonce`, `deviceSig` in that fixed order. */
-const VECTOR_HEX =
-  'a461760267746f6b656e49646137656e6f6e63657842307831313131313131313131313131313131' +
-  '31313131313131313131313131313131313131313131313131313131313131313131313131313131' +
-  '31313131313131316964657669636553696778823078323232323232323232323232323232323232' +
-  '32323232323232323232323232323232323232323232323232323232323232323232323232323232' +
-  '32323232323233333333333333333333333333333333333333333333333333333333333333333333' +
-  '333333333333333333333333333333333333333333333333333333333333';
+/**
+ * The frozen vector. Sub-plan 04's staff app writes its own encoder from these bytes, so this
+ * string — not the code above it — is the contract: tokenId 7, nonce 0x11×32, r 0x22×32,
+ * s 0x33×32, fields in declaration order (v, tokenId, nonce, deviceSig).
+ */
+const VECTOR =
+  '0xa461760267746f6b656e49646137656e6f6e63657842307831313131313131313131313131313131313131313131313131' +
+  '3131313131313131313131313131313131313131313131313131313131313131313131313131316964657669636553696778' +
+  '8230783232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232' +
+  '3232323232323232323232323232323232333333333333333333333333333333333333333333333333333333333333333333' +
+  '33333333333333333333333333333333333333333333333333333333333333';
 
-const hex = (bytes: Uint8Array): string =>
-  [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+/** The shape that never shipped. Kept only so the refusal below is tested against real bytes. */
+const V1_BYTES =
+  '0xa361760167746f6b656e496461376964657669636553696778823078323232323232323232323232323232323232323232' +
+  '3232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232' +
+  '3232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232' +
+  '32323232323232';
+
+function toBytes(hex: string): Uint8Array {
+  const bare = hex.slice(2);
+  return Uint8Array.from({ length: bare.length / 2 }, (_, i) => Number.parseInt(bare.slice(i * 2, i * 2 + 2), 16));
+}
+
+function toHex(bytes: Uint8Array): string {
+  return '0x' + [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
 
 describe('base64url', () => {
   it('encodes without padding and without + or /', () => {
@@ -54,17 +64,14 @@ describe('GateResponseWire CBOR', () => {
     expect(decodeGateResponse(encodeGateResponse(wire))).toEqual(wire);
   });
 
-  it('is the 230-byte vector both branches pin, byte for byte', () => {
-    const bytes = encodeGateResponse(wire);
-    expect(bytes.byteLength).toBe(230);
-    expect(hex(bytes)).toBe(VECTOR_HEX);
+  it('encodes the frozen vector byte for byte', () => {
+    // Two independent implementations have to agree on these bytes — this one and sub-plan 04's.
+    // A field reordered, a key renamed or a CBOR option changed all show up here first.
+    expect(toHex(encodeGateResponse(wire))).toBe(VECTOR);
+    expect(decodeGateResponse(toBytes(VECTOR))).toEqual(wire);
   });
 
-  /**
-   * The CBOR map is written in `GateResponseWire` declaration order, so the field order IS the
-   * contract: the vector above pins it, and this reads it back out of the decoded object.
-   */
-  it('carries the four fields in declaration order', () => {
+  it('keeps the fields in declaration order, which is what the vector pins', () => {
     expect(Object.keys(decodeGateResponse(encodeGateResponse(wire)))).toEqual([
       'v',
       'tokenId',
@@ -88,31 +95,38 @@ describe('GateResponseWire CBOR', () => {
     expect(encodeGateResponse(wire).byteLength).toBe(230);
   });
 
-  it('refuses a 32-byte deviceSig and a nonce that is not 32 bytes', () => {
-    expect(() =>
-      encodeGateResponse({ ...wire, deviceSig: ('0x' + '22'.repeat(32)) as Hex }),
-    ).toThrow('BAD_GATE_RESPONSE');
-    expect(() => encodeGateResponse({ ...wire, nonce: ('0x' + '11'.repeat(16)) as Hex })).toThrow(
+  it('refuses a 32-byte deviceSig', () => {
+    expect(() => encodeGateResponse({ ...wire, deviceSig: ('0x' + '22'.repeat(32)) as Hex })).toThrow(
       'BAD_GATE_RESPONSE',
     );
   });
 
-  /**
-   * v1 had no nonce. Nothing is on a device yet, so it is refused rather than migrated — but it
-   * is refused with its own message, because "that build predates the nonce" is a different
-   * field report from "that was not a MONTI tag".
-   */
-  it('tells a v1 payload apart from something that is not a response at all', () => {
-    expect(GATE_RESPONSE_VERSION).toBe(2);
-    const v1 = encodeV1Response();
-    expect(() => decodeGateResponse(v1)).toThrow(GateResponseVersionError);
-    expect(() => decodeGateResponse(v1)).toThrow('GATE_RESPONSE_VERSION');
+  it('refuses a wire without the gate code nonce', () => {
+    const { nonce: _nonce, ...withoutNonce } = wire;
+    expect(() => encodeGateResponse(withoutNonce as GateResponseWire)).toThrow('BAD_GATE_RESPONSE');
+    expect(() => encodeGateResponse({ ...wire, nonce: ('0x' + '11'.repeat(31)) as Hex })).toThrow(
+      'BAD_GATE_RESPONSE',
+    );
+  });
+});
+
+describe('the v1 wire, which no device ever carried', () => {
+  it('is refused by name rather than decoded', () => {
+    // Not `BAD_GATE_RESPONSE`: unreadable bytes and a build one version behind are different
+    // things to say, and only one of them is fixed by updating the app.
+    expect(() => decodeGateResponse(toBytes(V1_BYTES))).toThrow(GateResponseVersionError);
     try {
-      decodeGateResponse(v1);
-    } catch (error) {
-      expect((error as GateResponseVersionError).version).toBe(1);
+      decodeGateResponse(toBytes(V1_BYTES));
+      expect.unreachable('a v1 payload must not decode');
+    } catch (cause) {
+      expect(cause).toBeInstanceOf(GateResponseVersionError);
+      expect((cause as GateResponseVersionError).version).toBe(1);
+      expect((cause as Error).message).toBe('GATE_RESPONSE_VERSION');
     }
-    expect(() => decodeGateResponse(new Uint8Array([0x00, 0x01, 0x02]))).toThrow('BAD_GATE_RESPONSE');
+  });
+
+  it('is refused through the QR path too', () => {
+    expect(() => fromQrPayload(`MONTI1:${base64UrlEncode(toBytes(V1_BYTES))}`)).toThrow(GateResponseVersionError);
   });
 });
 
@@ -146,25 +160,3 @@ describe('QR fallback', () => {
   });
 });
 
-/**
- * The pre-nonce answer, built by hand because no encoder in this package will produce one any
- * more. Deliberately the same three fields v1 carried, so the refusal below is about the
- * version and not about a malformed map.
- */
-function encodeV1Response(): Uint8Array {
-  // Hand-rolled CBOR: a3 (3-entry map) + the three key/value pairs, definite-length text.
-  const text = (value: string): number[] => {
-    const bytes = [...new TextEncoder().encode(value)];
-    const head = bytes.length < 24 ? [0x60 + bytes.length] : [0x78, bytes.length];
-    return [...head, ...bytes];
-  };
-  return new Uint8Array([
-    0xa3,
-    ...text('v'),
-    0x01,
-    ...text('tokenId'),
-    ...text('7'),
-    ...text('deviceSig'),
-    ...text(wire.deviceSig),
-  ]);
-}

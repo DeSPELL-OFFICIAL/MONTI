@@ -16,7 +16,8 @@ export function TransferInvite() {
   const navigate = useNavigate();
   const { tokenId = '' } = useParams();
   const { phoneE164 } = (useLocation().state ?? {}) as { phoneE164?: string };
-  const { phase, error, invite, cancelled, send, cancel } = useInvite(tokenId);
+  const { phase, error, invite, cancelled, requireKyc, send, resend, cancel, refresh } =
+    useInvite(tokenId);
   const [copied, setCopied] = useState(false);
 
   async function copyMessage(text: string): Promise<void> {
@@ -44,10 +45,22 @@ export function TransferInvite() {
   return (
     <Screen title={copy.transfer.inviteTitle}>
       <p>{copy.transfer.inviteBody}</p>
-      <p className="muted">{copy.kyc.inviteKycNote}</p>
+      {/* Only events that ask for it: most do not, and the sentence is a hurdle on the rest. */}
+      {requireKyc ? <p className="muted">{copy.kyc.inviteKycNote}</p> : null}
       {error ? <Alert tone="error">{error}</Alert> : null}
-      {phase === 'confirming' ? <Alert tone="info">{copy.transfer.confirming}</Alert> : null}
       {cancelled ? <Alert tone="info">{copy.transfer.inviteCancelled}</Alert> : null}
+      {phase === 'confirming' ? (
+        <>
+          {/* Neither sent nor refused: the offer may still land. The send stays visible but
+              disabled — a second one would open a second offer — and the way forward is to
+              ask the chain again rather than to stare at an alert with no control under it. */}
+          <Alert tone="info">{copy.transfer.confirming}</Alert>
+          <Button disabled>{copy.transfer.inviteCta}</Button>
+          <Button variant="ghost" onClick={refresh}>
+            {copy.common.retry}
+          </Button>
+        </>
+      ) : null}
       {phase === 'open' ? (
         <>
           <Alert tone="info">{copy.transfer.inviteSent}</Alert>
@@ -68,7 +81,15 @@ export function TransferInvite() {
               </Button>
               {copied ? <Alert tone="info">{copy.transfer.inviteCopied}</Alert> : null}
             </>
-          ) : null}
+          ) : (
+            <>
+              {/* A reload, or a send whose receipt timed out: the offer is on chain but the
+                  message went with the page. The server hands it back for the same number, so
+                  nothing new is written — without this the only way out is to cancel. */}
+              <p className="muted">{copy.transfer.inviteOpenHint}</p>
+              <Button onClick={() => void resend(phoneE164)}>{copy.transfer.inviteResend}</Button>
+            </>
+          )}
           <Button variant="ghost" onClick={() => void cancel()}>
             {copy.transfer.inviteCancel}
           </Button>

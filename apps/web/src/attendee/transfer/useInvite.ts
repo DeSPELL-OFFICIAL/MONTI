@@ -19,8 +19,14 @@ export interface InviteState {
   /** The sentence and the `sms:` link the server made, once the offer is really on chain. */
   invite: TransferInviteResult | null;
   cancelled: boolean;
+  /** The event asks the receiver to verify, so the screen says so. Most events do not. */
+  requireKyc: boolean;
   send: (phoneE164: string) => Promise<void>;
+  /** The message again for an offer already on chain. Sends nothing new to the chain. */
+  resend: (phoneE164: string) => Promise<void>;
   cancel: () => Promise<void>;
+  /** Asks the chain again whether the offer landed, for a send whose receipt timed out. */
+  refresh: () => void;
 }
 
 const now = (): number => Math.floor(Date.now() / 1000);
@@ -37,24 +43,43 @@ export function useInvite(tokenId: string): InviteState {
   const [error, setError] = useState('');
   const [invite, setInvite] = useState<TransferInviteResult | null>(null);
   const [cancelled, setCancelled] = useState(false);
+  const [requireKyc, setRequireKyc] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   // A reload lands back here with the offer already on chain, so the chain — not anything
-  // this component remembers — is what says whether one is still open.
+  // this component remembers — is what says whether one is still open. The same read picks up
+  // whether this event asks the receiver to verify, which decides one line of the screen.
   useEffect(() => {
     let live = true;
     void (async () => {
       let open = false;
+      let kyc = false;
       try {
-        open = isOpenOffer(await readTicket().offerOf(BigInt(tokenId)), now());
+        const ticket = readTicket();
+        const id = BigInt(tokenId);
+        const [offer, meta] = await Promise.all([
+          ticket.offerOf(id),
+          ticket.eventOf(id).then((eventId) => ticket.eventMeta(eventId)),
+        ]);
+        open = isOpenOffer(offer, now());
+        kyc = meta.requireKyc;
       } catch {
         // A read that did not answer is not a refusal: fall through to the send button.
       }
-      if (live) setPhase(open ? 'open' : 'idle');
+      if (!live) return;
+      setRequireKyc(kyc);
+      setPhase(open ? 'open' : 'idle');
     })();
     return () => {
       live = false;
     };
-  }, [tokenId]);
+  }, [tokenId, reloadKey]);
+
+  function refresh(): void {
+    setError('');
+    setPhase('loading');
+    setReloadKey((key) => key + 1);
+  }
 
   async function send(phoneE164: string): Promise<void> {
     setPhase('working');
@@ -83,6 +108,26 @@ export function useInvite(tokenId: string): InviteState {
     }
   }
 
+  /**
+   * The message again for an offer that is already on chain — after a reload, or after a send
+   * whose receipt timed out. The server re-issues for the same number; it refuses only an
+   * invite for a *different* commitment while one is open, and that refusal has its own
+   * sentence. No second `createOffer` goes out, because the offer is already there.
+   */
+  async function resend(phoneE164: string): Promise<void> {
+    const previous = phase;
+    setPhase('working');
+    setError('');
+    setCancelled(false);
+    try {
+      setInvite(await api.createTransferInvite({ tokenId, phoneE164 }));
+      setPhase('open');
+    } catch (cause) {
+      setError(inviteFailure(copy, cause));
+      setPhase(previous);
+    }
+  }
+
   async function cancel(): Promise<void> {
     const previous = phase;
     setPhase('working');
@@ -103,5 +148,5 @@ export function useInvite(tokenId: string): InviteState {
     }
   }
 
-  return { phase, error, invite, cancelled, send, cancel };
+  return { phase, error, invite, cancelled, requireKyc, send, resend, cancel, refresh };
 }

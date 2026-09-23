@@ -1,10 +1,15 @@
 import { useState } from 'react';
-import { encodeErrorResult } from 'viem';
 import type { Hex } from '@monti/shared';
 import { ticketAbi } from '../../shared/chain/abis';
+import {
+  errorSelector as abiErrorSelector,
+  revertMatch as abiRevertMatch,
+  selectorOf,
+} from '../../shared/chain/revert';
 import { OpReverted, ticketOp } from '../../shared/chain/ops';
 import { getAttendeeAccount } from '../../shared/chain/accounts';
 import { readTicket } from '../../shared/chain/reads';
+import type { Copy } from '../../shared/copy/index';
 import { useCopy } from '../../shared/i18n';
 import { useSession } from '../../shared/session';
 import { precheckMessage, runPrecheck, type PrecheckFailure } from './precheck';
@@ -31,23 +36,27 @@ const REVERT_RULES: ReadonlyArray<readonly [string, PrecheckFailure]> = [
 ];
 
 /**
- * The selector the generated ABI gives this error, or nothing when it does not carry the name.
- * `encodeErrorResult` throws on a name it cannot find, and every caller below runs inside a
- * `catch` — a rename in sub-plan 01 would otherwise throw a second time there and leave the
- * screen stuck mid-send instead of falling through to the generic sentence.
+ * The one 01b revert a handover can raise that no pre-check rule covers. `_update`'s rotation
+ * quarantine reads the **recipient's** person (abi-delta-01b.md §6), and `runPrecheck` cannot
+ * ask the same question — it would need `Identity.personOf`, which this app does not read — so
+ * it is answered here, on the way back, rather than bolted onto `PrecheckFailure` as a rule
+ * nothing ever pre-checks.
+ *
+ * `DeviceLocked` deliberately stays out of this table even though 01b made it bidirectional:
+ * `_update` raises it for the sender and the recipient alike, and `transfer.alertLocked` names
+ * the recipient's phone. Half the time that would name the wrong phone, which is worse than
+ * the generic sentence. The recipient's lock is already caught before the send, by the
+ * pre-check's `locked` rule.
  */
-export function errorSelector(errorName: string): string | undefined {
-  try {
-    return encodeErrorResult({ abi: ticketAbi, errorName });
-  } catch {
-    return undefined;
-  }
-}
+const SEND_REVERTS: ReadonlyArray<readonly [string, (copy: Copy) => string]> = [
+  ['RotationPending', (copy) => copy.transfer.alertRecipientMoved],
+];
 
-/** Every one of these errors is argument-less, but slicing keeps a padded reason working. */
-function selectorOf(revertReason: Hex): string {
-  return revertReason.slice(0, 10).toLowerCase();
-}
+/** The two lookups in `shared/chain/revert.ts`, bound to `Ticket` — every screen that shares
+ *  the table below sends a `Ticket` write. The organiser's gate screen reads `Organizers`
+ *  refusals through the same helpers with its own ABI. */
+export const errorSelector = (errorName: string): string | undefined =>
+  abiErrorSelector(ticketAbi, errorName);
 
 /**
  * The same lookup for a screen with its own table. The invite and the inbox send other
@@ -55,16 +64,10 @@ function selectorOf(revertReason: Hex): string {
  * among the eight below, so they pair their own error names with their own sentences here and
  * fall back to `revertRule` for the ones a handover already owns.
  */
-export function revertMatch<T>(
+export const revertMatch = <T,>(
   revertReason: Hex,
   table: ReadonlyArray<readonly [string, T]>,
-): T | undefined {
-  const selector = selectorOf(revertReason);
-  for (const [errorName, value] of table) {
-    if (errorSelector(errorName) === selector) return value;
-  }
-  return undefined;
-}
+): T | undefined => abiRevertMatch(ticketAbi, revertReason, table);
 
 /** Built once, from the generated ABI rather than from hand-copied selectors. */
 let bySelector: Map<string, PrecheckFailure> | undefined;
@@ -144,9 +147,12 @@ export function useTransfer(tokenId: string): TransferState {
           setPhase('confirming');
           return;
         }
-        const rule = cause.revertReason ? revertRule(cause.revertReason) : undefined;
+        const reason = cause.revertReason;
+        // This screen's own table first, then the eight rules the pre-check already owns.
+        const own = reason ? revertMatch(reason, SEND_REVERTS) : undefined;
+        const rule = reason ? revertRule(reason) : undefined;
         // A revert nobody here recognises is not something the person can act on.
-        setError(rule ? precheckMessage(copy, rule) : copy.transfer.failed);
+        setError(own ? own(copy) : rule ? precheckMessage(copy, rule) : copy.transfer.failed);
       } else {
         setError(copy.common.error);
       }

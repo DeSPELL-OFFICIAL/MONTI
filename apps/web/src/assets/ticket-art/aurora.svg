@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 1754" width="1240" height="1754">
+  <defs>
+    <linearGradient id="au-bg" x1="0" y1="0" x2="0.4" y2="1">
+      <stop offset="0" stop-color="#0a0f2e"/>
+      <stop offset="0.55" stop-color="#241f6b"/>
+      <stop offset="1" stop-color="#0c3f52"/>
+    </linearGradient>
+    <linearGradient id="au-ribbon" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#4f7dff" stop-opacity="0"/>
+      <stop offset="0.45" stop-color="#6ee7ff" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#a06bff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="au-soft" x="-25%" y="-25%" width="150%" height="150%">
+      <feGaussianBlur stdDeviation="48"/>
+    </filter>
+  </defs>
+  <rect width="1240" height="1754" fill="url(#au-bg)"/>
+  <g filter="url(#au-soft)">
+    <path d="M-140 520C240 296 520 704 1380 372L1380 644C520 968 240 556 -140 788Z" fill="url(#au-ribbon)"/>
+    <path d="M-140 892C300 664 648 1052 1380 772L1380 992C648 1276 300 908 -140 1116Z" fill="url(#au-ribbon)" opacity="0.6"/>
+  </g>
+  <g fill="#ffffff" opacity="0.34">
+    <circle cx="214" cy="286" r="3"/><circle cx="392" cy="196" r="2"/><circle cx="612" cy="318" r="3.5"/>
+    <circle cx="864" cy="232" r="2.5"/><circle cx="1046" cy="392" r="3"/><circle cx="168" cy="472" r="2"/>
+    <circle cx="742" cy="148" r="2"/><circle cx="982" cy="128" r="3"/>
+  </g>
+  <g opacity="0.46" transform="translate(96 112)">
+    <rect x="0" y="0" width="52" height="52" rx="14" fill="none" stroke="#ffffff" stroke-width="4"/>
+    <path d="M14 38V18l12 12 12-12v20" fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="72" y="39" font-family="system-ui, -apple-system, 'Helvetica Neue', sans-serif" font-size="30" font-weight="700" letter-spacing="8" fill="#ffffff">MONTI</text>
+  </g>
+</svg>

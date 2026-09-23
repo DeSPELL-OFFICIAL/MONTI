@@ -15,7 +15,7 @@ vi.mock('@capgo/capacitor-nfc', () => ({ CapacitorNfc: { startScanning, stopScan
 
 const { NFC_ERROR } = await import('./errors');
 const { NFC_SESSION_TIMEOUT_MS } = await import('./session');
-const { readGateCodeNative, readThenWriteNative, writeGateResponseNative } = await import('./native');
+const { readGateCodeNative, readThenWriteNative } = await import('./native');
 
 const GATE_CODE: GateCodeWire = {
   v: 1,
@@ -221,13 +221,5 @@ describe('native nfc session', () => {
     expect(write).not.toHaveBeenCalled();
     expect(stopScanning).toHaveBeenCalledTimes(1);
     expect(removed).toEqual(['ndefDiscovered', 'nfcSessionEnd']);
-  });
-
-  it('writes into a session someone else already opened, without starting one', async () => {
-    await writeGateResponseNative(RESPONSE);
-    expect(startScanning).not.toHaveBeenCalled();
-    expect(write).toHaveBeenCalledWith({
-      records: [{ tnf: 4, type: typeBytes('monti.app:s'), id: [], payload: expect.any(Array) }],
-    });
   });
 });

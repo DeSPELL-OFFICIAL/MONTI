@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EnvioError, gql } from './client';
-import { EVENTS_QUERY, EVENT_QUERY } from './queries';
+import { EVENTS_QUERY, EVENT_QUERY, MY_ORGS_QUERY, ORG_EVENTS_QUERY } from './queries';
 import { clearMetadataCache, fetchEventMetadata, gatewayUrl, normalizeMetadata } from './ipfs';
 import { getConfig } from '../config';
 
@@ -79,6 +79,17 @@ describe('queries', () => {
     expect(EVENT_QUERY).not.toContain('sold');
     expect(EVENTS_QUERY).toContain('status: { _eq: "Published" }');
   });
+
+  it('declares the organiser documents with the scalar each column actually has', () => {
+    // `Organizer.owner` and `Admin`/`Manager.account` are `String!`; `Event.orgId` is `BigInt!`,
+    // which Hasura serves as `numeric` — so the list of ids is a list of those, not of strings.
+    expect(MY_ORGS_QUERY).toContain('$me: String!');
+    expect(MY_ORGS_QUERY).not.toMatch(/\$me:\s*numeric/);
+    expect(ORG_EVENTS_QUERY).toContain('$orgIds: [numeric!]!');
+    expect(ORG_EVENTS_QUERY).not.toMatch(/\$orgIds:\s*\[String!\]!/);
+    // A manager keeps its row after removal, so only the live ones are asked for.
+    expect(MY_ORGS_QUERY).toContain('exists: { _eq: true }');
+  });
 });
 
 describe('fetchEventMetadata', () => {
@@ -97,15 +108,39 @@ describe('fetchEventMetadata', () => {
     expect(metadata.category).toBe(0);
   });
 
-  it('accepts the wizard document, which names the title `title`', () => {
+  it('accepts a document that names the title `title` rather than `name`', () => {
     expect(normalizeMetadata({ title: '재즈 나이트', venue: '한남', category: 2, region: 'KR-11' })).toEqual({
       title: '재즈 나이트',
       description: '',
       image: '',
+      imageCid: '',
       venue: '한남',
       category: 2,
       region: 'KR-11',
+      // Pinned before the three existed, so each one defaults rather than going undefined.
+      tags: [],
+      venueHidden: false,
+      timeHidden: false,
     });
+  });
+
+  /**
+   * The server only pins the two flags when they are true and refuses a tag that breaks the
+   * rule, so what arrives here is either right or absent. A document somebody hand-pinned is
+   * neither, which is why every field is still read back at its own type.
+   */
+  it('reads the tags and the two visibility flags the creation scene now pins', () => {
+    expect(normalizeMetadata({
+      name: '재즈 나이트', tags: ['재즈', '라이브'], venueHidden: true, timeHidden: true,
+    })).toMatchObject({ tags: ['재즈', '라이브'], venueHidden: true, timeHidden: true });
+
+    // A hidden venue is a document with no `venue` key at all.
+    expect(normalizeMetadata({ name: 'n', venueHidden: true }).venue).toBe('');
+    // Anything that is not a list of non-empty strings is no tags.
+    expect(normalizeMetadata({ name: 'n', tags: '재즈' }).tags).toEqual([]);
+    expect(normalizeMetadata({ name: 'n', tags: ['재즈', 7, ''] }).tags).toEqual(['재즈']);
+    // Only `true` hides anything: a truthy string is a hand edit, not a flag.
+    expect(normalizeMetadata({ name: 'n', venueHidden: 'yes' }).venueHidden).toBe(false);
   });
 
   it('reads each CID once per session', async () => {

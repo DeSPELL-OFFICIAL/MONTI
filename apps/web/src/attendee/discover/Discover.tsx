@@ -1,22 +1,42 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Alert, Button, Field, Screen, Spinner } from '../../shared/ui';
-import { useCopy, useLocale } from '../../shared/i18n';
+import { Link, useNavigate } from 'react-router-dom';
+import { Alert, Button, Fab, Field, KycBadge, Screen, Spinner } from '../../shared/ui';
+import { fmt, useCopy, useLocale } from '../../shared/i18n';
+import { describeFailure } from '../../shared/errors';
+import { useSession } from '../../shared/session';
+import { useOrganizerEntry } from '../../organizer/useOrganizerEntry';
+import { useKycLevel } from '../me/useKycLevel';
 import { Filters } from './Filters';
 import {
   applyFilters,
   formatEventDate,
+  formatEventDay,
   loadFilters,
   saveFilters,
   useEvents,
   type DiscoverFilters,
 } from './useEvents';
 
+/**
+ * How many of an event's tags a card shows. The rest are counted into one `+N` chip rather
+ * than wrapped onto a second line: a card is a title, a time and a badge, and five tags would
+ * be the tallest thing on it. The detail screen shows all of them (plan section B-2).
+ */
+const CARD_TAGS = 2;
+
 export function Discover() {
   const copy = useCopy();
   const locale = useLocale();
   const [filters, setFilters] = useState<DiscoverFilters>(loadFilters);
-  const { data, isLoading, isError, refetch } = useEvents();
+  // Asked once for the whole page, not once per card, and not at all for a signed-out visitor.
+  const signedIn = useSession().status === 'signedIn';
+  const { kycLevel } = useKycLevel();
+  const navigate = useNavigate();
+  // Shown to everybody, signed out included. The one decision about where it goes is
+  // `useOrganizerEntry`'s, and it sends a visitor to signing up rather than refusing them:
+  // hiding the button is exactly how a founder with a fresh account finds nothing at all.
+  const organizer = useOrganizerEntry();
+  const { data, isLoading, isError, error, refetch } = useEvents();
   const items = applyFilters(data ?? [], filters);
 
   function update(next: DiscoverFilters): void {
@@ -41,7 +61,7 @@ export function Discover() {
 
       {isError ? (
         <>
-          <Alert tone="error">{copy.common.error}</Alert>
+          <Alert tone="error">{describeFailure(error, copy)}</Alert>
           <Button onClick={() => void refetch()}>{copy.common.retry}</Button>
         </>
       ) : null}
@@ -52,11 +72,33 @@ export function Discover() {
         {items.map(({ event, metadata }) => (
           <li key={event.id}>
             <Link to={`/events/${event.id}`}>{metadata?.title || copy.discover.untitled}</Link>
-            {event.requireKyc ? <span className="badge">{copy.kyc.requiredBadge}</span> : null}
-            <p className="muted">{formatEventDate(event.startsAt, locale)}</p>
+            <KycBadge required={event.requireKyc} level={kycLevel} signedIn={signedIn} />
+            {/* The same rule the detail screen keeps: an organiser who told only ticket
+                holders when their event starts must not have it printed to the minute on the
+                card everybody sees. The card already holds the document that says so. */}
+            <p className="muted">
+              {metadata?.timeHidden
+                ? formatEventDay(event.startsAt, locale)
+                : formatEventDate(event.startsAt, locale)}
+            </p>
+            {/* Reading only. Nothing filters on a tag and nothing here is pressable: the
+                indexer has no column for tags (`schema.graphql`), so filtering on them would
+                mean fetching every event's document before the first card could be drawn. */}
+            {metadata !== null && metadata.tags.length > 0 ? (
+              <ul className="tag-row tag-row--card">
+                {metadata.tags.slice(0, CARD_TAGS).map((tag) => (
+                  <li key={tag}>{tag}</li>
+                ))}
+                {metadata.tags.length > CARD_TAGS ? (
+                  <li>{fmt(copy.discover.tagsMore, { count: metadata.tags.length - CARD_TAGS })}</li>
+                ) : null}
+              </ul>
+            ) : null}
           </li>
         ))}
       </ul>
+
+      <Fab label={copy.discover.create} onClick={() => navigate(organizer.to)} />
     </Screen>
   );
 }

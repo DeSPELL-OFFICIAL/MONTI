@@ -35,9 +35,8 @@ beforeEach(() => {
     vi.stubEnv(`VITE_ADDR_${name}`, `0x${'11'.repeat(20)}`);
   }
   vi.stubEnv('VITE_ENVIO_URL', 'https://envio.example/v1/graphql');
-  vi.stubEnv('VITE_RP_ID', 'monti.app');
+  vi.stubEnv('VITE_RP_ID', 'monti.despell.io');
   vi.stubEnv('VITE_IPFS_GATEWAY', 'https://gw.example/ipfs/');
-  vi.stubEnv('VITE_PINATA_JWT', 'jwt');
 });
 
 afterEach(async () => {

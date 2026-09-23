@@ -3,7 +3,7 @@ import * as Base64 from 'ox/Base64';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const isNativePlatform = vi.fn(() => false);
-vi.mock('../config', () => ({ getConfig: () => ({ rpId: 'monti.app' }) }));
+vi.mock('../config', () => ({ getConfig: () => ({ rpId: 'monti.despell.io' }) }));
 vi.mock('@capacitor/core', () => ({ Capacitor: { isNativePlatform: () => isNativePlatform() } }));
 
 const createCredential = vi.fn(async (_options: unknown) => ({
@@ -84,7 +84,7 @@ describe('createPasskey (web)', () => {
       challenge: Uint8Array;
       authenticatorSelection: { residentKey: string; userVerification: string };
     };
-    expect(options.rp.id).toBe('monti.app');
+    expect(options.rp.id).toBe('monti.despell.io');
     // The server looks the attestation's challenge up as a document id; ox would otherwise
     // invent one and registerPasskey would answer CHALLENGE_NOT_FOUND every time.
     expect([...options.challenge]).toEqual([...CHALLENGE_BYTES]);
@@ -115,7 +115,7 @@ describe('createPasskey (native)', () => {
         authenticatorSelection: { residentKey: string; userVerification: string };
       };
     };
-    expect(request.publicKey.rp.id).toBe('monti.app');
+    expect(request.publicKey.rp.id).toBe('monti.despell.io');
     expect(request.publicKey.pubKeyCredParams).toEqual([{ type: 'public-key', alg: -7 }]);
     expect(request.publicKey.authenticatorSelection).toMatchObject({
       residentKey: 'required',
@@ -162,7 +162,7 @@ describe('getFnNative', () => {
     const assertion = await getFnNative({
       publicKey: {
         challenge: new Uint8Array([0xde, 0xad, 0xbe, 0xef]),
-        rpId: 'monti.app',
+        rpId: 'monti.despell.io',
         userVerification: 'required',
         allowCredentials: [{ id: new Uint8Array([0x63, 0x72, 0x65, 0x64]), type: 'public-key' }],
       },
@@ -176,7 +176,7 @@ describe('getFnNative', () => {
       };
     };
     expect(request.publicKey.challenge).toBe('3q2-7w');
-    expect(request.publicKey.rpId).toBe('monti.app');
+    expect(request.publicKey.rpId).toBe('monti.despell.io');
     expect(request.publicKey.userVerification).toBe('required');
     expect(request.publicKey.allowCredentials).toEqual([{ id: 'Y3JlZA', type: 'public-key' }]);
 

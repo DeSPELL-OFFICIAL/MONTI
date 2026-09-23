@@ -16,8 +16,6 @@ export interface AppConfig {
   envioUrl: string;
   rpId: string;
   ipfsGateway: string;
-  /** Empty until an organizer build needs it: nothing in the attendee app pins. */
-  pinataJwt: string;
   /** Derived from chainId, so no view hardcodes an explorer host. */
   explorerUrl: string;
 }
@@ -65,9 +63,6 @@ export function getConfig(): AppConfig {
     envioUrl: requiredEnv('VITE_ENVIO_URL'),
     rpId: requiredEnv('VITE_RP_ID'),
     ipfsGateway: requiredEnv('VITE_IPFS_GATEWAY'),
-    // Optional on purpose: the attendee app never pins, so a blank one must not stop it
-    // booting. The organizer upload path fails fast at its own call site instead.
-    pinataJwt: optionalEnv('VITE_PINATA_JWT') ?? '',
     explorerUrl: explorerUrlFor(chainId),
   };
   return cached;

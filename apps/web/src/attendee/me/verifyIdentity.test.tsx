@@ -4,11 +4,15 @@ import { MemoryRouter, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StrictMode, type ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ko } from '../../shared/copy/index';
+import { clearSession, setSession } from '../../shared/session';
 
 const POLL_INTERVAL_MS = 2_000;
 const POLL_LIMIT = 45;
 const KYC_URL = 'https://verify.didit.me/s/abc';
 const TIMEOUT_COPY = '아직 확인 결과가 오지 않았어요. 잠시 뒤 다시 확인해 주세요.';
+const GENERIC_COPY = '문제가 생겼어요. 잠시 뒤 다시 시도해 주세요.';
+const IN_FLIGHT_COPY = '잠시 후 다시 시도해 주세요.';
 
 // The screen only ever sees a URL and a remover, so the listener is captured here and fired by
 // hand. The matcher is the real one — a mocked matcher is how the dead web leg survived review.
@@ -28,7 +32,12 @@ vi.mock('../../shared/api/deepLink', async (orig) => ({
 
 const startKyc = vi.fn(async () => ({ kycUrl: KYC_URL, sessionId: 'sess-1' }));
 const getSignupStatus = vi.fn();
-vi.mock('../../shared/api/functions', () => ({ api: { startKyc, getSignupStatus } }));
+// `callableFailure` is the real one: the screen's in-flight branch reads a server status, and a
+// stubbed reader would let that branch pass while the real one never fired.
+vi.mock('../../shared/api/functions', async (orig) => ({
+  ...(await orig<typeof import('../../shared/api/functions')>()),
+  api: { startKyc, getSignupStatus },
+}));
 
 const navigate = vi.fn();
 vi.mock('react-router-dom', async (orig) => ({
@@ -72,6 +81,7 @@ async function comeBack(url = 'monti://kyc/callback') {
 
 beforeEach(() => {
   onDeepLink = null;
+  startKyc.mockClear();
   getSignupStatus.mockResolvedValue({ status: 'active', kycLevel: 0 });
 });
 
@@ -85,15 +95,60 @@ describe('VerifyIdentity', () => {
     expect(getSignupStatus).not.toHaveBeenCalled();
   });
 
+  /**
+   * Left off, the server falls back to `https://<rp>/kyc/callback` and the `returnTo` with it:
+   * on the web a verified person lands on the explore tab and every resumed claim after it is
+   * pointless. The address is the screen's own, marked, carrying where they were going.
+   */
+  it('tells the server where to send a web browser back to, returnTo and all', async () => {
+    renderScreen('/me/verify?returnTo=%2Fclaim%2F1%3Fintent%3Dclaim%26tier%3D0');
+    await userEvent.click(cta());
+    expect(startKyc).toHaveBeenCalledWith({
+      callbackUrl: `${window.location.origin}/me/verify?didit=done&returnTo=${encodeURIComponent('/claim/1?intent=claim&tier=0')}`,
+    });
+  });
+
+  it('falls back to the profile in the callback when nothing asked for the check', async () => {
+    renderScreen();
+    await userEvent.click(cta());
+    expect(startKyc).toHaveBeenCalledWith({
+      callbackUrl: `${window.location.origin}/me/verify?didit=done&returnTo=${encodeURIComponent('/me')}`,
+    });
+  });
+
   it('says so plainly when the session could not be started', async () => {
     startKyc.mockRejectedValueOnce(new Error('unavailable'));
     renderScreen();
     await userEvent.click(cta());
-    expect(await screen.findByText('문제가 생겼어요. 잠시 뒤 다시 시도해 주세요.')).toBeInTheDocument();
+    expect(await screen.findByText(GENERIC_COPY)).toBeInTheDocument();
+    // Nothing here gets better by waiting, so the generic sentence gets no "try again" button.
+    expect(screen.queryByRole('button', { name: '다시 시도' })).toBeNull();
+  });
+
+  it('asks the person to wait when another call already holds the session claim', async () => {
+    // `ensureKycSession` throws aborted/KYC_SESSION_IN_FLIGHT while the 60 s claim is held.
+    startKyc.mockRejectedValueOnce({ code: 'aborted', message: 'KYC_SESSION_IN_FLIGHT' } as never);
+    renderScreen();
+    await userEvent.click(cta());
+    expect(await screen.findByText(IN_FLIGHT_COPY)).toBeInTheDocument();
+    expect(screen.queryByText(GENERIC_COPY)).toBeNull();
+  });
+
+  it('lets the claim lapse and start over from the same screen', async () => {
+    startKyc.mockRejectedValueOnce({ code: 'aborted', message: 'KYC_SESSION_IN_FLIGHT' } as never);
+    renderScreen();
+    await userEvent.click(cta());
+    await screen.findByText(IN_FLIGHT_COPY);
+
+    await userEvent.click(screen.getByRole('button', { name: '다시 시도' }));
+    // The claim has lapsed, so the second attempt opens the hosted page and the sentence goes.
+    expect(startKyc).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(openHostedFlow).toHaveBeenCalledWith(KYC_URL));
+    expect(screen.queryByText(IN_FLIGHT_COPY)).toBeNull();
   });
 
   it('reports a duplicate face with the "already have an account" copy', async () => {
-    getSignupStatus.mockResolvedValue({ status: 'rejected', kycLevel: 0, reason: 'duplicate_face' });
+    getSignupStatus.mockResolvedValue({ status: 'rejected', kycLevel: 0, kycReason: 'duplicate_face' });
     renderScreen();
     await userEvent.click(cta());
     await comeBack();
@@ -101,11 +156,28 @@ describe('VerifyIdentity', () => {
   });
 
   it('reports any other failure with the generic rejection copy', async () => {
-    getSignupStatus.mockResolvedValue({ status: 'rejected', kycLevel: 0, reason: 'document_failed' });
+    getSignupStatus.mockResolvedValue({ status: 'rejected', kycLevel: 0, kycReason: 'declined' });
     renderScreen();
     await userEvent.click(cta());
     await comeBack();
     expect(await screen.findByText('본인 확인에 실패했어요. 다시 시도해 주세요.')).toBeInTheDocument();
+  });
+
+  /**
+   * A refusal is the one dead end in the app: the verdict came from the vendor, no button on
+   * this screen can change it, and a person who believes it is wrong has nowhere else to go.
+   * The address only appears with the refusal — an idle screen offering support reads as a
+   * warning that something is already broken.
+   */
+  it('hands a refused person the support address, and only then', async () => {
+    getSignupStatus.mockResolvedValue({ status: 'rejected', kycLevel: 0, kycReason: 'declined' });
+    renderScreen();
+    expect(screen.queryByRole('link', { name: ko.common.contactEmail })).toBeNull();
+
+    await userEvent.click(cta());
+    await comeBack();
+    const link = await screen.findByRole('link', { name: ko.common.contactEmail });
+    expect(link).toHaveAttribute('href', `mailto:${ko.common.contactEmail}`);
   });
 
   it('sends a verified person back to the screen that asked for the check', async () => {
@@ -223,13 +295,29 @@ describe('VerifyIdentity', () => {
 });
 
 describe('useKycLevel', () => {
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={new QueryClient()}>{children}</QueryClientProvider>
+  );
+
   it('reads the level the server reports and defaults to unverified', async () => {
+    setSession({ status: 'signedIn', account: `0x${'44'.repeat(20)}`, personId: 'p4' });
     getSignupStatus.mockResolvedValue({ status: 'kyc_ok', kycLevel: 1 });
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={new QueryClient()}>{children}</QueryClientProvider>
-    );
     const { result } = renderHook(() => useKycLevel(), { wrapper });
     expect(result.current.kycLevel).toBe(0);
     await waitFor(() => expect(result.current.kycLevel).toBe(1));
+    clearSession();
+  });
+
+  /**
+   * The event pages are public. Asking this of a visitor with no session only ever comes back
+   * `unauthenticated`, so the badge gets its 0 without a wasted call on every page load.
+   */
+  it('asks nothing of a visitor with no session, and is not left waiting on it', async () => {
+    clearSession();
+    getSignupStatus.mockClear();
+    const { result } = renderHook(() => useKycLevel(), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.kycLevel).toBe(0);
+    expect(getSignupStatus).not.toHaveBeenCalled();
   });
 });
