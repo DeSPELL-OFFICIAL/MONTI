@@ -135,10 +135,86 @@ contract OrganizersGatesTest is Test {
         orgs.openGate(gateId);
     }
 
+    /// @dev An id nobody ever registered is its own error, not a permission failure -- the staff app
+    ///      needs to tell "wrong gate id" apart from "not your gate".
+    function test_openGateRejectsAnUnknownGateId() public {
+        vm.prank(GATEKEEPER);
+        vm.expectRevert(Organizers.UnknownGate.selector);
+        orgs.openGate(4242);
+    }
+
+    /// @dev The gate bit is granted per organizer: holding it for another project opens nothing here.
+    function test_gateAdminOfAnotherOrganizerCannotOpenThisGate() public {
+        uint256 gateId = _registered();
+
+        address otherOwner = address(0x03);
+        address otherAdmin = address(0x0B);
+        uint32 gateBit = orgs.PERM_MANAGE_GATES();
+        uint256 otherOrgId = orgs.createOrganizer(otherOwner);
+        vm.prank(otherOwner);
+        orgs.setAdmin(otherOrgId, otherAdmin, gateBit);
+
+        vm.prank(otherAdmin);
+        vm.expectRevert(Organizers.Unauthorized.selector);
+        orgs.openGate(gateId);
+    }
+
     function test_strangerCannotOpenGate() public {
         uint256 gateId = _registered();
         vm.prank(STRANGER);
         vm.expectRevert(Organizers.Unauthorized.selector);
         orgs.openGate(gateId);
+    }
+
+    /// @dev T14 의 대응 수단은 revokeGate 다. 폐기된 게이트 계정은 페이마스터가 더 이상
+    ///      스폰서하지 않아야 하고(gateOf == 0), 그 주소를 새 단말기로 다시 쓸 수 있어야 한다.
+    function test_revokeGateReleasesTheAccount() public {
+        uint256 gateId = _registerGate(GATE_ACCOUNT);
+        assertEq(orgs.gateOf(GATE_ACCOUNT), gateId);
+
+        vm.prank(GATEKEEPER);
+        orgs.revokeGate(gateId);
+
+        assertEq(orgs.gateOf(GATE_ACCOUNT), 0, "a revoked gate is no longer a sponsored sender");
+        (,,,, bool open, bool revoked) = orgs.gateInfo(gateId);
+        assertFalse(open);
+        assertTrue(revoked, "the record survives; only the live mapping goes");
+    }
+
+    function test_aRevokedAccountCanBeRegisteredAgain() public {
+        uint256 first = _registerGate(GATE_ACCOUNT);
+        vm.prank(GATEKEEPER);
+        orgs.revokeGate(first);
+
+        uint256 second = _registerGate(GATE_ACCOUNT);
+        assertGt(second, first, "a fresh gate id, not the old one");
+        assertEq(orgs.gateOf(GATE_ACCOUNT), second);
+        assertFalse(orgs.isOpenGate(7, GATE_ACCOUNT), "a fresh gate starts closed");
+    }
+
+    function test_theOldGateIdStaysRevokedAfterReRegistration() public {
+        uint256 first = _registerGate(GATE_ACCOUNT);
+        vm.prank(GATEKEEPER);
+        orgs.revokeGate(first);
+        _registerGate(GATE_ACCOUNT);
+
+        vm.prank(GATEKEEPER);
+        vm.expectRevert(Organizers.GateIsRevoked.selector);
+        orgs.openGate(first);
+    }
+
+    /// @dev Minor 2. 반쪽 0 키는 관객 폰의 게이트 서명 검증(T14 방어 1)을 깬다. Identity 와 맞춘다.
+    function test_registerGateRejectsAHalfZeroKey() public {
+        vm.startPrank(GATEKEEPER);
+        vm.expectRevert(Organizers.InvalidGateKey.selector);
+        orgs.registerGate(7, GATE_ACCOUNT, bytes32(0), KY);
+        vm.expectRevert(Organizers.InvalidGateKey.selector);
+        orgs.registerGate(7, GATE_ACCOUNT, KX, bytes32(0));
+        vm.stopPrank();
+    }
+
+    function _registerGate(address account) internal returns (uint256 gateId) {
+        vm.prank(GATEKEEPER);
+        gateId = orgs.registerGate(7, account, KX, KY);
     }
 }

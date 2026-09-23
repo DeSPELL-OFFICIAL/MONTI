@@ -239,4 +239,28 @@ contract TicketOverrideTest is MontiTest {
         ticket.manualOverride(tokenId, closedGateId, 3);
         assertEq(ticket.checkInOf(tokenId).gateId, closedGateId);
     }
+
+    /// @dev Minor 5. 승인할 수 없는 요청은 애초에 올라가지 않는다 — manualOverride 와 같은 기준이다.
+    function test_requestOverrideRejectsAnEndedEvent() public {
+        vm.warp(T0 + 3 days);
+        vm.prank(MANAGER_NO);
+        vm.expectRevert(Ticket.EventEnded.selector);
+        ticket.requestOverride(tokenId, gateId, 1);
+    }
+
+    function test_requestOverrideRejectsACancelledEvent() public {
+        vm.prank(ORG_OWNER);
+        ticket.cancelEvent(eventId);
+        vm.prank(MANAGER_NO);
+        vm.expectRevert(Ticket.EventCancelled.selector);
+        ticket.requestOverride(tokenId, gateId, 1);
+    }
+
+    /// @dev 살아 있는 행사에서는 그대로 올라간다. 위의 두 거부가 문을 통째로 닫은 게 아님을 고정한다.
+    function test_requestOverrideStillWorksWhileTheEventRuns() public {
+        vm.expectEmit(true, true, true, true);
+        emit OverrideRequested(tokenId, gateId, MANAGER_NO, 1);
+        vm.prank(MANAGER_NO);
+        ticket.requestOverride(tokenId, gateId, 1);
+    }
 }

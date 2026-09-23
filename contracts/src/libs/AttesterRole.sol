@@ -2,7 +2,8 @@
 pragma solidity 0.8.31;
 
 /// @title AttesterRole
-/// @notice The attester is the off-chain key (Cloud KMS, spec 9.2) that attests "this human passed KYC".
+/// @notice The attester is the off-chain key (spec 9.2) that attests "this human passed KYC". MVP: raw
+///         EOA key in Secret Manager (ATTESTER_PK); KMS signing is the production path.
 ///         It is the only writer of Identity.register and Identity.rotateAccount. The deployer can
 ///         rotate the attester address; nobody else can. There is no other privileged role here.
 abstract contract AttesterRole {

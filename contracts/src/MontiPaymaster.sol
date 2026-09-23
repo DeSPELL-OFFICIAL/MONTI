@@ -45,6 +45,13 @@ contract MontiPaymaster is IPaymaster {
     uint256 public constant PLATFORM = 0;
     uint256 public constant MAX_BATCH = 8;
 
+    /// @dev The highest argument index `setAllowed` will index a call at. The widest row the
+    ///      constructor seeds is 2 (`safeTransferFrom`'s tokenId), so eight head words is already far
+    ///      past anything this paymaster sponsors -- past it the value is a typo, and a typo has to be
+    ///      refused at set time. Internal on purpose: it bounds an operator's input, and no consumer
+    ///      reads it, so it stays out of the exported ABI.
+    uint8 internal constant MAX_ARG_WORD = 7;
+
     uint32 private constant PERM_MANAGE_BUDGET = 16;
     bytes4 private constant EXECUTE = bytes4(keccak256("execute(address,uint256,bytes)"));
     bytes4 private constant EXECUTE_BATCH = bytes4(keccak256("executeBatch((address,uint256,bytes)[])"));
@@ -73,6 +80,7 @@ contract MontiPaymaster is IPaymaster {
     event StakeAdded(uint256 amount, uint32 unstakeDelaySec);
     event StakeUnlocked();
     event StakeWithdrawn(address indexed to, uint256 amount);
+    event SelectorAllowed(bytes4 indexed selector, uint8 kind, uint8 word);
 
     error Unauthorized();
     error ZeroAddress();
@@ -246,6 +254,43 @@ contract MontiPaymaster is IPaymaster {
         return argKindOf[selector] != ArgKind.None;
     }
 
+    /// @notice Which 32-byte argument word `argKindOf` reads the id out of. 0 unless stated.
+    function argWordOf(bytes4 selector) external view returns (uint8) {
+        return _argWord[selector];
+    }
+
+    /// @notice The only way the allowlist changes. Until now it existed only in the constructor
+    ///         (R-PM6), so changing one line of it meant redeploying all four contracts (I4). Passing
+    ///         `None` removes a selector, and that is the kill switch for an abused one -- one
+    ///         transaction, no redeploy (the I7 mitigation).
+    /// @dev    This opens no real new power. The deployer already holds `withdrawPlatform` and
+    ///         `addStake`; the reachable targets are still exactly Ticket, Identity and Organizers,
+    ///         which the constructor fixed as immutables; and every function inside them still runs
+    ///         its own authorization. What a selector buys is who pays the gas, never who may call.
+    ///         Not reachable from validation, so it changes nothing about ERC-7562 compliance.
+    function setAllowed(bytes4 selector, ArgKind kind, uint8 word) external {
+        if (msg.sender != deployer) revert Unauthorized();
+
+        // Removing a selector removes its word with it. Left behind, a stale word would be inherited
+        // by a later re-allow that passed 0 and meant it.
+        if (kind == ArgKind.None) {
+            delete argKindOf[selector];
+            delete _argWord[selector];
+            emit SelectorAllowed(selector, uint8(ArgKind.None), 0);
+            return;
+        }
+
+        // A word past the end of the call is not a narrower sponsorship, it is no sponsorship at all:
+        // `_argAt` bounds-checks it and every operation on that selector dies in validation with
+        // BadCallData. This setter is used under operational pressure and `SelectorAllowed` is its only
+        // feedback, so a mistyped word fails here rather than at the next tap.
+        if (word > MAX_ARG_WORD) revert BadCallData();
+
+        argKindOf[selector] = kind;
+        _argWord[selector] = word;
+        emit SelectorAllowed(selector, uint8(kind), word);
+    }
+
     // --- Call inspection -----------------------------------------------------------------------------
 
     /// @dev Reads the wallet's `execute`/`executeBatch` payload and returns the one slot that pays for it.
@@ -350,8 +395,13 @@ contract MontiPaymaster is IPaymaster {
         _allow("migrate(uint256)", ArgKind.TokenId);
         // Ticket — gate
         _allow("checkIn(uint256,(uint256,uint256,uint64,bytes32),bytes)", ArgKind.TokenId);
+        // C1: flushing the offline queue is the same admission by another door. It must not be the
+        // one admission that asks the gate phone's account for MON.
+        _allow("checkInLate(uint256,(uint256,uint256,uint64,bytes32),bytes)", ArgKind.TokenId);
         _allow("requestOverride(uint256,uint256,uint8)", ArgKind.TokenId);
         _allow("manualOverride(uint256,uint256,uint8)", ArgKind.TokenId);
+        // 5.5: voiding a ticket is the organizer's own remedy and must not demand MON of them.
+        _allow("revoke(uint256,uint8)", ArgKind.TokenId);
         // Ticket — organizer. createEvent names its org inside a dynamically offset struct, so it is not
         // decodable here without binding to Ticket's layout: MONTI pays for creating an event.
         _allow(
@@ -369,12 +419,21 @@ contract MontiPaymaster is IPaymaster {
         _allow("registerGate(uint256,address,bytes32,bytes32)", ArgKind.EventId);
         _allow("openGate(uint256)", ArgKind.Platform);
         _allow("closeGate(uint256)", ArgKind.Platform);
+        // 6.3 T14 answers a stolen terminal with "drop it from the allowlist" — the answer itself
+        // cannot be the thing that needs MON. Same slot as openGate/closeGate for the same reason.
+        _allow("revokeGate(uint256)", ArgKind.Platform);
+        // 5.8 "becoming an organizer" is a flow the audience starts. This function has no
+        // authorization of its own, so abuse stays possible (I7); setAllowed is what switches it off.
+        _allow("createOrganizer(address)", ArgKind.Platform);
+        _allow("transferOwner(uint256,address)", ArgKind.OrgId);
         _allow("setAdmin(uint256,address,uint32)", ArgKind.OrgId);
         _allow("setManager(uint256,address,bool,bool)", ArgKind.OrgId);
         // Identity — a person's own device and nickname, which belong to no project.
         _allow("setActiveDevice(bytes32,bytes32)", ArgKind.Platform);
         _allow("lockDevice(address)", ArgKind.Platform);
         _allow("setNickname(bytes32,string)", ArgKind.Platform);
+        // 6.3 T11: the button that takes a stolen account back must not ask for gas (C3).
+        _allow("cancelRotation()", ArgKind.Platform);
     }
 
     function _allow(string memory signature, ArgKind kind) private {

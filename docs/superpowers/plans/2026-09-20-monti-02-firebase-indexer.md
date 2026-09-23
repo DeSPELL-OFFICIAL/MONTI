@@ -9965,3 +9965,26 @@ curl -sI https://monti.app/.well-known/apple-app-site-association | grep -c "app
 ```
 
 모두 참이면 sub-plan 03과 04가 `@monti/shared`와 22개 함수, 호스티드 인덱서를 그대로 쓸 수 있다.
+
+## 01b delta (2026-09-21)
+
+01b 재배포 번들이 컨트랙트를 바꿨다. **아직 배포 전이다**(01b Task 15에서 새 주소로 올린다). 인터페이스 원본은 **`contracts/docs/abi-delta-01b.md`** 한 곳이고, 아래는 "어느 Task가 무엇 때문에 바뀌고 델타 문서의 어디를 읽어야 하는가"만 가리킨다. **위 Task 본문은 고치지 않는다** — 같은 파일이 `mvp-backend`에도 있어 본문을 고치면 병합에서 충돌한다. 실제 코드 수정은 이 델타를 들고 각 Task를 실행할 때 한다.
+
+| Task | 무엇이 바뀌나 | 새 인터페이스 | 읽을 곳 |
+|---|---|---|---|
+| **T3 (ABI 재수출)** | `packages/shared/src/abi`의 `Identity`·`Organizers`·`Ticket`·`MontiPaymaster` JSON을 01b 브랜치에서 **복사**한다(재생성 금지 — 옛 소스가 나온다). `CoinbaseSmartWalletFactory`는 안 바뀐다 | Identity 41→47, Ticket 105→116, Paymaster 42→45 | §1~§4, §8 · 02 |
+| **T2 (`constants.ts`·배포 로더)** | `CODE_WINDOW_SECONDS` 아래에 두 줄. 재배포 후 `deployments/10143.json`을 복사하고 `sync-deployments.mjs`를 돌린다 | `LATE_WINDOW_SECONDS = 43_200`, `MIGRATE_DELAY_SECONDS = 86_400` | §2 |
+| **T3 (abi.test.ts)** | `arrayContaining`이라 이름이 빠져도 안 보인다. 새 이름을 **명시적으로 추가**한다 | Ticket `checkInLate`·`offerDigest`·`eip712Domain`·`deviceDigest`·`LATE_WINDOW`·`MIGRATE_DELAY`, 이벤트 `CheckedInLate` / Identity `cancelRotation`·`rotatedAt`·`rotatedFrom`·`ROTATION_UNDO_WINDOW`, 이벤트 `RotationCancelled` / Paymaster `setAllowed`·`argWordOf`, 이벤트 `SelectorAllowed` | §8 · 02 |
+| **T4 (`encoding.ts` `deviceSigHash`)** | 다섯 낱말 → **일곱 낱말**. `encoding.hash.test.ts:35`의 벡터 `0xc99dfaef…60c7`는 죽었다 | `sha256(abi.encode(chainid, ticket, tokenId, gateId, eventId, nonce, issuedAt))`, 새 벡터 `0xca378ab2…fe66`. `functions/src`·`packages/shared/src`에서 **다른 사본이 없는지 grep**한다 — 두 번째 사본은 문에서 조용한 DENY다 | **§7.2** |
+| **T4 (`encoding.ts` `offerDigest`)** | raw keccak → **EIP-712**. 옛 벡터 `0x90244cd7…ed0a`는 **나란히 두지 말고 지운다** | `hashTypedData` 버전(델타 문서에 함수 전문이 있다), 새 벡터 `0x7171ab38…bc88d`. 함수 본문만 갈아 끼우고 CBOR·QR·DER 인코더는 건드리지 않는다 | **§7.1** |
+| **T25 (`pendingOffers`)** | `transferInvites.ts:240`의 서명이 EIP-712가 되면서 **`chainId`와 `Ticket` 주소가 스코프에 있어야** 한다(배포 레코드에 있다). `functions/test/transferInvites.test.ts`도 같이 | `offerDigest({chainId, ticket, tokenId, recipientCommitment, recipientAccount})` | **§7.1** |
+| **T28 (`tenderlyWebhook`)** | 늦은 경로가 새 이벤트를 하나 더 낸다. 입장 푸시는 **`CheckedIn` 한 번만** 보낸다 | `CheckedInLate(tokenId indexed, gateId indexed, issuedAt, ts)` topic0 `0xad3c23d7…b782`. 재배포 후 **알림 대상 주소를 새 네 주소로 다시 겨눈다** | §2 |
+| **T29 (`reconcilePending`)** | 바꿀 것 없음. 기록해 둔다 | 회전 되돌리기는 별도 스케줄을 요구하지 않는다(창이 24시간이고 체인이 스스로 닫는다) | §1 |
+| **T33 (인덱서 config)** | 재배포 후 **네 주소와 `start_block`이 전부 바뀐다**. 시작 블록은 `deployments/10143.json`의 **`.block`** | 옛 배포를 인덱싱한 데이터가 있으면 **비우고** 재시작한다(주소가 달라 섞이면 안 된다) | 01b Task 15 Step 6 |
+| **T35 (`Identity`·`Organizers` 핸들러)** | 이벤트 두 개가 늘고 하나가 짝을 갖는다 | `RotationCancelled(personId indexed, account indexed)` → `AccountRotated`가 쓴 것을 되돌리고 대기 플래그를 지운다. `rotateAccount`가 `AccountRotated` 직후 **`DeviceLocked(old,true)`를 함께 emit**한다(이미 잠겨 있었으면 두 번째 이벤트 없음). `GateRevoked`는 이제 `gateOf`를 비운다 | §1 · §6 |
+| **T36 (`Ticket` 핸들러)** | `CheckedInLate`는 **같은 트랜잭션의 `CheckedIn` 행에 `late = true`를 세울 뿐 두 번째 입장이 아니다.** 입장 수는 `CheckedIn`만 센다 | `CheckIn` 엔티티에 `late: Boolean!` 추가. `checkInOf`를 자리로 해체하는 곳은 **`(gateId, nonceHash, ts, manual, late)`** 순서로 (셀렉터가 그대로라 컴파일러가 못 잡는다) | **§5** · §2 |
+| **T36 (오퍼·전송)** | `acceptOffer`·`transferFrom`이 새 사유로 되돌아온다 | `EventCancelled`(취소된 행사의 티켓은 안 움직인다), `DeviceLocked`(받는 쪽도), `RotationPending`(교체 직후 24시간 수신 격리) | **§6** |
+
+**스키마 한 줄(인계)**: 세 저장소의 `indexer/schema.graphql`에서 `CheckIn`에 `late: Boolean!`을 더하고 `schema.test.ts`의 필드 목록에도 더한다. 핸들러 구현은 T36의 몫이다. 이 워크트리에는 인덱서가 없어 여기서는 지시만 남긴다.
+
+**백엔드 호출 집계(정정)**: 읽기 18(+`nicknameOwner`), 쓰기 5(+`setAdmin`/`setManager`).
