@@ -3,7 +3,7 @@ pragma solidity 0.8.31;
 
 import {Test} from "forge-std/Test.sol";
 import {EntryPoint} from "account-abstraction/core/EntryPoint.sol";
-import {Deploy} from "../script/Deploy.s.sol";
+import {DeployHarness} from "./Deploy.t.sol";
 import {Seed} from "../script/Seed.s.sol";
 import {Identity} from "../src/Identity.sol";
 import {Organizers} from "../src/Organizers.sol";
@@ -30,7 +30,7 @@ contract SeedHarness is Seed {
 ///         gitignored local ones and never the tracked 10143 pair.
 contract SeedTest is Test {
     EntryPoint internal entryPoint;
-    Deploy internal deployScript;
+    DeployHarness internal deployScript;
     SeedHarness internal seedScript;
 
     Identity internal identity;
@@ -44,7 +44,13 @@ contract SeedTest is Test {
 
     address internal constant GATE = address(0x6A7E);
     address internal constant SECOND_GATE = address(0x6A7F);
-    uint256 internal constant FUND = 0.02 ether;
+    /// @dev Matches Seed.DEFAULT_MEMBER_FUND_WEI. Monad charges gas_limit x 100 gwei, so 0.02 MON did
+    ///      not cover a claim on the 2026-09-22 testnet seed.
+    uint256 internal constant FUND = 0.1 ether;
+    /// @dev Stands in for the staff device's real P-256 public key. What matters is that it is a value
+    ///      the founder supplies, not one this repository can derive.
+    bytes32 internal constant GATE_KX = bytes32(uint256(0x6A11));
+    bytes32 internal constant GATE_KY = bytes32(uint256(0x6A22));
     /// @dev A real base32 CIDv1 of a sha2-256 digest, which is the shape Pinata hands the founder back.
     string internal constant CID = "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi";
 
@@ -57,7 +63,7 @@ contract SeedTest is Test {
         vm.chainId(31340);
 
         entryPoint = new EntryPoint();
-        deployScript = new Deploy();
+        deployScript = new DeployHarness();
         seedScript = new SeedHarness();
 
         deployer = vm.addr(DEPLOYER_PK);
@@ -165,13 +171,37 @@ contract SeedTest is Test {
     ///         seed file carries every id sub-plans 03 and 04 read.
     function test_runReadsTheDeploymentAndRecordsWhatTheAppsRead() public {
         if (vm.exists(SEED_PATH)) vm.removeFile(SEED_PATH);
-        deployScript.record();
+
+        // `run` reads its stack out of this file, so it has to be the one this test just wrote. Left
+        // behind by an earlier run, a stale 31340.json lets the test pass against a deployment that is
+        // not the one in process -- which is exactly how it kept passing after Deploy.record() stopped
+        // writing outside a broadcast.
+        if (vm.exists(DEPLOY_PATH)) vm.removeFile(DEPLOY_PATH);
+        deployScript.recordAt(DEPLOY_PATH);
+        assertTrue(vm.exists(DEPLOY_PATH), "the seed reads its stack out of this file");
+        assertEq(
+            vm.parseJsonAddress(vm.readFile(DEPLOY_PATH), ".identity"),
+            address(identity),
+            "and this run is what wrote it"
+        );
 
         vm.setEnv("DEPLOYER_PK", vm.toString(DEPLOYER_PK));
         vm.setEnv("ATTESTER_PK", vm.toString(ATTESTER_PK));
         vm.setEnv("GATE_ACCOUNT", vm.toString(GATE));
+        vm.setEnv("SEED_GATE_KX", vm.toString(GATE_KX));
+        vm.setEnv("SEED_GATE_KY", vm.toString(GATE_KY));
         vm.setEnv("MEMBER_FUND_WEI", vm.toString(FUND));
         vm.setEnv("SEED_IMAGE_CID", CID);
+
+        // `vm.setEnv` is process-global and forge runs this contract's test functions in parallel, so
+        // the unset-variable case lives here rather than in a test of its own: an unset SEED_GATE_KX
+        // reaches the script as a zero word, and the founder is told which variable is empty instead of
+        // being handed an InvalidGateKey from eight calls deep, after the organizer and the event are
+        // already on chain.
+        vm.setEnv("SEED_GATE_KX", vm.toString(bytes32(0)));
+        vm.expectRevert(bytes("SEED_GATE_KX and SEED_GATE_KY must be the gate device's P-256 public key"));
+        seedScript.run();
+        vm.setEnv("SEED_GATE_KX", vm.toString(GATE_KX));
 
         seedScript.run();
 
@@ -239,7 +269,16 @@ contract SeedTest is Test {
     function test_seedRefusesAnAttesterKeyThatIsNotTheAttester() public {
         vm.expectRevert(bytes("ATTESTER_PK does not match Identity.attester()"));
         seedScript.seed(
-            address(identity), address(organizers), address(ticket), GATE, CID, DEPLOYER_PK, ATTESTER_PK + 1, FUND
+            address(identity),
+            address(organizers),
+            address(ticket),
+            GATE,
+            GATE_KX,
+            GATE_KY,
+            CID,
+            DEPLOYER_PK,
+            ATTESTER_PK + 1,
+            FUND
         );
     }
 
@@ -248,18 +287,86 @@ contract SeedTest is Test {
     ///         founder deploys, so this is the first thing a mistimed run hits.
     function test_seedRefusesAStackThatIsNotDeployedYet() public {
         vm.expectRevert(Seed.StackNotDeployed.selector);
-        seedScript.seed(address(0), address(organizers), address(ticket), GATE, CID, DEPLOYER_PK, ATTESTER_PK, FUND);
+        seedScript.seed(
+            address(0),
+            address(organizers),
+            address(ticket),
+            GATE,
+            GATE_KX,
+            GATE_KY,
+            CID,
+            DEPLOYER_PK,
+            ATTESTER_PK,
+            FUND
+        );
+    }
+
+    /// @notice Review Minor 4. A gate registered under a placeholder key cannot be verified by the
+    ///         attendee phone, so spec 7.2 step 3 -- T14 defence 1, the phone checking the gate's
+    ///         signature before it writes anything back -- simply does not exist on that gate. The seed
+    ///         has to register the real device key the founder generated on the staff Android.
+    function test_seedRegistersTheGateWithTheSuppliedKey() public {
+        bytes32 kx = bytes32(uint256(0x6A11));
+        bytes32 ky = bytes32(uint256(0x6A22));
+        _seedWithGateKey(GATE, kx, ky);
+
+        (,, bytes32 gotX, bytes32 gotY,,) = organizers.gateInfo(seedScript.gateId());
+        assertEq(gotX, kx, "the gate key is the one the founder supplied");
+        assertEq(gotY, ky);
+        assertTrue(gotX != keccak256("gate-kx"), "no placeholder survives");
+        assertTrue(gotY != keccak256("gate-ky"), "neither half of one");
+    }
+
+    /// @notice An unset SEED_GATE_KX/KY reaches `seed` as a zero word. Organizers.registerGate would
+    ///         refuse it too (InvalidGateKey), but eight calls deep and after the organizer and the
+    ///         event are already on chain -- the founder is told which variable is empty before
+    ///         anything is broadcast.
+    function test_seedRefusesAGateKeyThatIsMissing() public {
+        vm.expectRevert(bytes("SEED_GATE_KX and SEED_GATE_KY must be the gate device's P-256 public key"));
+        _seedWithGateKey(GATE, bytes32(0), GATE_KY);
+
+        vm.expectRevert(bytes("SEED_GATE_KX and SEED_GATE_KY must be the gate device's P-256 public key"));
+        _seedWithGateKey(GATE, GATE_KX, bytes32(0));
+    }
+
+    /// @notice Monad charges on `gas_limit x 100 gwei`, not on gas used, so a demo member funded with
+    ///         0.02 MON could not send its own claim: the 2026-09-22 testnet seed had to finish three
+    ///         of them by hand with `cast`.
+    function test_theDefaultMemberFundIsEnoughForAClaimOnMonad() public view {
+        assertEq(seedScript.DEFAULT_MEMBER_FUND_WEI(), 0.1 ether, "0.02 MON did not cover a claim");
     }
 
     function _seedWithCid(string memory cid) private {
         seedScript.seed(
-            address(identity), address(organizers), address(ticket), GATE, cid, DEPLOYER_PK, ATTESTER_PK, FUND
+            address(identity),
+            address(organizers),
+            address(ticket),
+            GATE,
+            GATE_KX,
+            GATE_KY,
+            cid,
+            DEPLOYER_PK,
+            ATTESTER_PK,
+            FUND
         );
     }
 
     function _seed(address gateAccount) private {
+        _seedWithGateKey(gateAccount, GATE_KX, GATE_KY);
+    }
+
+    function _seedWithGateKey(address gateAccount, bytes32 kx, bytes32 ky) private {
         seedScript.seed(
-            address(identity), address(organizers), address(ticket), gateAccount, CID, DEPLOYER_PK, ATTESTER_PK, FUND
+            address(identity),
+            address(organizers),
+            address(ticket),
+            gateAccount,
+            kx,
+            ky,
+            CID,
+            DEPLOYER_PK,
+            ATTESTER_PK,
+            FUND
         );
     }
 }

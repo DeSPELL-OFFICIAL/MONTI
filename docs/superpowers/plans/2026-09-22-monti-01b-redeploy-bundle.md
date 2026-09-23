@@ -2966,7 +2966,7 @@ forge script script/SizeProbe.s.sol:SizeProbe \
 - [ ] 02/03/04가 **현재 배포**에서 게이트 탭 한 번을 엔드투엔드로 성공시켰다(R-F1). 아니면 여기서 멈춘다.
 - [ ] 04가 실제 스태프 단말기의 **게이트 계정 주소**(`GATE_ACCOUNT`)와 **진짜 게이트 공개키**(`SEED_GATE_KX`, `SEED_GATE_KY` — 0x 접두 32바이트 두 개)를 넘겼다. 계정 주소는 채택된 팩토리 `0xBA5ED110eFDBa3D005bfC882d75358ACBbB85842`로 **`factoryAddress`를 명시해** 유도한 것이어야 한다 — viem과 permissionless의 기본값은 v1.0 팩토리라 다른 주소가 나온다.
 - [ ] `SEED_IMAGE_CID`가 Pinata에 핀된 실제 CID다(`bafy…`, 59자).
-- [ ] 배포자 계정에 가스가 넉넉하다. 7건의 브로드캐스트가 각각 `--gas-limit 30000000`으로 나가고, Monad는 **한도 × 100 gwei**로 문다.
+- [ ] 배포자·어테스터 계정에 **마스터 플랜 「01b delta (2026-09-21)」 창업자 입력의 가스 예산 줄**이 요구하는 잔액이 있다(그 줄이 정본이다 — 숫자를 여기 다시 적지 않는다). 브로드캐스트는 각각 `--gas-limit 30000000`으로 나가고 Monad는 **한도 × 100 gwei**로 문다.
 - [ ] **옛 배포에서 살려야 할 것 목록이 있다** — Step 8의 계정 재등록 대상과 Step 9의 스테이크·예치금.
 - [ ] `forge test`가 초록이고 `.github-checks.sh`가 통과한다.
 

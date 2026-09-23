@@ -10,6 +10,16 @@ import {Organizers} from "../src/Organizers.sol";
 import {Ticket} from "../src/Ticket.sol";
 import {MontiPaymaster} from "../src/MontiPaymaster.sol";
 
+/// @notice The deploy script, plus the one entry point the tests need and the script must not have.
+/// @dev    `record()` writes only under a broadcast, and `forge test` is not one. This is how the tests
+///         reach the writing half without giving the script itself a public entry point that could be
+///         pointed at the tracked deployments/10143.json. Seed.t.sol drives the same harness.
+contract DeployHarness is Deploy {
+    function recordAt(string memory path) external {
+        _record(path);
+    }
+}
+
 /// @notice Runs the real deploy script against the real EntryPoint v0.6, in process. What is proved here
 ///         is what the founder cannot afford to discover on chain: the four contracts point at each other,
 ///         the paymaster is staked and funded before anything is sponsored, and the deployments file that
@@ -21,7 +31,7 @@ import {MontiPaymaster} from "../src/MontiPaymaster.sol";
 ///         the committed `10143.json`; it is gitignored.
 contract DeployTest is Test {
     EntryPoint internal entryPoint;
-    Deploy internal deployScript;
+    DeployHarness internal deployScript;
 
     uint256 internal constant PK = 0xD3910;
     address internal deployer;
@@ -37,6 +47,14 @@ contract DeployTest is Test {
     string internal constant PATH = "deployments/31337.json";
 
     bytes4 internal constant CHECK_IN = bytes4(keccak256("checkIn(uint256,(uint256,uint256,uint64,bytes32),bytes)"));
+    bytes4 internal constant CHECK_IN_LATE =
+        bytes4(keccak256("checkInLate(uint256,(uint256,uint256,uint64,bytes32),bytes)"));
+
+    /// @dev The keys sub-plans 02, 03 and 04 read out of deployments/<chainid>.json, in the order
+    ///      `vm.writeJson` emits them.
+    string[9] internal RECORDED_KEYS = [
+        "attester", "block", "chainId", "coinbaseFactory", "entryPoint", "identity", "organizers", "paymaster", "ticket"
+    ];
 
     function setUp() public {
         // Pin the chain id: on a forked run `block.chainid` would be Monad's, and `run()` would write
@@ -44,7 +62,7 @@ contract DeployTest is Test {
         vm.chainId(31337);
 
         entryPoint = new EntryPoint();
-        deployScript = new Deploy();
+        deployScript = new DeployHarness();
         deployer = vm.addr(PK);
 
         // A broadcast inside `forge test` only re-labels the sender; the value still leaves the script.
@@ -84,6 +102,18 @@ contract DeployTest is Test {
             uint8(MontiPaymaster.ArgKind.Platform),
             "openGate kind"
         );
+
+        // The six rows Task 11 added (I4). A constructor that seeded an older table would still pass
+        // the two assertions above, so each of them is named here with the slot it bills.
+        _assertSponsored(paymaster, CHECK_IN_LATE, MontiPaymaster.ArgKind.TokenId, "checkInLate");
+        _assertSponsored(paymaster, Ticket.revoke.selector, MontiPaymaster.ArgKind.TokenId, "revoke");
+        _assertSponsored(paymaster, Organizers.revokeGate.selector, MontiPaymaster.ArgKind.Platform, "revokeGate");
+        _assertSponsored(
+            paymaster, Organizers.createOrganizer.selector, MontiPaymaster.ArgKind.Platform, "createOrganizer"
+        );
+        _assertSponsored(paymaster, Organizers.transferOwner.selector, MontiPaymaster.ArgKind.OrgId, "transferOwner");
+        // C3's undo has to work from an account with a zero balance, which is the whole point of it.
+        _assertSponsored(paymaster, Identity.cancelRotation.selector, MontiPaymaster.ArgKind.Platform, "cancelRotation");
     }
 
     /// @notice `Organizers.setTicket` may be called once and never again, so the script has to hand it a
@@ -137,7 +167,13 @@ contract DeployTest is Test {
         // Without this gate a `forge script --rpc-url <monad>` rehearsal would overwrite the tracked
         // deployments/10143.json with addresses that were never deployed.
         assertFalse(vm.exists(PATH), "a run that is not a broadcast records nothing");
+
+        // The guard lives inside `record` itself, so the signature a founder can reach directly --
+        // `forge script --sig 'record()'` -- writes nothing either. Unguarded, that dry run would put
+        // the zero addresses of a script that deployed nothing into the tracked 10143.json.
         deployScript.record();
+        assertFalse(vm.exists(PATH), "nor does record() called on its own");
+        deployScript.recordAt(PATH);
 
         // Privileged roles must land on the broadcasting key, not on the script contract — otherwise
         // nobody can rotate the attester or top the paymaster up after the deploy.
@@ -146,6 +182,17 @@ contract DeployTest is Test {
         assertEq(deployScript.paymaster().deployer(), deployer, "paymaster.deployer");
 
         string memory raw = vm.readFile(PATH);
+
+        // Sub-plan 02's indexer config generator turns one of these keys into `start_block`, and it
+        // reads it as `block` -- `packages/shared`'s `Deployment` interface has no `startBlock` and the
+        // plan pins the names letter for letter. Pinning the whole set is what catches a key that is
+        // added, dropped or renamed here and then read as `undefined` three repositories away.
+        string[] memory keys = vm.parseJsonKeys(raw, "$");
+        assertEq(keys.length, RECORDED_KEYS.length, "a key was added or dropped");
+        for (uint256 i; i < keys.length; ++i) {
+            assertEq(keys[i], RECORDED_KEYS[i], "recorded key");
+        }
+
         assertEq(vm.parseJsonUint(raw, ".chainId"), block.chainid, "chainId");
         assertEq(vm.parseJsonAddress(raw, ".identity"), address(deployScript.identity()), "identity");
         assertEq(vm.parseJsonAddress(raw, ".organizers"), address(deployScript.organizers()), "organizers");
@@ -161,7 +208,7 @@ contract DeployTest is Test {
         // sub-plan 03 loses the account factory it creates attendee wallets with.
         vm.writeFile(PATH, string.concat('{"coinbaseFactory":"', vm.toString(FACTORY), '"}'));
         deployScript.run();
-        deployScript.record();
+        deployScript.recordAt(PATH);
 
         raw = vm.readFile(PATH);
         assertEq(vm.parseJsonAddress(raw, ".coinbaseFactory"), FACTORY, "coinbaseFactory survived");
@@ -173,6 +220,16 @@ contract DeployTest is Test {
         assertEq(deployScript.DEFAULT_STAKE_WEI(), 1 ether, "default stake");
         assertEq(deployScript.DEFAULT_DEPOSIT_WEI(), 1 ether, "default deposit");
         assertEq(deployScript.UNSTAKE_DELAY_SEC(), 1 days, "one-day unstake delay");
+    }
+
+    function _assertSponsored(
+        MontiPaymaster paymaster,
+        bytes4 selector,
+        MontiPaymaster.ArgKind kind,
+        string memory what
+    ) private view {
+        assertTrue(paymaster.allowedSelector(selector), string.concat(what, " is sponsored"));
+        assertEq(uint8(paymaster.argKindOf(selector)), uint8(kind), string.concat(what, " kind"));
     }
 
     function _deploy() private {

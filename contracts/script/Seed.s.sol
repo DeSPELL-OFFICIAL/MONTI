@@ -30,18 +30,24 @@ import {P256Vectors} from "../test/utils/P256Vectors.sol";
 ///           DEPLOYER_PK      broadcast key; owns the demo organizer and pays for the demo members' gas
 ///           ATTESTER_PK      the key behind Identity's attester; the only account that may register
 ///           GATE_ACCOUNT     the staff device's account, which becomes this event's open gate
+///           SEED_GATE_KX     the gate device's P-256 public key X, as 0x-prefixed 32 bytes. The
+///           SEED_GATE_KY     attendee phone verifies the gate's signature against these before it
+///                            writes anything back (spec 7.2 step 3, T14 defence 1), so a placeholder
+///                            here means that defence does not exist on the demo gate. Required, and
+///                            generated on the Android device by sub-plan 04
 ///           SEED_IMAGE_CID   the demo event's metadata JSON, pinned to Pinata before the seed is run:
 ///                            `{ name, description, image }`, which is where the attendee app reads the
 ///                            event's name and picture from. Required — the chain has only the hashes
-///           MEMBER_FUND_WEI  optional, defaults to 0.02 MON per demo member
+///           MEMBER_FUND_WEI  optional, defaults to 0.1 MON per demo member
 contract Seed is Script {
     /// @notice Enough demo attendees to show a list rather than a single row, few enough to seed in one
     ///         run on a testnet.
     uint256 public constant DEMO_MEMBERS = 3;
 
-    /// @notice One claim costs well under this at any testnet gas price; the rest stays in the account
-    ///         for whatever sub-plan 03 demos next.
-    uint256 public constant DEFAULT_MEMBER_FUND_WEI = 0.02 ether;
+    /// @notice One claim finishes inside this and the rest stays in the account for whatever sub-plan
+    ///         03 demos next. Monad charges `gas_limit x 100 gwei` rather than gas used, so 0.02 MON
+    ///         was not enough: the 2026-09-22 testnet seed had to finish three claims by hand.
+    uint256 public constant DEFAULT_MEMBER_FUND_WEI = 0.1 ether;
 
     /// @notice Spec 9.2's verified level: the demo attendees pass an event that demands ID and face.
     uint8 public constant DEMO_KYC_LEVEL = 1;
@@ -59,6 +65,11 @@ contract Seed is Script {
     ///      They exist so the seed can send a claim from each member without the founder minding three
     ///      more secrets, and they hold nothing but a free ticket and a few cents of testnet gas. The
     ///      real attendee phone registers its own passkey account through the app (sub-plan 03).
+    ///
+    ///      The device keys are just as public: all three demo members are registered with the same
+    ///      P256Vectors.DEVICE_X/Y, whose private key is printed in script/gen-p256-vectors.mjs. Anyone
+    ///      who reads this repository can sign a check-in for any of them. **This must never reach
+    ///      mainnet** -- it is a fixture for sub-plans 03 and 04 to tap against, not an account model.
     string internal constant MEMBER_LABEL = "monti.seed.demo.member";
     string internal constant PERSON_LABEL = "monti.seed.demo.person";
 
@@ -83,6 +94,10 @@ contract Seed is Script {
         uint256 deployerPk = vm.envUint("DEPLOYER_PK");
         uint256 attesterPk = vm.envUint("ATTESTER_PK");
         address gate = vm.envAddress("GATE_ACCOUNT");
+        // No default, and no placeholder: see the header. A gate the attendee phone cannot verify is a
+        // gate that check-in defence 1 does not cover.
+        bytes32 gateKx = vm.envBytes32("SEED_GATE_KX");
+        bytes32 gateKy = vm.envBytes32("SEED_GATE_KY");
         uint256 memberFundWei = vm.envOr("MEMBER_FUND_WEI", DEFAULT_MEMBER_FUND_WEI);
         // No default: an event whose metadata is not pinned yet has no name and no image on the
         // attendee's screen, and the founder is the only one who can pin it.
@@ -94,6 +109,8 @@ contract Seed is Script {
             vm.parseJsonAddress(raw, ".organizers"),
             vm.parseJsonAddress(raw, ".ticket"),
             gate,
+            gateKx,
+            gateKy,
             imageCid,
             deployerPk,
             attesterPk,
@@ -122,6 +139,8 @@ contract Seed is Script {
         address organizers_,
         address ticket_,
         address gateAccount_,
+        bytes32 gateKx_,
+        bytes32 gateKy_,
         string memory imageCid_,
         uint256 deployerPk,
         uint256 attesterPk,
@@ -130,6 +149,7 @@ contract Seed is Script {
         if (identity_ == address(0) || organizers_ == address(0) || ticket_ == address(0)) {
             revert StackNotDeployed();
         }
+        _requireGateKey(gateKx_, gateKy_);
         _requireCid(imageCid_);
 
         identity = Identity(identity_);
@@ -152,7 +172,7 @@ contract Seed is Script {
         orgId = organizers.createOrganizer(deployer);
         eventId = ticket.createEvent(_meta(imageCid_), _tiers());
         ticket.publishEvent(eventId);
-        gateId = organizers.registerGate(eventId, gateAccount, keccak256("gate-kx"), keccak256("gate-ky"));
+        gateId = organizers.registerGate(eventId, gateAccount, gateKx_, gateKy_);
         organizers.openGate(gateId);
         for (uint256 i; i < members.length; ++i) {
             if (members[i].balance >= memberFundWei) continue;
@@ -217,6 +237,17 @@ contract Seed is Script {
     ///      These are hashes of a demo label and a counter — no PII goes near them.
     function personId(uint256 index) public pure returns (bytes32) {
         return keccak256(abi.encodePacked(PERSON_LABEL, index));
+    }
+
+    /// @dev Organizers.registerGate refuses a half-zero key, but only after the organizer, the event
+    ///      and the funding are already on chain, and as an opaque InvalidGateKey. An unset
+    ///      SEED_GATE_KX/KY arrives here as a zero word, so this is where the founder is told which
+    ///      variable is empty -- before anything is broadcast.
+    function _requireGateKey(bytes32 kx, bytes32 ky) private pure {
+        require(
+            kx != bytes32(0) && ky != bytes32(0),
+            "SEED_GATE_KX and SEED_GATE_KY must be the gate device's P-256 public key"
+        );
     }
 
     /// @dev The chain carries only `titleHash` and `descHash`, so this CID is where the attendee app

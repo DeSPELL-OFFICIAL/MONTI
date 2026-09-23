@@ -22,6 +22,7 @@ contract PaymasterTest is MontiTest {
     event Deposited(uint256 indexed orgId, uint256 amount);
     event BudgetDebited(uint256 indexed orgId, uint256 amount);
     event SponsorModeSet(uint256 indexed orgId, bool selfSponsored);
+    event SelectorAllowed(bytes4 indexed selector, uint8 kind, uint8 word);
 
     function setUp() public {
         _deployMonti();
@@ -197,26 +198,26 @@ contract PaymasterTest is MontiTest {
         assertTrue(paymaster.allowedSelector(bytes4(keccak256("acceptOffer(uint256,bytes)"))));
         assertTrue(paymaster.allowedSelector(bytes4(keccak256("publishEvent(uint256)"))));
         assertTrue(paymaster.allowedSelector(bytes4(keccak256("cancelEvent(uint256)"))));
-        assertFalse(paymaster.allowedSelector(bytes4(keccak256("createOrganizer(address)"))));
+        assertTrue(paymaster.allowedSelector(bytes4(keccak256("createOrganizer(address)"))), "I4");
     }
 
     /// @dev The gate, override, migrate and revoke selectors named by the compiler rather than by a
     ///      hand-typed signature string, so a parameter list that drifts breaks the build instead of
-    ///      quietly falling out of the allowlist. `revoke` is the organizer's own admin action and is
-    ///      deliberately outside the sponsored set (master plan allowlist), so it is pinned false.
-    function test_doorSelectorsAreSponsoredAndRevokeIsNot() public view {
+    ///      quietly falling out of the allowlist. `revoke` used to be pinned false; I4 sponsors it,
+    ///      because spec 5.5 has the organizer void a ticket and that must not demand MON of them.
+    function test_theDoorAndTheOrganizersOwnActionsAreAllSponsored() public view {
         assertTrue(paymaster.allowedSelector(Ticket.checkIn.selector), "checkIn");
         assertTrue(paymaster.allowedSelector(Ticket.requestOverride.selector), "requestOverride");
         assertTrue(paymaster.allowedSelector(Ticket.manualOverride.selector), "manualOverride");
         assertTrue(paymaster.allowedSelector(Ticket.migrate.selector), "migrate");
-        assertFalse(paymaster.allowedSelector(Ticket.revoke.selector), "revoke is not sponsored");
+        assertTrue(paymaster.allowedSelector(Ticket.revoke.selector), "revoke is sponsored (I4)");
 
         // All four name a tokenId in the first word, which is how the paying project is found.
         assertEq(uint8(paymaster.argKindOf(Ticket.checkIn.selector)), uint8(MontiPaymaster.ArgKind.TokenId));
         assertEq(uint8(paymaster.argKindOf(Ticket.requestOverride.selector)), uint8(MontiPaymaster.ArgKind.TokenId));
         assertEq(uint8(paymaster.argKindOf(Ticket.manualOverride.selector)), uint8(MontiPaymaster.ArgKind.TokenId));
         assertEq(uint8(paymaster.argKindOf(Ticket.migrate.selector)), uint8(MontiPaymaster.ArgKind.TokenId));
-        assertEq(uint8(paymaster.argKindOf(Ticket.revoke.selector)), uint8(MontiPaymaster.ArgKind.None));
+        assertEq(uint8(paymaster.argKindOf(Ticket.revoke.selector)), uint8(MontiPaymaster.ArgKind.TokenId));
     }
 
     function test_argKindTableNamesWhereEachIdSits() public view {
@@ -397,6 +398,52 @@ contract PaymasterTest is MontiTest {
 
         _selfSponsor();
         ep.callValidate(address(paymaster), _op(_claimCall(), 0), bytes32(0), 0.01 ether);
+
+        // I4's six new selectors go through the same frame, so they are held to the same rule.
+        // Platform-kind calls read nothing outside this contract; the two id-bearing ones reach only
+        // Ticket and Organizers, exactly as the selectors that were already here do.
+        ep.callValidate(
+            address(paymaster),
+            _op(_execute(address(organizers), abi.encodeWithSignature("revokeGate(uint256)", uint256(1))), 0),
+            bytes32(0),
+            0.01 ether
+        );
+        ep.callValidate(
+            address(paymaster),
+            _op(_execute(address(organizers), abi.encodeWithSignature("createOrganizer(address)", ALICE)), 0),
+            bytes32(0),
+            0.01 ether
+        );
+        ep.callValidate(
+            address(paymaster),
+            _op(_execute(address(identity), abi.encodeWithSignature("cancelRotation()")), 0),
+            bytes32(0),
+            0.01 ether
+        );
+        ep.callValidate(
+            address(paymaster),
+            _op(_execute(address(ticket), abi.encodeWithSignature("revoke(uint256,uint8)", tokenId, uint8(1))), 0),
+            bytes32(0),
+            0.01 ether
+        );
+        // The same TokenId path `checkIn` takes above, but the comment said six and only five ran.
+        Ticket.GateCode memory lateCode =
+            Ticket.GateCode({gateId: 1, eventId: eventId, issuedAt: T0, nonce: bytes32(0)});
+        ep.callValidate(
+            address(paymaster),
+            _op(_execute(address(ticket), abi.encodeCall(Ticket.checkInLate, (tokenId, lateCode, ""))), 0),
+            bytes32(0),
+            0.01 ether
+        );
+        ep.callValidate(
+            address(paymaster),
+            _op(
+                _execute(address(organizers), abi.encodeWithSignature("transferOwner(uint256,address)", orgId, ALICE)),
+                0
+            ),
+            bytes32(0),
+            0.01 ether
+        );
         ep.setRefuseValidationReads(false);
     }
 
@@ -679,6 +726,144 @@ contract PaymasterTest is MontiTest {
         }
         assertEq(sponsored, 151);
         assertLt(paymaster.budgetOf(orgId), maxCost, "what is left cannot cover one more");
+    }
+
+    // --- I4: the four missing selectors, and the setter that ends the redeploys --------------------
+
+    /// @dev I4. Spec 6.3 T14 answers a stolen terminal with "the admin drops it from the allowlist",
+    ///      5.8 makes "becoming an organizer" a flow the audience starts, and 5.5 has the organizer
+    ///      void a ticket. All four of those needed MON in the holder's pocket. They no longer do.
+    function test_theFourMissingSelectorsAreSponsored() public view {
+        assertTrue(paymaster.allowedSelector(bytes4(keccak256("revokeGate(uint256)"))), "revokeGate");
+        assertTrue(paymaster.allowedSelector(bytes4(keccak256("revoke(uint256,uint8)"))), "Ticket.revoke");
+        assertTrue(paymaster.allowedSelector(bytes4(keccak256("createOrganizer(address)"))), "createOrganizer");
+        assertTrue(paymaster.allowedSelector(bytes4(keccak256("transferOwner(uint256,address)"))), "transferOwner");
+
+        assertEq(
+            uint8(paymaster.argKindOf(bytes4(keccak256("revokeGate(uint256)")))),
+            uint8(MontiPaymaster.ArgKind.Platform),
+            "a gateId resolves to a project only through a second lookup: MONTI pays"
+        );
+        assertEq(
+            uint8(paymaster.argKindOf(bytes4(keccak256("revoke(uint256,uint8)")))),
+            uint8(MontiPaymaster.ArgKind.TokenId)
+        );
+        assertEq(
+            uint8(paymaster.argKindOf(bytes4(keccak256("createOrganizer(address)")))),
+            uint8(MontiPaymaster.ArgKind.Platform)
+        );
+        assertEq(
+            uint8(paymaster.argKindOf(bytes4(keccak256("transferOwner(uint256,address)")))),
+            uint8(MontiPaymaster.ArgKind.OrgId)
+        );
+    }
+
+    /// @dev C1 과 C3 의 새 진입점도 가스리스여야 한다. 큐를 흘리는 것도, 도둑맞은 계정을
+    ///      되돌리는 것도 사용자가 MON 을 들고 있어야 하는 일이 아니다.
+    function test_theNewEntryPointsAreSponsored() public view {
+        bytes4 late = bytes4(keccak256("checkInLate(uint256,(uint256,uint256,uint64,bytes32),bytes)"));
+        assertTrue(paymaster.allowedSelector(late), "checkInLate");
+        assertEq(uint8(paymaster.argKindOf(late)), uint8(MontiPaymaster.ArgKind.TokenId));
+        assertEq(paymaster.argWordOf(late), 0);
+
+        bytes4 cancel = bytes4(keccak256("cancelRotation()"));
+        assertTrue(paymaster.allowedSelector(cancel), "cancelRotation");
+        assertEq(uint8(paymaster.argKindOf(cancel)), uint8(MontiPaymaster.ArgKind.Platform));
+    }
+
+    /// @dev R-PM6 의 구조적 귀결을 끝낸다: 다음부터 허용 목록 변경은 재배포가 아니다.
+    function test_deployerCanAddAndRemoveASelector() public {
+        bytes4 sel = bytes4(keccak256("setNickname(bytes32,string)"));
+        assertTrue(paymaster.allowedSelector(sel));
+
+        vm.expectEmit(true, false, false, true);
+        emit SelectorAllowed(sel, uint8(MontiPaymaster.ArgKind.None), 0);
+        paymaster.setAllowed(sel, MontiPaymaster.ArgKind.None, 0);
+        assertFalse(paymaster.allowedSelector(sel), "None removes it -- the kill switch");
+
+        paymaster.setAllowed(sel, MontiPaymaster.ArgKind.Platform, 0);
+        assertTrue(paymaster.allowedSelector(sel), "and it comes back");
+    }
+
+    function test_setAllowedRecordsTheArgumentWord() public {
+        bytes4 sel = bytes4(keccak256("transferFrom(address,address,uint256)"));
+        assertEq(paymaster.argWordOf(sel), 2, "the tokenId is the third word");
+
+        paymaster.setAllowed(sel, MontiPaymaster.ArgKind.TokenId, 1);
+        assertEq(paymaster.argWordOf(sel), 1);
+    }
+
+    /// @dev Minor 3. 잘못 친 word 는 "좁은 스폰서"가 아니라 스폰서 없음이다 -- `_argAt` 이 범위를
+    ///      확인하므로 그 셀렉터의 모든 UserOp 가 검증에서 BadCallData 로 죽는다. 세터를 누르는
+    ///      시점에 거절해야 운영자가 안다.
+    function test_setAllowedRefusesAnArgumentWordThatIsNotInTheCall() public {
+        bytes4 sel = bytes4(keccak256("transferFrom(address,address,uint256)"));
+
+        vm.expectRevert(MontiPaymaster.BadCallData.selector);
+        paymaster.setAllowed(sel, MontiPaymaster.ArgKind.TokenId, 8);
+        assertEq(paymaster.argWordOf(sel), 2, "the refused call changed nothing");
+
+        // 경계: 마지막으로 받아 주는 값은 그대로 들어간다.
+        paymaster.setAllowed(sel, MontiPaymaster.ArgKind.TokenId, 7);
+        assertEq(paymaster.argWordOf(sel), 7);
+    }
+
+    /// @dev Minor 3. 셀렉터를 끄면 word 도 함께 지워진다. 남겨 두면 나중에 word 0 을 뜻하고 넘긴
+    ///      재허용이 옛 word 를 물려받는다.
+    function test_removingASelectorClearsItsArgumentWord() public {
+        bytes4 sel = bytes4(keccak256("transferFrom(address,address,uint256)"));
+        assertEq(paymaster.argWordOf(sel), 2);
+
+        vm.expectEmit(true, false, false, true);
+        emit SelectorAllowed(sel, uint8(MontiPaymaster.ArgKind.None), 0);
+        paymaster.setAllowed(sel, MontiPaymaster.ArgKind.None, 2);
+        assertEq(paymaster.argWordOf(sel), 0, "the word went with it");
+
+        paymaster.setAllowed(sel, MontiPaymaster.ArgKind.TokenId, 0);
+        assertEq(paymaster.argWordOf(sel), 0, "and a re-allow that means word 0 gets word 0");
+    }
+
+    function test_onlyTheDeployerCanChangeTheAllowlist() public {
+        vm.prank(ALICE);
+        vm.expectRevert(MontiPaymaster.Unauthorized.selector);
+        paymaster.setAllowed(bytes4(keccak256("whatever()")), MontiPaymaster.ArgKind.Platform, 0);
+    }
+
+    /// @dev I7 의 완화책이 말뿐이 아닌지 본다. 남용되는 셀렉터를 끄면 그 다음 UserOp 는 검증에서
+    ///      죽고, 다시 켜면 살아난다 -- 그 사이에 재배포는 없다.
+    function test_theKillSwitchStopsTheVeryNextUserOp() public {
+        bytes memory createOrg =
+            _execute(address(organizers), abi.encodeWithSignature("createOrganizer(address)", ALICE));
+        ep.callValidate(address(paymaster), _op(createOrg, 0), bytes32(0), 0.01 ether);
+
+        paymaster.setAllowed(bytes4(keccak256("createOrganizer(address)")), MontiPaymaster.ArgKind.None, 0);
+        vm.expectRevert(MontiPaymaster.SelectorNotAllowed.selector);
+        ep.callValidate(address(paymaster), _op(createOrg, 0), bytes32(0), 0.01 ether);
+
+        paymaster.setAllowed(bytes4(keccak256("createOrganizer(address)")), MontiPaymaster.ArgKind.Platform, 0);
+        ep.callValidate(address(paymaster), _op(createOrg, 0), bytes32(0), 0.01 ether);
+    }
+
+    /// @dev 새 셀렉터가 진짜로 스폰서되는지는 allowedSelector 가 아니라 검증 경로가 답한다.
+    ///      revoke 는 TokenId 칸이므로 eventOf/eventOrg 두 조회를 거쳐 그 행사의 프로젝트로 간다.
+    function test_theNewlySponsoredCallsSurviveValidation() public {
+        bytes memory revokeCall =
+            _execute(address(ticket), abi.encodeWithSignature("revoke(uint256,uint8)", tokenId, uint8(1)));
+        (bytes memory ctx,) = ep.callValidate(address(paymaster), _op(revokeCall, 0), bytes32(0), 0.01 ether);
+        (uint256 slot,) = abi.decode(ctx, (uint256, uint256));
+        assertEq(slot, paymaster.PLATFORM(), "MONTI pays while the org has not opted in");
+
+        _selfSponsor();
+        paymaster.deposit{value: 1 ether}(orgId);
+        (ctx,) = ep.callValidate(address(paymaster), _op(revokeCall, 0), bytes32(0), 0.01 ether);
+        (slot,) = abi.decode(ctx, (uint256, uint256));
+        assertEq(slot, orgId, "and the project pays once it does");
+
+        bytes memory transferOwnerCall =
+            _execute(address(organizers), abi.encodeWithSignature("transferOwner(uint256,address)", orgId, ALICE));
+        (ctx,) = ep.callValidate(address(paymaster), _op(transferOwnerCall, 0), bytes32(0), 0.01 ether);
+        (slot,) = abi.decode(ctx, (uint256, uint256));
+        assertEq(slot, orgId, "transferOwner names its orgId in the first word");
     }
 
     receive() external payable {}

@@ -9396,3 +9396,19 @@ git commit -m "test(web): add three playwright smoke flows and finish the ci gat
 ### 5. 실행 순서 메모
 
 01(ABI·주소) → 02(콜러블) 이 먼저 끝나 있어야 Task 9의 conformance 테스트와 Task 16 이후가 실제로 돈다. 병렬로 시작할 경우 **Task 1~15는 의존 없이 진행 가능**하고, Task 16부터는 02의 콜러블 이름만 있으면 mock으로 개발할 수 있다. Task 31(스태프 UI)은 04가 시작하기 전에 끝나 있어야 한다.
+
+## 01b delta (2026-09-21)
+
+01b 재배포 번들이 컨트랙트를 바꿨다. **아직 배포 전이다**(01b Task 15에서 새 주소로 올린다). 인터페이스 원본은 **`contracts/docs/abi-delta-01b.md`** 한 곳이고, 아래는 "어느 Task가 무엇 때문에 바뀌고 델타 문서의 어디를 읽어야 하는가"만 가리킨다. **위 Task 본문은 고치지 않는다** — 같은 파일이 `mvp-web`에도 있어 본문을 고치면 병합에서 충돌한다.
+
+| Task | 무엇이 바뀌나 | 새 인터페이스 | 읽을 곳 |
+|---|---|---|---|
+| **T9 (`abis.ts`·`reads.ts`)** | ABI JSON을 01b 브랜치에서 **복사**하고(재생성 금지), `USED_ABI`에 새로 읽는 것을 등록한다. `abi-conformance.test.ts`가 제일 먼저 깨질 것이다 | `USED_ABI.Ticket`에 `deviceDigest: 5`(아래 패리티 핀용), `offerDigest: 3`(미리보기를 한다면), 이벤트는 **`CheckedIn`과 `CheckedInLate` 둘 다**. `readIdentity()`에 `rotatedAt`·`rotatedFrom`·`ROTATION_UNDO_WINDOW` 추가 | §1·§2, §8 · 03 |
+| **T9 (`CheckInStruct`·`STRUCT_SHAPES`)** | `checkInOf`는 셀렉터가 그대로인데 **반환 구조가 바뀌었다** — 컴파일러도 conformance 테스트의 셀렉터 비교도 못 잡는다. 구조체 컴포넌트 이름·순서를 고정하는 `STRUCT_SHAPES` 핀을 같이 고친다 | `CHECK_IN_FIELDS` `['gateId','ts','nonceHash','manual']` → **`['gateId','nonceHash','ts','manual','late']`**, `CheckInStruct`에 `late: boolean` | **§5** |
+| **T25 (`deviceSigDigest`)** | 다섯 낱말 → **일곱 낱말**. 앞에 `chainId`와 `Ticket` 주소가 붙는다. 그리고 **서명은 low-`s`만 통과한다** — `s > N/2`이면 `s = N − s`로 정규화해서 보낸다(안 하면 정상 탭의 절반이 `DEVICE_MISMATCH`) | `sha256(abi.encode(chainid, ticket, tokenId, gateId, eventId, nonce, issuedAt))`. **배포된 `deviceDigest(...)` 조회를 패리티 대상으로 한 벡터를 테스트에 핀한다** — 클라이언트가 고를 수 없는 두 낱말(`chainid`, Ticket 주소)이 정확히 손으로 만든 구현이 틀리는 지점이다. 고정 벡터 `0xca378ab2…fe66` | **§7.2** |
+| **T26 (결과 화면)** | 구독하는 이벤트가 하나 늘 수 있다. 입장 수는 `CheckedIn`만 센다 | `CheckedInLate(tokenId indexed, gateId indexed, issuedAt, ts)`는 늦은 경로에서 `CheckedIn`과 **함께** 나온다(두 번째 입장이 아니다) | §2 |
+| **T22·T23 (양도)** | **클라이언트 코드 변경 없음.** 양도 승인 다이제스트는 서버(02 `pendingOffers`)가 만들고 어테스터가 서명한다. 다만 받는 쪽 revert 문구가 늘어난다 | 서버 쪽이 EIP-712로 바뀐다는 사실만 안다. 받는 쪽 새 사유: `RotationPending`("계정 교체가 진행 중이라 N시간 뒤부터 받을 수 있어요"), `DeviceLocked`(이제 **보내는 쪽뿐 아니라 받는 쪽**도), `EventCancelled`(취소된 행사의 티켓은 양도되지 않는다) | **§7.1** · §6 |
+| **T27 (복구 화면)** | 계정 교체 되돌리기 UI가 새로 생긴다. 그리고 **정당한 복구도 24시간 동안 아무것도 받지 못한다** — 화면이 그렇게 말해야 한다 | 되돌리기 버튼은 `rotatedFrom(personId) == 내 주소 && now < rotatedAt(personId) + ROTATION_UNDO_WINDOW`일 때만 보인다(`rotatedAt`은 `register`도 찍으므로 혼자서는 깃발이 아니다). `cancelRotation()`은 페이마스터가 스폰서한다(잔액 0인 계정에서도 된다). **되돌려도 기기 잠금은 안 풀린다** → 이어서 `setActiveDevice` 안내, 마지막 기기 변경으로부터 7일이 안 지났으면 `deviceUpdatedAt + 7일`까지 비활성으로 렌더. `migrate`가 `RotationPending`이면 "N시간 후 사용 가능" | §1 · §6 · 기획서 v2.6 §5.5 |
+| **T30 (주최자)** | **삭제가 아니라 추가다** — 이 플랜에는 애초에 "MON이 필요하다"는 제약이 없다(`createOrganizer`·`transferOwner`·`revokeGate` 검색 결과 0). 새 사실을 적어 넣는다 | 주최자 조작은 전부 가스리스다. 01b 이후 `createOrganizer`, `transferOwner`, `revokeGate`, `Ticket.revoke` 네 개가 페이마스터 허용 목록에 있으므로 주최자 계정에 MON이 없어도 된다. 다만 **조직 오너·관리자·매니저 계정도 Identity 멤버여야** 페이마스터가 받는다 — 가입을 먼저 끝내고 조직을 만든다. 게이트를 잘못 등록해도 `revokeGate` 뒤 **같은 주소를 다시 등록할 수 있다** | §3 · §6 |
+| **T2 (상수)** | 02와 같은 두 줄 | `LATE_WINDOW_SECONDS = 43_200`, `MIGRATE_DELAY_SECONDS = 86_400` | §2 |
+| **T7 (`config.ts`)** | 재배포 후 `VITE_ADDR_IDENTITY`/`_ORGANIZERS`/`_TICKET`/`_PAYMASTER` 네 개를 **로컬 `.env`와 배포 환경 양쪽에서** 갈아준다. `config.ts`는 `loadDeployment`를 거치지 않으므로 안 바꾸면 앱이 옛 컨트랙트를 **조용히** 계속 쓴다 | | 01b Task 15 Step 5 |

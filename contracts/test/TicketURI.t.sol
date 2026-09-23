@@ -60,14 +60,14 @@ contract TicketURITest is MontiTest {
 
     function _tap() internal {
         vm.warp(P256Vectors.ISSUED_AT + 5);
+        Ticket.GateCode memory code = Ticket.GateCode({
+            gateId: gateId, eventId: P256Vectors.EVENT_ID, issuedAt: P256Vectors.ISSUED_AT, nonce: P256Vectors.NONCE
+        });
+        // 서명을 먼저 만든다. _deviceSig 는 sha256 프리컴파일과 치트코드를 부르므로 prank 뒤에
+        // 두면 그 prank 를 먹어 치운다(Task 9 가 _sig 에서 겪은 것과 같은 함정이다).
+        bytes memory deviceSig = _deviceSig(tokenId, code);
         vm.prank(GATE_A);
-        ticket.checkIn(
-            tokenId,
-            Ticket.GateCode({
-                gateId: gateId, eventId: P256Vectors.EVENT_ID, issuedAt: P256Vectors.ISSUED_AT, nonce: P256Vectors.NONCE
-            }),
-            abi.encode(P256Vectors.GATE1_R, P256Vectors.GATE1_S)
-        );
+        ticket.checkIn(tokenId, code, deviceSig);
     }
 
     /// @dev One published event whose organizer-supplied strings are ours to choose.
@@ -162,6 +162,29 @@ contract TicketURITest is MontiTest {
         vm.prank(ORG_OWNER);
         ticket.revoke(tokenId, 1);
         assertTrue(ticket.isRevoked(tokenId));
+    }
+
+    /// @dev 5.8 "행사 취소 시 티켓 일괄 취소". 일괄 revoke 트랜잭션 없이, 행사 상태에서 파생한다.
+    function test_uriShowsCancelledAfterTheEventIsCancelled() public {
+        assertEq(_statusOf(tokenId), NOT_ENTERED);
+        vm.prank(ORG_OWNER);
+        ticket.cancelEvent(eventId);
+        assertEq(_statusOf(tokenId), CANCELLED);
+    }
+
+    /// @dev 행사 단위 무효가 티켓 단위 상태를 덮는다. 이미 들어간 티켓도 취소됨으로 읽힌다.
+    function test_cancelledEventOutranksAnEnteredTicket() public {
+        _tap();
+        assertEq(_statusOf(tokenId), ENTERED);
+        vm.prank(ORG_OWNER);
+        ticket.cancelEvent(eventId);
+        assertEq(_statusOf(tokenId), CANCELLED);
+    }
+
+    /// @dev 끝난 행사는 취소가 아니다. Ended 는 시간이 만든 상태이고, 취소는 주최자가 만든 상태다.
+    function test_endedEventDoesNotReadAsCancelled() public {
+        vm.warp(T0 + 3 days);
+        assertEq(_statusOf(tokenId), NOT_ENTERED);
     }
 
     /// @dev Tier names and image CIDs are typed by organizers. A bare quote would end the JSON string
