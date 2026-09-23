@@ -322,6 +322,26 @@ const ko = {
       feeNote: '만드는 비용은 MONTI가 대신 내요',
     },
 
+
+    publish: {
+      pinning: '행사 정보를 올리고 있어요',
+      sending: '행사를 만들고 있어요',
+      finishing: '마무리하고 있어요',
+      // 시간 초과는 실패가 아니다. 두 번 보내면 행사가 두 개가 된다.
+      confirming: '만드는 중이에요. 화면을 나가도 돼요. 잠시 뒤 주최자 화면에서 확인해 주세요',
+    },
+
+    publishProblems: {
+      notYourOrg: '이 주최사에서 행사를 만들 권한이 없어요',
+      pinFailed: '지금은 저장할 수 없어요. 잠시 뒤 다시 시도해 주세요',
+      badMeta: '제목이나 소개가 너무 길어요. 줄이고 다시 시도해 주세요',
+      badTags: '태그를 다시 확인해 주세요',
+      badPoster: '포스터를 다시 올려 주세요',
+      schedule: '종료 시각이 시작 시각보다 뒤여야 해요',
+      tiersEmpty: '티켓 종류를 하나 이상 만들어 주세요',
+      failed: '행사를 만들지 못했어요. 잠시 뒤 다시 시도해 주세요',
+    },
+
     tierProblems: {
       eventIncomplete: '행사 정보에 아직 빠진 칸이 있어요',
       tiersTooMany: '종류는 8개까지예요',
@@ -721,6 +741,26 @@ const en: typeof ko = {
       requireKyc: 'Only people who passed the identity check',
       requireKycHelp: 'With this on, only people who finished the ID and face check can get a ticket. Leave it off for casual meetups',
       feeNote: 'MONTI covers the cost of creating it',
+    },
+
+
+    publish: {
+      pinning: 'Uploading the event details',
+      sending: 'Creating the event',
+      finishing: 'Finishing up',
+      // A timeout is not a failure. Sending it twice would be two events.
+      confirming: 'Still being created. You can leave this screen — check your organiser screen in a moment',
+    },
+
+    publishProblems: {
+      notYourOrg: 'You may not create events for this organiser',
+      pinFailed: 'Cannot save that right now. Please try again in a moment',
+      badMeta: 'The title or the description is too long. Please shorten it and try again',
+      badTags: 'Please check the tags again',
+      badPoster: 'Please upload the poster again',
+      schedule: 'The end has to come after the start',
+      tiersEmpty: 'Add at least one ticket kind',
+      failed: 'Could not create the event. Please try again in a moment',
     },
 
     tierProblems: {

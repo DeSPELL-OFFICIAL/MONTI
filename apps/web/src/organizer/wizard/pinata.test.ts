@@ -9,21 +9,23 @@ import { describe, expect, it, vi } from 'vitest';
  */
 interface PinCall {
   orgId: string;
-  image: { base64: string; mime: string };
-  meta: { name: string; description: string; venue: string; category: number; region: string };
+  meta: {
+    name: string; description: string; imageCid: string;
+    venue: string; category: number; region: string;
+  };
 }
 
-const pinEventMetadata = vi.fn(async (_args: PinCall) => ({
-  imageCid: 'bafkImage',
-  metadataCid: 'bafyMeta',
+const pinEventImage = vi.fn(async (_args: { bytesBase64: string; kind: string }) => ({
+  cid: 'bafkImage',
 }));
+const pinEventMetadata = vi.fn(async (_args: PinCall) => ({ metadataCid: 'bafyMeta' }));
 vi.mock('../../shared/api/functions', async (orig) => ({
   ...(await orig<typeof import('../../shared/api/functions')>()),
-  api: { pinEventMetadata },
+  api: { pinEventImage, pinEventMetadata },
 }));
 
 const {
-  ALLOWED_IMAGE_MIMES, ImageRejected, MAX_IMAGE_BYTES, pinEventImage, prepareImage,
+  ALLOWED_IMAGE_MIMES, ImageRejected, MAX_IMAGE_BYTES, pinEventDocuments, prepareImage,
 } = await import('./pinata');
 
 function fileOf(bytes: number, mime: string, name = 'cover.jpg'): File {
@@ -59,10 +61,10 @@ describe('prepareImage', () => {
   });
 });
 
-describe('pinEventImage', () => {
-  it('calls the backend callable by argument, and never Pinata itself', async () => {
+describe('pinEventDocuments', () => {
+  it('calls the two backend callables by argument, and never Pinata itself', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
-    const result = await pinEventImage({
+    const result = await pinEventDocuments({
       orgId: '9',
       image: { base64: 'AQID', mime: 'image/png', fileName: 'a.png' },
       name: '재즈 나이트',
@@ -71,12 +73,14 @@ describe('pinEventImage', () => {
       category: 2,
       region: 'KR-11',
     });
+    // The picture goes on its own now, and its CID is what the document carries across.
+    expect(pinEventImage).toHaveBeenCalledWith({ bytesBase64: 'AQID', kind: 'poster' });
     expect(pinEventMetadata).toHaveBeenCalledWith({
       orgId: '9',
-      image: { base64: 'AQID', mime: 'image/png' },
       meta: {
         name: '재즈 나이트',
         description: '한남동 라이브',
+        imageCid: 'bafkImage',
         venue: '한남동 어딘가',
         category: 2,
         region: 'KR-11',
@@ -93,7 +97,7 @@ describe('pinEventImage', () => {
    * (`shared/envio/ipfs.ts`), so a string reaches every discover screen as the default `0`.
    */
   it('sends the theme as the number the chain and the reader both want', async () => {
-    await pinEventImage({
+    await pinEventDocuments({
       orgId: '9',
       image: { base64: 'AQID', mime: 'image/png', fileName: 'a.png' },
       name: '재즈 나이트',

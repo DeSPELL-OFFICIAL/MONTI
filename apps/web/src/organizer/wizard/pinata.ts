@@ -111,18 +111,24 @@ export interface PinnedEvent {
 }
 
 /**
- * Pins the picture and the metadata document in one server call. `meta` is the readable half of
- * the event — the `{ name, description, venue, category, region }` the discover screens read
- * back out of the document beside the image, because the chain holds only hashes of them.
+ * Pins the picture and then the metadata document — **two calls**, because that is what the
+ * backend deploys: `pinEventImage` takes the bytes and answers with a CID, and
+ * `pinEventMetadata` takes that CID (task-ev-b report §3.1-3.2). The single call this used to
+ * make no longer exists, and there is no compatibility layer for it.
  *
- * All five are required here: `validateDraft` refuses a blank venue, an unlisted region and a
- * theme outside the four before Publish can reach this, so there is no half-filled call to
- * describe. `category` goes as a number because of the *reader*, not the server: the server
- * coerces a numeric string (`optionalCategory`, functions/src/functions/organizer.ts), but the
- * pinned document is read back only when `typeof === 'number'` (`shared/envio/ipfs.ts`), so a
- * `'2'` that survived the call would show as the default `0` on every discover screen.
+ * `meta` is the readable half of the event — the `{ name, description, venue, category,
+ * region }` the discover screens read back beside the image, because the chain holds only
+ * hashes of them. All five are required here: `validateDraft` refuses a blank venue, an
+ * unlisted region and a theme outside the four before Publish can reach this.
+ *
+ * `category` goes as a number because of the *reader*, not the server: the server coerces a
+ * numeric string, but the pinned document is read back only when `typeof === 'number'`
+ * (`shared/envio/ipfs.ts`), so a `'2'` that survived the call would show as `0` everywhere.
+ *
+ * This is the six-step wizard's path and it is on its way out (T-EV-W10); the creation scene
+ * has its own in `organizer/scene/usePublish.ts`.
  */
-export async function pinEventImage(args: {
+export async function pinEventDocuments(args: {
   orgId: string;
   image: PreparedImage;
   name: string;
@@ -131,15 +137,17 @@ export async function pinEventImage(args: {
   category: number;
   region: string;
 }): Promise<PinnedEvent> {
-  return api.pinEventMetadata({
+  const { cid } = await api.pinEventImage({ bytesBase64: args.image.base64, kind: 'poster' });
+  const { metadataCid } = await api.pinEventMetadata({
     orgId: args.orgId,
-    image: { base64: args.image.base64, mime: args.image.mime },
     meta: {
       name: args.name,
       description: args.description,
+      imageCid: cid,
       venue: args.venue,
       category: args.category,
       region: args.region,
     },
   });
+  return { imageCid: cid, metadataCid };
 }

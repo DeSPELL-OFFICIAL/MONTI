@@ -105,22 +105,52 @@ describe('callable wrappers', () => {
   });
 
   /**
-   * The landed `pinEventMetadata` takes three optional readable fields beside the two required
-   * ones, and `category` is a **number** — the chain's `uint8`. The server would coerce a numeric
-   * string, but the attendee reader reads the pinned `category` only when it is already a number,
-   * so this side always sends one.
+   * The landed `pinEventMetadata` no longer takes the picture — `imageCid` is what
+   * `pinEventImage` already answered with — and `category` is a **number**, the chain's
+   * `uint8`. The server would coerce a numeric string, but the attendee reader reads the
+   * pinned `category` only when it is already a number, so this side always sends one.
    */
   it('carries the optional metadata fields, with the theme as a number', async () => {
     await expect(
       api.pinEventMetadata({
         orgId: '9',
-        image: { base64: 'AQID', mime: 'image/png' },
-        meta: { name: 'n', description: 'd', venue: '한남동', category: 2, region: 'KR-11' },
+        meta: {
+          name: 'n', description: 'd', imageCid: 'bafkImage',
+          venue: '한남동', category: 2, region: 'KR-11',
+        },
       }),
     ).resolves.toMatchObject({
       name: 'pinEventMetadata',
-      payload: { meta: { name: 'n', description: 'd', venue: '한남동', category: 2, region: 'KR-11' } },
+      payload: {
+        meta: {
+          name: 'n', description: 'd', imageCid: 'bafkImage',
+          venue: '한남동', category: 2, region: 'KR-11',
+        },
+      },
     });
+  });
+
+  /**
+   * The three fields that decide what an attendee is allowed to see. `venue` is left out
+   * entirely when it is hidden — the words never leave the browser — and `tags` are already
+   * normalised here, because the server refuses the whole request over a bad one.
+   */
+  it('hides the venue by omitting it, and carries tags and the two flags', async () => {
+    const answer = await api.pinEventMetadata({
+      orgId: '9',
+      meta: {
+        name: 'n', description: 'd', imageCid: 'bafkImage', region: 'KR-11', category: 0,
+        tags: ['재즈', '라이브'], venueHidden: true, timeHidden: true,
+      },
+    });
+    expect(answer).toMatchObject({
+      name: 'pinEventMetadata',
+      payload: { meta: { tags: ['재즈', '라이브'], venueHidden: true, timeHidden: true } },
+    });
+    // Not merely absent from the pinned document — never sent at all. (`venueHidden` is a
+    // different key, so the check is for the key itself rather than for the substring.)
+    const meta = (answer as unknown as { payload: { meta: Record<string, unknown> } }).payload.meta;
+    expect(Object.hasOwn(meta, 'venue')).toBe(false);
   });
 
   /**

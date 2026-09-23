@@ -229,13 +229,28 @@ describe('organiser home', () => {
     expect(navigate).toHaveBeenCalledWith('/org/team/9');
   });
 
-  it('carries the chosen organisation into the wizard from one floating action', async () => {
+  it('carries the chosen organisation into the creation scene from one floating action', async () => {
     const user = userEvent.setup();
     withOrgs([ORG_A, ORG_B]);
     open(`/org?org=${ORG_B.orgId}`);
 
     await user.click(screen.getByRole('button', { name: copy.create }));
     expect(navigate).toHaveBeenCalledWith(`/org/new?org=${ORG_B.orgId}`);
+  });
+
+  /**
+   * Where that address actually lands. `/org/new` is the creation scene now (T-EV-W3), not
+   * the six-step wizard — the entry points from T-UX-5 and T-UX-6 both point here and neither
+   * had to change, so this is what proves they open the new screen.
+   */
+  it('opens the creation scene at `/org/new`, not the six-step wizard', () => {
+    withOrgs([ORG_A]);
+    open('/org/new?org=3');
+    expect(screen.getByRole('heading', { name: organizerCopy.ko.scene.title, level: 1 }))
+      .toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: organizerCopy.ko.scene.poster, level: 2 }))
+      .toBeInTheDocument();
+    expect(screen.queryByText(organizerCopy.ko.wizard.stepOf.replace('{{step}}', '1'))).toBeNull();
   });
 
   it('refuses the floating action to somebody who may not create events, and says why', () => {

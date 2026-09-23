@@ -389,34 +389,81 @@ export const api = {
   pinEventImage: call<{ bytesBase64: string; kind: 'poster' | 'ticket' }, { cid: string }>(
     'pinEventImage',
   ),
-  // The web never holds a pinning token. The organiser sends the cover picture and the two
-  // readable fields; the server checks that this caller may create events for `orgId`, pins
-  // the picture, then pins `{ name, description, image: "ipfs://<imageCid>" }` and answers
-  // with both CIDs. `metadataCid` is what goes into `EventMeta.imageCid` — the document
-  // `shared/envio/ipfs.ts` reads a title and a picture out of.
-  // Refusals worth their own sentence: `permission-denied` (not this caller's organisation),
-  // `invalid-argument` with `IMAGE_TOO_LARGE` or `BAD_MIME`.
-  // See functions/src/functions/organizer.ts (sub-plan 02, task C5).
-  // `meta.venue`, `meta.category` and `meta.region` are optional and are pinned into the same
-  // document beside `name`/`description`; an empty one is dropped by the server rather than
-  // pinned blank, because the attendee reader fills a missing field with its own default.
-  // `category` is a **number** — the chain's `uint8`. The server would coerce a numeric string
-  // (`optionalCategory`), but the attendee reader takes the pinned value only when it is already
-  // a number, so this side never leans on that coercion. A non-numeric string is `BAD_META`.
+  /**
+   * The readable half of an event, pinned as one JSON document whose CID is what
+   * `EventMeta.imageCid` carries — the chain holds only hashes of the title, the description
+   * and the venue, so this document is what every discover screen actually reads.
+   *
+   * **It no longer takes the picture.** `imageCid` is the CID `pinEventImage` already
+   * answered with; there is no `image` field and no `imageCid` in the reply, only
+   * `metadataCid` (task-ev-b report §3.2).
+   *
+   * Three fields decide what an attendee is allowed to see:
+   *  - `tags` — at most five, each at most 12 code points, already trimmed and de-duplicated.
+   *    The server runs the same rule and **refuses the whole request** (`BAD_TAGS`) rather
+   *    than dropping a bad one, because IPFS cannot be re-pinned and `updateEventMeta` closes
+   *    the moment the event is published.
+   *  - `venueHidden` — when true the server leaves the `venue` key out of the document
+   *    altogether. This side omits it as well, so the words never leave the browser.
+   *  - `timeHidden` — a rendering flag only: the chain always carries the real `startsAt`,
+   *    because the entry window is derived from it.
+   *
+   * `category` is a **number** — the chain's `uint8`. The server would coerce a numeric
+   * string, but the attendee reader takes the pinned value only when it is already a number.
+   * Empty optional fields are dropped rather than pinned blank.
+   *
+   * Refusals worth their own sentence, by reason: `NOT_ORGANIZER` (permission-denied),
+   * `BAD_META` / `BAD_TAGS` / `BAD_IMAGE_CID` / `BAD_ORG_ID` (invalid-argument),
+   * `PINATA_UPLOAD_FAILED` (unavailable, retryable).
+   */
   pinEventMetadata: call<
     {
       orgId: string;
-      image: { base64: string; mime: string };
       meta: {
         name: string;
         description: string;
+        imageCid: string;
         venue?: string;
         category?: number;
         region?: string;
+        tags?: string[];
+        venueHidden?: boolean;
+        timeHidden?: boolean;
       };
     },
-    { imageCid: string; metadataCid: string }
+    { metadataCid: string }
   >('pinEventMetadata'),
+  /**
+   * The ticket pictures of one event, in tier-index order — the index **is** `Tier.idx`, so a
+   * gap is not expressible and none is needed (functions/src/functions/eventArt.ts).
+   *
+   * Organiser-only, and it works **after the event is published**, which is the whole reason
+   * the art lives in Firestore rather than in the pinned document: `Tier` has no column for a
+   * picture and `updateEventMeta` refuses anything past Draft.
+   *
+   * Exactly one of `preset` and `imageCid` per entry — both, or neither, is `BAD_TIERS`. The
+   * preset is one of the four letters and never a name: the read side folds anything else back
+   * to `'a'`, so a name here would silently give every kind the same picture.
+   *
+   * It replaces the document rather than merging into it, so the whole list goes every time.
+   * Reading is **not** a callable — `shared/api/firestore.ts` reads `eventArt/{eventId}`
+   * directly, because one ticket list draws several events and a cold start would be a screen
+   * full of blanks.
+   */
+  saveEventArt: call<
+    { eventId: string; tiers: Array<{ preset: 'a' | 'b' | 'c' | 'd' } | { imageCid: string }> },
+    { ok: true }
+  >('saveEventArt'),
+  /**
+   * The private half of an event — the venue an attendee only sees once they hold a ticket
+   * (functions/src/functions/eventPrivate.ts). Organiser-only, and allowed after publishing.
+   *
+   * **It does not merge.** This call is the whole of the private record, so leaving `venue`
+   * out erases it; both fields go every time.
+   */
+  setEventPrivate: call<{ eventId: string; venue?: string; note?: string }, { ok: true }>(
+    'setEventPrivate',
+  ),
   /**
    * The person asks for their account to be destroyed (functions/src/functions/accountDeletion.ts).
    * Idempotent: a second call answers with the date the first one set rather than pushing it back.

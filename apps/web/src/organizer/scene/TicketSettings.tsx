@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Alert, Button, Field, Screen, StickyBar, Toggle } from '../../shared/ui';
+import { Alert, Button, Field, Screen, Spinner, StickyBar, Toggle } from '../../shared/ui';
 import type { EventDraftTier } from '../../shared/api/firestore';
 import { useOrganizerCopy } from '../copy';
+import { UnsponsoredNotice } from '../Unsponsored';
 import { emptyEventDraftTier, useEventDraft } from '../useEventDraft';
 import { TierCard } from './TierCard';
 import { SaveStatus } from './SaveStatus';
+import { usePublish } from './usePublish';
 import { MAX_TIERS, eventProblems, paidTiers, tierProblems } from './draftRules';
 
 /**
@@ -21,8 +23,17 @@ export function TicketSettings() {
   const copy = useOrganizerCopy().scene;
   const navigate = useNavigate();
   const { draftId: wanted = '' } = useParams();
-  const { draft, draftId, status, savedAt, patch } = useEventDraft('', wanted);
+  const { draft, draftId, status, savedAt, patch, discard } = useEventDraft('', wanted);
   const [checked, setChecked] = useState(false);
+  const { phase, problem, unsponsored, publish } = usePublish({
+    draft,
+    patch,
+    discard,
+    // The event exists by now and the draft is gone. A `wait` that gave up carries no log to
+    // read the id out of, and the organiser home takes the number by hand for exactly that.
+    onCreated: (created) =>
+      navigate(created.eventId === '' ? '/org' : `/org/events/${created.eventId}`),
+  });
 
   const problems = tierProblems(draft);
   const blocked = paidTiers(draft);
@@ -30,6 +41,9 @@ export function TicketSettings() {
   // Every reason `행사 만들기` cannot run, in the order the screen reads. A paid kind is the
   // only one that also disables the button: it is a choice to undo, not a field to fill in.
   const stopped = blocked.length > 0;
+  // `confirming` deliberately leaves the button pressable: that press is what asks the bundler
+  // what became of an operation whose `wait` gave up, and it never sends a second one.
+  const working = phase === 'pinning' || phase === 'sending' || phase === 'finishing';
 
   function patchTier(index: number, next: Partial<EventDraftTier>): void {
     patch({ tiers: draft.tiers.map((tier, at) => (at === index ? { ...tier, ...next } : tier)) });
@@ -38,11 +52,13 @@ export function TicketSettings() {
   function create(): void {
     setChecked(true);
     if (incomplete) {
+      // Nothing is sent: the fields that are missing are on the other scene, so that is where
+      // the organiser is taken, rather than being told about them from here.
       navigate(`/org/new/${draftId}`);
       return;
     }
-    // The operation itself lands in T-EV-W6; until then this scene is the last thing that
-    // checks the draft, and it checks all of it.
+    if (problems.length > 0) return;
+    void publish();
   }
 
   return (
@@ -115,11 +131,20 @@ export function TicketSettings() {
             ))
           : null}
         {stopped ? <Alert tone="warn">{copy.tierProblems.paidTier}</Alert> : null}
+        {unsponsored ? <UnsponsoredNotice /> : null}
+        {problem !== '' ? <Alert tone="error">{copy.publishProblems[problem]}</Alert> : null}
+        {phase === 'confirming' ? <Alert tone="info">{copy.publish.confirming}</Alert> : null}
+        {phase === 'pinning' || phase === 'sending' || phase === 'finishing' ? (
+          <p className="working">
+            <Spinner />
+            {copy.publish[phase]}
+          </p>
+        ) : null}
         <p className="muted">{copy.tiers.feeNote}</p>
       </div>
 
       <StickyBar status={<SaveStatus status={status} savedAt={savedAt} />}>
-        <Button disabled={stopped} onClick={create}>
+        <Button disabled={stopped || working} onClick={create}>
           {copy.tiers.create}
         </Button>
       </StickyBar>

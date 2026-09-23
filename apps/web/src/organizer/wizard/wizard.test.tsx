@@ -8,21 +8,24 @@ import { ticketAbi } from '../../shared/chain/abis';
 /**
  * The argument as the callable takes it (functions/src/functions/organizer.ts `requireMeta`),
  * typed here so the recorded call can be read field by field rather than only compared whole —
- * `category` is the one value whose *type* matters as much as its value.
+ * `category` is the one value whose *type* matters as much as its value. The picture is a
+ * separate call now, and `meta.imageCid` is what carries its CID across.
  */
 interface PinCall {
   orgId: string;
-  image: { base64: string; mime: string };
-  meta: { name: string; description: string; venue: string; category: number; region: string };
+  meta: {
+    name: string; description: string; imageCid: string;
+    venue: string; category: number; region: string;
+  };
 }
 
-const pinEventMetadata = vi.fn(async (_args: PinCall) => ({
-  imageCid: 'bafkImage',
-  metadataCid: 'bafyMeta',
+const pinEventImage = vi.fn(async (_args: { bytesBase64: string; kind: string }) => ({
+  cid: 'bafkImage',
 }));
+const pinEventMetadata = vi.fn(async (_args: PinCall) => ({ metadataCid: 'bafyMeta' }));
 vi.mock('../../shared/api/functions', async (orig) => ({
   ...(await orig<typeof import('../../shared/api/functions')>()),
-  api: { pinEventMetadata },
+  api: { pinEventImage, pinEventMetadata },
 }));
 
 interface SentOp { functionName: string; orgId: bigint; args: readonly unknown[] }
@@ -185,12 +188,13 @@ describe('the review step', () => {
     await user.click(screen.getByRole('button', { name: copy.publish }));
 
     await waitFor(() => expect(ticketOp).toHaveBeenCalled());
+    expect(pinEventImage).toHaveBeenCalledWith({ bytesBase64: 'AQID', kind: 'poster' });
     expect(pinEventMetadata).toHaveBeenCalledWith({
       orgId: '9',
-      image: { base64: 'AQID', mime: 'image/png' },
       meta: {
         name: READY.title,
         description: READY.description,
+        imageCid: 'bafkImage',
         venue: READY.venue,
         category: READY.category,
         region: READY.regionCode,

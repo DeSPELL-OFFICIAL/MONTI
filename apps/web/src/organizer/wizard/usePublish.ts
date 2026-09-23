@@ -9,7 +9,7 @@ import { isUnsponsored } from '../../shared/chain/unsponsored';
 import { callableFailure } from '../../shared/api/functions';
 import { useOrganizerCopy, type OrganizerCopy } from '../copy';
 import { buildEventMeta, buildTiers, validateDraft, type DraftProblem, type WizardDraft } from './buildEventMeta';
-import { ImageRejected, pinEventImage } from './pinata';
+import { ImageRejected, pinEventDocuments } from './pinata';
 
 /** Every sentence `copy.wizard.problems` owns. A superset of what the local mirror can find. */
 export type WizardProblem = keyof OrganizerCopy['wizard']['problems'];
@@ -103,7 +103,7 @@ export function usePublish(
 
     setPhase('pinning');
     try {
-      const { metadataCid } = await pinEventImage({
+      const { metadataCid } = await pinEventDocuments({
         orgId,
         image: draft.image,
         // `EventMeta` carries the title, the description and the venue as hashes only, so the
@@ -160,7 +160,7 @@ export function usePublish(
       const { code, reason } = callableFailure(cause);
       if (code === 'permission-denied') setProblems(['notYourOrg']);
       else if (reason === 'IMAGE_TOO_LARGE') setProblems(['imageTooLarge']);
-      else if (reason === 'BAD_IMAGE_MIME') setProblems(['imageType']);
+      else if (reason === 'BAD_IMAGE_MIME' || reason === 'BAD_IMAGE_FORMAT') setProblems(['imageType']);
       else if (code !== '') setProblems(['pinFailed']);
       else setError(copy.wizard.failed);
     }
