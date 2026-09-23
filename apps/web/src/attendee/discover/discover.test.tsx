@@ -541,3 +541,46 @@ describe('EventDetail · what only ticket holders see', () => {
     expect(screen.getByText('라이브')).toBeInTheDocument();
   });
 });
+
+/** T-EV-W11 · plan section B-2: two on a card, all of them on the detail screen, no filter. */
+describe('Discover · tags on a card', () => {
+  const FIVE = ['재즈', '라이브', '한남동', '심야', '무료'];
+
+  it('shows the first two and counts the rest into one chip', async () => {
+    gql.mockResolvedValue({ Event: [EVENT_ONE] });
+    fetchEventMetadata.mockResolvedValue({ ...META_A, tags: FIVE });
+    renderDiscover();
+    await screen.findByRole('link', { name: '재즈 나이트' });
+
+    expect(screen.getByText('재즈')).toBeInTheDocument();
+    expect(screen.getByText('라이브')).toBeInTheDocument();
+    expect(screen.getByText('+3')).toBeInTheDocument();
+    for (const tag of FIVE.slice(2)) expect(screen.queryByText(tag)).toBeNull();
+  });
+
+  it('counts nothing when they all fit', async () => {
+    gql.mockResolvedValue({ Event: [EVENT_ONE] });
+    fetchEventMetadata.mockResolvedValue({ ...META_A, tags: ['재즈', '라이브'] });
+    renderDiscover();
+    await screen.findByRole('link', { name: '재즈 나이트' });
+
+    expect(screen.getByText('라이브')).toBeInTheDocument();
+    expect(screen.queryByText(/^\+\d+$/)).toBeNull();
+  });
+
+  /**
+   * Reading only. The indexer has no column for tags, so a tag filter would have to fetch
+   * every event's document before the first card could be drawn — which is why none exists
+   * and why a tag on a card is not pressable.
+   */
+  it('draws no row at all for an event with no tags, and never a pressable one', async () => {
+    gql.mockResolvedValue({ Event: [EVENT_ONE] });
+    fetchEventMetadata.mockResolvedValue({ ...META_A, tags: ['재즈'] });
+    renderDiscover();
+    await screen.findByRole('link', { name: '재즈 나이트' });
+
+    expect(screen.getByText('재즈').tagName).toBe('LI');
+    expect(screen.queryByRole('button', { name: '재즈' })).toBeNull();
+    expect(screen.queryByRole('link', { name: '재즈' })).toBeNull();
+  });
+});

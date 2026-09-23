@@ -71,6 +71,8 @@ export const ko = {
     empty: '조건에 맞는 행사가 없어요.', getTicket: '티켓 받기', share: '공유',
     map: '지도로 보기', publicRecord: '공개 기록', soldOut: '마감됨', cancelled: '취소된 행사예요.',
     untitled: '제목을 불러오지 못했어요', remaining: '{{count}}자리 남음',
+    // 탐색 카드에 다 못 들어간 태그의 수. 상세 화면은 전부 보여준다(계획 B-2).
+    tagsMore: '+{{count}}',
     // 장소를 숨긴 행사의 공개 대역은 지역이다. 지역은 늘 공개이므로 17개 모두 이름이 있어야 한다.
     venueHidden: '장소는 티켓을 받으면 공개돼요',
     timeHidden: '시작 시각은 티켓을 받으면 공개돼요',

@@ -200,6 +200,10 @@ body {
 
 /* An event's own tags, on the detail screen. Reading only: nothing filters on them. */
 .tag-row { list-style: none; display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; padding: 0; }
+/* The same chips on an explore card, where they are the smallest line rather than a heading:
+   two of them plus a `+N`, on one row that never wraps the card taller. */
+.tag-row--card { margin: 4px 0 0; gap: 4px; }
+.tag-row--card li { padding: 2px 8px; font-size: 12px; }
 .tag-row li {
   border: 1px solid var(--line); border-radius: 999px;
   padding: 4px 10px; font-size: 13px; color: var(--muted);

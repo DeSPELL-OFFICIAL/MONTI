@@ -73,6 +73,8 @@ export const en: typeof ko = {
     empty: 'No events match your filters.', getTicket: 'Get a ticket', share: 'Share',
     map: 'Open in maps', publicRecord: 'Public record', soldOut: 'Sold out', cancelled: 'This event was cancelled.',
     untitled: 'Title unavailable', remaining: '{{count}} left',
+    // How many tags a card could not fit; the detail screen shows every one.
+    tagsMore: '+{{count}}',
     // The region is the public band of an event whose venue is hidden, so all 17 are named.
     venueHidden: 'The venue is shown once you have a ticket',
     timeHidden: 'The start time is shown once you have a ticket',

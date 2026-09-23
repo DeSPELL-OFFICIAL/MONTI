@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Alert, Button, Fab, Field, KycBadge, Screen, Spinner } from '../../shared/ui';
-import { useCopy, useLocale } from '../../shared/i18n';
+import { fmt, useCopy, useLocale } from '../../shared/i18n';
 import { describeFailure } from '../../shared/errors';
 import { useSession } from '../../shared/session';
 import { useOrganizerEntry } from '../../organizer/useOrganizerEntry';
@@ -16,6 +16,13 @@ import {
   useEvents,
   type DiscoverFilters,
 } from './useEvents';
+
+/**
+ * How many of an event's tags a card shows. The rest are counted into one `+N` chip rather
+ * than wrapped onto a second line: a card is a title, a time and a badge, and five tags would
+ * be the tallest thing on it. The detail screen shows all of them (plan section B-2).
+ */
+const CARD_TAGS = 2;
 
 export function Discover() {
   const copy = useCopy();
@@ -74,6 +81,19 @@ export function Discover() {
                 ? formatEventDay(event.startsAt, locale)
                 : formatEventDate(event.startsAt, locale)}
             </p>
+            {/* Reading only. Nothing filters on a tag and nothing here is pressable: the
+                indexer has no column for tags (`schema.graphql`), so filtering on them would
+                mean fetching every event's document before the first card could be drawn. */}
+            {metadata !== null && metadata.tags.length > 0 ? (
+              <ul className="tag-row tag-row--card">
+                {metadata.tags.slice(0, CARD_TAGS).map((tag) => (
+                  <li key={tag}>{tag}</li>
+                ))}
+                {metadata.tags.length > CARD_TAGS ? (
+                  <li>{fmt(copy.discover.tagsMore, { count: metadata.tags.length - CARD_TAGS })}</li>
+                ) : null}
+              </ul>
+            ) : null}
           </li>
         ))}
       </ul>
