@@ -351,3 +351,125 @@ Every signature made against the current deployment dies with it:
 
 None of these has a production caller today. That is the premise the bundle was written on, and Task
 15 is where it stops being true.
+
+---
+
+## 10. Deployed 2026-09-23 — Monad testnet (chain 10143)
+
+Task 15. `forge script Deploy` then `forge script Seed`, both `--broadcast --slow
+--non-interactive --code-size-limit 131072`, RPC `https://testnet-rpc.monad.xyz`. 348 tests and
+`.github-checks.sh` green on `f89132f` beforehand.
+
+| | Address |
+|---|---|
+| `identity` | `0x961a895b47Cf200C14acf38F5689979FF5bd8133` |
+| `organizers` | `0xa88C8D110Ca8f0c925A781AB8042bA012d7281F0` |
+| `ticket` | `0x4B8353C9F3503Cdbd011E8f35da0a955D95b1367` |
+| `paymaster` | `0xBDDBDaA9811C8944AF82319b19169A209A0928B2` |
+| `attester` (unchanged) | `0x6af898aA4d99375839d7069431A7019a6D84C4Ed` |
+| `entryPoint` (unchanged) | `0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789` |
+| `coinbaseFactory` (unchanged) | `0xBA5ED110eFDBa3D005bfC882d75358ACBbB85842` |
+
+`block` = **64921775** — the indexer's new `start_block`, and a lower bound by construction: the four
+creations landed in 64921805–64921824. The retired deployment is `ticket
+0xE9686503c4d675B0B1Ec9DE19AbEC51Fc59F1113` / `block 64385989`.
+
+**Cost.** Deploy: 7 transactions, 14,823,780 gas at 102 gwei = **1.512 MON**, plus 1 MON stake and
+1 MON EntryPoint deposit. Seed: 14 transactions, 2,841,024 gas = **0.290 MON** split across five
+senders (deployer 0.108, attester 0.087, three demo members 0.0316 each), plus 0.0244 MON topping
+those members up to 0.1 MON. Deployer `0x509ed82E…BCf3` 15.175 → 11.530 MON (of which 2 MON is the
+paymaster stake and deposit); attester 0.886 → 0.799 MON. Monad charges on the gas **limit**, so the plan's blanket
+`--gas-limit 30000000` would have cost ~21 MON for the Deploy alone and was not used — forge's own
+estimates were, as in the first deployment.
+
+**§9's EIP-170 claim, proved on the node.** `eth_call` of the Ticket creation returned 26,351 bytes
+of runtime before anything was broadcast, and `cast code` on the deployed Ticket returns the same
+26,351. Monad testnet does not enforce EIP-170. Deployed runtime sizes: Identity 4,783 B,
+Organizers 4,002 B, Ticket 26,351 B, MontiPaymaster 9,173 B. Note that `forge script --broadcast`
+still prompts on an over-24,576 B contract and dies with `IO error: not a terminal` when its stdout
+is a pipe; `--non-interactive` is what gets past it.
+
+**Allow-list as read back from the new paymaster.** 29 selectors, `argKindOf` / `argWordOf`
+(1 = Platform, 2 = EventId, 3 = TokenId, 4 = OrgId):
+
+| Selector | Signature | Kind | Word |
+|---|---|---|---|
+| `0x3e29e118` | `createEvent(EventMeta,Tier[])` | 1 | 0 |
+| `0x3b671ffa` | `updateEventMeta(uint256,EventMeta,Tier[])` | 2 | 0 |
+| `0xcfd9f3da` | `publishEvent(uint256)` | 2 | 0 |
+| `0x3f69babd` | `cancelEvent(uint256)` | 2 | 0 |
+| `0x09406344` | `claim(uint256,uint8,bytes)` | 2 | 0 |
+| `0x7e0c0c2c` | `checkIn(uint256,GateCode,bytes)` | 3 | 0 |
+| `0x47a7fad1` | `checkInLate(uint256,GateCode,bytes)` | 3 | 0 |
+| `0xba9479cc` | `requestOverride(uint256,uint256,uint8)` | 3 | 0 |
+| `0xb8c563eb` | `manualOverride(uint256,uint256,uint8)` | 3 | 0 |
+| `0x14f6b1fb` | `revoke(uint256,uint8)` | 3 | 0 |
+| `0xb9d92e7f` | `createOffer(uint256,bytes32,uint64)` | 3 | 0 |
+| `0xef706adf` | `cancelOffer(uint256)` | 3 | 0 |
+| `0x8f7150d0` | `acceptOffer(uint256,bytes)` | 3 | 0 |
+| `0x23b872dd` | `transferFrom(address,address,uint256)` | 3 | 2 |
+| `0x42842e0e` | `safeTransferFrom(address,address,uint256)` | 3 | 2 |
+| `0xb88d4fde` | `safeTransferFrom(address,address,uint256,bytes)` | 3 | 2 |
+| `0x454b0608` | `migrate(uint256)` | 3 | 0 |
+| `0x3e93259c` | `registerGate(uint256,address,bytes32,bytes32)` | 2 | 0 |
+| `0x396d45c4` | `openGate(uint256)` | 1 | 0 |
+| `0x6eac22c3` | `closeGate(uint256)` | 1 | 0 |
+| `0x761227ea` | `revokeGate(uint256)` | 1 | 0 |
+| `0x49cd9846` | `createOrganizer(address)` | 1 | 0 |
+| `0x1ebe85ba` | `transferOwner(uint256,address)` | 4 | 0 |
+| `0x7bf24b9a` | `setAdmin(uint256,address,uint32)` | 4 | 0 |
+| `0x79ef4eff` | `setManager(uint256,address,bool,bool)` | 4 | 0 |
+| `0xe8bffdb3` | `setActiveDevice(bytes32,bytes32)` | 1 | 0 |
+| `0xff5b0572` | `lockDevice(address)` | 1 | 0 |
+| `0x38ce6ad7` | `setNickname(bytes32,string)` | 1 | 0 |
+| `0xc64bf27a` | `cancelRotation()` | 1 | 0 |
+
+Two attester-only functions are deliberately **not** sponsored and read back
+`argKindOf == 0 / allowedSelector == false`: `register(bytes32,address,bytes32,bytes32,uint8)`
+(`0x2ddda87f`) and `rotateAccount(bytes32,address)` (`0xda8c1ce8`). The attester EOA pays its own
+gas for both; only the *undo* (`cancelRotation`) is sponsored, because C3 needs it to work from an
+empty account.
+
+**Paymaster money.** `EntryPoint.getDepositInfo(0xBDDB…28B2)` = `(1e18, true, 1e18, 86400, 0)` —
+1 MON deposited, staked, 1 MON stake, 1-day unstake delay. `budgetOf(0)` (platform) = 1e18.
+Immutables read back as the new Ticket / Organizers / Identity, `deployer` = `0x509ed82E…BCf3`.
+
+**§7.2 parity on the live contract.** The pinned digest `0xca378ab2…fe66` names chain 31337 and
+Ticket `0x7111…1111`, so it cannot reappear on 10143 — `chainid` and `address(this)` are filled in by
+the contract. What was checked instead is the formula: with the doc's five caller-chosen inputs
+(tokenId 7, gateId 3, eventId 11, nonce `0x11…11`, issuedAt 1789862400) the deployed
+`deviceDigest(...)` returns
+`0xec0c84e899cdacfab3dc560fc6ad89a3db7800cd07154b5ad3f24d0d4f46f8e9`, which is exactly
+`sha256(abi.encode(10143, 0x4B8353C9…1367, 7, 3, 11, nonce, 1789862400))` computed off chain, and the
+same expression with `31337, 0x7111…1111` reproduces `0xca378ab2…fe66`. Consumers must therefore
+re-derive their fixtures against **this** Ticket address.
+
+**The seeded gate is a placeholder.** No staff phone exists yet, so Task 15 generated a throwaway
+P-256 key pair (`openssl ecparam -name prime256v1`) rather than leave the gate unregistered. Gate 1,
+event 1, open:
+
+```
+GATE_ACCOUNT  0xDe2F7cf570Fe27308CC8256F033376aF2683b8dA
+SEED_GATE_KX  0x9ba2bbe85707d935d04e76b70f5600931ba4646fa8b0ad7ce9a52b5a1c10edb7
+SEED_GATE_KY  0xed43bdb576181bb22b80fa0473877e2594e3e9ce13a9c0228bf91fd8d9d8edfb
+```
+
+The account is the Coinbase Smart Wallet **v1.1** counterfactual for that single P-256 owner:
+`getAddress(bytes[],uint256)` on factory `0xBA5ED110…5842` with `owners = [KX‖KY]` (64 raw bytes) and
+`nonce = 0`. The same call on the repo's fixed vector owner (`0x11×32‖0x22×32`) returns
+`0xCf83795Af2E30a8Bb373610f45563eB97A5aEDb1`, which is how the derivation was checked before use. The
+account is undeployed (counterfactual), which `registerGate` does not care about. Check-in defence 1
+(spec 7.2 step 3) is therefore **not** covered on this gate until the real device replaces it — and
+because `registerGate` takes an account once, the real device joins through Task 15 Step 7
+(`registerGate` + `openGate` on event 1), not through a re-seed.
+
+**Seed state.** Organizer 1 owned by the deployer, event 1 Published with one free tier and the same
+pinned metadata CID `bafkreiepv7iydmisqmk2qrht7zwfeaxtf7sljdzfbfhtthjgpovrknn754`, gate 1 open, the
+three demo members registered at KYC level 1 and holding tokens 1–3.
+
+**Still open after this commit:** the old paymaster `0xDa7824f0d06B2930a4847260Cf111BBC5AaA2539`
+still holds 1 MON stake and 1 MON deposit (Step 9: `unlockStake` now, `withdrawStake` 24 h later,
+`withdrawPlatform` any time); real accounts on the old `Identity 0x226E…beD6` are not re-registered
+(Step 8); the sponsored-UserOp smoke test through Pimlico on the new stack (Step 4's last item) has
+not been run; and the four `VITE_ADDR_*` values plus the three consumer repos still point at the
+retired addresses (Step 5 / Task 15b).
