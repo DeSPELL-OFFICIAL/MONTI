@@ -13,6 +13,7 @@ import { AcceptInvite } from './invites/Accept';
 import { CreateEvent } from './scene/CreateEvent';
 import { TicketSettings } from './scene/TicketSettings';
 import { Created } from './scene/Created';
+import { EditEvent } from './scene/EditEvent';
 import { useWizard } from './wizard/useWizard';
 import { Step1Basic } from './wizard/Step1Basic';
 import { Step2When } from './wizard/Step2When';
@@ -250,6 +251,9 @@ export function OrganizerRoutes() {
       <Route path="new/:draftId" element={<CreateEvent />} />
       <Route path="new/:draftId/tickets" element={<TicketSettings />} />
       <Route path="events/:eventId" element={<Dashboard />} />
+      {/* Reopens the same scene on an event that already exists, by writing a draft from it
+          and handing over. Only ever offered while the event is a Draft (T-EV-W12). */}
+      <Route path="events/:eventId/edit" element={<EditEvent />} />
       <Route path="events/:eventId/gates" element={<Gates />} />
       <Route path="team" element={<Team />} />
       <Route path="team/:orgId" element={<TeamRoute />} />

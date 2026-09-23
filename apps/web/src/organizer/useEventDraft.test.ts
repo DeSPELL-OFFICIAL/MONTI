@@ -177,6 +177,42 @@ describe('opening the scene', () => {
     expect(view.result.current.draft.orgId).toBe('9');
   });
 
+  /**
+   * T-EV-W12. `/org/new` starts a creation; an abandoned edit draft belongs to the event it
+   * was opened from, and resuming it there would put 만들기 in front of somebody else's event
+   * and then send `updateEventMeta` to it.
+   */
+  it('never carries on with an abandoned edit draft at the create entry point', async () => {
+    store = [
+      { id: 'edit-7', updatedAt: 2_000, data: { title: '고치던 행사', editingEventId: '7' } },
+      { id: 'mine', updatedAt: 1_000, data: { title: '내 초안' } },
+    ];
+    const view = await openDraft();
+
+    expect(view.result.current.draftId).toBe('mine');
+    expect(view.result.current.draft.title).toBe('내 초안');
+
+    // Nor from the device copy, which is the other way the newest draft comes back.
+    localStorage.setItem(EVENT_DRAFT_KEY, JSON.stringify({
+      id: 'edit-7', draft: { title: '고치던 행사', editingEventId: '7' },
+    }));
+    store = [];
+    listEventDrafts.mockRejectedValue(new Error('offline'));
+    const fresh = await openDraft();
+    expect(fresh.result.current.draft.editingEventId).toBe('');
+    expect(fresh.result.current.draftId).not.toBe('edit-7');
+  });
+
+  it('opens an edit draft by name, because the address asked for that one', async () => {
+    store = [{ id: 'edit-7', updatedAt: 2_000, data: { title: '고치던 행사', editingEventId: '7' } }];
+    const view = renderHook(() => useEventDraft('', 'edit-7'));
+    await advance(0);
+    await advance(0);
+
+    expect(view.result.current.draftId).toBe('edit-7');
+    expect(view.result.current.draft.editingEventId).toBe('7');
+  });
+
   it('starts empty when this account has no draft', async () => {
     const view = await openDraft();
     expect(view.result.current.draft).toEqual({ ...emptyEventDraft, orgId: '9' });

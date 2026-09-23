@@ -59,7 +59,7 @@ export const emptyEventDraft: EventDraft = {
   startsAt: 0, endsAt: 0, timeHidden: false,
   transferable: true, transferCutoffHours: 2, requireKyc: false,
   tiers: [emptyEventDraftTier],
-  submittedOpHash: '', createdEventId: '',
+  submittedOpHash: '', createdEventId: '', editingEventId: '',
 };
 
 export type EventDraftStatus = 'saved' | 'saving' | 'error';
@@ -132,6 +132,7 @@ export function normalizeEventDraft(raw: unknown): EventDraft {
     tiers: tiers.length > 0 ? tiers : emptyEventDraft.tiers,
     submittedOpHash: text(saved.submittedOpHash, emptyEventDraft.submittedOpHash),
     createdEventId: text(saved.createdEventId, emptyEventDraft.createdEventId),
+    editingEventId: text(saved.editingEventId, emptyEventDraft.editingEventId),
   };
 }
 
@@ -184,6 +185,17 @@ export async function forgetEventDraft(draftId: string): Promise<void> {
   await deleteEventDraft(draftId);
 }
 
+/**
+ * A draft that was opened from an event that already exists (T-EV-W12). It is never what
+ * `/org/new` carries on with: that entry point starts a **creation**, and resuming an
+ * abandoned edit there would put the organiser in front of somebody else's event with a button
+ * that says 만들기 — and then send `updateEventMeta` to an event they were not editing.
+ * Named drafts (`/org/new/<id>`) are unaffected: the address asked for that one by name.
+ */
+function isEditDraft(draft: EventDraft): boolean {
+  return draft.editingEventId !== '';
+}
+
 /** The organisation comes from the route, so it outranks whatever the stored draft remembers. */
 function withOrg(draft: EventDraft, orgId: string): EventDraft {
   return orgId === '' || draft.orgId === orgId ? draft : { ...draft, orgId };
@@ -222,8 +234,10 @@ export function useEventDraft(orgId: string, wantedId?: string): EventDraftState
   // `/org/new/<id>` names the document to open — coming back from SCENE 2, or resuming from
   // another tab. The device copy is only the right thing to show when it mirrors *that*
   // document; for any other id the fields start empty and the read below fills them.
-  const [opened] = useState(() =>
-    (wantedId === undefined || mirrored?.id === wantedId ? mirrored : null));
+  const [opened] = useState(() => {
+    if (wantedId !== undefined) return mirrored?.id === wantedId ? mirrored : null;
+    return mirrored !== null && !isEditDraft(mirrored.draft) ? mirrored : null;
+  });
   const [draft, setDraft] = useState<EventDraft>(() =>
     withOrg(opened?.draft ?? emptyEventDraft, orgId));
   // The id is minted here rather than after the round trip, so a draft typed into while
@@ -346,7 +360,7 @@ export function useEventDraft(orgId: string, wantedId?: string): EventDraftState
       if (!liveRef.current) return;
       // The named document when the route named one; otherwise whichever was written last.
       const newest = wantedId === undefined
-        ? stored[0]
+        ? stored.find((entry) => !isEditDraft(normalizeEventDraft(entry.data)))
         : stored.find((entry) => entry.id === wantedId);
       if (newest !== undefined && !touchedRef.current && newest.id !== openedIdRef.current) {
         // Another device got further than this one. Typing that has already happened here

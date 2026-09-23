@@ -321,6 +321,16 @@ export interface EventDraft {
    * tried again later. The draft is only deleted once both of them have landed.
    */
   createdEventId: string;
+  /**
+   * The id of the event this draft is **editing**, or `''` for a draft that will make a new
+   * one. An event is editable only while the chain still calls it a Draft (`Ticket.sol:235`),
+   * and the difference this field makes is the whole of it: the scene is the same, the rules
+   * are the same, and the last button sends `updateEventMeta` instead of `createEvent`.
+   *
+   * It is never set on the same draft as {@link createdEventId}: one is an event this draft
+   * made, the other an event this draft was opened from.
+   */
+  editingEventId: string;
 }
 
 /**

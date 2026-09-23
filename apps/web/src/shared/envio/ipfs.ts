@@ -11,6 +11,13 @@ export interface EventMetadata {
   description: string;
   /** Already an https gateway URL: an `ipfs://<cid>` value is rewritten on the way in. */
   image: string;
+  /**
+   * The poster's own CID, exactly as the document stores it and before {@link image} turns it
+   * into a URL. It is what re-pinning an edited event has to send back (`pinEventMetadata`
+   * takes `meta.imageCid`), and there is no way back to it from a gateway URL — so it is kept
+   * rather than reconstructed. `''` for a document whose `image` is an ordinary http address.
+   */
+  imageCid: string;
   venue: string;
   category: number;
   region: string;
@@ -70,6 +77,8 @@ export function normalizeMetadata(raw: unknown): EventMetadata {
     title: text(fields.name) || text(fields.title),
     description: text(fields.description),
     image: image === '' ? '' : gatewayUrl(image),
+    imageCid: image.startsWith(IPFS_SCHEME) ? image.slice(IPFS_SCHEME.length)
+      : image.startsWith('http') ? '' : image,
     venue: text(fields.venue),
     category: typeof fields.category === 'number' ? fields.category : 0,
     region: text(fields.region),

@@ -143,6 +143,13 @@ export function Dashboard() {
 
       {pending === '' ? (
         <>
+          {/* Editing closes the moment the event is published — `updateEventMeta` reverts
+              `NotDraft` (`Ticket.sol:235`) — so the way in is offered only while it is open. */}
+          {status === 'Draft' ? (
+            <p>
+              <Link to={`/org/events/${eventId}/edit`}>{dash.edit}</Link>
+            </p>
+          ) : null}
           {status === 'Draft' ? <Button onClick={() => setPending('publish')}>{life.publish}</Button> : null}
           {status === 'Draft' || status === 'Published' ? (
             <Button variant="danger" onClick={() => setPending('cancel')}>

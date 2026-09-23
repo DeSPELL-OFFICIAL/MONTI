@@ -46,6 +46,10 @@ export function CreateEvent() {
   // the moment it is opened is a scene that starts by telling the organiser off.
   const [checked, setChecked] = useState(false);
 
+  // A draft opened from an event that already exists (T-EV-W12). The way out then leads back
+  // to that event, and `처음부터` is hidden: on an edit it would throw the event's own fields
+  // away and leave an empty draft that makes a *second* event.
+  const editing = draft.editingEventId !== '';
   const problems = eventProblems(draft);
   const wrong = (key: EventProblem) =>
     (checked && problems.includes(key) ? <p className="problem">{copy.problems[key]}</p> : null);
@@ -74,9 +78,9 @@ export function CreateEvent() {
     <Screen title={copy.title}>
       <div className="scene">
         <p>
-          <Link to="/org">{copy.leave}</Link>
+          <Link to={editing ? `/org/events/${draft.editingEventId}` : '/org'}>{copy.leave}</Link>
         </p>
-        {resumed ? (
+        {resumed && !editing ? (
           <p className="muted">
             {copy.resumed} ·{' '}
             <Button variant="ghost" onClick={() => void discard()}>

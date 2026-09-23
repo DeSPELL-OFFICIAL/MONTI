@@ -10,6 +10,7 @@ import { api, callableFailure } from '../../shared/api/functions';
 import type { EventDraft } from '../../shared/api/firestore';
 import { buildEventMeta, buildTiers, type WizardDraft } from '../wizard/buildEventMeta';
 import type { OrganizerCopy } from '../copy';
+import { saveDraft, type LifecycleProblem } from '../lifecycle';
 import { eventProblems, normalizeTags, saleWindow, tierProblems } from './draftRules';
 import {
   followUpPlan, followUpsDone, runFollowUps, type FollowUpPlan, type FollowUpResult,
@@ -37,6 +38,19 @@ const PIN_PROBLEMS: Readonly<Record<string, PublishProblem>> = {
   NOT_ORGANIZER: 'notYourOrg',
   PINATA_UPLOAD_FAILED: 'pinFailed',
   BAD_PINATA_CID: 'pinFailed',
+};
+
+/**
+ * What `updateEventMeta` can be refused for, in the words `organizer/lifecycle.ts` already
+ * gives those reverts. `NotDraft` is the one that matters: the chain closes editing the moment
+ * an event is published (`Ticket.sol:235`), so an organiser who published in another tab is
+ * told exactly that rather than "that did not work".
+ */
+const UPDATE_PROBLEMS: Readonly<Record<LifecycleProblem, PublishProblem>> = {
+  notDraft: 'notDraft',
+  closed: 'notDraft',
+  notAllowed: 'notYourOrg',
+  failed: 'failed',
 };
 
 /** Three values the scene does not ask for, because there is one right answer for each. */
@@ -204,7 +218,105 @@ export function usePublish(
     [discard, draft, draftId, onCreated],
   );
 
+  /**
+   * The same two writes as {@link finish}, for an event that already existed. The difference
+   * is what happens when one of them does not land: there is no done screen to carry a retry
+   * to, and pressing 저장 again is safe for every step of an update — the pin, the chain write
+   * and both callables all replace rather than add — so the draft is kept and the button is
+   * the retry.
+   */
+  const finishUpdate = useCallback(
+    async (eventId: string): Promise<void> => {
+      setPhase('finishing');
+      const plan = followUpPlan(draft, eventId);
+      const done = await runFollowUps(plan);
+      if (!followUpsDone(plan, done)) {
+        setPhase('idle');
+        setProblem('followUpFailed');
+        return;
+      }
+      await discard();
+      onCreated({
+        eventId,
+        posterCid: draft.posterCid,
+        title: draft.title.trim(),
+        followUpFailed: false,
+        draftId,
+        plan,
+        done,
+      });
+    },
+    [discard, draft, draftId, onCreated],
+  );
+
+  /**
+   * `저장` on an event that already exists — the same scene, the same rules, and
+   * `updateEventMeta` in place of `createEvent` (T-EV-W12). The chain refuses it once the
+   * event is published, which is why the entry point is only offered while it is a Draft.
+   *
+   * Nothing here needs the duplicate-send guards the create path is built around: sending the
+   * same update twice writes the same `EventMeta` twice, where sending `createEvent` twice
+   * makes two events.
+   */
+  const update = useCallback(
+    async (eventId: string): Promise<void> => {
+      if (eventProblems(draft).length > 0 || tierProblems(draft).length > 0) {
+        setPhase('idle');
+        return;
+      }
+      setProblem('');
+      setUnsponsored(false);
+      setPhase('pinning');
+      try {
+        const orgId = draft.orgId.trim();
+        // A fresh document every time: the chain's `imageCid` is the CID of *this* JSON, and
+        // the hashes beside it are of the strings in it, so the two are written together.
+        const { metadataCid } = await api.pinEventMetadata({ orgId, meta: toPinnedMeta(draft) });
+        setPhase('sending');
+        const chainDraft = toChainDraft(draft, Math.floor(Date.now() / 1_000));
+        const result = await saveDraft(
+          BigInt(eventId),
+          BigInt(orgId),
+          buildEventMeta(chainDraft, metadataCid),
+          buildTiers(chainDraft),
+        );
+        if (result.state === 'unsponsored') {
+          setPhase('idle');
+          setUnsponsored(true);
+          return;
+        }
+        // Still on its way. The button stays pressable, and pressing it sends the same update
+        // again — which is the whole difference from a `createEvent` that timed out.
+        if (result.state === 'confirming') {
+          setPhase('confirming');
+          return;
+        }
+        if (result.state === 'refused') {
+          setPhase('idle');
+          setProblem(UPDATE_PROBLEMS[result.problem]);
+          return;
+        }
+        await finishUpdate(eventId);
+      } catch (cause) {
+        setPhase('idle');
+        const { code, reason } = callableFailure(cause);
+        if (PIN_PROBLEMS[reason]) setProblem(PIN_PROBLEMS[reason]);
+        else if (code === 'permission-denied') setProblem('notYourOrg');
+        else if (code !== '') setProblem('pinFailed');
+        else setProblem('failed');
+      }
+    },
+    [draft, finishUpdate],
+  );
+
   const publish = useCallback(async (): Promise<void> => {
+    // A draft opened from an event that already exists goes the other way entirely: no id to
+    // read out of a log, no duplicate to guard against, and `updateEventMeta` at the end.
+    if (draft.editingEventId !== '') {
+      await update(draft.editingEventId);
+      return;
+    }
+
     // The event this draft already made. Recorded before anything that can fail, so from here
     // on there is no path that sends a second `createEvent` — pressing the button again only
     // tries the two writes that are still missing.
@@ -304,7 +416,7 @@ export function usePublish(
       else if (code !== '') setProblem('pinFailed');
       else setProblem('failed');
     }
-  }, [draft, finish, patch, save]);
+  }, [draft, finish, patch, save, update]);
 
   // Sentences are the scene's business: this hook hands back the *name* of the rule, so the
   // same failure reads the same whichever screen ends up showing it.

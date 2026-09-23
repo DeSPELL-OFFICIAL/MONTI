@@ -204,6 +204,8 @@ const ko = {
     checkedIn: '입장함',
     notCheckedIn: '아직',
     gates: '입구 단말기',
+    // 공개 전에만 열린다 — updateEventMeta 는 Draft 에서만 된다(Ticket.sol:235).
+    edit: '행사 정보 고치기',
     notIndexed: '없는 행사 번호이거나 아직 색인 전이에요',
     failed: '현황을 불러오지 못했어요. 잠시 뒤 다시 시도해 주세요',
 
@@ -253,6 +255,15 @@ const ko = {
     startOver: '처음부터',
     next: '다음',
     back: '행사 정보로',
+
+    /** 이미 만들어진 행사를 같은 씬에서 고친다(T-EV-W12). 공개 전에만 열린다. */
+    edit: {
+      title: '행사 정보 고치기',
+      loading: '행사 정보를 불러오고 있어요',
+      notDraft: '이미 공개한 행사는 고칠 수 없어요',
+      failed: '행사 정보를 불러오지 못했어요. 잠시 뒤 다시 시도해 주세요',
+      back: '행사 화면으로',
+    },
 
     saveAuto: '적는 대로 저장돼요',
     saving: '저장 중…',
@@ -321,6 +332,7 @@ const ko = {
       price: '가격',
       free: '무료',
       amount: '금액',
+      save: '저장',
       art: '티켓 그림',
       // 'Mint' 는 관객 금지어(`mint`)에 걸린다 — 색 이름은 '청록'/'Teal' 로 둔다.
       artA: '오로라', artB: '잉걸', artC: '청록', artD: '어스름',
@@ -366,6 +378,7 @@ const ko = {
       pinning: '행사 정보를 올리고 있어요',
       sending: '행사를 만들고 있어요',
       finishing: '마무리하고 있어요',
+      updating: '행사 정보를 저장하고 있어요',
       // 시간 초과는 실패가 아니다. 두 번 보내면 행사가 두 개가 된다.
       confirming: '만드는 중이에요. 화면을 나가도 돼요. 잠시 뒤 주최자 화면에서 확인해 주세요',
     },
@@ -379,6 +392,8 @@ const ko = {
       badMeta: '제목이나 소개가 너무 길어요. 줄이고 다시 시도해 주세요',
       badTags: '태그를 다시 확인해 주세요',
       badPoster: '포스터를 다시 올려 주세요',
+      notDraft: '이미 공개한 행사는 고칠 수 없어요',
+      followUpFailed: '티켓 그림이나 장소를 저장하지 못했어요. 저장을 한 번 더 눌러 주세요',
       schedule: '종료 시각이 시작 시각보다 뒤여야 해요',
       tiersEmpty: '티켓 종류를 하나 이상 만들어 주세요',
       failed: '행사를 만들지 못했어요. 잠시 뒤 다시 시도해 주세요',
@@ -674,6 +689,8 @@ const en: typeof ko = {
     checkedIn: 'In',
     notCheckedIn: 'Not yet',
     gates: 'Entry terminals',
+    /** Only before publishing: the chain refuses `updateEventMeta` past Draft. */
+    edit: 'Edit this event',
     notIndexed: 'No event has that number, or it has not been indexed yet',
     failed: 'Could not load the status. Please try again in a moment',
 
@@ -715,6 +732,15 @@ const en: typeof ko = {
     startOver: 'Start over',
     next: 'Next',
     back: 'Back to the event',
+
+    /** See the Korean block: the same scene, opened on an event that already exists. */
+    edit: {
+      title: 'Edit this event',
+      loading: 'Loading the event',
+      notDraft: 'An event that is already public cannot be edited',
+      failed: 'Could not load the event. Please try again in a moment',
+      back: 'Back to the event',
+    },
 
     saveAuto: 'Saved as you write',
     saving: 'Saving…',
@@ -783,6 +809,7 @@ const en: typeof ko = {
       price: 'Price',
       free: 'Free',
       amount: 'Amount',
+      save: 'Save',
       art: 'Ticket picture',
       artA: 'Aurora', artB: 'Ember', artC: 'Teal', artD: 'Dusk',
       artUpload: 'Upload your own',
@@ -826,6 +853,7 @@ const en: typeof ko = {
       pinning: 'Uploading the event details',
       sending: 'Creating the event',
       finishing: 'Finishing up',
+      updating: 'Saving the event',
       // A timeout is not a failure. Sending it twice would be two events.
       confirming: 'Still being created. You can leave this screen — check your organiser screen in a moment',
     },
@@ -839,6 +867,8 @@ const en: typeof ko = {
       badMeta: 'The title or the description is too long. Please shorten it and try again',
       badTags: 'Please check the tags again',
       badPoster: 'Please upload the poster again',
+      notDraft: 'An event that is already public cannot be edited',
+      followUpFailed: 'Could not save the ticket picture or the venue. Please press Save once more',
       schedule: 'The end has to come after the start',
       tiersEmpty: 'Add at least one ticket kind',
       failed: 'Could not create the event. Please try again in a moment',

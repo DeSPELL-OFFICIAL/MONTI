@@ -25,6 +25,9 @@ export function TicketSettings() {
   const { draftId: wanted = '' } = useParams();
   const { draft, draftId, status, savedAt, patch, save, discard } = useEventDraft('', wanted);
   const [checked, setChecked] = useState(false);
+  // A draft opened from an event that already exists (T-EV-W12). The scene is the same one;
+  // what changes is the word on the button and where a save that landed goes next.
+  const editing = draft.editingEventId !== '';
   const { phase, problem, unsponsored, publish } = usePublish({
     draft,
     draftId,
@@ -35,7 +38,13 @@ export function TicketSettings() {
     // them from: the indexer has not seen the event and, when everything landed, the draft is
     // gone. `plan`/`done`/`draftId` go too — they are what makes the retry on that screen real.
     // `onCreated` is never called without an id; that branch stays here and says so.
-    onCreated: (created) =>
+    onCreated: (created) => {
+      // An event that already existed has a screen of its own to go back to, and the done
+      // screen's words ("행사를 만들었어요") would be the wrong ones for an edit.
+      if (editing) {
+        navigate(`/org/events/${created.eventId}`);
+        return;
+      }
       navigate(`/org/new/done/${created.eventId}`, {
         state: {
           posterCid: created.posterCid,
@@ -45,7 +54,8 @@ export function TicketSettings() {
           plan: created.plan,
           done: created.done,
         },
-      }),
+      });
+    },
   });
 
   const problems = tierProblems(draft);
@@ -154,7 +164,7 @@ export function TicketSettings() {
         {phase === 'pinning' || phase === 'sending' || phase === 'finishing' ? (
           <p className="working">
             <Spinner />
-            {copy.publish[phase]}
+            {editing && phase === 'sending' ? copy.publish.updating : copy.publish[phase]}
           </p>
         ) : null}
         <p className="muted">{copy.tiers.feeNote}</p>
@@ -162,7 +172,7 @@ export function TicketSettings() {
 
       <StickyBar status={<SaveStatus status={status} savedAt={savedAt} />}>
         <Button disabled={stopped || working} onClick={create}>
-          {copy.tiers.create}
+          {editing ? copy.tiers.save : copy.tiers.create}
         </Button>
       </StickyBar>
     </Screen>

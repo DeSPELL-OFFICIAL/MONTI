@@ -113,6 +113,7 @@ describe('fetchEventMetadata', () => {
       title: '재즈 나이트',
       description: '',
       image: '',
+      imageCid: '',
       venue: '한남',
       category: 2,
       region: 'KR-11',
