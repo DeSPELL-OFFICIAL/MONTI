@@ -10,11 +10,19 @@ import { ABI_BY_CONTRACT, type UsedContract, type UsedFunction } from './abis';
 export const EventStatus = { Draft: 0, Published: 1, Cancelled: 2, Ended: 3 } as const;
 export type EventStatusValue = (typeof EventStatus)[keyof typeof EventStatus];
 
+/**
+ * `Ticket.checkInOf`. The 01b order: `nonceHash` sits **in front of** `ts` so that
+ * `ts + manual + late` share one storage slot (`contracts/docs/abi-delta-01b.md` §5). Solidity
+ * reads the struct by field name and never noticed; viem decodes positionally, so this
+ * interface and `CHECK_IN_FIELDS` move together or not at all.
+ */
 export interface CheckInStruct {
   gateId: bigint;
-  ts: bigint;
   nonceHash: Hex;
+  ts: bigint;
   manual: boolean;
+  /** The tap was recorded through `checkInLate`, outside the code window. Still an entry. */
+  late: boolean;
 }
 
 export interface EventMetaStruct {
@@ -67,15 +75,6 @@ function reader<C extends UsedContract>(contract: C, address: Hex) {
     getPublicClient().readContract({ address, abi, functionName, args }) as Promise<T>;
 }
 
-/**
- * `Identity.ROTATION_UNDO_WINDOW()` and `Ticket.MIGRATE_DELAY()` — one span under two names,
- * which sub-plan 01b's redeploy asserts are equal to each other. Neither view exists on the
- * ABI this branch builds against, so the span is named once here and read from this constant;
- * no screen interpolates an hour count of its own. When 01b lands it becomes a real read
- * (`readIdentity().rotationUndoWindow()`) and this line goes away.
- */
-export const ROTATION_UNDO_WINDOW_SECONDS = 86_400;
-
 /** `Identity.activeDevice` answers with two separate `bytes32` outputs, not a struct. */
 export interface DeviceKeyPoint {
   x: Hex;
@@ -97,6 +96,33 @@ export function readIdentity() {
       const [x, y] = await call<[Hex, Hex]>('activeDevice', [account]);
       return { x, y };
     },
+    /**
+     * `uint64` seconds — when this person's account last moved. Note the argument is a
+     * **personId** (`bytes32`), not an account address, unlike every read above.
+     *
+     * `register` stamps this too (`contracts/docs/abi-delta-01b.md` §1), so a non-zero
+     * `rotatedAt` is *not* on its own "there is a rotation to undo" — every registered person
+     * has one. {@link rotatedFrom} is the flag; this only bounds the window.
+     */
+    rotatedAt: (personId: Hex) => call<bigint>('rotatedAt', [personId]),
+    /**
+     * The account a rotation pushed aside, or the zero address once the window closed or the
+     * undo already happened. **This is the flag.** Takes a **personId** (`bytes32`).
+     *
+     * For the account asking, "may I undo right now?" is the whole of:
+     * `rotatedFrom(personId) === me && now < rotatedAt(personId) + ROTATION_UNDO_WINDOW`.
+     */
+    rotatedFrom: (personId: Hex) => call<Hex>('rotatedFrom', [personId]),
+    /**
+     * `86400` (1 day), and equal to `Ticket.MIGRATE_DELAY` by construction — a contracts test
+     * asserts it. Read rather than interpolated, so no screen carries an hour count of its own.
+     *
+     * The undo itself, `Identity.cancelRotation()`, is a **write**, not a read: it takes no
+     * argument (the contract reads the caller) and goes out through `identityOp` in `ops.ts`
+     * like every other Identity write. It is sponsored, which is the point — the pushed-aside
+     * account has no gas.
+     */
+    rotationUndoWindow: () => call<bigint>('ROTATION_UNDO_WINDOW', []),
   };
 }
 
@@ -159,6 +185,25 @@ export function readTicket() {
     eventMeta: (eventId: bigint) => call<EventMetaStruct>('eventMeta', [eventId]),
     tiers: (eventId: bigint) => call<readonly TierStruct[]>('tiers', [eventId]),
     offerOf: (tokenId: bigint) => call<OfferStruct>('offerOf', [tokenId]),
+    /**
+     * `86400` (1 day). How long a ticket waits before it will follow a rotated account:
+     * `migrate` inside that window reverts `RotationPending`
+     * (`contracts/docs/abi-delta-01b.md` §6), so the "티켓 가져오기" button counts from here.
+     */
+    migrateDelay: () => call<bigint>('MIGRATE_DELAY', []),
+    /**
+     * **The parity target.** The exact 32 bytes the attendee phone must sign for `checkIn` /
+     * `checkInLate` (`contracts/docs/abi-delta-01b.md` §7.2):
+     * `sha256(abi.encode(block.chainid, address(this), tokenId, gateId, eventId, nonce,
+     * issuedAt))` — seven words, 224 bytes.
+     *
+     * The two inputs a client cannot choose — `block.chainid` and `address(this)` — are filled
+     * in by the contract, not passed. That is exactly why a hand-rolled sha256 that omits them
+     * passes every local test and then fails at the door, and why `deviceDigest.parity.test.ts`
+     * pins one vector against this deployed view rather than against another local function.
+     */
+    deviceDigest: (tokenId: bigint, gateId: bigint, eventId: bigint, nonce: Hex, issuedAt: bigint) =>
+      call<Hex>('deviceDigest', [tokenId, gateId, eventId, nonce, issuedAt]),
   };
 }
 
@@ -181,12 +226,14 @@ const TIER_FIELDS = [
   'name', 'priceUsdCents', 'supply', 'minted', 'maxPerWallet', 'seated',
 ] as const satisfies readonly (keyof TierStruct)[];
 
-// 01b: (gateId, nonceHash, ts, manual, late) — the redeploy reorders `ts` and `nonceHash` and
-// adds `late: bool` for a tap recorded outside the code window. The CURRENT order is pinned
-// below on purpose: the day the regenerated ABI lands, the test above fails rather than
-// decoding `ts` out of `nonceHash`'s slot, and this list and `CheckInStruct` move together.
+// The 01b order (`contracts/docs/abi-delta-01b.md` §5): `nonceHash` in front of `ts`, and
+// `late` at the end. `checkInOf`'s selector `0xdb7b7d7e` did **not** change, so nothing about
+// this reorder can surface as a compile error, a revert, or a decode failure — a wrong list
+// here just reads `ts` out of `nonceHash`'s slot, same width, no error, wrong value.
+// `STRUCT_SHAPES` below and `abis.test.ts` are the only thing standing between this app and
+// exactly that.
 const CHECK_IN_FIELDS = [
-  'gateId', 'ts', 'nonceHash', 'manual',
+  'gateId', 'nonceHash', 'ts', 'manual', 'late',
 ] as const satisfies readonly (keyof CheckInStruct)[];
 
 const OFFER_FIELDS = [
@@ -217,7 +264,15 @@ const MANAGER_FIELDS = ['exists', 'canApprove'] as const satisfies readonly (key
  * screen that writes it and the screen that reads it back.
  */
 export const STRUCT_INPUT_SHAPES = {
-  Ticket: { createEvent: { meta: EVENT_META_FIELDS, tiers_: TIER_FIELDS } },
+  Ticket: {
+    createEvent: { meta: EVENT_META_FIELDS, tiers_: TIER_FIELDS },
+    // The edit path sends the same two structs as the create path and has to be pinned too —
+    // otherwise a reordered `EventMeta` is caught when an event is made and missed when it is
+    // edited. Both rows reference the same two lists, and so do the reads above, so a struct
+    // cannot drift between the screen that creates one, the screen that edits it, and the
+    // screen that reads it back.
+    updateEventMeta: { meta: EVENT_META_FIELDS, tiers_: TIER_FIELDS },
+  },
 } as const;
 
 export const STRUCT_SHAPES = {

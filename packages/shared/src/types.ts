@@ -40,6 +40,21 @@ export interface GateResponseWire {
   deviceSig: Hex;
 }
 
+/**
+ * 백엔드의 Tenderly 웹훅이 `CheckedIn` 에서 쏘는 FCM **data** 페이로드. 값이 전부 문자열인
+ * 것은 취향이 아니라 제약이다 — FCM data 페이로드는 문자열만 실을 수 있어서 `tokenId` 도
+ * 숫자가 아니라 십진 문자열로 온다.
+ *
+ * `late` 는 01b 의 `CheckedInLate` 경로에서 웹훅이 얹어 주는 참고값일 뿐이다. 화면의 초록은
+ * 그것과 무관하게 뜬다 — 01b 는 늦은 체크인에서도 `CheckedInLate` 와 **함께** `CheckedIn` 을
+ * 내보내므로, 이 푸시가 도착했다는 사실 자체가 이미 입장 확정이다. 거절을 실어 나르는 필드는
+ * 여기 없고, 있어서도 안 된다.
+ */
+export interface CheckInPush {
+  tokenId: string;
+  late?: '1';
+}
+
 export interface SnapshotTicket {
   tokenId: string;
   account: Hex;

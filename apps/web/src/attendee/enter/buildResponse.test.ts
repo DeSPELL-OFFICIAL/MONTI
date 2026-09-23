@@ -61,10 +61,18 @@ const GATE_CODE: GateCodeWire = {
   sig: `0x${'00'.repeat(64)}`,
 };
 
-/** The five-field digest the deployed `Ticket.checkIn` recomputes (`P256Vectors.t.sol`). */
-const V1_DIGEST = '0xc99dfaef599235b36414480bc53054182d5f7fc67a33c60233f3f73f7fc560c7';
-/** The domain-separated one 01b lands (`P256Vectors.SHARED_DIGEST`, commit ba44c63). */
+/**
+ * The domain-separated digest the deployed `Ticket.deviceDigest` answers with
+ * (`P256Vectors.SHARED_DIGEST`, and `contracts/docs/abi-delta-01b.md` §7.2). Seven words: the
+ * five below plus `chainid` and the Ticket address, which is why the fixture mocks a config.
+ */
 const V2_DIGEST = '0xca378ab2af0962bff66d23c4ebb20198fb1a80fe94957e6520368bacae1ffe66';
+/**
+ * The five-field value the same inputs used to hash to, kept as a negative control. It is dead
+ * — the 01b redeploy will not take it — and a build that produced it again would look perfectly
+ * healthy right up to the door, where it is refused as `BadDeviceSignature`.
+ */
+const DEAD_V1_DIGEST = '0xc99dfaef599235b36414480bc53054182d5f7fc67a33c60233f3f73f7fc560c7';
 
 /** A real device key, so the local verify is exercised rather than stubbed out. */
 async function newDeviceKey() {
@@ -120,12 +128,18 @@ beforeEach(async () => {
 });
 
 describe('deviceSigDigest', () => {
-  it('is the five-field digest the deployed Ticket.checkIn recomputes', () => {
-    expect(deviceSigDigest({ tokenId: TOKEN_ID, gateCode: GATE_CODE })).toBe(V1_DIGEST);
+  it('is the domain-separated digest the deployed Ticket.deviceDigest recomputes', () => {
+    expect(deviceSigDigest({ tokenId: TOKEN_ID, gateCode: GATE_CODE })).toBe(V2_DIGEST);
+    // The two words a local re-implementation is most likely to leave out are the two the
+    // client does not choose, so the dead five-field value is asserted against, not just away.
+    expect(deviceSigDigest({ tokenId: TOKEN_ID, gateCode: GATE_CODE })).not.toBe(DEAD_V1_DIGEST);
   });
 
-  it('can produce the domain-separated digest 01b lands, from the same inputs', () => {
-    expect(
+  it('takes the chain and the deployment from config rather than from the gate code', () => {
+    // `chainid` and the Ticket address are filled in by the contract on the far side. If this
+    // screen left either out, every field it *does* control would still match and the signature
+    // would be refused at the door — so the two are pinned against the shared builder directly.
+    expect(deviceSigDigest({ tokenId: TOKEN_ID, gateCode: GATE_CODE })).toBe(
       deviceDigestV2({
         chainId: 31337n,
         ticket: TICKET,
@@ -135,7 +149,7 @@ describe('deviceSigDigest', () => {
         nonce: NONCE,
         issuedAt: 1_789_862_400n,
       }),
-    ).toBe(V2_DIGEST);
+    );
   });
 
   it('hands WebCrypto the preimage, since it hashes the message itself', async () => {
@@ -150,7 +164,7 @@ describe('deviceSigDigest', () => {
 describe('buildGateResponse', () => {
   it('signs the digest with the attendee alias', async () => {
     await buildGateResponse(TOKEN_ID, GATE_CODE);
-    expect(signWithDeviceKey).toHaveBeenCalledWith(V1_DIGEST, { alias: ATTENDEE_KEY_ALIAS });
+    expect(signWithDeviceKey).toHaveBeenCalledWith(V2_DIGEST, { alias: ATTENDEE_KEY_ALIAS });
   });
 
   it('puts r and s on the wire as two 32-byte words', async () => {
@@ -242,7 +256,7 @@ describe('tapSigner — the body of the one NFC session', () => {
   it('never prompts inside the session — it only signs with the key already armed', async () => {
     const { sign } = session();
     await sign(GATE_CODE);
-    expect(signWithDeviceKey).toHaveBeenCalledWith(V1_DIGEST, { alias: ATTENDEE_KEY_ALIAS });
+    expect(signWithDeviceKey).toHaveBeenCalledWith(V2_DIGEST, { alias: ATTENDEE_KEY_ALIAS });
   });
 
   it('tears the session down without signing when the gate is refused', async () => {

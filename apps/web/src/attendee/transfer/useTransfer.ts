@@ -9,6 +9,7 @@ import {
 import { OpReverted, ticketOp } from '../../shared/chain/ops';
 import { getAttendeeAccount } from '../../shared/chain/accounts';
 import { readTicket } from '../../shared/chain/reads';
+import type { Copy } from '../../shared/copy/index';
 import { useCopy } from '../../shared/i18n';
 import { useSession } from '../../shared/session';
 import { precheckMessage, runPrecheck, type PrecheckFailure } from './precheck';
@@ -32,6 +33,23 @@ const REVERT_RULES: ReadonlyArray<readonly [string, PrecheckFailure]> = [
   ['KycRequired', 'recipientNotVerified'],
   ['TransferLimitReached', 'noTransfersLeft'],
   ['MaxPerWalletExceeded', 'maxPerWallet'],
+];
+
+/**
+ * The one 01b revert a handover can raise that no pre-check rule covers. `_update`'s rotation
+ * quarantine reads the **recipient's** person (abi-delta-01b.md §6), and `runPrecheck` cannot
+ * ask the same question — it would need `Identity.personOf`, which this app does not read — so
+ * it is answered here, on the way back, rather than bolted onto `PrecheckFailure` as a rule
+ * nothing ever pre-checks.
+ *
+ * `DeviceLocked` deliberately stays out of this table even though 01b made it bidirectional:
+ * `_update` raises it for the sender and the recipient alike, and `transfer.alertLocked` names
+ * the recipient's phone. Half the time that would name the wrong phone, which is worse than
+ * the generic sentence. The recipient's lock is already caught before the send, by the
+ * pre-check's `locked` rule.
+ */
+const SEND_REVERTS: ReadonlyArray<readonly [string, (copy: Copy) => string]> = [
+  ['RotationPending', (copy) => copy.transfer.alertRecipientMoved],
 ];
 
 /** The two lookups in `shared/chain/revert.ts`, bound to `Ticket` — every screen that shares
@@ -129,9 +147,12 @@ export function useTransfer(tokenId: string): TransferState {
           setPhase('confirming');
           return;
         }
-        const rule = cause.revertReason ? revertRule(cause.revertReason) : undefined;
+        const reason = cause.revertReason;
+        // This screen's own table first, then the eight rules the pre-check already owns.
+        const own = reason ? revertMatch(reason, SEND_REVERTS) : undefined;
+        const rule = reason ? revertRule(reason) : undefined;
         // A revert nobody here recognises is not something the person can act on.
-        setError(rule ? precheckMessage(copy, rule) : copy.transfer.failed);
+        setError(own ? own(copy) : rule ? precheckMessage(copy, rule) : copy.transfer.failed);
       } else {
         setError(copy.common.error);
       }

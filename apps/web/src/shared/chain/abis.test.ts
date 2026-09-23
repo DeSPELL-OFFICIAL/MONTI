@@ -145,6 +145,32 @@ describe('the struct fields the wizard encodes positionally', () => {
   }
 });
 
+/**
+ * Two pins the generic loops above cannot make on their own.
+ *
+ * The first is not the ABI-order check — the `STRUCT_SHAPES` loop already makes that, reading
+ * `CHECK_IN_FIELDS` straight out of `reads.ts`. It is the check that the guard still *exists*
+ * and still names the 01b order: delete `checkInOf` from `STRUCT_SHAPES` and the loop simply
+ * stops running, silently, which is the one way this app can go back to decoding `ts` out of
+ * `nonceHash`'s slot without a red test.
+ *
+ * The second pins a topic0 as a literal. `eventTopic` derives it from the same generated ABI
+ * every other test reads, so an ABI swapped for the wrong deployment's export would agree with
+ * itself all the way down; the value below comes from `contracts/docs/abi-delta-01b.md` §2.
+ */
+describe('the 01b redeploy, pinned', () => {
+  it('still guards checkInOf, in the 01b order', () => {
+    expect(STRUCT_SHAPES.Ticket.checkInOf).toEqual(['gateId', 'nonceHash', 'ts', 'manual', 'late']);
+  });
+
+  it('carries CheckedInLate live, at its known topic0', () => {
+    expect(PENDING_EVENTS.Ticket).toEqual([]);
+    expect(eventTopic('Ticket', 'CheckedInLate')).toBe(
+      '0xad3c23d74f79b6306db7acb45e49e960632c823ee84714ce5616a798913fb782',
+    );
+  });
+});
+
 describe('the struct fields reads.ts decodes positionally', () => {
   for (const contract of Object.keys(STRUCT_SHAPES) as Array<keyof typeof STRUCT_SHAPES>) {
     const shapes: Readonly<Record<string, readonly string[]>> = STRUCT_SHAPES[contract];

@@ -18,7 +18,11 @@
 // and silence is what the deadline reports.
 import { useCallback, useEffect, useState } from 'react';
 import { numberToHex, type Hex } from 'viem';
-import { CLOCK_SKEW_SECONDS, CODE_WINDOW_SECONDS } from '@monti/shared';
+// `CheckInPush` is the wire shape of the webhook's FCM payload and lives in `@monti/shared`
+// with the other shapes the backend and this app both have to agree on. `late` is live as of
+// the 01b redeploy, and it changes nothing here: 01b emits `CheckedIn` alongside
+// `CheckedInLate` on the late path, so the payload's arrival is already the confirmation.
+import { CLOCK_SKEW_SECONDS, CODE_WINDOW_SECONDS, type CheckInPush } from '@monti/shared';
 import { Alert, Spinner } from '../../shared/ui';
 import { useCopy } from '../../shared/i18n';
 import { USED_EVENTS, eventTopic } from '../../shared/chain/abis';
@@ -63,17 +67,6 @@ export function checkedInTopics(tokenId: string): (Hex | Hex[] | null)[] | null 
   if (signatures.length === 0) return null;
   return [signatures, numberToHex(BigInt(tokenId), { size: 32 })];
 }
-
-/**
- * The FCM data payload `pushCheckedIn` sends from the backend's Tenderly webhook. It is emitted
- * only from the `CheckedIn` case, so its arrival IS the confirmation — there is no refusal to
- * carry, and no field here says one. `late` joins it after the 01b redeploy; it changes nothing
- * on this screen, because 01b emits `CheckedIn` alongside `CheckedInLate` on the late path and
- * the green lands either way.
- */
-// shared: CheckInPush — belongs in `@monti/shared` next to the other wire shapes the day the
-// backend and this app are in one branch. It is not there on this branch.
-type CheckInPush = { tokenId: string; late?: '1' };
 
 // Ruling 4: `registerPush` runs once per app run, the first time someone reaches this screen
 // with an account. It raises the OS permission prompt, and a person who said no must not be

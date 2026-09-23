@@ -75,18 +75,33 @@ async function show(tokenId = '42') {
   });
 }
 
+/**
+ * `CheckedInLate(uint256,uint256,uint64,uint64)`, written out rather than derived, so this file
+ * and `contracts/docs/abi-delta-01b.md` §2 cannot drift apart — `shared/chain/abis.test.ts`
+ * pins the same literal against the generated ABI.
+ */
+const CHECKED_IN_LATE_TOPIC = '0xad3c23d74f79b6306db7acb45e49e960632c823ee84714ce5616a798913fb782';
+
 describe('checkedInTopics', () => {
-  it('filters the Ticket address by CheckedIn and this tokenId', () => {
+  it('filters the Ticket address by both check-in events and this tokenId', () => {
+    // 01b's offline flush emits `CheckedInLate`, and an attendee admitted that way has to see
+    // the same green, so both signatures share one topic0 slot.
     const [signature, tokenTopic] = checkedInTopics('42') ?? [];
-    expect(signature).toEqual([encodeEventTopics({ abi: ticketAbi, eventName: 'CheckedIn' })[0]]);
+    expect(signature).toEqual([
+      encodeEventTopics({ abi: ticketAbi, eventName: 'CheckedIn' })[0],
+      CHECKED_IN_LATE_TOPIC,
+    ]);
     expect(tokenTopic).toBe(numberToHex(42n, { size: 32 }));
   });
 
-  it('leaves out an event the deployed ABI does not carry yet', () => {
-    // `CheckedInLate` arrives with the 01b redeploy. Until then one signature, not a topic0
-    // array with an undefined in it — which would match every log the contract ever emitted.
+  it('puts only real signatures in the topic0 slot, never a hole', () => {
+    // The filter is built by asking the manifest for each name and dropping what it does not
+    // carry. What may never come out the other end is a topic0 array with an `undefined` in it,
+    // or an empty one: a node reads either as "match any topic0", and this screen would then go
+    // green on the next Transfer this ticket emits.
     const [signature] = checkedInTopics('42') ?? [];
-    expect(signature).toHaveLength(1);
+    expect(signature).toHaveLength(2);
+    expect(signature).not.toContain(undefined);
   });
 
   /**

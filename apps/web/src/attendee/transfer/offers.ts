@@ -86,6 +86,15 @@ const OFFER_REVERTS: ReadonlyArray<readonly [string, Sentence]> = [
  * `MaxPerWalletExceeded` are `_update`'s, and `revertRule` does own sentences for them — but
  * those are written about the person on the far side of a handover, and here that person is
  * the reader, so they get their own.
+ *
+ * The last two are 01b's, and both are newly reachable on this side (abi-delta-01b.md §6):
+ *
+ * - `RotationPending` — `_update` now holds a freshly moved account at arm's length for the
+ *   whole undo window, on mint as well as on transfer. It applies to an honest recovery too,
+ *   so somebody who just changed phones receives nothing at all for that day, and the sentence
+ *   has to say so rather than read as a failure they can retry out of.
+ * - `DeviceLocked` — the freeze became bidirectional. A locked phone is now refused as the
+ *   RECIPIENT of a handover, which is exactly this screen, and no longer only as its sender.
  */
 const ACCEPT_REVERTS: ReadonlyArray<readonly [string, Sentence]> = [
   ['NoOffer', (copy) => copy.transfer.offerGone],
@@ -94,6 +103,8 @@ const ACCEPT_REVERTS: ReadonlyArray<readonly [string, Sentence]> = [
   ['KycRequired', (copy) => copy.kyc.offerNeedsKyc],
   ['NotMember', (copy) => copy.transfer.offerNotMember],
   ['MaxPerWalletExceeded', (copy) => copy.transfer.offerMaxPerWallet],
+  ['RotationPending', (copy) => copy.transfer.offerRotationPending],
+  ['DeviceLocked', (copy) => copy.transfer.offerDeviceLocked],
 ];
 
 /** A screen's own table first, then the eight rules a handover already has sentences for. */

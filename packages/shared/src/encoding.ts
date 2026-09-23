@@ -63,8 +63,11 @@ function assertTicket(value: Hex): void {
 }
 
 /**
- * v1 서명 원문. 5개 워드뿐이라 체인도 배포본도 가리키지 않는다.
- * @deprecated 01b 재배포(그 계획의 Task 15) 이후에는 {@link deviceDigestPreimageV2} 가 맞다.
+ * v1 서명 원문. 5개 워드뿐이라 체인도 배포본도 가리키지 않았다.
+ * @deprecated 이 원문을 검증하던 배포본(Ticket `0xE9686503c4d675B0B1Ec9DE19AbEC51Fc59F1113`)은
+ *             2026-09-23 01b 재배포로 은퇴했다. 지금 맞는 것은 {@link deviceDigestPreimageV2} 다.
+ *             남겨 둔 이유는 하나뿐이다 — 테스트가 v2 와 다르다는 것을 보이는 음성 대조군으로
+ *             아직 부른다.
  */
 export function deviceSigPreimage(input: Omit<DeviceDigestInput, 'chainId' | 'ticket'>): Hex {
   assertBytes32(input.nonce, 'BAD_NONCE');
@@ -75,11 +78,13 @@ export function deviceSigPreimage(input: Omit<DeviceDigestInput, 'chainId' | 'ti
 }
 
 /**
- * 관객 기기 키가 서명하는 값(v1). **지금 배포된** Ticket.checkIn 이 체인 위에서
- * sha256(abi.encode(tokenId, g.gateId, g.eventId, g.nonce, g.issuedAt)) 로 다시 계산한다.
- * 인자 순서를 바꾸면 모든 체크인이 실패한다.
- * @deprecated 01b 재배포 이후에는 {@link deviceDigestV2} 가 맞다. 형식 선택은
- *             {@link DEVICE_DIGEST_FORM} 한 줄이고, 화면은 {@link deviceDigest} 를 부른다.
+ * 관객 기기 키가 서명하던 값(v1). 은퇴한 배포본(Ticket
+ * `0xE9686503c4d675B0B1Ec9DE19AbEC51Fc59F1113`)의 `Ticket.checkIn` 이 체인 위에서
+ * sha256(abi.encode(tokenId, g.gateId, g.eventId, g.nonce, g.issuedAt)) 로 다시 계산했다.
+ * @deprecated 이 형식을 검증하던 배포본은 2026-09-23 01b 재배포로 은퇴했고, 지금 맞는 것은
+ *             {@link deviceDigestV2} 다. 형식 선택은 {@link DEVICE_DIGEST_FORM} 한 줄이고,
+ *             화면은 {@link deviceDigest} 를 부른다. 이 함수가 남아 있는 것은 죽은 형식이
+ *             살아 있는 형식과 다르다는 것을 테스트가 음성 대조군으로 보이기 때문이다.
  */
 export function deviceSigHash(input: Omit<DeviceDigestInput, 'chainId' | 'ticket'>): Hex {
   return sha256(deviceSigPreimage(input));
