@@ -1,0 +1,7 @@
+{
+  "projects": {
+    "default": "mon-ti",
+    "dev": "mon-ti",
+    "prod": "monti-prod"
+  }
+}

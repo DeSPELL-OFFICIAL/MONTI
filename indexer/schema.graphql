@@ -1,0 +1,169 @@
+# MONTI chain entities (Envio HyperIndex).
+#
+# The chain is the only source: every field below is carried by an event in
+# contracts/src/{Identity,Organizers,Ticket}.sol, or read once from the Ticket
+# contract in the handler that answers that event (Event, Tier).
+# Ids are chain ids; addresses and bytes32 values are lowercase hex strings.
+# Nothing identifying a human is indexed here — the off-chain side lives in
+# Firestore and is joined by account address only.
+#
+# @index marks the columns Functions and the web filter or order by
+# (functions/src/functions/{snapshot,listAttendees}.ts, apps/web discovery).
+
+# Organizers.OrganizerCreated(orgId, owner) / OwnerTransferred(orgId, from, to)
+type Organizer {
+  id: ID!            # orgId
+  owner: String! @index
+}
+
+# Organizers.AdminSet(orgId, admin, bits) — bits is uint32, wider than Int
+type Admin {
+  id: ID!            # orgId-account
+  orgId: BigInt! @index
+  account: String! @index
+  bits: BigInt!
+}
+
+# Organizers.ManagerSet(orgId, manager, exists, canApprove) — exists false = removed
+type Manager {
+  id: ID!            # orgId-account
+  orgId: BigInt! @index
+  account: String! @index
+  exists: Boolean!
+  canApprove: Boolean!
+}
+
+# Organizers.GateRegistered(gateId, eventId, gateAccount, kx, ky)
+# + GateOpened / GateClosed / GateRevoked
+# `open` 은 Envio 예약어다(codegen EE210). 컨트랙트 뷰
+# `isOpenGate(eventId, gateAccount)` 를 줄인 `isOpen` 을 쓴다 — 그 뷰는 gateId 가
+# 아니라 (공연, 게이트 계정) 쌍으로 묻는다(contracts/src/Organizers.sol:170).
+type Gate {
+  id: ID!            # gateId
+  eventId: BigInt! @index
+  # 01b 의 `revokeGate` 는 `gateOf(account)` 를 비워서 같은 계정을 새 gateId 로 다시
+  # 등록할 수 있게 한다(abi-delta-01b.md §6). 그래서 한 주소에 행이 둘 이상 남는다 —
+  # 주소로 게이트를 찾는 질의는 반드시 `revoked: false` 로 거른다.
+  account: String! @index
+  kx: String!
+  ky: String!
+  isOpen: Boolean!
+  revoked: Boolean!
+}
+
+# Ticket.EventCreated(eventId, orgId, creator); the rest of EventMeta is read
+# from Ticket.eventMeta(eventId) in the handler.
+# status follows Ticket.EventStatusChanged(eventId, status), which the contract
+# also emits with status 0 (Draft) at creation.
+type Event {
+  id: ID!            # eventId
+  orgId: BigInt! @index
+  creator: String!
+  titleHash: String!
+  descHash: String!
+  imageCid: String!
+  startsAt: BigInt! @index
+  endsAt: BigInt!
+  venueHash: String!
+  saleStart: BigInt!
+  saleEnd: BigInt!
+  transferable: Boolean!
+  transferCutoffSeconds: BigInt!
+  maxTransfers: Int!
+  approvalRequired: Boolean!
+  category: Int!
+  regionCode: String!
+  # Draft | Published | Cancelled. `Ended` 는 **이벤트로 오지 않는다** — 어떤 함수도
+  # `EventStatusChanged(3)` 을 내지 않고(Ticket.sol:178,193,201), 컨트랙트의
+  # `eventStatus` 뷰가 `endsAt` 에서 파생할 뿐이다. 끝난 공연을 고르려면 이 열이
+  # 아니라 `endsAt` 을 비교하라.
+  status: String! @index
+  requireKyc: Boolean!
+}
+
+# Ticket.EventCreated + Ticket.tiers(eventId), one row per tier index
+type Tier {
+  id: ID!            # eventId-idx
+  eventId: BigInt! @index
+  idx: Int!
+  name: String!
+  priceUsdCents: BigInt!
+  supply: BigInt!
+  minted: BigInt!
+  maxPerWallet: BigInt!
+  seated: Boolean!
+}
+
+# Ticket.Claimed(tokenId, eventId, to, tier); owner follows ERC-721 Transfer
+# and Ticket.Migrated(tokenId, from, to); revoked follows Ticket.Revoked.
+# Derived state: valid = not revoked and checkIn == null, used = checkIn != null,
+# revoked = revoked. No separate status column — the joins carry it.
+type Ticket {
+  id: ID!            # tokenId
+  eventId: BigInt! @index
+  tier: Int!
+  owner: String! @index
+  transfers: Int!
+  revoked: Boolean!
+  checkIn: CheckIn
+  identity: IdentityAccount
+}
+
+# Ticket.CheckedIn(tokenId, eventId, gateId, nonceHash, ts) — manual false;
+# Ticket.ManualOverride writes the same row with manual true and a zero nonceHash.
+# late 는 01b 의 checkInLate 가 채운다. `CheckedInLate(tokenId, gateId, issuedAt, ts)`
+# 는 `CheckedIn` 과 같은 트랜잭션에서 **먼저** 오고(01b Ticket.sol:468-469),
+# `CheckedIn` 핸들러가 그 행에서 late 를 이어받는다. 2026-09-23 재배포로 그 이벤트가
+# ABI·config 에 들어와 실제로 true 가 찍힌다 — 스키마는 그대로다.
+type CheckIn {
+  id: ID!            # tokenId
+  gateId: BigInt!
+  ts: BigInt!
+  nonceHash: String!
+  manual: Boolean!
+  late: Boolean!
+  txHash: String!
+  block: BigInt!
+}
+
+# Ticket.ManualOverride(tokenId, gateId, approver, role, reason) — requested false;
+# Ticket.OverrideRequested(tokenId, gateId, requester, reason) — requested true,
+# role 0. Neither event carries eventId: join through the paired CheckIn or Ticket.
+type Override {
+  id: ID!            # txHash-logIndex
+  tokenId: BigInt! @index
+  gateId: BigInt! @index
+  approver: String!
+  role: Int!         # 0 requester, 1 approver (owner or admin), 2 manager
+  reason: Int!
+  requested: Boolean!
+}
+
+# 01b 의 `RotationCancelled(personId, account)` 는 `AccountRotated` 를 **함께**
+# emit 하므로 "현재 계정" 로직이 그대로 맞다. 감사 로그일 뿐 새 열은 없다.
+# Identity.Registered(personId, account) creates the row; AccountRotated moves it,
+# DeviceChanged fills deviceX/deviceY, DeviceLocked sets locked,
+# NicknameSet sets nickname, KycLevelSet sets kycLevel.
+type IdentityAccount {
+  id: ID!            # account address
+  personId: String!
+  nickname: String
+  kycLevel: Int!     # 0 = number verified only, 1 = ID + face verified
+  deviceX: String!
+  deviceY: String!
+  locked: Boolean!
+  deviceUpdatedAt: BigInt!
+}
+
+# Ticket.OfferCreated(tokenId, from, recipientCommitment, expiresAt),
+# OfferCancelled(tokenId), OfferAccepted(tokenId, from, to)
+# 01b 의 EIP-712 전환은 `acceptOffer` 가 **검증하는** 다이제스트만 바꾼다.
+# 다이제스트는 이벤트에 실리지 않고 `offerDigest(...)` 뷰로 다시 계산할 수 있으므로
+# 여기에 저장하지 않는다 — 새 열이 필요 없다.
+type Offer {
+  id: ID!            # tokenId
+  from: String! @index
+  commitment: String!
+  expiresAt: BigInt!
+  status: String!    # open | cancelled | accepted
+}
