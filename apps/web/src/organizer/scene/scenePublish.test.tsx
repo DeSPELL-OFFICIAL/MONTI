@@ -8,7 +8,7 @@ import type { EventDraft, StoredEventDraft } from '../../shared/api/firestore';
 
 let store: StoredEventDraft[] = [];
 const listEventDrafts = vi.fn(async () => [...store].sort((a, b) => b.updatedAt - a.updatedAt));
-const saveEventDraft = vi.fn(async () => undefined);
+const saveEventDraft = vi.fn(async (_id: string, _draft: EventDraft) => undefined);
 const deleteEventDraft = vi.fn(async (id: string) => {
   store = store.filter((row) => row.id !== id);
 });
@@ -71,8 +71,15 @@ const { emptyEventDraft, emptyEventDraftTier } = await import('../useEventDraft'
 const { organizerCopy } = await import('../copy');
 const copy = organizerCopy.ko.scene;
 
+/** Where a navigation landed, and what it carried — the handover is what the retry runs on. */
+let handed: unknown = null;
+function handover(): unknown {
+  return handed;
+}
 function Probe() {
-  return <p>{`landed:${useLocation().pathname}`}</p>;
+  const location = useLocation();
+  handed = location.state;
+  return <p>{`landed:${location.pathname}`}</p>;
 }
 
 const SUBMITTED = `0x${'11'.repeat(32)}` as const;
@@ -123,6 +130,7 @@ beforeAll(() => {
 beforeEach(() => {
   localStorage.clear();
   store = [];
+  handed = null;
   ticketOp.mockResolvedValue({ success: true, logs: [CREATED_LOG] });
   resolveSubmittedOp.mockResolvedValue({ state: 'pending', logs: [] });
   pinEventMetadata.mockResolvedValue({ metadataCid: 'bafyMeta' });
@@ -207,12 +215,46 @@ describe('the publish path', () => {
     expect(sent.args[0]).toMatchObject({ venueHash: keccak256(toBytes('서울 용산구 한남동')) });
   });
 
-  it('carries on to the event when the pictures did not save: the event exists', async () => {
+  /**
+   * The event is on chain and the hidden venue exists nowhere else — the public document has
+   * no `venue` key and `updateEventMeta` refuses anything past Draft. So the draft is held
+   * open until both writes land, and the done screen is handed everything needed to finish.
+   */
+  it('keeps the draft when a follow-up did not land, and carries the retry across', async () => {
+    saveEventArt.mockRejectedValue(new Error('offline'));
+    open({ ...READY, venueHidden: true });
+    await create();
+    await waitFor(() => expect(screen.getByText('landed:/org/new/done/12')).toBeInTheDocument());
+    expect(deleteEventDraft).not.toHaveBeenCalled();
+
+    const state = handover() as {
+      followUpFailed: boolean; draftId: string;
+      plan: { eventId: string; venue: string | null; tiers: unknown[] };
+      done: { artSaved: boolean; venueSaved: boolean };
+    };
+    expect(state.followUpFailed).toBe(true);
+    expect(state.draftId).toBe('d-42');
+    expect(state.plan).toMatchObject({ eventId: '12', venue: '서울 용산구 한남동' });
+    // The venue went through even though the pictures did not: one refusal must not take the
+    // other write down with it.
+    expect(state.done).toEqual({ artSaved: false, venueSaved: true });
+  });
+
+  it('records the id on the draft before anything that could still fail', async () => {
     saveEventArt.mockRejectedValue(new Error('offline'));
     open();
     await create();
-    await waitFor(() => expect(screen.getByText('landed:/org/new/done/12')).toBeInTheDocument());
-    expect(deleteEventDraft).toHaveBeenCalledWith('d-42');
+    await waitFor(() => expect(saveEventDraft).toHaveBeenCalled());
+    const written = saveEventDraft.mock.calls.at(-1)?.[1] as { createdEventId?: string } | undefined;
+    expect(written?.createdEventId).toBe('12');
+  });
+
+  it('never sends a second createEvent for a draft that already made one', async () => {
+    open({ ...READY, createdEventId: '12' });
+    await create();
+    await waitFor(() => expect(saveEventArt).toHaveBeenCalled());
+    expect(ticketOp).not.toHaveBeenCalled();
+    expect(pinEventMetadata).not.toHaveBeenCalled();
   });
 });
 
@@ -255,6 +297,21 @@ describe('when it does not land', () => {
     open();
     await create();
     expect(await screen.findByText(copy.publishProblems.notYourOrg)).toBeInTheDocument();
+  });
+
+  /**
+   * The receipt landed but no `EventCreated` came out of its logs. The event exists and
+   * nothing can address it, so the draft — the only place its venue and pictures still are —
+   * stays, and the organiser is told rather than dropped on the home screen without a word.
+   */
+  it('says so when the event was made but its number could not be read', async () => {
+    ticketOp.mockResolvedValue({ success: true, logs: [] });
+    open();
+    await create();
+    expect(await screen.findByText(copy.publishProblems.noEventId)).toBeInTheDocument();
+    expect(screen.queryByText(/^landed:/)).toBeNull();
+    expect(deleteEventDraft).not.toHaveBeenCalled();
+    expect(saveEventArt).not.toHaveBeenCalled();
   });
 
   it('names a refused tag rather than blaming the connection', async () => {

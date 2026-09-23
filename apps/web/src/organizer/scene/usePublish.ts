@@ -10,7 +10,10 @@ import { api, callableFailure } from '../../shared/api/functions';
 import type { EventDraft } from '../../shared/api/firestore';
 import { buildEventMeta, buildTiers, type WizardDraft } from '../wizard/buildEventMeta';
 import type { OrganizerCopy } from '../copy';
-import { eventProblems, normalizeTags, saleWindow, tierArt, tierProblems } from './draftRules';
+import { eventProblems, normalizeTags, saleWindow, tierProblems } from './draftRules';
+import {
+  followUpPlan, followUpsDone, runFollowUps, type FollowUpPlan, type FollowUpResult,
+} from './followUps';
 
 /** Every sentence `copy.scene.publishProblems` owns. */
 export type PublishProblem = keyof OrganizerCopy['scene']['publishProblems'];
@@ -43,14 +46,23 @@ const SEATED = false;
 
 export type PublishPhase = 'idle' | 'pinning' | 'sending' | 'finishing' | 'confirming';
 
-/** What the done screen needs, carried across rather than read back: the draft is gone by then. */
+/**
+ * What the done screen needs, carried across rather than read back: by then the indexer has
+ * not seen the event and — when everything landed — the draft is gone.
+ *
+ * `plan`, `done` and `draftId` are what make the retry on that screen real: the plan is
+ * everything the two writes need, `done` says which of them already landed, and `draftId`
+ * names the draft that is still being held open until they both do.
+ */
 export interface CreatedEvent {
-  /** `''` when the operation landed but its logs carried no `EventCreated` this side could read. */
   eventId: string;
   posterCid: string;
   title: string;
   /** The event exists, but `saveEventArt` or `setEventPrivate` did not land. */
   followUpFailed: boolean;
+  draftId: string;
+  plan: FollowUpPlan;
+  done: FollowUpResult;
 }
 
 export interface PublishState {
@@ -129,8 +141,11 @@ function toPinnedMeta(draft: EventDraft) {
 
 export interface PublishOptions {
   draft: EventDraft;
+  draftId: string;
   patch: (next: Partial<EventDraft>) => void;
-  /** Throws the draft away once the event exists. Never before. */
+  /** Forces the pending write out now, so a fact recorded here is durable before anything else runs. */
+  save: () => Promise<void>;
+  /** Throws the draft away. Only ever once the event exists **and** both follow-ups landed. */
   discard: () => Promise<void>;
   onCreated: (created: CreatedEvent) => void;
 }
@@ -149,34 +164,55 @@ export interface PublishOptions {
  * with one line saying what did not save — not left on a screen that would send a second
  * `createEvent` if they pressed the button again.
  */
-export function usePublish({ draft, patch, discard, onCreated }: PublishOptions): PublishState {
+export function usePublish(
+  { draft, draftId, patch, save, discard, onCreated }: PublishOptions,
+): PublishState {
   const [phase, setPhase] = useState<PublishPhase>('idle');
   const [problem, setProblem] = useState<PublishProblem | ''>('');
   const [unsponsored, setUnsponsored] = useState(false);
 
   const finish = useCallback(
     async (eventId: string): Promise<void> => {
-      setPhase('finishing');
-      let followUpFailed = false;
-      if (eventId !== '') {
-        try {
-          await api.saveEventArt({ eventId, tiers: draft.tiers.map(tierArt) });
-          if (draft.venueHidden) {
-            // The call does not merge: leaving `venue` out would erase it, so it always goes.
-            await api.setEventPrivate({ eventId, venue: draft.venue.trim() });
-          }
-        } catch {
-          followUpFailed = true;
-        }
+      // The receipt landed but no `EventCreated` came out of its logs. The event exists and
+      // nothing can address it, so the draft is the only place its venue and its pictures
+      // still are — it stays, and the organiser is told rather than dropped on the home screen.
+      if (eventId === '') {
+        setPhase('idle');
+        setProblem('noEventId');
+        return;
       }
-      // The event is on chain; a draft that outlived it is a second event waiting to happen.
-      await discard();
-      onCreated({ eventId, posterCid: draft.posterCid, title: draft.title.trim(), followUpFailed });
+      setPhase('finishing');
+      const plan = followUpPlan(draft, eventId);
+      const done = await runFollowUps(plan);
+      const complete = followUpsDone(plan, done);
+      // The one condition the draft may be deleted on. A venue that was never written is a
+      // venue nowhere else: the public document has no `venue` key, and `updateEventMeta`
+      // refuses anything past Draft, so losing the draft loses it for good.
+      if (complete) await discard();
+      onCreated({
+        eventId,
+        posterCid: draft.posterCid,
+        title: draft.title.trim(),
+        followUpFailed: !complete,
+        draftId,
+        plan,
+        done,
+      });
     },
-    [discard, draft, onCreated],
+    [discard, draft, draftId, onCreated],
   );
 
   const publish = useCallback(async (): Promise<void> => {
+    // The event this draft already made. Recorded before anything that can fail, so from here
+    // on there is no path that sends a second `createEvent` — pressing the button again only
+    // tries the two writes that are still missing.
+    if (draft.createdEventId !== '') {
+      setProblem('');
+      setUnsponsored(false);
+      await finish(draft.createdEventId);
+      return;
+    }
+
     // One `createEvent` per draft. A previous attempt whose `wait` gave up may still be in
     // flight and the draft outlives the page, so the first question is always what became of
     // that one — never "send it again". A bundler we cannot reach answers `pending`, because
@@ -190,7 +226,11 @@ export function usePublish({ draft, patch, discard, onCreated }: PublishOptions)
       );
       if (submitted.state === 'pending') return;
       if (submitted.state === 'landed') {
-        await finish(createdEventId(submitted.logs));
+        // It did land after all. Same rule as below: the id is recorded before anything else.
+        const landed = createdEventId(submitted.logs);
+        patch({ createdEventId: landed });
+        await save().catch(() => undefined);
+        await finish(landed);
         return;
       }
       // It reverted. The same draft may be sent again, so the hash goes away first.
@@ -219,7 +259,15 @@ export function usePublish({ draft, patch, discard, onCreated }: PublishOptions)
       });
       // `createEvent` returns the new id, but a sponsored operation gives back a receipt — so
       // the id comes out of the operation's own `EventCreated` log.
-      await finish(createdEventId(receipt.logs));
+      const eventId = createdEventId(receipt.logs);
+      // Written to the draft **and flushed** before the follow-ups run. A page that dies here
+      // comes back to a draft that knows its event, rather than to one that would make a
+      // second. (A successful receipt carries no `userOpHash` — `sendOp` only passes one on a
+      // revert — so the id is the fact there is to record; the hash is already stored on the
+      // timeout path, which is the one it exists for.)
+      patch({ createdEventId: eventId });
+      await save().catch(() => undefined);
+      await finish(eventId);
     } catch (cause) {
       // The operation is still on its way; it did not fail. Same rule as the hand-over screen.
       if (cause instanceof OpReverted && cause.revertReason === 'TIMEOUT') {
@@ -246,7 +294,7 @@ export function usePublish({ draft, patch, discard, onCreated }: PublishOptions)
       else if (code !== '') setProblem('pinFailed');
       else setProblem('failed');
     }
-  }, [draft, finish, patch]);
+  }, [draft, finish, patch, save]);
 
   // Sentences are the scene's business: this hook hands back the *name* of the rule, so the
   // same failure reads the same whichever screen ends up showing it.

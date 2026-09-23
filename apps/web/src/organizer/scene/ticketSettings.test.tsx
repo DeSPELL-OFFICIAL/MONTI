@@ -100,6 +100,19 @@ describe('the kinds', () => {
     expect(screen.getByRole('button', { name: copy.tiers.add })).toBeDisabled();
   });
 
+  /** The one field that had no cap. Past 40 the draft rule refuses the whole document. */
+  it('stops the kind name at forty characters, where the draft rule does', async () => {
+    const user = userEvent.setup();
+    open();
+    await ready();
+    const name = screen.getByLabelText(copy.tiers.name);
+    expect(name).toHaveAttribute('maxlength', '40');
+
+    await user.clear(name);
+    await user.type(name, 'ㄱ'.repeat(41));
+    expect(mirror().tiers[0]?.name).toHaveLength(40);
+  });
+
   it('removes the kind that was asked for and leaves the rest in order', async () => {
     const user = userEvent.setup();
     open({ ...READY, tiers: [

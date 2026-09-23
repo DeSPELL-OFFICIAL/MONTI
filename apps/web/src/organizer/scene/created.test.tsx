@@ -11,6 +11,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const toDataURL = vi.fn<(text: string) => Promise<string>>();
 vi.mock('qrcode', () => ({ default: { toDataURL } }));
 
+/** The two writes the retry button runs, and the draft it is holding open until they land. */
+const saveEventArt = vi.fn(async (_args: unknown) => ({ ok: true as const }));
+const setEventPrivate = vi.fn(async (_args: unknown) => ({ ok: true as const }));
+vi.mock('../../shared/api/functions', async (orig) => ({
+  ...(await orig<typeof import('../../shared/api/functions')>()),
+  api: { saveEventArt, setEventPrivate },
+}));
+const deleteEventDraft = vi.fn(async () => undefined);
+vi.mock('../../shared/api/firestore', () => ({
+  deleteEventDraft,
+  listEventDrafts: vi.fn(async () => []),
+  saveEventDraft: vi.fn(async () => undefined),
+}));
+
 vi.mock('../../shared/config', async (orig) => ({
   ...(await orig<typeof import('../../shared/config')>()),
   getConfig: () => ({ ipfsGateway: 'https://gw.test/' }),
@@ -30,8 +44,19 @@ function open(state: unknown = { posterCid: 'bafkposter', title: '재즈 나이�
   );
 }
 
+/** What SCENE 2 hands over when `saveEventArt` was refused and the venue was written. */
+const UNFINISHED = {
+  posterCid: '', title: '재즈 나이트', followUpFailed: true, draftId: 'd-42',
+  plan: { eventId: '12', tiers: [{ preset: 'c' }], venue: '서울 용산구 한남동' },
+  done: { artSaved: false, venueSaved: true },
+};
+
 beforeEach(() => {
+  localStorage.clear();
   toDataURL.mockReset().mockResolvedValue('data:image/png;base64,QQ==');
+  saveEventArt.mockReset().mockResolvedValue({ ok: true });
+  setEventPrivate.mockReset().mockResolvedValue({ ok: true });
+  deleteEventDraft.mockReset().mockResolvedValue(undefined);
 });
 
 describe('the done screen', () => {
@@ -84,8 +109,56 @@ describe('the done screen', () => {
   });
 
   it('says which part did not save, when the event itself did', () => {
-    open({ posterCid: '', title: '재즈 나이트', followUpFailed: true });
+    open(UNFINISHED);
     expect(screen.getByText(copy.artFailed)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: copy.retry })).toBeInTheDocument();
+  });
+
+  /**
+   * The retry the copy names, on this screen — not on the event screen, which hosts no such
+   * thing until T-EV-W12/W13. Both callables replace their document rather than merging, so
+   * running one again is the same as running it once.
+   */
+  it('runs only the write that is still missing, and lets the draft go once it lands', async () => {
+    const user = userEvent.setup();
+    open(UNFINISHED);
+    await user.click(screen.getByRole('button', { name: copy.retry }));
+
+    await waitFor(() => expect(saveEventArt)
+      .toHaveBeenCalledWith({ eventId: '12', tiers: [{ preset: 'c' }] }));
+    // The venue already landed, so it is not written a second time.
+    expect(setEventPrivate).not.toHaveBeenCalled();
+    await waitFor(() => expect(deleteEventDraft).toHaveBeenCalledWith('d-42'));
+    expect(await screen.findByText(copy.retryDone)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: copy.retry })).toBeNull();
+  });
+
+  it('keeps the draft and the button when the retry is refused again', async () => {
+    const user = userEvent.setup();
+    saveEventArt.mockRejectedValue(new Error('offline'));
+    open(UNFINISHED);
+    await user.click(screen.getByRole('button', { name: copy.retry }));
+
+    await waitFor(() => expect(saveEventArt).toHaveBeenCalled());
+    expect(deleteEventDraft).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: copy.retry })).toBeInTheDocument();
+    expect(screen.getByText(copy.artFailed)).toBeInTheDocument();
+  });
+
+  it('writes the hidden venue too when that is the half that was refused', async () => {
+    const user = userEvent.setup();
+    open({ ...UNFINISHED, done: { artSaved: true, venueSaved: false } });
+    await user.click(screen.getByRole('button', { name: copy.retry }));
+
+    await waitFor(() => expect(setEventPrivate)
+      .toHaveBeenCalledWith({ eventId: '12', venue: '서울 용산구 한남동' }));
+    expect(saveEventArt).not.toHaveBeenCalled();
+  });
+
+  it('offers no retry when nothing was missing', () => {
+    open();
+    expect(screen.queryByRole('button', { name: copy.retry })).toBeNull();
+    expect(screen.queryByText(copy.artFailed)).toBeNull();
   });
 
   /** Opened straight from history or a bookmark: the link and the QR still have to work. */

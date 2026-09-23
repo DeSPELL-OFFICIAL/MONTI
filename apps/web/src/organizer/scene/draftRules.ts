@@ -117,6 +117,14 @@ export function saleWindow(draft: EventDraft, now: number): { saleStart: number;
 /** `Ticket.createEvent` refuses more than eight kinds with `InvalidTiers` (`Ticket.sol:193`). */
 export const MAX_TIERS = 8;
 
+/**
+ * The security rule's own cap on a kind's name (`firestore.rules` `tierOk`). It is the *draft*
+ * that breaks here, not the chain — the chain never measures a tier name — and the rule refuses
+ * the **whole document** rather than one field, so a 41st character turns every autosave from
+ * then on into a permission error with nothing on screen to say which box caused it.
+ */
+export const MAX_TIER_NAME_CHARS = 40;
+
 /** The struct widths. A value past one of these does not revert — it fails to encode. */
 const UINT16_MAX = 65_535;
 const UINT32_MAX = 4_294_967_295;
@@ -124,7 +132,8 @@ const SECONDS_PER_HOUR = 3_600;
 
 /** One named rule of SCENE 2; `organizer/copy.ts` owns a sentence for each. */
 export type TierProblem =
-  | 'tiersTooMany' | 'tierName' | 'tierSupply' | 'tierMaxPerWallet' | 'cutoff' | 'paidTier';
+  | 'tiersTooMany' | 'tierName' | 'tierNameTooLong' | 'tierSupply' | 'tierMaxPerWallet'
+  | 'cutoff' | 'paidTier';
 
 /**
  * Which ticket kinds cannot be created, by index. Today that is every kind whose currency is
@@ -146,6 +155,9 @@ export function tierProblems(draft: EventDraft): TierProblem[] {
   const problems: TierProblem[] = [];
   if (draft.tiers.length > MAX_TIERS) problems.push('tiersTooMany');
   if (draft.tiers.some((tier) => tier.name.trim() === '')) problems.push('tierName');
+  if (draft.tiers.some((tier) => charCount(tier.name.trim()) > MAX_TIER_NAME_CHARS)) {
+    problems.push('tierNameTooLong');
+  }
   if (draft.tiers.some((tier) => !isWholeNumber(tier.supply, 1, UINT32_MAX))) problems.push('tierSupply');
   if (draft.tiers.some((tier) => !isWholeNumber(tier.maxPerWallet, 1, UINT16_MAX))) {
     problems.push('tierMaxPerWallet');

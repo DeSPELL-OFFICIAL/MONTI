@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { emptyEventDraft } from '../useEventDraft';
 import type { EventDraft } from '../../shared/api/firestore';
 import {
-  MAX_TAGS, eventProblems, normalizeTags, paidTiers, saleWindow, tierArt, tierProblems,
+  MAX_TAGS, MAX_TIER_NAME_CHARS, eventProblems, normalizeTags, paidTiers, saleWindow,
+  tierArt, tierProblems,
 } from './draftRules';
 
 /** A draft with nothing left to fix, so each case below can break exactly one rule. */
@@ -107,6 +108,18 @@ describe('tierProblems', () => {
   it('refuses a ninth kind, as `Ticket.createEvent` would', () => {
     expect(tierProblems(withTiers(Array.from({ length: 8 }, () => tier)))).toEqual([]);
     expect(tierProblems(withTiers(Array.from({ length: 9 }, () => tier)))).toEqual(['tiersTooMany']);
+  });
+
+  /**
+   * The draft rule caps a kind's name at 40 (`firestore.rules` `tierOk`) and refuses the
+   * **whole document** past it — so a 41st character would turn every autosave from then on
+   * into a permission error with nothing on screen saying which box did it. The chain never
+   * measures this field, so nothing else would ever have caught it.
+   */
+  it('refuses a kind name over forty characters, as the draft rule does', () => {
+    expect(tierProblems(withTiers([{ ...tier, name: 'ㄱ'.repeat(40) }]))).toEqual([]);
+    expect(tierProblems(withTiers([{ ...tier, name: 'ㄱ'.repeat(41) }]))).toEqual(['tierNameTooLong']);
+    expect(MAX_TIER_NAME_CHARS).toBe(40);
   });
 
   it('refuses a negative hand-over cut-off', () => {

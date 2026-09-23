@@ -336,7 +336,11 @@ const ko = {
       qr: '행사 주소 QR 코드',
       view: '행사 보기',
       home: '주최자 홈',
-      artFailed: '티켓 그림이나 장소를 저장하지 못했어요. 행사 화면에서 다시 저장해 주세요',
+      // 재시도는 이 화면 안에 있다. 없는 화면으로 보내지 않는다.
+      artFailed: '티켓 그림이나 장소를 저장하지 못했어요. 아래 다시 저장을 눌러 주세요. 저장할 때까지 초안을 지우지 않았어요',
+      retry: '다시 저장',
+      retryWorking: '저장하고 있어요',
+      retryDone: '저장했어요',
       untitled: '이름 없는 행사',
     },
 
@@ -350,6 +354,8 @@ const ko = {
 
     publishProblems: {
       notYourOrg: '이 주최사에서 행사를 만들 권한이 없어요',
+      // 행사는 만들어졌는데 영수증에서 번호를 못 읽은 경우. 초안은 남겨 둔다.
+      noEventId: '행사는 만들어졌는데 번호를 읽지 못했어요. 이 화면을 나가지 말고 잠시 뒤 다시 눌러 주세요',
       pinFailed: '지금은 저장할 수 없어요. 잠시 뒤 다시 시도해 주세요',
       badMeta: '제목이나 소개가 너무 길어요. 줄이고 다시 시도해 주세요',
       badTags: '태그를 다시 확인해 주세요',
@@ -363,6 +369,7 @@ const ko = {
       eventIncomplete: '행사 정보에 아직 빠진 칸이 있어요',
       tiersTooMany: '종류는 8개까지예요',
       tierName: '모든 종류에 이름을 적어 주세요',
+      tierNameTooLong: '종류 이름은 40자 안으로 적어 주세요',
       tierSupply: '수량을 1장 이상으로 적어 주세요',
       tierMaxPerWallet: '1인당 한도를 1장에서 65535장 사이로 적어 주세요',
       cutoff: '양도 마감 시간을 0시간 이상으로 적어 주세요',
@@ -774,7 +781,11 @@ const en: typeof ko = {
       qr: 'QR code for the event address',
       view: 'See the event',
       home: 'Organiser home',
-      artFailed: 'The ticket pictures or the venue did not save. Save them again from the event screen',
+      // The retry lives on this screen. Nobody is sent to a screen that does not exist.
+      artFailed: 'The ticket pictures or the venue did not save. Press Save again below. Your draft has been kept until they do',
+      retry: 'Save again',
+      retryWorking: 'Saving',
+      retryDone: 'Saved',
       untitled: 'Unnamed event',
     },
 
@@ -788,6 +799,8 @@ const en: typeof ko = {
 
     publishProblems: {
       notYourOrg: 'You may not create events for this organiser',
+      // The event was made but the receipt did not name it. The draft is kept.
+      noEventId: 'The event was created but its number could not be read. Stay on this screen and press again in a moment',
       pinFailed: 'Cannot save that right now. Please try again in a moment',
       badMeta: 'The title or the description is too long. Please shorten it and try again',
       badTags: 'Please check the tags again',
@@ -801,6 +814,7 @@ const en: typeof ko = {
       eventIncomplete: 'Some of the event details are still missing',
       tiersTooMany: 'Up to eight kinds',
       tierName: 'Give every kind a name',
+      tierNameTooLong: 'Write a kind name of 40 characters or fewer',
       tierSupply: 'Write how many as 1 or more',
       tierMaxPerWallet: 'Write the per-person limit as a number from 1 to 65535',
       cutoff: 'Write the hand-over cut-off as 0 hours or more',

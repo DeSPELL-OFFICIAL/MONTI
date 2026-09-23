@@ -10,6 +10,7 @@ import { Filters } from './Filters';
 import {
   applyFilters,
   formatEventDate,
+  formatEventDay,
   loadFilters,
   saveFilters,
   useEvents,
@@ -65,7 +66,14 @@ export function Discover() {
           <li key={event.id}>
             <Link to={`/events/${event.id}`}>{metadata?.title || copy.discover.untitled}</Link>
             <KycBadge required={event.requireKyc} level={kycLevel} signedIn={signedIn} />
-            <p className="muted">{formatEventDate(event.startsAt, locale)}</p>
+            {/* The same rule the detail screen keeps: an organiser who told only ticket
+                holders when their event starts must not have it printed to the minute on the
+                card everybody sees. The card already holds the document that says so. */}
+            <p className="muted">
+              {metadata?.timeHidden
+                ? formatEventDay(event.startsAt, locale)
+                : formatEventDate(event.startsAt, locale)}
+            </p>
           </li>
         ))}
       </ul>

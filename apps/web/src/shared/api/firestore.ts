@@ -314,6 +314,13 @@ export interface EventDraft {
    * draft outlives the page, so without it a second attempt is a second event.
    */
   submittedOpHash: string;
+  /**
+   * The id of the event this draft already created, or `''`. Written the moment the chain
+   * names it and **before** anything that could still fail, so a draft can never make a second
+   * event — and so the two writes that need the id (`saveEventArt`, `setEventPrivate`) can be
+   * tried again later. The draft is only deleted once both of them have landed.
+   */
+  createdEventId: string;
 }
 
 /**

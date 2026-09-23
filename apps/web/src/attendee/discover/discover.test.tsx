@@ -434,6 +434,35 @@ describe('EventDetail', () => {
  * neither — including for somebody who handed their ticket on a minute ago. The time needs no
  * storage of its own, because the chain already carries the real one.
  */
+/**
+ * The list screen keeps the same rule as the detail screen. It is the screen the founder's
+ * demo opens on, so a start time leaking here would undo the switch where it is most visible.
+ */
+describe('Discover · a hidden start time', () => {
+  it('prints the day and no clock on a card whose organiser hid the time', async () => {
+    gql.mockResolvedValue({ Event: [EVENT_ONE] });
+    fetchEventMetadata.mockResolvedValue({ ...META_A, timeHidden: true });
+    renderDiscover();
+    await screen.findByRole('link', { name: '재즈 나이트' });
+
+    const at = new Date(Number(EVENT_ONE.startsAt) * 1000);
+    expect(screen.getByText(at.toLocaleDateString('ko', { dateStyle: 'medium' }))).toBeInTheDocument();
+    // Not merely a different string: no card carries a clock at all.
+    expect(screen.queryByText(/\d{1,2}:\d{2}/)).toBeNull();
+    expect(screen.queryByText(at.toLocaleString('ko', { dateStyle: 'medium', timeStyle: 'short' }))).toBeNull();
+  });
+
+  it('still prints the full time for an event that hid nothing', async () => {
+    gql.mockResolvedValue({ Event: [EVENT_ONE] });
+    fetchEventMetadata.mockResolvedValue(META_A);
+    renderDiscover();
+    await screen.findByRole('link', { name: '재즈 나이트' });
+    const at = new Date(Number(EVENT_ONE.startsAt) * 1000);
+    expect(screen.getByText(at.toLocaleString('ko', { dateStyle: 'medium', timeStyle: 'short' })))
+      .toBeInTheDocument();
+  });
+});
+
 describe('EventDetail · what only ticket holders see', () => {
   const HIDDEN = {
     ...META_A, venue: '', region: 'KR-11', venueHidden: true, timeHidden: true,

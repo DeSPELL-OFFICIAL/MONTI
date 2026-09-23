@@ -59,7 +59,7 @@ export const emptyEventDraft: EventDraft = {
   startsAt: 0, endsAt: 0, timeHidden: false,
   transferable: true, transferCutoffHours: 2, requireKyc: false,
   tiers: [emptyEventDraftTier],
-  submittedOpHash: '',
+  submittedOpHash: '', createdEventId: '',
 };
 
 export type EventDraftStatus = 'saved' | 'saving' | 'error';
@@ -131,6 +131,7 @@ export function normalizeEventDraft(raw: unknown): EventDraft {
     requireKyc: flag(saved.requireKyc, emptyEventDraft.requireKyc),
     tiers: tiers.length > 0 ? tiers : emptyEventDraft.tiers,
     submittedOpHash: text(saved.submittedOpHash, emptyEventDraft.submittedOpHash),
+    createdEventId: text(saved.createdEventId, emptyEventDraft.createdEventId),
   };
 }
 
@@ -171,6 +172,16 @@ function clearMirror(): void {
 
 function newDraftId(): string {
   return crypto.randomUUID();
+}
+
+/**
+ * Throws one draft away from outside the scene that was editing it — what the done screen does
+ * once the writes it was keeping the draft for have finally landed. The device copy only goes
+ * if it is a copy of *this* draft; another scene's mirror is not this caller's to clear.
+ */
+export async function forgetEventDraft(draftId: string): Promise<void> {
+  if (readMirror()?.id === draftId) clearMirror();
+  await deleteEventDraft(draftId);
 }
 
 /** The organisation comes from the route, so it outranks whatever the stored draft remembers. */

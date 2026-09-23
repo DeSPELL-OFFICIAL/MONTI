@@ -4,6 +4,8 @@ import QRCode from 'qrcode';
 import { Alert, Button, Screen } from '../../shared/ui';
 import { gatewayUrl } from '../../shared/envio/ipfs';
 import { useOrganizerCopy } from '../copy';
+import { forgetEventDraft } from '../useEventDraft';
+import { followUpsDone, runFollowUps, type FollowUpResult } from './followUps';
 import type { CreatedEvent } from './usePublish';
 
 /** Big enough to scan off a phone held up across a table, small enough to be a few kilobytes. */
@@ -19,12 +21,20 @@ const QR_WIDTH = 320;
  */
 type Handover = Partial<Omit<CreatedEvent, 'eventId'>>;
 
+const ALL_SAVED: FollowUpResult = { artSaved: true, venueSaved: true };
+
 export function Created() {
   const copy = useOrganizerCopy().scene.done;
   const { eventId = '' } = useParams();
   const handed = (useLocation().state ?? {}) as Handover;
   const [dataUrl, setDataUrl] = useState('');
   const [copied, setCopied] = useState('');
+  // What the publish path managed to write. Nothing handed over means nothing was missing —
+  // somebody opened this address from history, and there is no draft left to repair.
+  const [saved, setSaved] = useState<FollowUpResult>(handed.done ?? ALL_SAVED);
+  const [retrying, setRetrying] = useState(false);
+  const plan = handed.plan;
+  const missing = plan !== undefined && !followUpsDone(plan, saved);
 
   // The address an attendee would open, absolute — it is going into a message or onto a poster.
   const link = `${window.location.origin}/events/${eventId}`;
@@ -42,6 +52,23 @@ export function Created() {
       live = false;
     };
   }, [link]);
+
+  /**
+   * Runs only the writes that have not landed, against the id the event already has. Both
+   * callables replace their document rather than merging, so pressing this twice is the same
+   * as pressing it once — and the draft, which is the only place the hidden venue still
+   * exists, is not deleted until they have both gone through.
+   */
+  async function retry(): Promise<void> {
+    if (plan === undefined) return;
+    setRetrying(true);
+    const next = await runFollowUps(plan, saved);
+    setSaved(next);
+    if (followUpsDone(plan, next) && handed.draftId) {
+      await forgetEventDraft(handed.draftId).catch(() => undefined);
+    }
+    setRetrying(false);
+  }
 
   async function copyLink(): Promise<void> {
     try {
@@ -69,7 +96,15 @@ export function Created() {
         {/* The one thing an organiser has to be told, and it is not good news: `createEvent`
             makes a Draft, and `claim` refuses anything that is not Published. */}
         <Alert tone="info">{copy.notYetPublic}</Alert>
-        {handed.followUpFailed ? <Alert tone="warn">{copy.artFailed}</Alert> : null}
+        {missing ? (
+          <>
+            <Alert tone="warn">{copy.artFailed}</Alert>
+            <Button variant="ghost" disabled={retrying} onClick={() => void retry()}>
+              {retrying ? copy.retryWorking : copy.retry}
+            </Button>
+          </>
+        ) : null}
+        {!missing && handed.followUpFailed ? <p className="muted">{copy.retryDone}</p> : null}
 
         <section>
           <h2>{copy.link}</h2>

@@ -23,21 +23,27 @@ export function TicketSettings() {
   const copy = useOrganizerCopy().scene;
   const navigate = useNavigate();
   const { draftId: wanted = '' } = useParams();
-  const { draft, draftId, status, savedAt, patch, discard } = useEventDraft('', wanted);
+  const { draft, draftId, status, savedAt, patch, save, discard } = useEventDraft('', wanted);
   const [checked, setChecked] = useState(false);
   const { phase, problem, unsponsored, publish } = usePublish({
     draft,
+    draftId,
     patch,
+    save,
     discard,
-    // The event exists by now and the draft is gone, so the title and the poster travel in the
-    // navigation — there is nowhere left to read them from. A `wait` that gave up carries no
-    // log to read the id out of, and the organiser home takes the number by hand for that.
+    // The title and the poster travel in the navigation because there is nowhere left to read
+    // them from: the indexer has not seen the event and, when everything landed, the draft is
+    // gone. `plan`/`done`/`draftId` go too — they are what makes the retry on that screen real.
+    // `onCreated` is never called without an id; that branch stays here and says so.
     onCreated: (created) =>
-      navigate(created.eventId === '' ? '/org' : `/org/new/done/${created.eventId}`, {
+      navigate(`/org/new/done/${created.eventId}`, {
         state: {
           posterCid: created.posterCid,
           title: created.title,
           followUpFailed: created.followUpFailed,
+          draftId: created.draftId,
+          plan: created.plan,
+          done: created.done,
         },
       }),
   });

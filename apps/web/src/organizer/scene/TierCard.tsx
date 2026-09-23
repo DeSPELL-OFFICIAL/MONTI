@@ -4,7 +4,7 @@ import type { CroppedPoster, TicketArtPreset } from '../../shared/ui';
 import { fmt } from '../../shared/i18n';
 import type { EventDraftCurrency, EventDraftTier } from '../../shared/api/firestore';
 import { useOrganizerCopy, type OrganizerCopy } from '../copy';
-import { TICKET_ART_PRESETS, tierArt } from './draftRules';
+import { MAX_TIER_NAME_CHARS, TICKET_ART_PRESETS, tierArt } from './draftRules';
 import { usePinImage } from './usePinImage';
 
 /** The four the draft can hold. Only the first can be created today; see {@link paidTiers}. */
@@ -104,6 +104,9 @@ export function TierCard({ index, tier, title, removable, onPatch, onRemove }: T
       <Field label={copy.name}>
         <input
           value={tier.name}
+          // The draft rule's own cap. Past it the rule refuses the whole document, so autosave
+          // would stop for good with nothing on screen saying which box did it.
+          maxLength={MAX_TIER_NAME_CHARS}
           placeholder={copy.namePlaceholder}
           onChange={(event) => onPatch({ name: event.target.value })}
         />
