@@ -465,6 +465,24 @@ export const api = {
     'setEventPrivate',
   ),
   /**
+   * The venue of an event whose organiser told only ticket holders
+   * (functions/src/functions/eventPrivate.ts). The server asks the chain on **every** call —
+   * `balanceOfEvent(caller, eventId) > 0`, or this organiser's own event — so somebody who
+   * hands their ticket on is refused from the next call onward, which a mirrored membership
+   * document in Firestore could never manage.
+   *
+   * `{}` is a real answer: an event whose organiser saved nothing private. The refusal to
+   * branch on is `NOT_HOLDER` (permission-denied); `AUTH_REQUIRED` means the session lapsed.
+   *
+   * It is also what the screen uses to decide whether a **time** may be shown in full. The
+   * hidden start time needs no storage — the chain has the real one — so a caller this
+   * callable answers at all is a caller who holds a ticket, which is the same question.
+   *
+   * There is a cold start behind it, so the line it fills belongs in a skeleton and never in
+   * the way of the rest of the screen.
+   */
+  getEventPrivate: call<{ eventId: string }, { venue?: string; note?: string }>('getEventPrivate'),
+  /**
    * The person asks for their account to be destroyed (functions/src/functions/accountDeletion.ts).
    * Idempotent: a second call answers with the date the first one set rather than pushing it back.
    *

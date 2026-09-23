@@ -14,6 +14,20 @@ export interface EventMetadata {
   venue: string;
   category: number;
   region: string;
+  /** At most five, each at most 12 code points; the server pinned them already normalised. */
+  tags: string[];
+  /**
+   * The venue is for ticket holders only, so the document carries no `venue` key at all and
+   * the real one is behind `getEventPrivate`. The chain still holds the hash of the real
+   * venue, so what an organiser promised at creation stays provable.
+   */
+  venueHidden: boolean;
+  /**
+   * The start time is for ticket holders only. A **rendering** rule and not storage: the chain
+   * always carries the real `startsAt` because the entry window is derived from it, so hiding
+   * it is what the app shows, not what anyone could prove. A public record is a public record.
+   */
+  timeHidden: boolean;
 }
 
 const IPFS_SCHEME = 'ipfs://';
@@ -39,6 +53,9 @@ interface RawMetadata {
   venue?: unknown;
   category?: unknown;
   region?: unknown;
+  tags?: unknown;
+  venueHidden?: unknown;
+  timeHidden?: unknown;
 }
 
 function text(value: unknown): string {
@@ -56,6 +73,13 @@ export function normalizeMetadata(raw: unknown): EventMetadata {
     venue: text(fields.venue),
     category: typeof fields.category === 'number' ? fields.category : 0,
     region: text(fields.region),
+    tags: Array.isArray(fields.tags)
+      ? fields.tags.filter((tag): tag is string => typeof tag === 'string' && tag !== '')
+      : [],
+    // The server only pins these two when they are true, so a missing key is `false` — which
+    // is also the right answer for every document pinned before they existed.
+    venueHidden: fields.venueHidden === true,
+    timeHidden: fields.timeHidden === true,
   };
 }
 

@@ -26,9 +26,11 @@ vi.mock('../../organizer/useMyOrgs', () => ({ useMyOrgs }));
 
 // A signed-in session makes `useKycLevel` ask the server for real; only that one call is stubbed.
 const getSignupStatus = vi.fn(async () => ({ status: 'active', kycLevel: 0 }));
+/** The chain-checked read behind a hidden venue. A rejection is the ordinary "no ticket" case. */
+const getEventPrivate = vi.fn<(args: { eventId: string }) => Promise<{ venue?: string }>>();
 vi.mock('../../shared/api/functions', async (orig) => ({
   ...(await orig<typeof import('../../shared/api/functions')>()),
-  api: { getSignupStatus },
+  api: { getSignupStatus, getEventPrivate },
 }));
 
 const { setSession } = await import('../../shared/session');
@@ -53,8 +55,9 @@ const EVENT_TWO = {
   regionCode: keccak256(toBytes('KR-26')), requireKyc: false,
 };
 
-const META_A = { title: '재즈 나이트', description: '한남동의 밤', image: '', venue: '한남', category: 0, region: 'KR-11' };
-const META_B = { title: '개발자 모임', description: '', image: '', venue: '해운대', category: 1, region: 'KR-26' };
+const PUBLIC = { tags: [] as string[], venueHidden: false, timeHidden: false };
+const META_A = { title: '재즈 나이트', description: '한남동의 밤', image: '', venue: '한남', category: 0, region: 'KR-11', ...PUBLIC };
+const META_B = { title: '개발자 모임', description: '', image: '', venue: '해운대', category: 1, region: 'KR-26', ...PUBLIC };
 
 const TIERS = [
   { id: '1-0', eventId: '1', idx: 0, name: '일반', priceUsdCents: '0', supply: '100', minted: '40', maxPerWallet: '2', seated: false },
@@ -150,6 +153,7 @@ beforeEach(() => {
   myOrgs();
   gql.mockResolvedValue({ Event: [EVENT_ONE, EVENT_TWO] });
   fetchEventMetadata.mockImplementation(metadataByCid);
+  getEventPrivate.mockReset().mockRejectedValue({ code: 'permission-denied', message: 'NOT_HOLDER' });
 });
 
 describe('Discover', () => {
@@ -419,5 +423,92 @@ describe('EventDetail', () => {
     gql.mockResolvedValue({ Event: [], Tier: [] });
     renderDetail('404');
     expect(await screen.findByRole('alert')).toHaveTextContent('문제가 생겼어요. 잠시 뒤 다시 시도해 주세요.');
+  });
+});
+
+/**
+ * T-EV-W8 — what an event's own organiser chose to tell only the people who hold a ticket.
+ *
+ * There is one authorisation for both halves and it is the callable: it asks the chain on
+ * every call, so an answer means a ticket (or this organiser's own event) and a refusal means
+ * neither — including for somebody who handed their ticket on a minute ago. The time needs no
+ * storage of its own, because the chain already carries the real one.
+ */
+describe('EventDetail · what only ticket holders see', () => {
+  const HIDDEN = {
+    ...META_A, venue: '', region: 'KR-11', venueHidden: true, timeHidden: true,
+    tags: ['재즈', '라이브'],
+  };
+
+  function hiddenEvent() {
+    gql.mockResolvedValue({ Event: [EVENT_ONE], Tier: TIERS });
+    fetchEventMetadata.mockResolvedValue(HIDDEN);
+  }
+
+  it('offers the region and a promise instead of the venue, to somebody without a ticket', async () => {
+    hiddenEvent();
+    setSession({ status: 'signedIn', account: ME });
+    renderDetail();
+    await screen.findByRole('heading', { name: '재즈 나이트' });
+    expect(await screen.findByText(/서울 · 장소는 티켓을 받으면 공개돼요/)).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /지도로 보기/ })).toBeNull();
+  });
+
+  it('shows the day and says the time comes with the ticket', async () => {
+    hiddenEvent();
+    setSession({ status: 'signedIn', account: ME });
+    renderDetail();
+    expect(await screen.findByText(/시작 시각은 티켓을 받으면 공개돼요/)).toBeInTheDocument();
+    // The day itself stays public: an event nobody can date is one nobody can plan around.
+    const day = new Date(Number(EVENT_ONE.startsAt) * 1000).toLocaleDateString('ko', { dateStyle: 'medium' });
+    expect(screen.getByText(new RegExp(day.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))).toBeInTheDocument();
+  });
+
+  it('gives a holder the real venue, the map link and the full time', async () => {
+    hiddenEvent();
+    getEventPrivate.mockResolvedValue({ venue: '서울 용산구 한남동 12' });
+    setSession({ status: 'signedIn', account: ME });
+    renderDetail();
+
+    expect(await screen.findByRole('link', { name: /서울 용산구 한남동 12 · 지도로 보기/ }))
+      .toHaveAttribute('href', expect.stringContaining('maps.google.com'));
+    expect(getEventPrivate).toHaveBeenCalledWith({ eventId: '1' });
+    expect(screen.queryByText(/장소는 티켓을 받으면 공개돼요/)).toBeNull();
+    expect(screen.queryByText(/시작 시각은 티켓을 받으면 공개돼요/)).toBeNull();
+    // Two badges, because both halves were hidden and both are now this person's alone.
+    expect(screen.getAllByText('나만 보여요')).toHaveLength(2);
+  });
+
+  it('never asks at all when nobody is signed in', async () => {
+    hiddenEvent();
+    renderDetail();
+    expect(await screen.findByText(/장소는 티켓을 받으면 공개돼요/)).toBeInTheDocument();
+    expect(getEventPrivate).not.toHaveBeenCalled();
+  });
+
+  it('leaves the rest of the screen alone while the callable is still cold', async () => {
+    hiddenEvent();
+    getEventPrivate.mockReturnValue(new Promise(() => undefined));
+    setSession({ status: 'signedIn', account: ME });
+    renderDetail();
+    // The tiers and the call to action are already there; only the venue line is waiting.
+    expect(await screen.findByRole('link', { name: '티켓 받기' })).toBeInTheDocument();
+    expect(screen.getByText(/서울 · 확인하고 있어요/)).toBeInTheDocument();
+  });
+
+  it('asks nothing for an event whose organiser hid neither half', async () => {
+    gql.mockResolvedValue({ Event: [EVENT_ONE], Tier: TIERS });
+    setSession({ status: 'signedIn', account: ME });
+    renderDetail();
+    expect(await screen.findByRole('link', { name: /한남 · 지도로 보기/ })).toBeInTheDocument();
+    expect(getEventPrivate).not.toHaveBeenCalled();
+  });
+
+  it('shows every tag the event carries', async () => {
+    hiddenEvent();
+    renderDetail();
+    await screen.findByRole('heading', { name: '재즈 나이트' });
+    expect(screen.getByText('재즈')).toBeInTheDocument();
+    expect(screen.getByText('라이브')).toBeInTheDocument();
   });
 });

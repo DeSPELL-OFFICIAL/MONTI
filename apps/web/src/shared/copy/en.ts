@@ -73,9 +73,17 @@ export const en: typeof ko = {
     empty: 'No events match your filters.', getTicket: 'Get a ticket', share: 'Share',
     map: 'Open in maps', publicRecord: 'Public record', soldOut: 'Sold out', cancelled: 'This event was cancelled.',
     untitled: 'Title unavailable', remaining: '{{count}} left',
+    // The region is the public band of an event whose venue is hidden, so all 17 are named.
+    venueHidden: 'The venue is shown once you have a ticket',
+    timeHidden: 'The start time is shown once you have a ticket',
+    privateOnly: 'Only you can see this',
+    privateLoading: 'Checking',
     regions: {
-      'KR-11': 'Seoul', 'KR-26': 'Busan', 'KR-28': 'Incheon',
-      'KR-30': 'Daejeon', 'KR-41': 'Gyeonggi', 'KR-48': 'Gyeongnam',
+      'KR-11': 'Seoul', 'KR-26': 'Busan', 'KR-27': 'Daegu', 'KR-28': 'Incheon',
+      'KR-29': 'Gwangju', 'KR-30': 'Daejeon', 'KR-31': 'Ulsan', 'KR-50': 'Sejong',
+      'KR-41': 'Gyeonggi', 'KR-42': 'Gangwon', 'KR-43': 'North Chungcheong',
+      'KR-44': 'South Chungcheong', 'KR-45': 'North Jeolla', 'KR-46': 'South Jeolla',
+      'KR-47': 'North Gyeongsang', 'KR-48': 'South Gyeongsang', 'KR-49': 'Jeju',
     },
   },
   tickets: {

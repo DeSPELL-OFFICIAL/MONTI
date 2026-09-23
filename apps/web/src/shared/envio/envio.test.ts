@@ -116,7 +116,30 @@ describe('fetchEventMetadata', () => {
       venue: '한남',
       category: 2,
       region: 'KR-11',
+      // Pinned before the three existed, so each one defaults rather than going undefined.
+      tags: [],
+      venueHidden: false,
+      timeHidden: false,
     });
+  });
+
+  /**
+   * The server only pins the two flags when they are true and refuses a tag that breaks the
+   * rule, so what arrives here is either right or absent. A document somebody hand-pinned is
+   * neither, which is why every field is still read back at its own type.
+   */
+  it('reads the tags and the two visibility flags the creation scene now pins', () => {
+    expect(normalizeMetadata({
+      name: '재즈 나이트', tags: ['재즈', '라이브'], venueHidden: true, timeHidden: true,
+    })).toMatchObject({ tags: ['재즈', '라이브'], venueHidden: true, timeHidden: true });
+
+    // A hidden venue is a document with no `venue` key at all.
+    expect(normalizeMetadata({ name: 'n', venueHidden: true }).venue).toBe('');
+    // Anything that is not a list of non-empty strings is no tags.
+    expect(normalizeMetadata({ name: 'n', tags: '재즈' }).tags).toEqual([]);
+    expect(normalizeMetadata({ name: 'n', tags: ['재즈', 7, ''] }).tags).toEqual(['재즈']);
+    // Only `true` hides anything: a truthy string is a hand edit, not a flag.
+    expect(normalizeMetadata({ name: 'n', venueHidden: 'yes' }).venueHidden).toBe(false);
   });
 
   it('reads each CID once per session', async () => {
