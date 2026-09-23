@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="device_key_prompt_title">Confirm it\'s you</string>
+    <string name="device_key_prompt_subtitle">Unlock to get ready for entry</string>
+    <string name="device_key_prompt_cancel">Cancel</string>
+</resources>

@@ -1,8 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { keccak256 } from 'viem';
+import { keccak256, sha256 } from 'viem';
 import {
+  DEVICE_DIGEST_FORM,
+  MONAD_TESTNET_CHAIN_ID,
+  P256_HALF_ORDER,
+  P256_ORDER,
+  ticketAddress,
+} from './constants.js';
+import {
+  deviceDigest,
+  deviceDigestPreimage,
+  deviceDigestV2,
+  deviceDigestPreimageV2,
   deviceSigHash,
+  deviceSigPreimage,
   gateCodeHash,
+  gateCodePreimage,
   nicknameHash,
   normalizeNickname,
   offerDigest,
@@ -27,6 +40,25 @@ describe('gateCodeHash', () => {
     );
   });
 
+  it('is sha256 of gateCodePreimage, the bytes a verifier that hashes internally is handed', () => {
+    const preimage = gateCodePreimage({ gateId: 3n, eventId: 11n, issuedAt: ISSUED_AT, nonce: NONCE });
+    // abi.encode of (uint256, uint256, uint64, bytes32) is four 32-byte words, in that order.
+    expect(preimage).toBe(
+      '0x' +
+        '03'.padStart(64, '0') +
+        '0b'.padStart(64, '0') +
+        (1_789_862_400).toString(16).padStart(64, '0') +
+        '11'.repeat(32),
+    );
+    expect(sha256(preimage)).toBe(gateCodeHash({ gateId: 3n, eventId: 11n, issuedAt: ISSUED_AT, nonce: NONCE }));
+  });
+
+  it('rejects a nonce that is not 32 bytes', () => {
+    expect(() => gateCodePreimage({ gateId: 3n, eventId: 11n, issuedAt: ISSUED_AT, nonce: '0x11' as Hex })).toThrow(
+      'BAD_NONCE',
+    );
+  });
+
   it('changes when any field changes', () => {
     const base = gateCodeHash({ gateId: 3n, eventId: 11n, issuedAt: ISSUED_AT, nonce: NONCE });
     expect(gateCodeHash({ gateId: 4n, eventId: 11n, issuedAt: ISSUED_AT, nonce: NONCE })).not.toBe(base);
@@ -36,9 +68,92 @@ describe('gateCodeHash', () => {
 });
 
 describe('deviceSigHash', () => {
-  const FIXTURE = {
-    chainId: FIXTURE_CHAIN_ID,
-    ticket: FIXTURE_TICKET,
+  it('matches the fixed vector the retired Ticket.checkIn recomputed on chain', () => {
+    expect(
+      deviceSigHash({ tokenId: 7n, gateId: 3n, eventId: 11n, nonce: NONCE, issuedAt: ISSUED_AT }),
+    ).toBe('0xc99dfaef599235b36414480bc53054182d5f7fc67a33c60233f3f73f7fc560c7');
+  });
+
+  it('is not the gate hash with the same inputs', () => {
+    expect(deviceSigHash({ tokenId: 7n, gateId: 3n, eventId: 11n, nonce: NONCE, issuedAt: ISSUED_AT })).not.toBe(
+      gateCodeHash({ gateId: 3n, eventId: 11n, issuedAt: ISSUED_AT, nonce: NONCE }),
+    );
+  });
+
+  it('rejects a nonce that is not 32 bytes', () => {
+    expect(() =>
+      deviceSigHash({ tokenId: 7n, gateId: 3n, eventId: 11n, nonce: '0x11' as Hex, issuedAt: ISSUED_AT }),
+    ).toThrow('BAD_NONCE');
+  });
+});
+
+/**
+ * The domain-separated form `Ticket._deviceDigest` lands with sub-plan 01b:
+ * `sha256(abi.encode(uint256 chainId, address ticket, uint256 tokenId, uint256 gateId,
+ * uint256 eventId, bytes32 nonce, uint64 issuedAt))`. The two extra words stop a signature
+ * collected on one chain, or by one Ticket deployment, from being replayed against another.
+ */
+const V2_INPUT = {
+  chainId: 31337n,
+  ticket: '0x7111111111111111111111111111111111111111' as Hex,
+  tokenId: 7n,
+  gateId: 3n,
+  eventId: 11n,
+  nonce: NONCE,
+  issuedAt: ISSUED_AT,
+};
+
+describe('deviceDigestV2', () => {
+  it('matches the fixed vector the contracts pin (P256Vectors.SHARED_DIGEST)', () => {
+    expect(deviceDigestV2(V2_INPUT)).toBe('0xca378ab2af0962bff66d23c4ebb20198fb1a80fe94957e6520368bacae1ffe66');
+  });
+
+  it('is sha256 of the seven-word preimage, spelled out by hand', () => {
+    expect(deviceDigestPreimageV2(V2_INPUT)).toBe(
+      '0x' +
+        (31337).toString(16).padStart(64, '0') +
+        '7111111111111111111111111111111111111111'.padStart(64, '0') +
+        '07'.padStart(64, '0') +
+        '03'.padStart(64, '0') +
+        '0b'.padStart(64, '0') +
+        '11'.repeat(32) +
+        (1_789_862_400).toString(16).padStart(64, '0'),
+    );
+    expect(sha256(deviceDigestPreimageV2(V2_INPUT))).toBe(deviceDigestV2(V2_INPUT));
+  });
+
+  it('is not the five-field digest — otherwise the domain words did nothing', () => {
+    expect(deviceDigestV2(V2_INPUT)).not.toBe(deviceSigHash(V2_INPUT));
+  });
+
+  it('changes with the chain and with the deployment', () => {
+    expect(deviceDigestV2({ ...V2_INPUT, chainId: 10143n })).not.toBe(deviceDigestV2(V2_INPUT));
+    expect(deviceDigestV2({ ...V2_INPUT, ticket: `0x${'22'.repeat(20)}` as Hex })).not.toBe(deviceDigestV2(V2_INPUT));
+  });
+
+  it('rejects a ticket that is not an address', () => {
+    expect(() => deviceDigestV2({ ...V2_INPUT, ticket: '0x7111' as Hex })).toThrow('BAD_TICKET_ADDRESS');
+  });
+});
+
+/**
+ * 같은 공식을 두 도메인에서 못 박는다. 둘 다 필요하다.
+ *
+ * - 위 `V2_INPUT` 은 컨트랙트 테스트가 쓰는 가상의 배포본(chain 31337, Ticket 0x7111…1111)이라
+ *   Solidity 쪽 고정 벡터(`P256Vectors.SHARED_DIGEST`)와 1:1 로 맞춰 볼 수 있다. 존재하지
+ *   않는 주소이므로 체인에 물어볼 수는 없다.
+ * - 아래 `LIVE_INPUT` 은 2026-09-23 에 실제로 올라간 Ticket 이 `deviceDigest(...)` 뷰로
+ *   되돌려준 값이다(abi-delta-01b §10). 다섯 개의 caller 입력은 위와 똑같고, 앞의 두 워드
+ *   —`chainid` 와 `address(this)`— 만 다르다.
+ *
+ * 그 두 워드가 바로 클라이언트가 고를 수 없는 입력이고, 로컬 재구현이 틀리는 곳도 정확히
+ * 거기다. 한쪽만 남기면 "도메인 워드가 정말 다이제스트를 바꾸는가"와 "그 바꾸는 방식이
+ * 배포된 컨트랙트와 같은가" 중 하나를 잃는다.
+ */
+describe('deviceDigestV2 against the deployed Ticket', () => {
+  const LIVE_INPUT = {
+    chainId: 10143n,
+    ticket: '0x4B8353C9F3503Cdbd011E8f35da0a955D95b1367' as Hex,
     tokenId: 7n,
     gateId: 3n,
     eventId: 11n,
@@ -46,48 +161,47 @@ describe('deviceSigHash', () => {
     issuedAt: ISSUED_AT,
   };
 
-  it('matches the fixed vector Ticket.deviceDigest recomputes on chain', () => {
-    expect(deviceSigHash(FIXTURE)).toBe(
-      '0xca378ab2af0962bff66d23c4ebb20198fb1a80fe94957e6520368bacae1ffe66',
+  it('reproduces what the live deviceDigest(...) view returned on 10143', () => {
+    expect(deviceDigestV2(LIVE_INPUT)).toBe(
+      '0xec0c84e899cdacfab3dc560fc6ad89a3db7800cd07154b5ad3f24d0d4f46f8e9',
     );
   });
 
-  // 온체인 정합성 앵커. 2026-09-23 배포된 Ticket 0x4B83…1367 의 deviceDigest(7, 3, 11, 0x11*32,
-  // 1789862400) 가 실제로 돌려준 값을 그대로 박았다(task-15 보고서). 클라이언트가 고를 수 없는 두
-  // 워드(chainid, address(this))를 컨트랙트가 채운 결과라, 이 테스트만이 로컬 재구현을 검증한다.
-  it('matches the value read back from the deployed Ticket on chain 10143', () => {
-    expect(
-      deviceSigHash({
-        chainId: LIVE_CHAIN_ID,
-        ticket: LIVE_TICKET,
-        tokenId: 7n,
-        gateId: 3n,
-        eventId: 11n,
-        nonce: NONCE,
-        issuedAt: ISSUED_AT,
-      }),
-    ).toBe('0xec0c84e899cdacfab3dc560fc6ad89a3db7800cd07154b5ad3f24d0d4f46f8e9');
+  it('names the Ticket the deployment record names, so a redeploy cannot leave this behind', () => {
+    expect(ticketAddress(MONAD_TESTNET_CHAIN_ID)).toBe(LIVE_INPUT.ticket);
   });
 
-  // 새로 붙은 두 워드의 존재 이유 그 자체.
-  it('changes when the chain id or the Ticket address changes', () => {
-    const base = deviceSigHash(FIXTURE);
-    expect(deviceSigHash({ ...FIXTURE, chainId: LIVE_CHAIN_ID })).not.toBe(base);
-    expect(deviceSigHash({ ...FIXTURE, ticket: LIVE_TICKET })).not.toBe(base);
+  it('differs from the 31337 vector on the two domain words alone', () => {
+    expect({ ...LIVE_INPUT, chainId: V2_INPUT.chainId, ticket: V2_INPUT.ticket }).toEqual(V2_INPUT);
+    expect(deviceDigestV2(LIVE_INPUT)).not.toBe(deviceDigestV2(V2_INPUT));
+  });
+});
+
+describe('deviceSigPreimage (v1)', () => {
+  it('is what the deprecated five-field hash is sha256 of', () => {
+    expect(sha256(deviceSigPreimage(V2_INPUT))).toBe(deviceSigHash(V2_INPUT));
+  });
+});
+
+describe('the form this build signs', () => {
+  it('follows DEVICE_DIGEST_FORM and nothing else', () => {
+    const expected = DEVICE_DIGEST_FORM === 'v2-domainSeparated' ? deviceDigestV2(V2_INPUT) : deviceSigHash(V2_INPUT);
+    expect(deviceDigest(V2_INPUT)).toBe(expected);
+    expect(sha256(deviceDigestPreimage(V2_INPUT))).toBe(deviceDigest(V2_INPUT));
   });
 
-  it('is not the gate hash with the same inputs', () => {
-    expect(deviceSigHash(FIXTURE)).not.toBe(
-      gateCodeHash({ gateId: 3n, eventId: 11n, issuedAt: ISSUED_AT, nonce: NONCE }),
-    );
+  it('is the domain-separated form, because that is what the deployed Ticket verifies', () => {
+    // Pinned to the deployment, not to a plan: 01b went out on 2026-09-23 (chain 10143, Ticket
+    // 0x4B8353C9…1367) and its `_deviceDigest` is the seven-word form. This line and
+    // DEVICE_DIGEST_FORM move together, and only when a redeploy moves the contract.
+    expect(DEVICE_DIGEST_FORM).toBe('v2-domainSeparated');
   });
+});
 
-  it('rejects a nonce that is not 32 bytes', () => {
-    expect(() => deviceSigHash({ ...FIXTURE, nonce: '0x11' as Hex })).toThrow('BAD_NONCE');
-  });
-
-  it('rejects a Ticket address that is not 20 bytes', () => {
-    expect(() => deviceSigHash({ ...FIXTURE, ticket: '0x71' as Hex })).toThrow('BAD_TICKET');
+describe('the secp256r1 order', () => {
+  it('is SEC 2 n, and half of it is the low-s boundary Solady enforces', () => {
+    expect(P256_ORDER).toBe(0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551n);
+    expect(P256_HALF_ORDER).toBe(P256_ORDER / 2n);
   });
 });
 

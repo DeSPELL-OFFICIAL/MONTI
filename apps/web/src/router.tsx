@@ -1,0 +1,110 @@
+import { Navigate, Outlet, type RouteObject, useLocation } from 'react-router-dom';
+import { BottomTabs } from './shared/ui';
+import { useRegistration } from './shared/registration';
+import { useSession } from './shared/session';
+import { Spinner } from './shared/ui';
+
+const TAB_PATHS = ['/', '/tickets', '/chats', '/me'];
+
+function TabShell() {
+  const location = useLocation();
+  const showTabs = TAB_PATHS.includes(location.pathname);
+  return (
+    <>
+      <Outlet />
+      {showTabs ? <BottomTabs /> : null}
+    </>
+  );
+}
+
+export function RequireSession() {
+  const session = useSession();
+  if (session.status === 'loading') return <Spinner />;
+  if (session.status === 'anonymous') return <Navigate to="/login" replace />;
+  return <FinishSignupFirst />;
+}
+
+/**
+ * The one place that knows a signed-in person may still be `pending`. It sits here rather than
+ * on each screen because the answer is the same everywhere: a person whose chain registration
+ * never happened is refused by `startKyc` and by every claim, and the fix is one screen away.
+ *
+ * Only `pending` redirects. `unknown` and `checking` render the screen the person asked for —
+ * an unanswered question is not grounds for interrupting anybody. Where they were going travels
+ * in `returnTo` so the device screen can put them back.
+ */
+function FinishSignupFirst() {
+  const registration = useRegistration();
+  const location = useLocation();
+  if (registration !== 'pending') return <Outlet />;
+  const returnTo = encodeURIComponent(`${location.pathname}${location.search}`);
+  return <Navigate to={`/signup/device?returnTo=${returnTo}`} replace />;
+}
+
+// 각 화면은 뒤 태스크에서 실제 구현으로 교체된다. 여기서는 라우트 표를 확정한다.
+import { Discover } from './attendee/discover/Discover';
+import { EventDetail } from './attendee/discover/EventDetail';
+import { Login } from './attendee/Login';
+import { Phone } from './attendee/signup/Phone';
+import { Verify } from './attendee/signup/Verify';
+import { VerifyIdentity } from './attendee/me/VerifyIdentity';
+import { KycCallback } from './attendee/me/KycCallback';
+import { PasskeyStep } from './attendee/signup/Passkey';
+import { DeviceStep } from './attendee/signup/Device';
+import { Done } from './attendee/signup/Done';
+import { Claim } from './attendee/claim/Claim';
+import { TicketList } from './attendee/tickets/List';
+import { TicketDetail } from './attendee/tickets/Detail';
+import { TransferRecipient } from './attendee/transfer/Recipient';
+import { TransferConfirm } from './attendee/transfer/Confirm';
+import { TransferInvite } from './attendee/transfer/Invite';
+import { InviteLanding } from './attendee/transfer/InviteLanding';
+import { Inbox } from './attendee/tickets/Inbox';
+import { Enter } from './attendee/enter/Enter';
+import { ChatList } from './attendee/chats/ChatList';
+import { ChatRoom } from './attendee/chats/ChatRoom';
+import { Profile } from './attendee/me/Profile';
+import { OrganizerRoutes } from './organizer/Layout';
+import { StaffRoutes } from './staff/Console';
+
+export const routes: RouteObject[] = [
+  {
+    element: <TabShell />,
+    children: [
+      { path: '/', element: <Discover /> },
+      { path: '/events/:eventId', element: <EventDetail /> },
+      { path: '/login', element: <Login /> },
+      { path: '/signup/phone', element: <Phone /> },
+      { path: '/signup/verify', element: <Verify /> },
+      { path: '/signup/passkey', element: <PasskeyStep /> },
+      { path: '/signup/device', element: <DeviceStep /> },
+      { path: '/signup/done', element: <Done /> },
+      // Where the link in an invite text lands. Public on purpose: the person it was sent to
+      // is usually not signed in yet, and this screen is what starts their signup.
+      { path: '/i/:inviteId', element: <InviteLanding /> },
+      // Public on purpose: the hosted identity check returns a browser here, and a person whose
+      // session dropped while they were away must still be forwarded rather than bounced home.
+      { path: '/kyc/callback', element: <KycCallback /> },
+      {
+        element: <RequireSession />,
+        children: [
+          { path: '/claim/:eventId', element: <Claim /> },
+          { path: '/tickets', element: <TicketList /> },
+          { path: '/tickets/inbox', element: <Inbox /> },
+          { path: '/tickets/:tokenId', element: <TicketDetail /> },
+          { path: '/tickets/:tokenId/transfer', element: <TransferRecipient /> },
+          { path: '/tickets/:tokenId/transfer/confirm', element: <TransferConfirm /> },
+          { path: '/tickets/:tokenId/transfer/invite', element: <TransferInvite /> },
+          { path: '/tickets/:tokenId/enter', element: <Enter /> },
+          { path: '/chats', element: <ChatList /> },
+          { path: '/chats/:eventId', element: <ChatRoom /> },
+          { path: '/me', element: <Profile /> },
+          { path: '/me/verify', element: <VerifyIdentity /> },
+          { path: '/org/*', element: <OrganizerRoutes /> },
+        ],
+      },
+      { path: '/staff/*', element: <StaffRoutes /> },
+      { path: '*', element: <Navigate to="/" replace /> },
+    ],
+  },
+];

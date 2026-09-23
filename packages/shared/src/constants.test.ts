@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   attesterAddress,
   BANNED_ATTENDEE_WORDS,
+  CLOCK_SKEW_SECONDS,
   CODE_WINDOW_SECONDS,
   CREATE2_DEPLOYER_ADDRESS,
   DEVICE_COOLDOWN_SECONDS,
@@ -51,10 +52,15 @@ describe('protocol timings', () => {
   it('matches spec §7.3', () => {
     expect(GATE_CODE_ROTATE_MS).toBe(3_000);
     expect(CODE_WINDOW_SECONDS).toBe(60);
-    // 01b: Ticket.LATE_WINDOW / Ticket.MIGRATE_DELAY 와 한 글자도 다르면 안 된다.
+    // Both mirror Ticket.sol: `CODE_WINDOW = 60`, `CLOCK_SKEW = 5`. A phone that judges a gate
+    // code by anything else either signs a code the chain will reject or refuses a good one.
+    expect(CLOCK_SKEW_SECONDS).toBe(5);
+    expect(DEVICE_COOLDOWN_SECONDS).toBe(604_800);
+    // 01b: `Ticket.LATE_WINDOW = 43200` and `Ticket.MIGRATE_DELAY = 86400`. The second is equal
+    // to `Identity.ROTATION_UNDO_WINDOW` by construction — a contract test asserts that equality,
+    // and a screen that hard-codes one of the two without the other will contradict the chain.
     expect(LATE_WINDOW_SECONDS).toBe(43_200);
     expect(MIGRATE_DELAY_SECONDS).toBe(86_400);
-    expect(DEVICE_COOLDOWN_SECONDS).toBe(604_800);
     expect(HCE_AID).toBe('D2760000850101');
     expect(QR_PREFIX).toBe('MONTI1:');
     expect(FIREBASE_REGION).toBe('us-east1');

@@ -1,7 +1,8 @@
 import { Encoder } from 'cbor-x';
 import { encodeAbiParameters, hashTypedData, keccak256, parseAbiParameters, sha256, stringToBytes } from 'viem';
-import { QR_PREFIX } from './constants.js';
+import { DEVICE_DIGEST_FORM, QR_PREFIX } from './constants.js';
 import {
+  GATE_RESPONSE_VERSION,
   isGateCodeWire,
   isGateResponseWire,
   type GateCodeWire,
@@ -14,56 +15,113 @@ function assertBytes32(value: Hex, label: string): void {
   if (typeof value !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(value)) throw new Error(label);
 }
 
-/** 게이트 단말기의 게이트 키가 서명하는 값. GateCodeWire.sig 가 이 해시에 대한 r||s 다. */
-export function gateCodeHash(input: {
+export interface GateCodeDigestInput {
   gateId: bigint;
   eventId: bigint;
   issuedAt: bigint;
   nonce: Hex;
-}): Hex {
-  assertBytes32(input.nonce, 'BAD_NONCE');
-  return sha256(
-    encodeAbiParameters(
-      parseAbiParameters('uint256 gateId, uint256 eventId, uint64 issuedAt, bytes32 nonce'),
-      [input.gateId, input.eventId, input.issuedAt, input.nonce],
-    ),
-  );
 }
 
 /**
- * 관객 기기 키가 서명하는 값. 일곱 워드다 — chainId 와 Ticket 주소가 앞에 붙는다.
- * 체인 위에서는 Ticket.deviceDigest(tokenId, gateId, eventId, nonce, issuedAt) 이
- * 같은 값을 돌려준다. 앞의 두 워드는 컨트랙트가 block.chainid 와 address(this) 로
- * 직접 채우므로 호출자가 고를 수 없다 — 그래서 옛 배포본·다른 체인의 서명이 여기서 죽는다.
- * deviceDigest(...) 가 유일한 정합성 기준이다. 인자 순서를 바꾸면 모든 체크인이 실패한다.
+ * 게이트 키가 **서명하는 대상 바이트열**. `gateCodeHash` 는 이걸 sha256 한 값이다.
+ *
+ * 따로 내보내는 이유는 하나다: WebCrypto 의 `ECDSA`/`SHA-256` 검증은 다이제스트가 아니라
+ * 원문을 받아 자기가 해싱한다. 원문 정의가 두 군데 생기면 서명은 조용히 어긋나므로,
+ * 해시와 원문 모두 이 함수 하나에서 나온다.
  */
-export function deviceSigHash(input: {
-  chainId: number;
+export function gateCodePreimage(input: GateCodeDigestInput): Hex {
+  assertBytes32(input.nonce, 'BAD_NONCE');
+  return encodeAbiParameters(
+    parseAbiParameters('uint256 gateId, uint256 eventId, uint64 issuedAt, bytes32 nonce'),
+    [input.gateId, input.eventId, input.issuedAt, input.nonce],
+  );
+}
+
+/** 게이트 단말기의 게이트 키가 서명하는 값. GateCodeWire.sig 가 이 해시에 대한 r||s 다. */
+export function gateCodeHash(input: GateCodeDigestInput): Hex {
+  return sha256(gateCodePreimage(input));
+}
+
+/**
+ * 관객 기기 키가 서명하는 값의 입력. 두 형식이 같은 입력을 받는다 — v1 은 앞의 두 워드를
+ * 그냥 쓰지 않는다. 호출부가 형식에 따라 인자를 바꿔 넣지 않아도 되도록 일부러 하나로 뒀다.
+ */
+export interface DeviceDigestInput {
+  /** `block.chainid`. v1 에서는 쓰이지 않는다. */
+  chainId: bigint;
+  /** 배포된 Ticket 주소(`address(this)`). v1 에서는 쓰이지 않는다. */
   ticket: Hex;
   tokenId: bigint;
   gateId: bigint;
   eventId: bigint;
   nonce: Hex;
   issuedAt: bigint;
-}): Hex {
+}
+
+function assertTicket(value: Hex): void {
+  if (typeof value !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(value)) throw new Error('BAD_TICKET_ADDRESS');
+}
+
+/**
+ * v1 서명 원문. 5개 워드뿐이라 체인도 배포본도 가리키지 않았다.
+ * @deprecated 이 원문을 검증하던 배포본(Ticket `0xE9686503c4d675B0B1Ec9DE19AbEC51Fc59F1113`)은
+ *             2026-09-23 01b 재배포로 은퇴했다. 지금 맞는 것은 {@link deviceDigestPreimageV2} 다.
+ *             남겨 둔 이유는 하나뿐이다 — 테스트가 v2 와 다르다는 것을 보이는 음성 대조군으로
+ *             아직 부른다.
+ */
+export function deviceSigPreimage(input: Omit<DeviceDigestInput, 'chainId' | 'ticket'>): Hex {
   assertBytes32(input.nonce, 'BAD_NONCE');
-  if (!/^0x[0-9a-fA-F]{40}$/.test(input.ticket)) throw new Error('BAD_TICKET');
-  return sha256(
-    encodeAbiParameters(
-      parseAbiParameters(
-        'uint256 chainId, address ticket, uint256 tokenId, uint256 gateId, uint256 eventId, bytes32 nonce, uint64 issuedAt',
-      ),
-      [
-        BigInt(input.chainId),
-        input.ticket,
-        input.tokenId,
-        input.gateId,
-        input.eventId,
-        input.nonce,
-        input.issuedAt,
-      ],
-    ),
+  return encodeAbiParameters(
+    parseAbiParameters('uint256 tokenId, uint256 gateId, uint256 eventId, bytes32 nonce, uint64 issuedAt'),
+    [input.tokenId, input.gateId, input.eventId, input.nonce, input.issuedAt],
   );
+}
+
+/**
+ * 관객 기기 키가 서명하던 값(v1). 은퇴한 배포본(Ticket
+ * `0xE9686503c4d675B0B1Ec9DE19AbEC51Fc59F1113`)의 `Ticket.checkIn` 이 체인 위에서
+ * sha256(abi.encode(tokenId, g.gateId, g.eventId, g.nonce, g.issuedAt)) 로 다시 계산했다.
+ * @deprecated 이 형식을 검증하던 배포본은 2026-09-23 01b 재배포로 은퇴했고, 지금 맞는 것은
+ *             {@link deviceDigestV2} 다. 형식 선택은 {@link DEVICE_DIGEST_FORM} 한 줄이고,
+ *             화면은 {@link deviceDigest} 를 부른다. 이 함수가 남아 있는 것은 죽은 형식이
+ *             살아 있는 형식과 다르다는 것을 테스트가 음성 대조군으로 보이기 때문이다.
+ */
+export function deviceSigHash(input: Omit<DeviceDigestInput, 'chainId' | 'ticket'>): Hex {
+  return sha256(deviceSigPreimage(input));
+}
+
+/**
+ * v2 서명 원문. 01b 의 `Ticket._deviceDigest` 가 그대로 이 7개 워드를 abi.encode 한다:
+ * `(uint256 chainId, address ticket, uint256 tokenId, uint256 gateId, uint256 eventId,
+ * bytes32 nonce, uint64 issuedAt)`. 앞의 두 워드가 있어야 한 체인·한 배포본에서 거둔 서명이
+ * 다른 곳에서 재생되지 않는다.
+ */
+export function deviceDigestPreimageV2(input: DeviceDigestInput): Hex {
+  assertBytes32(input.nonce, 'BAD_NONCE');
+  assertTicket(input.ticket);
+  return encodeAbiParameters(
+    parseAbiParameters(
+      'uint256 chainId, address ticket, uint256 tokenId, uint256 gateId, uint256 eventId, bytes32 nonce, uint64 issuedAt',
+    ),
+    [input.chainId, input.ticket, input.tokenId, input.gateId, input.eventId, input.nonce, input.issuedAt],
+  );
+}
+
+export function deviceDigestV2(input: DeviceDigestInput): Hex {
+  return sha256(deviceDigestPreimageV2(input));
+}
+
+/**
+ * 이 빌드가 실제로 서명하는 원문. WebCrypto 는 다이제스트가 아니라 원문을 받아 자기가
+ * 해싱하므로, 로컬 검증은 이걸 쓴다 — `gateCodePreimage` 가 있는 이유와 같다.
+ */
+export function deviceDigestPreimage(input: DeviceDigestInput): Hex {
+  return DEVICE_DIGEST_FORM === 'v2-domainSeparated' ? deviceDigestPreimageV2(input) : deviceSigPreimage(input);
+}
+
+/** 이 빌드가 실제로 서명하는 32바이트. 형식은 {@link DEVICE_DIGEST_FORM} 한 줄이 정한다. */
+export function deviceDigest(input: DeviceDigestInput): Hex {
+  return sha256(deviceDigestPreimage(input));
 }
 
 /** 닉네임 비교는 항상 이 정규형으로 한다. 웹·서버·인덱서가 같은 함수를 쓴다. */
@@ -139,9 +197,50 @@ const cbor = new Encoder({
   useFloat32: 0,
 });
 
+/**
+ * 와이어에 표준 순서 바깥의 키가 붙어 있으면 거절한다. 조용히 버리면 보낸 쪽은 자기가 넣은
+ * 필드가 건너갔다고 믿고 받는 쪽은 그런 필드를 본 적이 없다 — 어느 쪽도 틀린 줄 모른다.
+ */
+export class UnknownWireKeyError extends Error {
+  /** 어느 와이어인지 — 'GateCodeWire' | 'GateResponseWire' */
+  readonly wire: string;
+  /** 표준 순서에 없는 키들 */
+  readonly keys: readonly string[];
+
+  constructor(wire: string, keys: readonly string[]) {
+    super('UNKNOWN_WIRE_KEY');
+    this.name = 'UnknownWireKeyError';
+    this.wire = wire;
+    this.keys = keys;
+  }
+}
+
+/** 표준 순서 맵이 곧 아는 키의 전부다. 목록을 따로 두면 언젠가 literal 과 어긋난다. */
+function assertOnlyCanonicalKeys(source: object, canonical: Record<string, unknown>, wire: string): void {
+  const known = new Set(Object.keys(canonical));
+  const extra = Object.keys(source).filter((key) => !known.has(key));
+  if (extra.length > 0) throw new UnknownWireKeyError(wire, extra);
+}
+
+/**
+ * 키 순서는 **호출부의 객체가 아니라 아래 literal** 이 정한다. 두 브랜치가 같은 값을 다른
+ * 순서로 담아도 바이트열은 하나다 — `cbor.encode(wire)` 였을 때는 아니었다.
+ * 순서: v, gateId, eventId, issuedAt, nonce, kx, ky, sig.
+ */
 export function encodeGateCode(wire: GateCodeWire): Uint8Array {
   if (!isGateCodeWire(wire)) throw new Error('BAD_GATE_CODE');
-  return new Uint8Array(cbor.encode(wire));
+  const map = {
+    v: wire.v,
+    gateId: wire.gateId,
+    eventId: wire.eventId,
+    issuedAt: wire.issuedAt,
+    nonce: wire.nonce,
+    kx: wire.kx,
+    ky: wire.ky,
+    sig: wire.sig,
+  };
+  assertOnlyCanonicalKeys(wire, map, 'GateCodeWire');
+  return new Uint8Array(cbor.encode(map));
 }
 
 export function decodeGateCode(bytes: Uint8Array): GateCodeWire {
@@ -155,9 +254,31 @@ export function decodeGateCode(bytes: Uint8Array): GateCodeWire {
   return decoded;
 }
 
+/**
+ * 버전이 다른 게이트 응답. `BAD_GATE_RESPONSE`(못 읽는 바이트열)와 구분되는 이유는 하나다 —
+ * 스태프 화면이 "읽을 수 없는 코드"가 아니라 "앱을 업데이트하세요"라고 말해야 하기 때문이다.
+ * v1 은 기기에 나간 적이 없으므로 해석하지 않고 여기서 끊는다.
+ */
+export class GateResponseVersionError extends Error {
+  readonly version: unknown;
+
+  constructor(version: unknown) {
+    super('GATE_RESPONSE_VERSION');
+    this.name = 'GateResponseVersionError';
+    this.version = version;
+  }
+}
+
+/**
+ * 키 순서는 **호출부의 객체가 아니라 아래 literal** 이 정한다: v, tokenId, nonce, deviceSig.
+ * 고정 벡터가 그 순서를 못 박고 있으니, 순서를 바꾸려면 벡터부터 바꿔야 한다. 호출부가 같은
+ * 값을 다른 순서로 적어도 나가는 바이트열은 하나다.
+ */
 export function encodeGateResponse(wire: GateResponseWire): Uint8Array {
   if (!isGateResponseWire(wire)) throw new Error('BAD_GATE_RESPONSE');
-  return new Uint8Array(cbor.encode(wire));
+  const map = { v: wire.v, tokenId: wire.tokenId, nonce: wire.nonce, deviceSig: wire.deviceSig };
+  assertOnlyCanonicalKeys(wire, map, 'GateResponseWire');
+  return new Uint8Array(cbor.encode(map));
 }
 
 export function decodeGateResponse(bytes: Uint8Array): GateResponseWire {
@@ -166,6 +287,10 @@ export function decodeGateResponse(bytes: Uint8Array): GateResponseWire {
     decoded = cbor.decode(bytes);
   } catch {
     throw new Error('BAD_GATE_RESPONSE');
+  }
+  if (typeof decoded === 'object' && decoded !== null) {
+    const version = (decoded as Record<string, unknown>).v;
+    if (typeof version === 'number' && version !== GATE_RESPONSE_VERSION) throw new GateResponseVersionError(version);
   }
   if (!isGateResponseWire(decoded)) throw new Error('BAD_GATE_RESPONSE');
   return decoded;

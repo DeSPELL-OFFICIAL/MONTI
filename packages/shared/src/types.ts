@@ -15,11 +15,44 @@ export interface GateCodeWire {
   sig: Hex;
 }
 
+/**
+ * 이 빌드가 말하는 게이트 응답 형식. 기기에 나간 v1 은 없으므로 하위 호환 경로도 없다 —
+ * v1 페이로드는 {@link GateResponseVersionError} 로 끊는다.
+ */
+export const GATE_RESPONSE_VERSION = 2;
+
+/**
+ * 관객 기기가 게이트에 돌려주는 답. **키 순서가 계약이다** — 스태프 앱(04)이 같은 바이트열을
+ * 재현한다. 다만 그 순서를 실제로 정하는 곳은 이 선언이 아니라 `encodeGateResponse` 안의
+ * 표준 순서 literal 이다(이 선언과 같은 순서로 적혀 있다). 순서를 바꾸려면 그 literal 과
+ * 고정 벡터를 함께 바꿔야 한다.
+ */
 export interface GateResponseWire {
-  v: 1;
+  v: typeof GATE_RESPONSE_VERSION;
   tokenId: string;
+  /**
+   * 관객이 서명한 **그 게이트 코드의 nonce**. 스태프 단말기가 자기가 방금 발급한 코드와
+   * 돌아온 답을 맞춰보는 유일한 열쇠다 — 한 화면에 여러 관객이 겹칠 때 어느 답이 어느
+   * 코드의 것인지 알아야 한다.
+   */
+  nonce: Hex;
   /** r||s 64B over sha256(abi.encode(chainid,ticket,tokenId,gateId,eventId,nonce,issuedAt)) — Ticket.deviceDigest(...) */
   deviceSig: Hex;
+}
+
+/**
+ * 백엔드의 Tenderly 웹훅이 `CheckedIn` 에서 쏘는 FCM **data** 페이로드. 값이 전부 문자열인
+ * 것은 취향이 아니라 제약이다 — FCM data 페이로드는 문자열만 실을 수 있어서 `tokenId` 도
+ * 숫자가 아니라 십진 문자열로 온다.
+ *
+ * `late` 는 01b 의 `CheckedInLate` 경로에서 웹훅이 얹어 주는 참고값일 뿐이다. 화면의 초록은
+ * 그것과 무관하게 뜬다 — 01b 는 늦은 체크인에서도 `CheckedInLate` 와 **함께** `CheckedIn` 을
+ * 내보내므로, 이 푸시가 도착했다는 사실 자체가 이미 입장 확정이다. 거절을 실어 나르는 필드는
+ * 여기 없고, 있어서도 안 된다.
+ */
+export interface CheckInPush {
+  tokenId: string;
+  late?: '1';
 }
 
 export interface SnapshotTicket {
@@ -51,6 +84,43 @@ export interface SnapshotWire {
   tickets: SnapshotTicket[];
   /** secp256k1 over keccak256(canonical JSON without attesterSig) */
   attesterSig: Hex;
+}
+
+/**
+ * 스태프 화면이 입장을 거절할 때 말하는 코드(스펙 §13 DENY 행). 스태프 앱(04)과 관객 앱(03)이
+ * 같은 값을 쓰게 하려고 여기 한 번만 적는다 — 한쪽에만 있는 코드는 반대쪽에서 빈 문장이 된다.
+ *
+ * 01 의 T20/T21 이후 `Ticket` 커스텀 에러 이름이 `GateMismatch → GATE_MISMATCH`,
+ * `EventCancelled → EVENT_CANCELLED` 로 정리됐고, 이 목록이 그 셀렉터 맵의 키다.
+ *
+ * `UNKNOWN_REVERT` 는 컨트랙트 에러가 아니다 — 이 빌드가 모르는 셀렉터로 revert 했다는 뜻,
+ * 즉 컨트랙트가 앱보다 앞서 나갔다는 뜻이다. 그래도 거절이다(이유를 못 읽는 게이트가 그
+ * 이유로 입장시킬 수는 없다). 사유 자체가 없었던 `TX_FAILED` 와는 다른 사건이라 따로 둔다.
+ *
+ * `TIMEOUT` 은 **여기 없다.** 쓰기가 시간 안에 답을 못 받은 것은 "아직 확인 중"이지 거절이
+ * 아니다. 관객 화면은 그것을 기다림으로 다루고, 거절 문장으로 번역하지 않는다.
+ */
+export const GATE_DENY_CODES = [
+  'ALREADY_USED',
+  'WRONG_EVENT',
+  'REVOKED',
+  'EXPIRED_CODE',
+  'NO_TICKET',
+  'GATE_CLOSED',
+  'DEVICE_LOCKED',
+  'DEVICE_MISMATCH',
+  'GATE_MISMATCH',
+  'EVENT_ENDED',
+  'EVENT_CANCELLED',
+  'TX_FAILED',
+  'UNKNOWN_REVERT',
+] as const;
+
+export type GateDenyCode = (typeof GATE_DENY_CODES)[number];
+
+/** 푸시 페이로드처럼 밖에서 들어온 문자열을 DENY 코드로 좁힌다. */
+export function isGateDenyCode(value: unknown): value is GateDenyCode {
+  return typeof value === 'string' && (GATE_DENY_CODES as readonly string[]).includes(value);
 }
 
 /** Ticket.EventStatusChanged 의 uint8 코드 순서. 인덱스가 곧 체인의 코드다. */
@@ -138,5 +208,7 @@ export function isGateCodeWire(value: unknown): value is GateCodeWire {
 export function isGateResponseWire(value: unknown): value is GateResponseWire {
   if (typeof value !== 'object' || value === null) return false;
   const v = value as Record<string, unknown>;
-  return v.v === 1 && isDecimalString(v.tokenId) && isHex64(v.deviceSig);
+  return (
+    v.v === GATE_RESPONSE_VERSION && isDecimalString(v.tokenId) && isHex32(v.nonce) && isHex64(v.deviceSig)
+  );
 }

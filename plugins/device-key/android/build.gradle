@@ -1,0 +1,49 @@
+ext {
+    // API 31 is the floor on purpose, not a leftover: KeyInfo.getSecurityLevel() — the only way
+    // to read back whether the key actually landed in StrongBox rather than trust the request —
+    // arrives in 31, and setUserAuthenticationParameters(60, AUTH_BIOMETRIC_STRONG) in 30.
+    // Reporting the backing is a requirement, so there is no pre-31 path to keep.
+    montiMinSdkVersion = 31
+    montiCompileSdkVersion = 35
+    androidxBiometricVersion = '1.1.0'
+}
+
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.7.2'
+        classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.0.21'
+    }
+}
+
+apply plugin: 'com.android.library'
+apply plugin: 'org.jetbrains.kotlin.android'
+
+android {
+    namespace 'app.monti.devicekey'
+    compileSdk project.hasProperty('compileSdkVersion') ? rootProject.ext.compileSdkVersion : montiCompileSdkVersion
+    defaultConfig {
+        minSdk montiMinSdkVersion
+        targetSdk project.hasProperty('targetSdkVersion') ? rootProject.ext.targetSdkVersion : montiCompileSdkVersion
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_21
+        targetCompatibility JavaVersion.VERSION_21
+    }
+    kotlinOptions {
+        jvmTarget = '21'
+    }
+}
+
+repositories {
+    google()
+    mavenCentral()
+}
+
+dependencies {
+    implementation project(':capacitor-android')
+    implementation "androidx.biometric:biometric:$androidxBiometricVersion"
+}

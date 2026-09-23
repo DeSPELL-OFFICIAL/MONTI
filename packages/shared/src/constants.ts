@@ -35,12 +35,50 @@ export const NDEF_RESPONSE_TYPE = 'monti.app:s';
  */
 export const QR_PREFIX = 'MONTI1:';
 
+/**
+ * P-256(secp256r1) 군의 위수 `n` 과 그 절반. Solady 의 `P256.verifySignature` 가 `s > n/2`
+ * 서명을 거부하므로(가변성 방지), 기기 키 서명을 체인에 올리는 쪽은 예외 없이 이 경계로
+ * 판단한다. 값이 두 군데 있으면 한쪽만 고쳐지고 체크인 절반이 조용히 되돌려진다.
+ */
+export const P256_ORDER = 0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551n;
+export const P256_HALF_ORDER = P256_ORDER / 2n;
+
+/**
+ * 관객 기기 키가 서명하는 다이제스트의 형식. 두 가지가 있고, 어느 쪽인지는 **배포된**
+ * Ticket 이 정한다.
+ *
+ * - `v1-fiveField` — `sha256(abi.encode(tokenId, gateId, eventId, nonce, issuedAt))`.
+ *   은퇴한 배포본(Ticket `0xE9686503c4d675B0B1Ec9DE19AbEC51Fc59F1113`)의 `checkIn` 이
+ *   검증하던 형식이다. 이 값을 받아 주는 컨트랙트는 이제 없다.
+ * - `v2-domainSeparated` — 앞에 `chainId` 와 Ticket 주소 두 워드를 붙인 7워드 형식.
+ *   01b 번들이 `Ticket._deviceDigest` 로 들여왔고, **지금 배포된** 것이 이쪽이다 —
+ *   2026-09-23 재배포, chain 10143, Ticket `0x4B8353C9F3503Cdbd011E8f35da0a955D95b1367`.
+ *
+ * 그 재배포(01b 계획의 Task 15)가 끝났으므로 이 한 줄은 `v2-domainSeparated` 이고,
+ * 서명·검증·QR 이 한꺼번에 여기에 따라온다. 형식을 고르는 곳은 여기 하나뿐이다.
+ */
+export type DeviceDigestForm = 'v1-fiveField' | 'v2-domainSeparated';
+export const DEVICE_DIGEST_FORM: DeviceDigestForm = 'v2-domainSeparated';
+
 export const GATE_CODE_ROTATE_MS = 3_000;
 export const CODE_WINDOW_SECONDS = 60;
-/** 오프라인 큐가 늦게 올라올 때의 여유. Ticket.LATE_WINDOW 와 같아야 한다 — 코드의 하한이자 제출의 상한이다. */
+/**
+ * `Ticket.LATE_WINDOW`. 오프라인 큐가 뒤늦게 밀어 넣는 `checkInLate` 가 받아 주는 폭이다 —
+ * 코드는 개장 12시간 전부터 유효하고, 제출은 종료 12시간 뒤까지 받는다. 체인 읽기
+ * (`LATE_WINDOW()`)가 있는 화면은 그쪽을 먼저 쓴다. 이 상수는 읽기 전에 미리 그릴 때만이다.
+ */
 export const LATE_WINDOW_SECONDS = 43_200;
-/** 회전된 계정을 티켓이 따라가기 전에 기다리는 시간. Ticket.MIGRATE_DELAY 이자 Identity.ROTATION_UNDO_WINDOW 와 같은 값이다. */
+/**
+ * `Ticket.MIGRATE_DELAY`. 회수된 계정을 티켓이 따라가기까지 기다리는 시간이고, 설계상
+ * `Identity.ROTATION_UNDO_WINDOW` 와 같은 값이다 — 컨트랙트 테스트가 그 동치를 단언한다.
+ * 여기서도 체인 읽기(`MIGRATE_DELAY()` / `ROTATION_UNDO_WINDOW()`)가 있으면 그쪽이 먼저다.
+ */
 export const MIGRATE_DELAY_SECONDS = 86_400;
+/**
+ * `Ticket.CLOCK_SKEW`. 게이트 폰 시계가 체인보다 이만큼 앞서 가는 것까지는 위조가 아니다.
+ * 관객 폰도 같은 값으로 판단해야 체인이 받아 줄 코드를 먼저 거절하지 않는다.
+ */
+export const CLOCK_SKEW_SECONDS = 5;
 export const ARM_WINDOW_SECONDS = 60;
 export const ROTATION_COOLDOWN_SECONDS = 7 * 24 * 60 * 60;
 export const DEVICE_COOLDOWN_SECONDS = 7 * 24 * 60 * 60;

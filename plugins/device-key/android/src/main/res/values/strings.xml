@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Prompt copy lives here, not in DeviceKeyPlugin.kt, so the Kotlin holds no user-facing
+     strings and Android picks the locale itself. -->
+<resources>
+    <string name="device_key_prompt_title">본인 확인</string>
+    <string name="device_key_prompt_subtitle">입장 준비를 위해 잠금을 해제해 주세요</string>
+    <string name="device_key_prompt_cancel">취소</string>
+</resources>
