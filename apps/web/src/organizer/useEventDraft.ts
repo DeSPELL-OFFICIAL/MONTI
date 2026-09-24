@@ -149,15 +149,27 @@ export function normalizeEventDraft(raw: unknown): EventDraft {
 interface MirroredDraft {
   id: string;
   draft: EventDraft;
+  /**
+   * When this copy was written, which is the last keystroke rather than the last write that
+   * landed on the server. It is what the resume sheet dates the draft by when the server's own
+   * `updatedAt` is out of reach — offline, or a login that expired mid-sentence — because for
+   * that draft this copy is the only one there is.
+   */
+  at: number;
 }
 
 function readMirror(): MirroredDraft | null {
   try {
     const raw = localStorage.getItem(EVENT_DRAFT_KEY);
     if (raw === null) return null;
-    const saved = JSON.parse(raw) as { id?: unknown; draft?: unknown };
+    const saved = JSON.parse(raw) as { id?: unknown; draft?: unknown; at?: unknown };
     const id = text(saved.id, '');
-    return id === '' ? null : { id, draft: normalizeEventDraft(saved.draft) };
+    return id === ''
+      ? null
+      // A copy with no stamp was written by a build that did not keep one. "Now" is the least
+      // wrong thing to say about it: it is this device's own copy of a draft being opened right
+      // now, and a 0 would date it to 1970 in front of the person deciding whether to keep it.
+      : { id, draft: normalizeEventDraft(saved.draft), at: count(saved.at, Date.now()) };
   } catch {
     // Private mode, a full quota, or a copy somebody edited by hand: start clean.
     return null;
@@ -166,7 +178,7 @@ function readMirror(): MirroredDraft | null {
 
 function writeMirror(id: string, draft: EventDraft): void {
   try {
-    localStorage.setItem(EVENT_DRAFT_KEY, JSON.stringify({ id, draft }));
+    localStorage.setItem(EVENT_DRAFT_KEY, JSON.stringify({ id, draft, at: Date.now() }));
   } catch {
     // The scene still works for this session; only the offline proofing is lost.
   }
@@ -226,14 +238,35 @@ export interface EventDraftState {
   draftId: string;
   /** True until the newest stored draft has been read back. The fields are usable throughout. */
   loading: boolean;
-  /** True when the open draft came back from storage — what `이어서 쓰는 중` is shown for. */
+  /** True when the open draft came back from storage — what the resume sheet is asked over. */
   resumed: boolean;
+  /**
+   * Epoch ms the resumed draft was last written, from the server's clock when there was one and
+   * from the device copy when there was not; 0 when nothing was resumed. It is what the sheet
+   * says `마지막 저장` of, and it is not {@link savedAt}, which only ever counts this session.
+   */
+  resumedAt: number;
   status: EventDraftStatus;
   /** Epoch ms of the last write that landed; 0 when nothing has been written yet. */
   savedAt: number;
   patch: (next: Partial<EventDraft>) => void;
   /** Writes now if anything is unsaved. Resolves once the attempt is over, refused or not. */
   save: () => Promise<void>;
+  /**
+   * 임시 저장, pressed. It writes even when the debounce has already caught up and there is
+   * nothing unsaved left, because the person pressed a button and a button that decides for
+   * itself that it had nothing to do is a button nobody trusts again. Resolves `true` when the
+   * draft is stored — which is what the toast says — and `false` when the write was refused,
+   * and then the status line is already saying so.
+   */
+  saveNow: () => Promise<boolean>;
+  /**
+   * `새로 만들기`: a new id and an empty draft, **leaving the stored one where it is**. That is
+   * the whole difference from {@link discard}, and it is the point — somebody who starts a
+   * second event has not said the first one may be thrown away (plan section F-4). The cap of
+   * {@link MAX_EVENT_DRAFTS} and `pruneDrafts` are what keep the collection finite instead.
+   */
+  startNew: () => Promise<void>;
   /** Deletes the document and the device copy, and opens an empty draft in its place. */
   discard: () => Promise<void>;
 }
@@ -254,6 +287,7 @@ export function useEventDraft(orgId: string, wantedId?: string): EventDraftState
   const [draftId, setDraftId] = useState<string>(() => opened?.id ?? wantedId ?? newDraftId());
   const [loading, setLoading] = useState(true);
   const [resumed, setResumed] = useState(false);
+  const [resumedAt, setResumedAt] = useState(() => opened?.at ?? 0);
   const [status, setStatus] = useState<EventDraftStatus>('saved');
   const [savedAt, setSavedAt] = useState(0);
 
@@ -273,37 +307,42 @@ export function useEventDraft(orgId: string, wantedId?: string): EventDraftState
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const liveRef = useRef(true);
   /** Writes run one after another, so a ten-minute tick cannot race the debounce it overtook. */
-  const chainRef = useRef<Promise<void>>(Promise.resolve());
+  const chainRef = useRef<Promise<unknown>>(Promise.resolve());
 
   const clearTimer = useCallback((): void => {
     if (timerRef.current !== null) clearTimeout(timerRef.current);
     timerRef.current = null;
   }, []);
 
-  const writeNow = useCallback(async (force: boolean): Promise<void> => {
-    if (!touchedRef.current) return;
-    if (!dirtyRef.current && !force) return;
+  const writeNow = useCallback(async (force: boolean): Promise<boolean> => {
+    // Nothing has been typed, so there is no document worth creating — and nothing was lost,
+    // which is why this answers `true`: the caller's question is whether the draft is stored.
+    if (!touchedRef.current) return true;
+    if (!dirtyRef.current && !force) return true;
     const id = idRef.current;
     const body = draftRef.current;
     dirtyRef.current = false;
     if (liveRef.current) setStatus('saving');
     try {
       await saveEventDraft(id, body);
-      if (!liveRef.current) return;
+      if (!liveRef.current) return true;
       setStatus('saved');
       setSavedAt(Date.now());
+      return true;
     } catch {
       // The write did not land — offline, or a login that expired. The change is still
       // unsaved, so the next trigger tries it again rather than dropping it.
       dirtyRef.current = true;
       if (liveRef.current) setStatus('error');
+      return false;
     }
   }, []);
 
-  const runSave = useCallback((force: boolean): Promise<void> => {
+  const runSave = useCallback((force: boolean): Promise<boolean> => {
     clearTimer();
-    chainRef.current = chainRef.current.then(() => writeNow(force));
-    return chainRef.current;
+    const next = chainRef.current.then(() => writeNow(force));
+    chainRef.current = next;
+    return next;
   }, [clearTimer, writeNow]);
 
   const patch = useCallback((next: Partial<EventDraft>): void => {
@@ -319,6 +358,41 @@ export function useEventDraft(orgId: string, wantedId?: string): EventDraftState
     timerRef.current = setTimeout(() => { void runSave(false); }, DRAFT_DEBOUNCE_MS);
   }, [clearTimer, runSave]);
 
+  const startNew = useCallback(async (): Promise<void> => {
+    // What the old draft is still owed is written before the id changes: the writer reads
+    // `idRef` and `draftRef` at the moment it runs, so switching first would file the last two
+    // seconds of the old draft under the new draft's id and lose the pair of them.
+    await runSave(false);
+    clearTimer();
+    dirtyRef.current = false;
+    touchedRef.current = false;
+    const next = newDraftId();
+    idRef.current = next;
+    openedIdRef.current = next;
+    const fresh = withOrg(emptyEventDraft, orgRef.current);
+    draftRef.current = fresh;
+    // The device copy is deliberately left mirroring the draft being walked away from, until
+    // the first keystroke here rewrites it: for a draft that never reached Firestore that copy
+    // is the only one there is, and 새로 만들기 does not throw drafts away.
+    if (liveRef.current) {
+      setDraft(fresh);
+      setDraftId(next);
+      setResumed(false);
+      setResumedAt(0);
+      setStatus('saved');
+      setSavedAt(0);
+    }
+    let stored: StoredEventDraft[] = [];
+    try {
+      stored = await listEventDrafts();
+    } catch {
+      /* offline: the cap is kept the next time this account is online */
+    }
+    // One slot held free for the draft starting now. Nothing else is deleted — with fewer than
+    // five stored this deletes nothing at all, which is the ordinary case.
+    await pruneDrafts(stored, 1);
+  }, [clearTimer, runSave]);
+
   const discard = useCallback(async (): Promise<void> => {
     clearTimer();
     dirtyRef.current = false;
@@ -330,6 +404,7 @@ export function useEventDraft(orgId: string, wantedId?: string): EventDraftState
     if (liveRef.current) {
       setDraft(fresh);
       setResumed(false);
+      setResumedAt(0);
       setStatus('saved');
       setSavedAt(0);
     }
@@ -382,6 +457,9 @@ export function useEventDraft(orgId: string, wantedId?: string): EventDraftState
         setDraft(resumedDraft);
         setDraftId(newest.id);
       }
+      // The server's clock outranks the device copy's: they are two answers to the same
+      // question and only one of them survives a phone whose time is wrong.
+      if (newest !== undefined) setResumedAt(newest.updatedAt);
       setResumed(opened !== null || newest !== undefined);
       setLoading(false);
       // Nothing is being added here — the resumed draft is one of these — so the whole cap
@@ -418,7 +496,11 @@ export function useEventDraft(orgId: string, wantedId?: string): EventDraftState
     };
   }, [runSave]);
 
-  const save = useCallback((): Promise<void> => runSave(false), [runSave]);
+  const save = useCallback(async (): Promise<void> => { await runSave(false); }, [runSave]);
+  const saveNow = useCallback((): Promise<boolean> => runSave(true), [runSave]);
 
-  return { draft, draftId, loading, resumed, status, savedAt, patch, save, discard };
+  return {
+    draft, draftId, loading, resumed, resumedAt, status, savedAt,
+    patch, save, saveNow, startNew, discard,
+  };
 }

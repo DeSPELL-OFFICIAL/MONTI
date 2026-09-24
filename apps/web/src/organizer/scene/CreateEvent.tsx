@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Alert, Button, Field, Screen, Spinner, StickyBar, Toggle } from '../../shared/ui';
+import { Alert, Button, Field, Screen, Spinner, StickyBar, Toast, Toggle } from '../../shared/ui';
 import { fmt, useCopy, useLocale } from '../../shared/i18n';
 import { THEME_CODES, themeLabels } from '../../shared/eventThemes';
 import { useDisplayName } from '../../shared/displayName';
@@ -13,6 +13,7 @@ import { KR_REGIONS } from './regions';
 import { fromLocalInput, toLocalInput } from './datetime';
 import { PosterCard } from './PosterCard';
 import { usePosterUpload } from './usePosterUpload';
+import { ResumeSheet } from './ResumeSheet';
 import { SaveStatus } from './SaveStatus';
 import { TicketExtras, TicketSection } from './TicketSection';
 import { usePublish } from './usePublish';
@@ -48,15 +49,27 @@ const FOLDED_PROBLEMS: ReadonlySet<EventProblem> = new Set<EventProblem>([
 
 export function CreateEvent() {
   const copy = useOrganizerCopy().scene;
-  const themes = themeLabels(useCopy());
+  const shared = useCopy();
+  const themes = themeLabels(shared);
   const locale = useLocale();
   const navigate = useNavigate();
   // `/org/new/<id>` names a draft to carry on with — where SCENE 2's back link comes from.
   const { draftId: wanted } = useParams();
   // `/org/new?org=<id>` is how the organiser home and the explore FAB name the organisation.
   const asked = useSearchParams()[0].get('org') ?? '';
-  const { draft, draftId, resumed, status, savedAt, patch, save, discard } = useEventDraft(asked, wanted);
+  const {
+    draft, draftId, loading, resumed, resumedAt, status, savedAt,
+    patch, save, saveNow, startNew, discard,
+  } = useEventDraft(asked, wanted);
   const [tag, setTag] = useState('');
+  /** The one sentence 임시 저장 leaves behind, and `''` when there is none on screen. */
+  const [toast, setToast] = useState('');
+  /**
+   * The resume question, answered once per visit. It is a separate flag from `resumed` because
+   * `이어서 작성하기` changes nothing about the draft — it is the same scene carrying on — so
+   * there would be nothing else for the sheet to close on.
+   */
+  const [decided, setDecided] = useState(false);
   const myOrgs = useMyOrgs();
   const displayName = useDisplayName();
   /**
@@ -78,6 +91,12 @@ export function CreateEvent() {
   // to that event, and `처음부터` is hidden: on an edit it would throw the event's own fields
   // away and leave an empty draft that makes a *second* event.
   const editing = draft.editingEventId !== '';
+  /**
+   * Only a genuine resume is worth a question (plan section F-3). `/org/new/<id>` named the
+   * draft, so the address has already answered this one; an edit draft is never resumed at this
+   * entry point at all, and the hook is what makes sure of that.
+   */
+  const asking = !decided && !loading && resumed && wanted === undefined && !editing;
   // Only when there is nothing to pick from: one organisation is used without asking, and two
   // or more are chosen in `더 설정하기` — neither is a question worth a box on this screen.
   const needsOrg = !editing && !myOrgs.isLoading && myOrgs.orgs.length === 0 && draft.orgId === '';
@@ -192,6 +211,16 @@ export function CreateEvent() {
     void publish();
   }
 
+  /**
+   * 임시 저장. The write is forced rather than debounced — the press is the whole point, and a
+   * button that decides for itself that it had nothing to do is a button nobody presses twice.
+   * The sentence only appears for a write that landed; a refused one is already being said on
+   * the left of the same bar, and two sentences that disagree would be worse than one.
+   */
+  async function saveDraft(): Promise<void> {
+    if (await saveNow()) setToast(copy.saved);
+  }
+
   function addTag(): void {
     const next = normalizeTags([...draft.tags, tag]);
     if (next.length !== draft.tags.length) patch({ tags: next });
@@ -204,13 +233,16 @@ export function CreateEvent() {
         <p>
           <Link to={editing ? `/org/events/${draft.editingEventId}` : '/org'}>{copy.leave}</Link>
         </p>
-        {resumed && !editing ? (
-          <p className="muted">
-            {copy.resumed} ·{' '}
-            <Button variant="ghost" onClick={() => void discard()}>
-              {copy.startOver}
-            </Button>
-          </p>
+        {asking ? (
+          <ResumeSheet
+            title={draft.title}
+            at={resumedAt}
+            onResume={() => setDecided(true)}
+            onFresh={() => {
+              setDecided(true);
+              void startNew();
+            }}
+          />
         ) : null}
 
         <section id="scene-poster">
@@ -427,10 +459,16 @@ export function CreateEvent() {
       </div>
 
       <StickyBar status={<SaveStatus status={status} savedAt={savedAt} />}>
-        <Button disabled={blocked || working} onClick={create}>
-          {editing ? copy.tiers.save : copy.tiers.create}
-        </Button>
+        <div className="sticky-bar__buttons">
+          <Button variant="ghost" onClick={() => void saveDraft()}>{copy.saveDraft}</Button>
+          <Button disabled={blocked || working} onClick={create}>
+            {editing ? copy.tiers.save : copy.tiers.create}
+          </Button>
+        </div>
       </StickyBar>
+      {toast === '' ? null : (
+        <Toast text={toast} dismiss={shared.common.close} onDone={() => setToast('')} />
+      )}
     </Screen>
   );
 }

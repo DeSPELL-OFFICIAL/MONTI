@@ -11,6 +11,7 @@ export { ContactLink } from './ContactLink';
 export { Chip, type ChipProps } from './Chip';
 export { Toggle, type ToggleProps } from './Toggle';
 export { StickyBar } from './StickyBar';
+export { Toast, TOAST_MS, type ToastProps } from './Toast';
 export { Steps, type StepsProps } from './Steps';
 export { A4Cropper, A4Frame, type A4CropperProps, type A4FrameProps } from './A4Cropper';
 export { PosterModal, type PosterModalProps } from './PosterModal';

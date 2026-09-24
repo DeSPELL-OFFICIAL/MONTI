@@ -47,6 +47,7 @@ vi.mock('../../shared/config', async (orig) => ({
 }));
 
 const { CreateEvent } = await import('./CreateEvent');
+const { fmt } = await import('../../shared/i18n');
 const { THEME_CODES } = await import('../../shared/eventThemes');
 const { toLocalInput } = await import('./datetime');
 const { ko: sharedCopy } = await import('../../shared/copy/index');
@@ -150,17 +151,6 @@ describe('the scene layout', () => {
     // It still reaches the draft, which is the only thing that needed it.
     await userEvent.setup().type(screen.getByLabelText(copy.titleLabel), '재');
     expect(mirror().orgId).toBe('7');
-  });
-
-  it('says a draft is being carried on, and can start over', async () => {
-    seed('kept', { title: '지난 초안' });
-    open();
-    await waitFor(() => expect(screen.getByLabelText(copy.titleLabel)).toHaveValue('지난 초안'));
-    expect(screen.getByText(new RegExp(copy.resumed))).toBeInTheDocument();
-
-    await userEvent.setup().click(screen.getByRole('button', { name: copy.startOver }));
-    await waitFor(() => expect(screen.getByLabelText(copy.titleLabel)).toHaveValue(''));
-    expect(deleteEventDraft).toHaveBeenCalledWith('kept');
   });
 
   it('opens the draft the address names rather than the newest one', async () => {
@@ -319,6 +309,72 @@ describe('tags and the two visibility switches', () => {
   });
 });
 
+/**
+ * Plan section F-3/F-4. The autosave was already doing every one of these things before the
+ * founder's phone test and none of it showed, so what is under test here is entirely what the
+ * organiser can see and press.
+ */
+describe('the resume sheet', () => {
+  /** Old enough to be dated in minutes, so the sentence under test is not the 방금 one. */
+  const FIVE_MINUTES_AGO = (): number => Date.now() - 5 * 60_000;
+
+  it('asks which draft this is before carrying on with it', async () => {
+    seed('kept', { title: '지난 초안' }, FIVE_MINUTES_AGO());
+    open();
+
+    expect(await screen.findByText(copy.resume.title)).toBeInTheDocument();
+    // Which draft, and how stale it is: nobody with two abandoned drafts can answer without both.
+    expect(screen.getByText(fmt(copy.resume.body, {
+      title: '지난 초안', when: fmt(copy.agoMinutes, { count: 5 }),
+    }))).toBeInTheDocument();
+
+    await userEvent.setup().click(screen.getByRole('button', { name: copy.resume.keep }));
+    expect(screen.queryByText(copy.resume.title)).toBeNull();
+    // The same draft, still: 이어서 작성하기 changes nothing but the sheet being gone.
+    expect(screen.getByLabelText(copy.titleLabel)).toHaveValue('지난 초안');
+  });
+
+  it('calls a draft with no title what it is rather than showing a gap', async () => {
+    seed('kept', { title: '' }, FIVE_MINUTES_AGO());
+    open();
+    expect(await screen.findByText(new RegExp(copy.resume.untitled))).toBeInTheDocument();
+  });
+
+  /** The core of F-4: 새로 만들기 is not 버리기. The old draft is still there afterwards. */
+  it('starts a new draft without deleting the one that was left behind', async () => {
+    seed('kept', { title: '지난 초안' }, FIVE_MINUTES_AGO());
+    open();
+    await userEvent.setup().click(await screen.findByRole('button', { name: copy.resume.fresh }));
+
+    await waitFor(() => expect(screen.getByLabelText(copy.titleLabel)).toHaveValue(''));
+    expect(screen.queryByText(copy.resume.title)).toBeNull();
+    expect(deleteEventDraft).not.toHaveBeenCalled();
+    expect(store.map((row) => row.id)).toEqual(['kept']);
+  });
+
+  it('never asks when the address already named the draft', async () => {
+    seed('kept', { title: '지목한 초안' }, FIVE_MINUTES_AGO());
+    open('/org/new/kept');
+    await waitFor(() => expect(screen.getByLabelText(copy.titleLabel)).toHaveValue('지목한 초안'));
+    expect(screen.queryByText(copy.resume.title)).toBeNull();
+  });
+
+  /** T-EV-W12: `/org/new` starts a creation, so an abandoned edit is not offered back here. */
+  it('never asks about a draft that was opened from an event', async () => {
+    seed('edit-7', { title: '고치던 행사', editingEventId: '7' }, FIVE_MINUTES_AGO());
+    open();
+    await waitFor(() => expect(listEventDrafts).toHaveBeenCalled());
+    expect(screen.queryByText(copy.resume.title)).toBeNull();
+    expect(screen.getByLabelText(copy.titleLabel)).toHaveValue('');
+  });
+
+  it('never asks when this account has nothing stored', async () => {
+    open();
+    await waitFor(() => expect(listEventDrafts).toHaveBeenCalled());
+    expect(screen.queryByText(copy.resume.title)).toBeNull();
+  });
+});
+
 describe('the save state', () => {
   it('says nothing has been stored until something has been typed', async () => {
     open();
@@ -332,6 +388,21 @@ describe('the save state', () => {
     await waitFor(() => expect(listEventDrafts).toHaveBeenCalled());
     await userEvent.setup().type(screen.getByLabelText(copy.titleLabel), '재');
     await waitFor(() => expect(saveEventDraft).toHaveBeenCalled(), { timeout: 4_000 });
-    expect(await screen.findByText(copy.savedNow)).toBeInTheDocument();
+    expect(await screen.findByText(fmt(copy.savedAgo, { ago: copy.agoNow }))).toBeInTheDocument();
+  }, 10_000);
+
+  /** Plan section F-2: the button the autosave never had, and the sentence proving it ran. */
+  it('writes the draft the moment 임시 저장 is pressed, and says 저장됨', async () => {
+    const user = userEvent.setup();
+    open();
+    await waitFor(() => expect(listEventDrafts).toHaveBeenCalled());
+    await user.type(screen.getByLabelText(copy.titleLabel), '재');
+    saveEventDraft.mockClear();
+
+    // Now, not two seconds from now: the press is what wrote it, and the debounce it overtook
+    // does not write the same draft a second time afterwards.
+    await user.click(screen.getByRole('button', { name: copy.saveDraft }));
+    await waitFor(() => expect(saveEventDraft).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText(copy.saved)).toBeInTheDocument();
   }, 10_000);
 });

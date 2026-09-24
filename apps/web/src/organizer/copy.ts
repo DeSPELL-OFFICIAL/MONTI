@@ -255,8 +255,6 @@ const ko = {
   scene: {
     title: '행사 만들기',
     leave: '나가기',
-    resumed: '이어서 쓰는 중',
-    startOver: '처음부터',
     // 기본 다섯 칸(포스터·제목·시작·장소·티켓) 밖의 모든 것이 이 안에 접혀 있다(계획 B-2).
     more: '더 설정하기',
 
@@ -271,10 +269,23 @@ const ko = {
     saveAuto: '적는 대로 저장돼요',
     saving: '저장 중…',
     saveFailed: '저장 안 됨 · 다시 시도',
-    savedNow: '저장됨 · 방금',
     savedAgo: '저장됨 · {{ago}}',
+    agoNow: '방금',
     agoMinutes: '{{count}}분 전',
     agoHours: '{{count}}시간 전',
+    // 자동저장은 처음부터 다 돌고 있었고 화면에 흔적이 없었다(계획 F-2). 이 버튼이 그 증거다.
+    saveDraft: '임시 저장',
+    saved: '저장됨',
+
+    /** 초안을 두고 나갔던 사람이 다시 들어올 때 묻는 바텀 시트(계획 F-3). */
+    resume: {
+      title: '이어서 작성할까요?',
+      body: '{{title}} · 마지막 저장 {{when}}',
+      untitled: '제목 없는 행사',
+      keep: '이어서 작성하기',
+      // 옛 초안을 지우지 않는다 — 5개까지 남고 오래된 것부터 밀린다(계획 F-4).
+      fresh: '새로 만들기',
+    },
 
     poster: '포스터',
     posterEmpty: '포스터를 올리면 여기에 보여요',
@@ -705,8 +716,6 @@ const en: typeof ko = {
   scene: {
     title: 'Create an event',
     leave: 'Leave',
-    resumed: 'Carrying on where you left off',
-    startOver: 'Start over',
     // See the Korean block: everything but the five fields that make an event is folded here.
     more: 'More settings',
 
@@ -721,10 +730,23 @@ const en: typeof ko = {
     saveAuto: 'Saved as you write',
     saving: 'Saving…',
     saveFailed: 'Not saved · try again',
-    savedNow: 'Saved · just now',
     savedAgo: 'Saved · {{ago}}',
+    agoNow: 'just now',
     agoMinutes: '{{count}} min ago',
     agoHours: '{{count}} h ago',
+    // See the Korean block: the autosave was already doing all of this and none of it showed.
+    saveDraft: 'Save draft',
+    saved: 'Saved',
+
+    /** See the Korean block: what a draft left behind asks on the way back in. */
+    resume: {
+      title: 'Carry on where you left off?',
+      body: '{{title}} · last saved {{when}}',
+      untitled: 'Untitled event',
+      keep: 'Carry on',
+      // See the Korean block: this keeps the old draft rather than throwing it away.
+      fresh: 'Start a new one',
+    },
 
     poster: 'Poster',
     posterEmpty: 'Your poster appears here',

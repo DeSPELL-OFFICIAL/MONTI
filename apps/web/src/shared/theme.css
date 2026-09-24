@@ -127,6 +127,42 @@ body {
 .sticky-bar__status { flex: 1; color: var(--muted); font-size: 13px; }
 .sticky-bar__action { flex: 0 0 auto; min-width: 128px; }
 .sticky-bar__action .btn { height: 44px; }
+/* 임시 저장 beside 만들기. The autosave was already doing all of this and none of it showed
+   (plan section F-2), so the bar carries the button that proves it. The two size to their own
+   words rather than halving the slot between them: 만들기 is the one that must never wrap. */
+.sticky-bar__buttons { display: flex; gap: 8px; }
+.sticky-bar__buttons .btn { width: auto; padding: 0 14px; white-space: nowrap; }
+
+/* One sentence over the bar that saved the draft. Not a dialog: nothing is asked, nothing takes
+   focus, and it leaves on its own — the scene behind it keeps the cursor it had. */
+.toast {
+  position: fixed; inset: auto 0 0 0; z-index: 12;
+  bottom: calc(env(safe-area-inset-bottom) + var(--sticky-bar-h) + 12px);
+  max-width: 448px; margin: 0 auto;
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; border-radius: var(--radius);
+  background: var(--surface); border: 1px solid var(--line);
+  font-size: 14px;
+}
+.toast span { flex: 1; }
+.toast__x { border: 0; background: transparent; color: var(--muted); font-size: 15px; padding: 0 4px; }
+
+/* The question a draft left behind asks on the way back in (plan section F-3). A sheet rather
+   than a screen: it is one decision with both answers on it, and a route would put it in the
+   back button's history. */
+.sheet {
+  position: fixed; inset: auto 0 0 0; z-index: 61;
+  width: 100%; max-width: 480px; max-height: none;
+  margin: 0 auto; padding: 0; border: 0;
+  border-top: 1px solid var(--line); border-radius: var(--radius) var(--radius) 0 0;
+  background: var(--surface); color: var(--text);
+}
+.sheet__body {
+  display: grid; gap: 10px;
+  padding: 20px 16px calc(env(safe-area-inset-bottom) + 20px);
+}
+.sheet__body h2 { margin: 0; font-size: 17px; }
+.sheet__body p { margin: 0; }
 
 .chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
 /* Twelve pictures plus 직접 올리기 wrap into four rows on a phone and push the kind's own boxes
