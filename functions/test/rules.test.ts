@@ -510,10 +510,20 @@ describe('eventDrafts/{uid}/drafts/{draftId}', () => {
     );
   });
 
+  // 번들된 글자는 열둘이다(`eventArt.ts` 의 `ART_PRESETS`). 마지막 글자가 여기서 막히면
+  // 그 그림을 고른 순간부터 초안 자동저장이 통째로 권한 오류가 된다.
+  it('takes every bundled preset letter, first to last', async () => {
+    const db = owner();
+    for (const preset of ['a', 'e', 'h', 'l']) {
+      await assertSucceeds(db.doc(MINE).update({ tiers: [{ ...tier, art: { preset } }] }));
+    }
+  });
+
   // 그림 칸이 잠겨 있지 않으면 거기가 base64 바이트를 담는 자리가 된다.
   it('blocks ticket art that is neither a preset letter nor a CID', async () => {
     const db = owner();
-    await assertFails(db.doc(MINE).update({ tiers: [{ ...tier, art: { preset: 'e' } }] }));
+    await assertFails(db.doc(MINE).update({ tiers: [{ ...tier, art: { preset: 'm' } }] }));
+    await assertFails(db.doc(MINE).update({ tiers: [{ ...tier, art: { preset: 'A' } }] }));
     await assertFails(db.doc(MINE).update({ tiers: [{ ...tier, art: { preset: 'aurora' } }] }));
     await assertFails(db.doc(MINE).update({ tiers: [{ ...tier, art: { base64: 'x'.repeat(40) } }] }));
     await assertFails(db.doc(MINE).update({ tiers: [{ ...tier, art: { imageCid: 'x'.repeat(81) } }] }));

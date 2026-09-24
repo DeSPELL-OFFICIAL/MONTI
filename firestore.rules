@@ -142,13 +142,20 @@ service cloud.firestore {
                   || request.resource.data.submittedOpHash.matches('^0x[0-9a-fA-F]{64}$')));
       }
 
-      // 티켓 그림은 번들된 프리셋 글자(a~d) 하나이거나 올린 그림의 CID 하나다. 둘 중 무엇이
+      // 티켓 그림은 번들된 프리셋 글자(a~l) 하나이거나 올린 그림의 CID 하나다. 둘 중 무엇이
       // 들어와도 되지만 **그 두 칸 말고는 못 들어온다** — 여기가 잠기지 않으면 그림 칸이
       // base64 바이트를 담는 자리가 된다. 빠진 칸은 통과하는 기본값으로 읽는다.
+      //
+      // 글자 목록의 원본은 `functions/src/functions/eventArt.ts` 의 `ART_PRESETS` 다. 규칙
+      // 파일은 TS 를 읽지 못하므로 두 벌이 존재하고, 어긋나면 `eventArt.test.ts` 가 깨진다.
+      //
+      // **목록이 아니라 정규식인 이유는 아래 예산이다.** `in ['a',...,'l']` 은 칸마다 글자
+      // 수만큼 값을 치러 여덟 칸 × 열두 글자로 1,000개를 넘긴다(넷일 때는 들어갔다). 범위
+      // 하나면 칸마다 1이다. 문자열이 아닌 값은 `matches` 가 오류를 내고, 오류는 거부다.
       function artOk(art) {
         let cid = art.get('imageCid', '');
         return art.keys().hasOnly(['preset', 'imageCid'])
-          && art.get('preset', 'a') in ['a', 'b', 'c', 'd']
+          && art.get('preset', 'a').matches('^[a-l]$')
           && cid is string
           && cid.size() <= 80;
       }
