@@ -86,47 +86,24 @@ body {
    element's own transform puts it back over the frame. */
 .a4-frame__img--turned { width: calc(100% * 1754 / 1240); height: calc(100% * 1240 / 1754); }
 
-/* The ticket picture is the same A4 frame as the poster, so one crop serves both. */
+/* The ticket is a ticket rather than a page: 1000x1600, with the stub below the tear line.
+   A picture the organiser uploaded was cropped to A4 and is placed with `slice`, so it fills
+   this frame and loses a sliver of its sides rather than sitting letterboxed inside it. */
 .ticket-art {
-  position: relative; overflow: hidden; width: 100%; aspect-ratio: 1240 / 1754;
+  position: relative; overflow: hidden; width: 100%; aspect-ratio: 1000 / 1600;
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
   isolation: isolate;
 }
-.ticket-art__backdrop { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-/* Three of the four presets run bright at the foot; the scrim is what keeps white text on all four. */
-.ticket-art__scrim {
-  position: absolute; inset: 42% 0 0 0;
-  background: linear-gradient(180deg, rgba(8, 9, 12, 0) 0%, rgba(8, 9, 12, 0.8) 76%);
-}
-.ticket-art__caption { position: absolute; inset: auto 0 0 0; padding: 16px; }
-.ticket-art__tier {
-  margin: 0 0 6px; font-size: 12px; font-weight: 600; letter-spacing: 0.12em;
-  text-transform: uppercase; color: #cfd6e4;
-}
-.ticket-art__title {
-  margin: 0; font-size: 20px; font-weight: 700; line-height: 1.25; color: #fff;
-  /* A long event name wraps and then stops at three lines rather than growing out of the frame. */
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3;
-  overflow: hidden; overflow-wrap: anywhere;
-}
-/* Overhangs the frame on both sides so the band reads as painted across a torn ticket. */
-.ticket-art__band {
-  position: absolute; left: -10%; right: -10%; top: 46%; margin: 0;
-  transform: rotate(-18deg); background: #d92d20; color: #fff; text-align: center;
-  padding: 0.5rem 0; font-weight: 700; letter-spacing: 0.3em;
-}
+/* Everything on a ticket — the backdrop, the scrim, the tear, the four strings and the band —
+   is inside this one document (`buildTicketSvg`). There is nothing left to lay over it, which
+   is why the caption rules that used to live here are gone: type inside the picture scales
+   with the picture, so a thumbnail and a full ticket need one rule instead of three each. */
+.ticket-art__svg { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
 
 /* A ticket row: the picture as a thumbnail, the number and the state beside it. The column is
    a fixed width rather than a share of the row because the art is 1.41x as tall as it is wide
    — at the 480px the screen is, a full-width ticket would make one row taller than the phone. */
 .ticket-row { display: grid; grid-template-columns: 76px 1fr; gap: 12px; align-items: center; }
-/* The frame's own type is sized for a full-width ticket; at thumbnail width it has to shrink
-   with the frame, or the title alone fills the picture. Only the sizes change, never the
-   layout, so the thumbnail and the big ticket stay recognisably the same object. */
-.ticket-row__art .ticket-art__caption { padding: 7px; }
-.ticket-row__art .ticket-art__tier { margin-bottom: 2px; font-size: 8px; letter-spacing: 0.08em; }
-.ticket-row__art .ticket-art__title { font-size: 11px; -webkit-line-clamp: 2; line-clamp: 2; }
-.ticket-row__art .ticket-art__band { padding: 2px 0; font-size: 9px; letter-spacing: 0.16em; }
 /* The detail screen shows one ticket, so it is the picture rather than a thumbnail — capped
    short of the full width so the state, the door guide and 입장하기 stay on the same screen. */
 .ticket-detail-art { max-width: 260px; margin: 0 auto 16px; }
@@ -152,6 +129,14 @@ body {
 .sticky-bar__action .btn { height: 44px; }
 
 .chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+/* Twelve pictures plus 직접 올리기 wrap into four rows on a phone and push the kind's own boxes
+   off the screen. The art row scrolls sideways instead, the way a long list of choices does
+   everywhere else on a phone, and each chip keeps its own width rather than being squeezed. */
+.chip-row--art {
+  flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity; padding-bottom: 4px;
+}
+.chip-row--art > * { flex: 0 0 auto; scroll-snap-align: start; }
 .chip {
   border: 1px solid var(--line); background: var(--surface); color: var(--text);
   border-radius: 999px; padding: 8px 14px; font-size: 14px; line-height: 1.2;
@@ -219,9 +204,6 @@ body {
 .tier-card__head .btn { width: auto; height: 36px; padding: 0 14px; font-size: 14px; }
 /* The picture is A4, so at card width it would be taller than the phone. It is a preview. */
 .tier-card__art { max-width: 150px; margin: 12px auto 4px; }
-.tier-card__art .ticket-art__caption { padding: 9px; }
-.tier-card__art .ticket-art__tier { margin-bottom: 3px; font-size: 9px; letter-spacing: 0.08em; }
-.tier-card__art .ticket-art__title { font-size: 13px; -webkit-line-clamp: 2; line-clamp: 2; }
 .tier-card__pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .tier-card .a4-frame { max-width: 200px; margin: 8px auto; }
 

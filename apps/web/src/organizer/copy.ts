@@ -1,4 +1,5 @@
 import { useLocale } from '../shared/i18n';
+import type { TicketArtPreset } from '../shared/ui';
 
 /**
  * The organiser's own copy, in both locales. It is kept out of `shared/copy` because the
@@ -351,8 +352,14 @@ const ko = {
       amount: '금액',
       save: '저장',
       art: '티켓 그림',
+      // One name per preset letter, as a record rather than as flat `artA`..`artD` keys: the
+      // `satisfies` below is what makes a locale that forgets a letter fail the build, which is
+      // what the flat keys were for before there were twelve of them (plan section E-1).
       // 'Mint' 는 관객 금지어(`mint`)에 걸린다 — 색 이름은 '청록'/'Teal' 로 둔다.
-      artA: '오로라', artB: '잉걸', artC: '청록', artD: '어스름',
+      artNames: {
+        a: '오로라', b: '잉걸', c: '청록', d: '어스름', e: '네온', f: '색종이',
+        g: '물결', h: '햇살', i: '안개', j: '줄무늬', k: '점묘', l: '회로',
+      } satisfies Record<TicketArtPreset, string>,
       artUpload: '직접 올리기',
       artUploadClose: '그만두기',
       artWorking: '그림을 올리고 있어요',
@@ -795,7 +802,10 @@ const en: typeof ko = {
       amount: 'Amount',
       save: 'Save',
       art: 'Ticket picture',
-      artA: 'Aurora', artB: 'Ember', artC: 'Teal', artD: 'Dusk',
+      artNames: {
+        a: 'Aurora', b: 'Ember', c: 'Teal', d: 'Dusk', e: 'Neon', f: 'Confetti',
+        g: 'Wave', h: 'Sunburst', i: 'Haze', j: 'Stripes', k: 'Dots', l: 'Circuit',
+      } satisfies Record<TicketArtPreset, string>,
       artUpload: 'Upload your own',
       artUploadClose: 'Never mind',
       artWorking: 'Uploading the picture',

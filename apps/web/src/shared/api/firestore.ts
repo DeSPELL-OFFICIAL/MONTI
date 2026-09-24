@@ -151,12 +151,14 @@ export async function loadOrgName(orgId: string): Promise<string | null> {
 }
 
 /**
- * The four bundled backdrops, by the letter `eventArt` stores. Spelled out here rather than
+ * The twelve bundled backdrops, by the letter `eventArt` stores. Spelled out here rather than
  * imported as a value so that reading a document pulls in no pictures: this list is the
  * validator's alphabet, and TypeScript fails the build if {@link TicketArtPreset} ever
  * gains a letter this one does not.
  */
-const TICKET_ART_PRESETS: readonly TicketArtPreset[] = ['a', 'b', 'c', 'd'];
+const TICKET_ART_PRESETS: readonly TicketArtPreset[] = [
+  'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l',
+];
 
 /** What a ticket looks like before anybody has chosen anything, and after anything went wrong. */
 const DEFAULT_TICKET_ART: TicketArtSource = { preset: 'a' };

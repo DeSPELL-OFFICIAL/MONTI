@@ -2,6 +2,7 @@ import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
 import type { FunctionsErrorCodeCore } from 'firebase/functions';
 import type { AttendeeRow, Hex, PersonStatus, ResolveRecipientResult, SnapshotWire } from '@monti/shared';
+import type { TicketArtSource } from '../ui/TicketArt';
 import { getFirebaseFunctions } from './firebase';
 
 /** The gRPC status the server chose, with Firebase's `functions/` prefix stripped. */
@@ -442,8 +443,10 @@ export const api = {
    * picture and `updateEventMeta` refuses anything past Draft.
    *
    * Exactly one of `preset` and `imageCid` per entry — both, or neither, is `BAD_TIERS`. The
-   * preset is one of the four letters and never a name: the read side folds anything else back
-   * to `'a'`, so a name here would silently give every kind the same picture.
+   * preset is one of the twelve letters and never a name: the read side folds anything else
+   * back to `'a'`, so a name here would silently give every kind the same picture. The letters
+   * are {@link TicketArtSource} rather than a list spelled out here, because a fourth copy of
+   * that alphabet is a fourth place to forget when the server's `ART_PRESETS` grows.
    *
    * It replaces the document rather than merging into it, so the whole list goes every time.
    * Reading is **not** a callable — `shared/api/firestore.ts` reads `eventArt/{eventId}`
@@ -451,7 +454,7 @@ export const api = {
    * full of blanks.
    */
   saveEventArt: call<
-    { eventId: string; tiers: Array<{ preset: 'a' | 'b' | 'c' | 'd' } | { imageCid: string }> },
+    { eventId: string; tiers: TicketArtSource[] },
     { ok: true }
   >('saveEventArt'),
   /**

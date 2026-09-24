@@ -200,5 +200,11 @@ export function tierArt(tier: EventDraftTier): TicketArtSource {
   return { preset: preset ?? 'a' };
 }
 
-/** The alphabet, in the order the picker offers it. */
-export const TICKET_ART_PRESETS: readonly TicketArtPreset[] = ['a', 'b', 'c', 'd'];
+/**
+ * The alphabet, in the order the picker offers it. Twelve letters, matching the server's
+ * `ART_PRESETS` and the draft rule's `^[a-l]$`: a letter this list has and the rule does not
+ * would fail autosave for the whole document the moment somebody picked it.
+ */
+export const TICKET_ART_PRESETS: readonly TicketArtPreset[] = [
+  'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l',
+];

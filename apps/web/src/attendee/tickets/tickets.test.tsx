@@ -4,10 +4,6 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearSession, setSession } from '../../shared/session';
-// The two bundled backdrops these tests name. Imported rather than spelled out as a path, so
-// the assertion is "the picture preset c draws" and not "the file it happens to live in".
-import aurora from '../../assets/ticket-art/aurora.svg';
-import mint from '../../assets/ticket-art/mint.svg';
 
 // The indexer is not deployed, so the transport is mocked and answers each document by name.
 // Every assertion below is about what the screens do with the rows, never about how they arrive.
@@ -111,9 +107,15 @@ function row(tokenId: string): HTMLElement {
   return screen.getByRole('link', { name: new RegExp(`^#${tokenId} · `) });
 }
 
-/** The picture a row (or the whole detail screen) drew, as the URL its backdrop points at. */
-function backdropIn(scope: HTMLElement | Document): string {
-  return scope.querySelector<HTMLImageElement>('.ticket-art__backdrop')?.getAttribute('src') ?? '';
+/**
+ * The picture a row (or the whole detail screen) drew, as the preset letter it names.
+ *
+ * The backdrop is markup inside the ticket's own SVG now rather than a bundled file behind an
+ * `<img src>`, and the letter is what a document stores — so this asserts the thing that was
+ * read out of Firestore, not the file it happened to be bundled into.
+ */
+function presetIn(scope: HTMLElement | Document): string {
+  return scope.querySelector('.ticket-art__svg')?.getAttribute('data-preset') ?? '';
 }
 
 /**
@@ -295,9 +297,9 @@ describe('ticket art', () => {
     art.docs.set('eventArt/7', { tiers: [{ design: 'c' }] });
     renderList();
     await screen.findByRole('link', { name: '#1 · 입장 전' });
-    await waitFor(() => expect(backdropIn(row('1'))).toBe(mint));
+    await waitFor(() => expect(presetIn(row('1'))).toBe('c'));
     // #5 belongs to an event `saveEventArt` has never been called for — the ordinary case.
-    expect(backdropIn(row('5'))).toBe(aurora);
+    expect(presetIn(row('5'))).toBe('a');
   });
 
   /**
@@ -311,8 +313,8 @@ describe('ticket art', () => {
     renderList();
     await screen.findByRole('link', { name: '#1 · 입장 전' });
     // The same render honours a key it does know, so this is a fallback and not a dead read.
-    await waitFor(() => expect(backdropIn(row('5'))).toBe(mint));
-    expect(backdropIn(row('1'))).toBe(aurora);
+    await waitFor(() => expect(presetIn(row('5'))).toBe('c'));
+    expect(presetIn(row('1'))).toBe('a');
   });
 
   /** A picture nobody could read is a picture, never an error the list stops at. */
@@ -320,7 +322,7 @@ describe('ticket art', () => {
     art.refuse = true;
     renderList();
     expect(await screen.findByRole('link', { name: '#1 · 입장 전' })).toBeInTheDocument();
-    expect(backdropIn(row('1'))).toBe(aurora);
+    expect(presetIn(row('1'))).toBe('a');
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
@@ -347,7 +349,7 @@ describe('ticket art', () => {
     expect(await screen.findByText('입장 완료')).toBeInTheDocument();
     expect(screen.getByText('사용됨')).toBeInTheDocument();
     expect(screen.getByText('한여름 밤의 재즈')).toBeInTheDocument();
-    expect(backdropIn(document)).toBe(aurora);
+    expect(presetIn(document)).toBe('a');
   });
 
   it('leaves the band off a ticket the detail screen still lets you enter with', async () => {

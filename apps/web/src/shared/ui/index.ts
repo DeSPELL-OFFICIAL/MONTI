@@ -19,6 +19,10 @@ export {
   TicketArt, type TicketArtProps, type TicketArtPreset, type TicketArtSource,
 } from './TicketArt';
 export {
+  buildTicketSvg, escapeXml, textWidth, wrapTitle, type TicketSvgInput,
+} from './ticketArt/buildTicketSvg';
+export { TICKET_BACKDROPS, TICKET_HEIGHT, TICKET_WIDTH, type TicketBackdrop } from './ticketArt/presets';
+export {
   cropToA4, sourceRect, turnedSize,
   A4_WIDTH, A4_HEIGHT, A4_MAX_BYTES, A4_QUALITY, A4_QUALITY_RESCUE,
   type CropView, type CropOptions, type CropSource, type CroppedPoster,

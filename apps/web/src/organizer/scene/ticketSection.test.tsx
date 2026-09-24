@@ -172,10 +172,10 @@ describe('the picture', () => {
     const user = userEvent.setup();
     open();
     await ready();
-    await user.click(screen.getByRole('button', { name: copy.tiers.artC }));
+    await user.click(screen.getByRole('button', { name: copy.tiers.artNames.c }));
     expect(mirror().tiers[0]?.design).toBe('c');
     expect(JSON.stringify(mirror())).not.toContain('aurora');
-    expect(screen.getByRole('button', { name: copy.tiers.artC })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: copy.tiers.artNames.c })).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('uploads one of their own through the same cropper, as a ticket and not a poster', async () => {
