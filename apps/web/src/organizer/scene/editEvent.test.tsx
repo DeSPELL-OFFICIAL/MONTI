@@ -72,7 +72,6 @@ const META = {
 const { EditEvent } = await import('./EditEvent');
 const { ko: sharedCopy } = await import('../../shared/copy/index');
 const { CreateEvent } = await import('./CreateEvent');
-const { TicketSettings } = await import('./TicketSettings');
 const { organizerCopy } = await import('../copy');
 const copy = organizerCopy.ko.scene;
 
@@ -80,14 +79,13 @@ function Probe() {
   return <p>{`landed:${useLocation().pathname}`}</p>;
 }
 
-/** The whole of the organiser's side of an edit: the prefill screen and both scenes. */
+/** The whole of the organiser's side of an edit: the prefill screen and the scene. */
 function open(at = '/org/events/7/edit'): void {
   render(
     <MemoryRouter initialEntries={[at]}>
       <Routes>
         <Route path="/org/events/:eventId/edit" element={<EditEvent />} />
         <Route path="/org/new/:draftId" element={<CreateEvent />} />
-        <Route path="/org/new/:draftId/tickets" element={<TicketSettings />} />
         <Route path="*" element={<Probe />} />
       </Routes>
     </MemoryRouter>,
@@ -211,9 +209,8 @@ describe('saving an edit', () => {
 
     await screen.findByDisplayValue('재즈 나이트');
     await user.type(screen.getByDisplayValue('재즈 나이트'), '!');
-    await user.click(screen.getByRole('button', { name: copy.next }));
 
-    // SCENE 2's button says 저장 on an edit, not 행사 만들기.
+    // The one button says 저장 on an edit, not 행사 만들기.
     const save = await screen.findByRole('button', { name: copy.tiers.save });
     expect(screen.queryByRole('button', { name: copy.tiers.create })).toBeNull();
     await user.click(save);
@@ -269,7 +266,6 @@ describe('saving an edit', () => {
     const draftId = saveEventDraft.mock.calls[0]?.[0] as string;
 
     await screen.findByDisplayValue('재즈 나이트');
-    await user.click(screen.getByRole('button', { name: copy.next }));
     await user.click(await screen.findByRole('button', { name: copy.tiers.save }));
 
     expect(await screen.findByText(copy.publishProblems.followUpFailed)).toBeInTheDocument();
@@ -290,7 +286,6 @@ describe('saving an edit', () => {
     await waitFor(() => expect(saveEventDraft).toHaveBeenCalled());
 
     await screen.findByDisplayValue('재즈 나이트');
-    await user.click(screen.getByRole('button', { name: copy.next }));
     await user.click(await screen.findByRole('button', { name: copy.tiers.save }));
 
     expect(await screen.findByText(copy.publishProblems.notDraft)).toBeInTheDocument();

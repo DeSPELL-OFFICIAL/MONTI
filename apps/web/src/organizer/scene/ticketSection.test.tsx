@@ -26,7 +26,7 @@ vi.mock('../../shared/config', async (orig) => ({
   getConfig: () => ({ ipfsGateway: 'https://gw.test/' }),
 }));
 
-const { TicketSettings } = await import('./TicketSettings');
+const { CreateEvent } = await import('./CreateEvent');
 const { EVENT_DRAFT_KEY, emptyEventDraft, emptyEventDraftTier } = await import('../useEventDraft');
 const { organizerCopy } = await import('../copy');
 const { ko: sharedCopy } = await import('../../shared/copy/index');
@@ -52,9 +52,9 @@ const READY: EventDraft = {
 function open(draft: EventDraft = READY, id = 'd-42'): void {
   store = [{ id, updatedAt: 1_000, data: draft }];
   render(
-    <MemoryRouter initialEntries={[`/org/new/${id}/tickets`]}>
+    <MemoryRouter initialEntries={[`/org/new/${id}`]}>
       <Routes>
-        <Route path="/org/new/:draftId/tickets" element={<TicketSettings />} />
+        <Route path="/org/new/:draftId" element={<CreateEvent />} />
         <Route path="*" element={<Probe />} />
       </Routes>
     </MemoryRouter>,
@@ -211,11 +211,13 @@ describe('the rules that belong to the event', () => {
 });
 
 describe('행사 만들기', () => {
-  it('sends an unfinished event back to SCENE 1 under the same draft id', async () => {
+  /** The event fields are in the same scroll now, so a missing one is named where it is. */
+  it('names the missing event field rather than sending anybody to a second screen', async () => {
     open({ ...READY, title: '' });
     await ready();
     await userEvent.setup().click(screen.getByRole('button', { name: copy.tiers.create }));
-    expect(screen.getByText('landed:/org/new/d-42')).toBeInTheDocument();
+    expect(screen.getByText(copy.problems.title)).toBeInTheDocument();
+    expect(screen.queryByText(/^landed:/)).toBeNull();
   });
 
   it('names an unnamed kind under the cards', async () => {
@@ -225,9 +227,11 @@ describe('행사 만들기', () => {
     expect(screen.getByText(copy.tierProblems.tierName)).toBeInTheDocument();
   });
 
-  it('goes back to the event scene by the link at the top', async () => {
+  /** One scroll: the title box and the kind cards are on screen together. */
+  it('keeps the event fields and the kinds on the same screen', async () => {
     open();
     await ready();
-    expect(screen.getByRole('link', { name: copy.back })).toHaveAttribute('href', '/org/new/d-42');
+    expect(screen.getByLabelText(copy.titleLabel)).toHaveValue(READY.title);
+    expect(screen.getByRole('link', { name: copy.leave })).toHaveAttribute('href', '/org');
   });
 });

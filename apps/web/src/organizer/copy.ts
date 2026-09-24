@@ -256,8 +256,6 @@ const ko = {
     leave: '나가기',
     resumed: '이어서 쓰는 중',
     startOver: '처음부터',
-    next: '다음',
-    back: '행사 정보로',
 
     /** 이미 만들어진 행사를 같은 씬에서 고친다(T-EV-W12). 공개 전에만 열린다. */
     edit: {
@@ -406,7 +404,6 @@ const ko = {
     },
 
     tierProblems: {
-      eventIncomplete: '행사 정보에 아직 빠진 칸이 있어요',
       tiersTooMany: '종류는 8개까지예요',
       tierName: '모든 종류에 이름을 적어 주세요',
       tierNameTooLong: '종류 이름은 40자 안으로 적어 주세요',
@@ -681,8 +678,6 @@ const en: typeof ko = {
     leave: 'Leave',
     resumed: 'Carrying on where you left off',
     startOver: 'Start over',
-    next: 'Next',
-    back: 'Back to the event',
 
     /** See the Korean block: the same scene, opened on an event that already exists. */
     edit: {
@@ -829,7 +824,6 @@ const en: typeof ko = {
     },
 
     tierProblems: {
-      eventIncomplete: 'Some of the event details are still missing',
       tiersTooMany: 'Up to eight kinds',
       tierName: 'Give every kind a name',
       tierNameTooLong: 'Write a kind name of 40 characters or fewer',

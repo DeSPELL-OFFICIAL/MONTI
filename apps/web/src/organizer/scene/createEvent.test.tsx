@@ -90,14 +90,19 @@ beforeEach(() => {
   pinEventImage.mockResolvedValue({ cid: 'bafkposter' });
 });
 
-describe('SCENE 1 layout', () => {
-  it('puts the poster card above every field, in the plan order', async () => {
+describe('the scene layout', () => {
+  it('puts the poster card above every field, with the tickets in the same scroll', async () => {
     open();
     await waitFor(() => expect(listEventDrafts).toHaveBeenCalled());
     const headings = screen.getAllByRole('heading', { level: 2 }).map((node) => node.textContent);
-    expect(headings).toEqual([copy.poster, copy.themeLabel, copy.tagsLabel, copy.placeLabel, copy.timeLabel]);
+    expect(headings).toEqual([
+      copy.poster, copy.themeLabel, copy.tagsLabel, copy.placeLabel, copy.timeLabel,
+      copy.tiers.title, copy.tiers.rules,
+    ]);
     expect(screen.getByLabelText(copy.titleLabel)).toBeInTheDocument();
     expect(screen.getByLabelText(copy.bodyLabel)).toBeInTheDocument();
+    // The ticket screen is gone: its one kind is a section here (plan section B-1).
+    expect(screen.getByLabelText(copy.tiers.name)).toBeInTheDocument();
   });
 
   it('shows the organisation number nowhere: the address already carries it', async () => {
@@ -130,35 +135,36 @@ describe('SCENE 1 layout', () => {
   });
 });
 
-describe('SCENE 1 validation', () => {
-  it('never blocks 다음, and only names what is missing once it has been pressed', async () => {
+describe('the one button', () => {
+  it('never blocks 만들기, and only names what is missing once it has been pressed', async () => {
     const user = userEvent.setup();
     open();
     await waitFor(() => expect(listEventDrafts).toHaveBeenCalled());
-    expect(screen.getByRole('button', { name: copy.next })).toBeEnabled();
+    expect(screen.getByRole('button', { name: copy.tiers.create })).toBeEnabled();
     expect(screen.queryByText(copy.problems.poster)).toBeNull();
 
-    await user.click(screen.getByRole('button', { name: copy.next }));
+    await user.click(screen.getByRole('button', { name: copy.tiers.create }));
     expect(screen.getByText(copy.problems.poster)).toBeInTheDocument();
     expect(screen.getByText(copy.problems.title)).toBeInTheDocument();
     expect(screen.getByText(copy.problems.venue)).toBeInTheDocument();
-    // Still on SCENE 1: an unfinished field is a message, not a wall.
+    // Still here: an unfinished field is a message, not a wall — and never a second screen.
     expect(screen.queryByText(/^landed:/)).toBeNull();
   });
 
-  it('hands a finished draft to the ticket scene under the same draft id', async () => {
+  /** The founder's second tap: 다음 followed by 행사 만들기 was two for one intention. */
+  it('is the only button in the bar, and there is no 다음 left to press', async () => {
     seed('d-42', READY);
     open('/org/new/d-42');
     await waitFor(() => expect(screen.getByLabelText(copy.titleLabel)).toHaveValue(READY.title));
-    await userEvent.setup().click(screen.getByRole('button', { name: copy.next }));
-    expect(screen.getByText('landed:/org/new/d-42/tickets')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: copy.tiers.create })).toBeEnabled();
+    expect(screen.queryByText('landed:/org/new/d-42/tickets')).toBeNull();
   });
 
   it('says the end has to come after the start', async () => {
     seed('d-1', { ...READY, endsAt: READY.startsAt });
     open('/org/new/d-1');
     await waitFor(() => expect(screen.getByLabelText(copy.titleLabel)).toHaveValue(READY.title));
-    await userEvent.setup().click(screen.getByRole('button', { name: copy.next }));
+    await userEvent.setup().click(screen.getByRole('button', { name: copy.tiers.create }));
     expect(screen.getByText(copy.problems.schedule)).toBeInTheDocument();
   });
 });

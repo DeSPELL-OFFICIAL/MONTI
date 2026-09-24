@@ -1,27 +1,36 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Button, Chip, Field, Screen, StickyBar, Toggle } from '../../shared/ui';
+import { Alert, Button, Chip, Field, Screen, Spinner, StickyBar, Toggle } from '../../shared/ui';
 import { fmt, useLocale } from '../../shared/i18n';
 import { useOrganizerCopy, type OrganizerCopy } from '../copy';
+import { UnsponsoredNotice } from '../Unsponsored';
 import { useEventDraft } from '../useEventDraft';
 import { KR_REGIONS } from './regions';
 import { fromLocalInput, toLocalInput } from './datetime';
 import { PosterCard } from './PosterCard';
 import { SaveStatus } from './SaveStatus';
+import { TicketSection } from './TicketSection';
+import { usePublish } from './usePublish';
 import {
   MAX_BODY_CHARS, MAX_TAGS, MAX_TAG_CHARS, MAX_TITLE_CHARS, MAX_VENUE_CHARS,
-  PROBLEM_SECTION, THEME_CODES, charCount, eventProblems, normalizeTags, type EventProblem,
+  PROBLEM_SECTION, THEME_CODES, charCount, eventProblems, normalizeTags, paidTiers, tierProblems,
+  type EventProblem,
 } from './draftRules';
 
 /**
- * SCENE 1 — the event itself, as one scroll rather than five steps. The sections are in the
- * order of the plan's section A-2 with the poster card fixed at the top, and the bar at the
- * foot carries the save state and the one way on.
+ * The creation scene — the event **and** its tickets, as one scroll and one button.
  *
- * `다음` is never disabled. An organiser who has not filled a field in yet is scrolled to it
- * and shown one line under it; they are not stopped, because a half-written draft that cannot
- * move is a draft that gets abandoned on the step it was stuck on — which is the whole
- * complaint the six-step wizard was replaced over.
+ * It was two screens until the founder's phone test (plan section B-1): `/org/new/:draftId` for
+ * the event and `/org/new/:draftId/tickets` for the kinds, with 다음 between them. Pressing
+ * 다음 and then 행사 만들기 is two taps for one intention, so the second screen is a section of
+ * this one now and `만들기` is the only button. None of the rules moved: `eventProblems`,
+ * `tierProblems` and `usePublish` are the same three they were.
+ *
+ * `만들기` is never disabled for an empty field. An organiser who has not filled one in yet is
+ * scrolled to it and shown one line under it; they are not stopped, because a half-written
+ * draft that cannot move is a draft that gets abandoned on the field it was stuck on — which is
+ * the whole complaint the six-step wizard was replaced over. A paid kind is the one exception:
+ * that is a choice to undo, not a field to fill in, and it does disable the button.
  */
 
 /** The theme copy is four flat keys rather than a map, so a missing locale fails the build. */
@@ -40,9 +49,9 @@ export function CreateEvent() {
   const { draftId: wanted } = useParams();
   // `/org/new?org=<id>` is how the organiser home and the explore FAB name the organisation.
   const asked = useSearchParams()[0].get('org') ?? '';
-  const { draft, draftId, resumed, status, savedAt, patch, discard } = useEventDraft(asked, wanted);
+  const { draft, draftId, resumed, status, savedAt, patch, save, discard } = useEventDraft(asked, wanted);
   const [tag, setTag] = useState('');
-  // Nothing is marked wrong until `다음` has been pressed once: a scene that reddens a field
+  // Nothing is marked wrong until `만들기` has been pressed once: a scene that reddens a field
   // the moment it is opened is a scene that starts by telling the organiser off.
   const [checked, setChecked] = useState(false);
 
@@ -51,21 +60,65 @@ export function CreateEvent() {
   // away and leave an empty draft that makes a *second* event.
   const editing = draft.editingEventId !== '';
   const problems = eventProblems(draft);
+  const tiersWrong = tierProblems(draft);
+  const blocked = paidTiers(draft).length > 0;
   const wrong = (key: EventProblem) =>
     (checked && problems.includes(key) ? <p className="problem">{copy.problems[key]}</p> : null);
 
-  function onNext(): void {
-    setChecked(true);
-    const first = problems[0];
-    if (first === undefined) {
-      navigate(`/org/new/${draftId}/tickets`);
-      return;
-    }
+  const { phase, problem, unsponsored, publish } = usePublish({
+    draft,
+    draftId,
+    patch,
+    save,
+    discard,
+    // The title and the poster travel in the navigation because there is nowhere left to read
+    // them from: the indexer has not seen the event and, when everything landed, the draft is
+    // gone. `plan`/`done`/`draftId` go too — they are what makes the retry on that screen real.
+    // `onCreated` is never called without an id; that branch stays here and says so.
+    onCreated: (created) => {
+      // An event that already existed has a screen of its own to go back to, and the done
+      // screen's words ("행사를 만들었어요") would be the wrong ones for an edit.
+      if (editing) {
+        navigate(`/org/events/${created.eventId}`);
+        return;
+      }
+      navigate(`/org/new/done/${created.eventId}`, {
+        state: {
+          posterCid: created.posterCid,
+          title: created.title,
+          followUpFailed: created.followUpFailed,
+          draftId: created.draftId,
+          plan: created.plan,
+          done: created.done,
+        },
+      });
+    },
+  });
+
+  // `confirming` deliberately leaves the button pressable: that press is what asks the bundler
+  // what became of an operation whose `wait` gave up, and it never sends a second one.
+  const working = phase === 'pinning' || phase === 'sending' || phase === 'finishing';
+
+  function scrollTo(section: string): void {
     // jsdom has no `scrollIntoView`, and neither does an older browser; the line under the
     // field is the part that has to work, so the scroll is offered rather than relied on.
-    document.getElementById(`scene-${PROBLEM_SECTION[first]}`)?.scrollIntoView?.({
+    document.getElementById(`scene-${section}`)?.scrollIntoView?.({
       behavior: 'smooth', block: 'center',
     });
+  }
+
+  function create(): void {
+    setChecked(true);
+    const first = problems[0];
+    if (first !== undefined) {
+      scrollTo(PROBLEM_SECTION[first]);
+      return;
+    }
+    if (tiersWrong.length > 0) {
+      scrollTo('tickets');
+      return;
+    }
+    void publish();
   }
 
   function addTag(): void {
@@ -229,10 +282,34 @@ export function CreateEvent() {
           {wrong('endsAt')}
           {wrong('schedule')}
         </section>
+
+        <TicketSection
+          draft={draft}
+          patch={patch}
+          problems={checked ? tiersWrong : []}
+          blocked={blocked}
+        />
+
+        {unsponsored ? <UnsponsoredNotice /> : null}
+        {problem !== '' ? <Alert tone="error">{copy.publishProblems[problem]}</Alert> : null}
+        {/* `confirming` covers two things — an operation still in flight, and one that landed
+            without naming its event. The second says so itself, so only one line shows. */}
+        {phase === 'confirming' && problem === '' ? (
+          <Alert tone="info">{editing ? copy.publish.confirmingEdit : copy.publish.confirming}</Alert>
+        ) : null}
+        {phase === 'pinning' || phase === 'sending' || phase === 'finishing' ? (
+          <p className="working">
+            <Spinner />
+            {editing && phase === 'sending' ? copy.publish.updating : copy.publish[phase]}
+          </p>
+        ) : null}
+        <p className="muted">{copy.tiers.feeNote}</p>
       </div>
 
       <StickyBar status={<SaveStatus status={status} savedAt={savedAt} />}>
-        <Button onClick={onNext}>{copy.next}</Button>
+        <Button disabled={blocked || working} onClick={create}>
+          {editing ? copy.tiers.save : copy.tiers.create}
+        </Button>
       </StickyBar>
     </Screen>
   );

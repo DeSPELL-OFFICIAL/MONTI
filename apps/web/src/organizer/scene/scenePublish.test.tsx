@@ -69,7 +69,7 @@ vi.mock('../../shared/config', async (orig) => ({
 }));
 
 const { OpReverted } = await import('../../shared/chain/ops');
-const { TicketSettings } = await import('./TicketSettings');
+const { CreateEvent } = await import('./CreateEvent');
 const { emptyEventDraft, emptyEventDraftTier } = await import('../useEventDraft');
 const { organizerCopy } = await import('../copy');
 const copy = organizerCopy.ko.scene;
@@ -111,9 +111,9 @@ const READY: EventDraft = {
 function open(draft: EventDraft = READY, id = 'd-42'): void {
   store = [{ id, updatedAt: 1_000, data: draft }];
   render(
-    <MemoryRouter initialEntries={[`/org/new/${id}/tickets`]}>
+    <MemoryRouter initialEntries={[`/org/new/${id}`]}>
       <Routes>
-        <Route path="/org/new/:draftId/tickets" element={<TicketSettings />} />
+        <Route path="/org/new/:draftId" element={<CreateEvent />} />
         <Route path="*" element={<Probe />} />
       </Routes>
     </MemoryRouter>,
