@@ -77,7 +77,14 @@ export const ko = {
     title: '탐색', searchPlaceholder: '행사 이름 검색', create: '만들기',
     filterDate: '날짜', filterRegion: '지역', filterCategory: '테마',
     dateToday: '오늘', dateWeek: '이번 주', dateMonth: '이번 달', datePick: '직접 선택',
-    categoryAll: '전체', category0: '공연', category1: '모임', category2: '전시', category3: '기타',
+    categoryAll: '전체',
+    // 테마 = 행사 카테고리. 목록과 순서는 shared/eventThemes.ts 가 갖고, 이름만 여기 있다.
+    // 0~3 은 이미 체인에 박힌 뜻 그대로다(기타는 3 인 채로 맨 아래에 보인다).
+    themes: {
+      0: '공연', 1: '모임', 2: '전시',
+      4: '페스티벌', 5: '스포츠', 6: '콘퍼런스', 7: '강연·클래스', 8: '파티',
+      9: '영화·상영', 10: '마켓', 11: '네트워킹', 3: '기타',
+    },
     empty: '조건에 맞는 행사가 없어요.', getTicket: '티켓 받기', share: '공유',
     map: '지도로 보기', publicRecord: '공개 기록', soldOut: '마감됨', cancelled: '취소된 행사예요.',
     untitled: '제목을 불러오지 못했어요', remaining: '{{count}}자리 남음',

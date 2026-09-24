@@ -223,3 +223,9 @@ body {
   0%, 100% { transform: scale(1); opacity: 1; }
   50% { transform: scale(1.6); opacity: 0.45; }
 }
+
+/* Two boxes on one line — the region and the venue, which are one answer. */
+.field-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+/* `더 설정하기`: everything an event can do without, closed until somebody wants it. */
+.more { margin: 16px 0; border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
+.more > summary { cursor: pointer; font-weight: 600; }

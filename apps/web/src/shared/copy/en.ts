@@ -77,7 +77,13 @@ export const en: typeof ko = {
     title: 'Explore', searchPlaceholder: 'Search events', create: 'Create',
     filterDate: 'Date', filterRegion: 'Region', filterCategory: 'Theme',
     dateToday: 'Today', dateWeek: 'This week', dateMonth: 'This month', datePick: 'Pick a date',
-    categoryAll: 'All', category0: 'Concert', category1: 'Meetup', category2: 'Exhibition', category3: 'Other',
+    categoryAll: 'All',
+    // See the Korean block: shared/eventThemes.ts owns the list and the order, this owns names.
+    themes: {
+      0: 'Concert', 1: 'Meetup', 2: 'Exhibition',
+      4: 'Festival', 5: 'Sports', 6: 'Conference', 7: 'Talk or class', 8: 'Party',
+      9: 'Film', 10: 'Market', 11: 'Networking', 3: 'Other',
+    },
     empty: 'No events match your filters.', getTicket: 'Get a ticket', share: 'Share',
     map: 'Open in maps', publicRecord: 'Public record', soldOut: 'Sold out', cancelled: 'This event was cancelled.',
     untitled: 'Title unavailable', remaining: '{{count}} left',

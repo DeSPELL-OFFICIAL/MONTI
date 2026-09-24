@@ -23,9 +23,6 @@ export const MAX_VENUE_CHARS = 200;
 export const MAX_TAGS = 5;
 export const MAX_TAG_CHARS = 12;
 
-/** The four themes the discover filter offers (`attendee/discover/useEvents.ts`). */
-export const THEME_CODES = [0, 1, 2, 3] as const;
-
 /** One named rule; `organizer/copy.ts` owns a sentence for each, and each names a section. */
 export type EventProblem =
   | 'poster' | 'title' | 'tags' | 'body' | 'region' | 'venue' | 'venueTooLong'
@@ -71,6 +68,24 @@ function isTimestamp(value: number): boolean {
 }
 
 /**
+ * How long an event runs when nobody says otherwise. The end time is one of the three fields
+ * the founder's phone test put behind `더 설정하기` (plan section B-3): most events last an
+ * evening, and asking for a second `datetime-local` before anybody has typed a title is how a
+ * creation screen loses the person filling it in.
+ */
+export const DEFAULT_EVENT_SECONDS = 2 * 60 * 60;
+
+/**
+ * The end of the event — the one the organiser set, or two hours after it starts. Every reader
+ * goes through here (the rules, the sign-up window, the scene's own field and the chain draft)
+ * so a derived end can never disagree with the one being checked.
+ */
+export function endsAtOf(draft: EventDraft): number {
+  if (isTimestamp(draft.endsAt)) return draft.endsAt;
+  return isTimestamp(draft.startsAt) ? draft.startsAt + DEFAULT_EVENT_SECONDS : 0;
+}
+
+/**
  * Everything SCENE 1 refuses, in the order the sections ask for it — so the first entry is
  * both the sentence to show and the section to scroll to.
  */
@@ -88,8 +103,10 @@ export function eventProblems(draft: EventDraft): EventProblem[] {
     problems.push('tags');
   }
 
-  const body = draft.description.trim();
-  if (body === '' || charCount(body) > MAX_BODY_CHARS) problems.push('body');
+  // Not required: `pinEventMetadata` measures a description and refuses only a long one — an
+  // empty one is fine by the server (`functions/src/functions/organizer.ts:206-212`), and a
+  // required 소개 is one more wall between an organiser and their event (plan section B-3).
+  if (charCount(draft.description.trim()) > MAX_BODY_CHARS) problems.push('body');
 
   if (!REGION_CODES.has(draft.regionCode)) problems.push('region');
   const venue = draft.venue.trim();
@@ -97,8 +114,9 @@ export function eventProblems(draft: EventDraft): EventProblem[] {
   else if (charCount(venue) > MAX_VENUE_CHARS) problems.push('venueTooLong');
 
   if (!isTimestamp(draft.startsAt)) problems.push('startsAt');
-  if (!isTimestamp(draft.endsAt)) problems.push('endsAt');
-  else if (isTimestamp(draft.startsAt) && draft.startsAt >= draft.endsAt) problems.push('schedule');
+  const endsAt = endsAtOf(draft);
+  if (!isTimestamp(endsAt)) problems.push('endsAt');
+  else if (isTimestamp(draft.startsAt) && draft.startsAt >= endsAt) problems.push('schedule');
 
   return problems;
 }
@@ -111,7 +129,7 @@ export function eventProblems(draft: EventDraft): EventProblem[] {
  * deleted wizard asked for are gone.
  */
 export function saleWindow(draft: EventDraft, now: number): { saleStart: number; saleEnd: number } {
-  return { saleStart: now, saleEnd: draft.endsAt };
+  return { saleStart: now, saleEnd: endsAtOf(draft) };
 }
 
 /** `Ticket.createEvent` refuses more than eight kinds with `InvalidTiers` (`Ticket.sol:193`). */

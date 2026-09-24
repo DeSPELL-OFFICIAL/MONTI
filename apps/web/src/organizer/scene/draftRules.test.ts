@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { emptyEventDraft } from '../useEventDraft';
 import type { EventDraft } from '../../shared/api/firestore';
 import {
-  MAX_TAGS, MAX_TIER_NAME_CHARS, eventProblems, normalizeTags, paidTiers, saleWindow,
-  tierArt, tierProblems,
+  DEFAULT_EVENT_SECONDS, MAX_TAGS, MAX_TIER_NAME_CHARS, endsAtOf, eventProblems, normalizeTags,
+  paidTiers, saleWindow, tierArt, tierProblems,
 } from './draftRules';
 
 /** A draft with nothing left to fix, so each case below can break exactly one rule. */
@@ -35,8 +35,10 @@ describe('eventProblems', () => {
     expect(eventProblems(READY)).toEqual([]);
   });
 
+  /** Five things are asked for and the description is not one of them (plan section B-3). */
   it('names an empty draft section by section, in the order the scene asks', () => {
-    expect(eventProblems(emptyEventDraft)).toEqual(['poster', 'title', 'body', 'venue', 'startsAt', 'endsAt']);
+    expect(eventProblems(emptyEventDraft)).toEqual(['poster', 'title', 'venue', 'startsAt', 'endsAt']);
+    expect(eventProblems({ ...READY, description: '' })).toEqual([]);
   });
 
   /**
@@ -75,8 +77,27 @@ describe('eventProblems', () => {
 
   it('asks for each time on its own, and only then whether they are the right way round', () => {
     expect(eventProblems({ ...READY, startsAt: 0 })).toEqual(['startsAt']);
-    expect(eventProblems({ ...READY, endsAt: 0 })).toEqual(['endsAt']);
+    // An end nobody set is two hours after the start, so it is not a problem — an end with no
+    // start to derive it from still is.
+    expect(eventProblems({ ...READY, endsAt: 0 })).toEqual([]);
+    expect(eventProblems({ ...READY, startsAt: 0, endsAt: 0 })).toEqual(['startsAt', 'endsAt']);
     expect(eventProblems({ ...READY, endsAt: READY.startsAt })).toEqual(['schedule']);
+  });
+});
+
+describe('endsAtOf', () => {
+  it('keeps the end the organiser set', () => {
+    expect(endsAtOf(READY)).toBe(READY.endsAt);
+  });
+
+  /** `더 설정하기` is closed by default, so most events never have one typed in. */
+  it('derives two hours after the start when nobody set one', () => {
+    expect(endsAtOf({ ...READY, endsAt: 0 })).toBe(READY.startsAt + DEFAULT_EVENT_SECONDS);
+    expect(DEFAULT_EVENT_SECONDS).toBe(7_200);
+  });
+
+  it('has nothing to derive from without a start', () => {
+    expect(endsAtOf({ ...READY, startsAt: 0, endsAt: 0 })).toBe(0);
   });
 });
 
@@ -88,6 +109,13 @@ describe('saleWindow', () => {
    */
   it('opens now and closes when the event ends', () => {
     expect(saleWindow(READY, 1_789_000_000)).toEqual({ saleStart: 1_789_000_000, saleEnd: READY.endsAt });
+  });
+
+  /** The derived end is the one the window closes on, so `saleStart < saleEnd` still holds. */
+  it('closes on the derived end when the organiser never set one', () => {
+    const { saleStart, saleEnd } = saleWindow({ ...READY, endsAt: 0 }, 1_789_000_000);
+    expect(saleEnd).toBe(READY.startsAt + DEFAULT_EVENT_SECONDS);
+    expect(saleStart).toBeLessThan(saleEnd);
   });
 });
 

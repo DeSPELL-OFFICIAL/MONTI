@@ -37,6 +37,8 @@ const { setSession } = await import('../../shared/session');
 const { Discover } = await import('./Discover');
 const { EventDetail } = await import('./EventDetail');
 const { METADATA_CONCURRENCY, mapWithPool } = await import('./useEvents');
+const { THEME_CODES, themeLabels } = await import('../../shared/eventThemes');
+const { ko } = await import('../../shared/copy/index');
 
 const NOW_SECONDS = Math.floor(Date.now() / 1000);
 const IN_TWO_DAYS = String(NOW_SECONDS + 2 * 86_400);
@@ -191,6 +193,21 @@ describe('Discover', () => {
     await userEvent.selectOptions(screen.getByLabelText('테마'), '0');
     expect(screen.getByText('재즈 나이트')).toBeInTheDocument();
     expect(screen.queryByText('개발자 모임')).toBeNull();
+  });
+
+  /**
+   * The organiser's dropdown and this one read `shared/eventThemes.ts`. They held their own
+   * copies of `[0, 1, 2, 3]` until the list grew to twelve, and widening one alone would have
+   * hidden every 페스티벌 from the only screen that can find one (plan section A-4).
+   */
+  it('offers every theme an organiser can pick, plus 전체', async () => {
+    renderDiscover();
+    expect(await screen.findByText('재즈 나이트')).toBeInTheDocument();
+    const theme = screen.getByLabelText('테마') as HTMLSelectElement;
+    expect([...theme.options].map((option) => option.value))
+      .toEqual(['all', ...THEME_CODES.map(String)]);
+    expect([...theme.options].map((option) => option.textContent))
+      .toEqual(['전체', ...THEME_CODES.map((code) => themeLabels(ko)[code])]);
   });
 
   it('remembers the last filter across mounts', async () => {

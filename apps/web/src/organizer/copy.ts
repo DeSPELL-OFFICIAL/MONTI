@@ -256,6 +256,8 @@ const ko = {
     leave: '나가기',
     resumed: '이어서 쓰는 중',
     startOver: '처음부터',
+    // 기본 다섯 칸(포스터·제목·시작·장소·티켓) 밖의 모든 것이 이 안에 접혀 있다(계획 B-2).
+    more: '더 설정하기',
 
     /** 이미 만들어진 행사를 같은 씬에서 고친다(T-EV-W12). 공개 전에만 열린다. */
     edit: {
@@ -298,6 +300,7 @@ const ko = {
     timeLabel: '시간',
     startsAt: '시작',
     endsAt: '종료',
+    endsAtHelp: '비워 두면 시작 2시간 뒤로 잡아요',
     holdersOnly: '티켓 소지자에게만 공개',
     // 백엔드 T-EV-B 보고 9.3: 숨김 → 공개는 언제든 되지만 그 반대는 안 된다.
     venueHiddenHelp: '탐색 화면에는 지역만 보여요. 자세한 장소는 티켓을 받은 사람에게만 알려줘요',
@@ -325,8 +328,10 @@ const ko = {
       add: '종류 추가',
       remove: '빼기',
       kind: '{{index}}번째 종류',
-      name: '이름',
-      namePlaceholder: '예: 일반',
+      // 창업자가 "이름이 뭔지 모르겠다"고 한 그 칸이다. 무엇의 이름인지 라벨이 말한다(계획 E-5).
+      name: '티켓 종류 (예: 일반, VIP)',
+      nameHelp: '티켓에 찍히는 이름이에요',
+      namePlaceholder: '일반',
       supply: '수량',
       maxPerWallet: '1인당 한도',
       price: '가격',
@@ -678,6 +683,8 @@ const en: typeof ko = {
     leave: 'Leave',
     resumed: 'Carrying on where you left off',
     startOver: 'Start over',
+    // See the Korean block: everything but the five fields that make an event is folded here.
+    more: 'More settings',
 
     /** See the Korean block: the same scene, opened on an event that already exists. */
     edit: {
@@ -720,6 +727,7 @@ const en: typeof ko = {
     timeLabel: 'When',
     startsAt: 'Starts',
     endsAt: 'Ends',
+    endsAtHelp: 'Left alone, it ends two hours after it starts',
     holdersOnly: 'Only people with a ticket',
     // Backend report 9.3: hidden can be opened up at any time, open can never be hidden again.
     venueHiddenHelp: 'Explore screens show the region only. People who got a ticket are told the exact place',
@@ -747,8 +755,10 @@ const en: typeof ko = {
       add: 'Add a kind',
       remove: 'Remove',
       kind: 'Kind {{index}}',
-      name: 'Name',
-      namePlaceholder: 'e.g. General',
+      // The box the founder could not name. The label says what it is the name of.
+      name: 'Ticket kind (e.g. General, VIP)',
+      nameHelp: 'This is the name printed on the ticket',
+      namePlaceholder: 'General',
       supply: 'How many',
       maxPerWallet: 'Most one person may hold',
       price: 'Price',

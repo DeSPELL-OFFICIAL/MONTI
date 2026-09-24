@@ -1,21 +1,30 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Alert, Button, Chip, Field, Screen, Spinner, StickyBar, Toggle } from '../../shared/ui';
-import { fmt, useLocale } from '../../shared/i18n';
-import { useOrganizerCopy, type OrganizerCopy } from '../copy';
+import { Alert, Button, Field, Screen, Spinner, StickyBar, Toggle } from '../../shared/ui';
+import { fmt, useCopy, useLocale } from '../../shared/i18n';
+import { THEME_CODES, themeLabels } from '../../shared/eventThemes';
+import { useOrganizerCopy } from '../copy';
 import { UnsponsoredNotice } from '../Unsponsored';
 import { useEventDraft } from '../useEventDraft';
 import { KR_REGIONS } from './regions';
 import { fromLocalInput, toLocalInput } from './datetime';
 import { PosterCard } from './PosterCard';
 import { SaveStatus } from './SaveStatus';
-import { TicketSection } from './TicketSection';
+import { TicketExtras, TicketSection } from './TicketSection';
 import { usePublish } from './usePublish';
 import {
   MAX_BODY_CHARS, MAX_TAGS, MAX_TAG_CHARS, MAX_TITLE_CHARS, MAX_VENUE_CHARS,
-  PROBLEM_SECTION, THEME_CODES, charCount, eventProblems, normalizeTags, paidTiers, tierProblems,
+  PROBLEM_SECTION, charCount, endsAtOf, eventProblems, normalizeTags, paidTiers, tierProblems,
   type EventProblem,
 } from './draftRules';
+
+/**
+ * The fields behind `더 설정하기`. A problem in one of them opens the fold before the scroll —
+ * a sentence nobody can see is worse than no sentence at all.
+ */
+const FOLDED_PROBLEMS: ReadonlySet<EventProblem> = new Set<EventProblem>([
+  'tags', 'body', 'endsAt', 'schedule',
+]);
 
 /**
  * The creation scene — the event **and** its tickets, as one scroll and one button.
@@ -33,16 +42,9 @@ import {
  * that is a choice to undo, not a field to fill in, and it does disable the button.
  */
 
-/** The theme copy is four flat keys rather than a map, so a missing locale fails the build. */
-function themeLabel(copy: OrganizerCopy['scene'], code: number): string {
-  if (code === 1) return copy.theme1;
-  if (code === 2) return copy.theme2;
-  if (code === 3) return copy.theme3;
-  return copy.theme0;
-}
-
 export function CreateEvent() {
   const copy = useOrganizerCopy().scene;
+  const themes = themeLabels(useCopy());
   const locale = useLocale();
   const navigate = useNavigate();
   // `/org/new/<id>` names a draft to carry on with — where SCENE 2's back link comes from.
@@ -51,6 +53,9 @@ export function CreateEvent() {
   const asked = useSearchParams()[0].get('org') ?? '';
   const { draft, draftId, resumed, status, savedAt, patch, save, discard } = useEventDraft(asked, wanted);
   const [tag, setTag] = useState('');
+  // `더 설정하기`. Closed to begin with — the five fields above it are the whole of an event
+  // that works — and opened by hand, or by a problem hiding inside it.
+  const [more, setMore] = useState(false);
   // Nothing is marked wrong until `만들기` has been pressed once: a scene that reddens a field
   // the moment it is opened is a scene that starts by telling the organiser off.
   const [checked, setChecked] = useState(false);
@@ -111,6 +116,7 @@ export function CreateEvent() {
     setChecked(true);
     const first = problems[0];
     if (first !== undefined) {
+      if (FOLDED_PROBLEMS.has(first)) setMore(true);
       scrollTo(PROBLEM_SECTION[first]);
       return;
     }
@@ -161,100 +167,6 @@ export function CreateEvent() {
           {wrong('title')}
         </section>
 
-        <section id="scene-tags">
-          <h2>{copy.themeLabel}</h2>
-          <div className="chip-row">
-            {THEME_CODES.map((code) => (
-              <Chip
-                key={code}
-                label={themeLabel(copy, code)}
-                selected={draft.category === code}
-                onClick={() => patch({ category: code })}
-              />
-            ))}
-          </div>
-
-          <h2>{copy.tagsLabel}</h2>
-          <p className="muted">{copy.tagsHelp}</p>
-          <div className="chip-row">
-            {draft.tags.map((entry) => (
-              <button
-                key={entry}
-                type="button"
-                className="chip chip--on"
-                aria-label={fmt(copy.tagRemove, { tag: entry })}
-                onClick={() => patch({ tags: draft.tags.filter((kept) => kept !== entry) })}
-              >
-                {entry}
-              </button>
-            ))}
-          </div>
-          <Field label={copy.tagAdd}>
-            <input
-              value={tag}
-              maxLength={MAX_TAG_CHARS}
-              placeholder={copy.tagPlaceholder}
-              disabled={draft.tags.length >= MAX_TAGS}
-              onChange={(event) => setTag(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key !== 'Enter') return;
-                event.preventDefault();
-                addTag();
-              }}
-            />
-          </Field>
-          <Button variant="ghost" disabled={draft.tags.length >= MAX_TAGS} onClick={addTag}>
-            {copy.tagAdd}
-          </Button>
-          {wrong('tags')}
-        </section>
-
-        <section id="scene-body">
-          <Field label={copy.bodyLabel}>
-            <textarea
-              value={draft.description}
-              rows={6}
-              maxLength={MAX_BODY_CHARS}
-              placeholder={copy.bodyPlaceholder}
-              onChange={(event) => patch({ description: event.target.value })}
-            />
-          </Field>
-          <p className="muted">
-            {fmt(copy.count, { count: charCount(draft.description), max: MAX_BODY_CHARS })}
-          </p>
-          {wrong('body')}
-        </section>
-
-        <section id="scene-venue">
-          <h2>{copy.placeLabel}</h2>
-          <Field label={copy.regionLabel}>
-            <select value={draft.regionCode} onChange={(event) => patch({ regionCode: event.target.value })}>
-              {KR_REGIONS.map((region) => (
-                <option key={region.code} value={region.code}>
-                  {locale === 'en' ? region.labelEn : region.labelKo}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label={copy.placeLabel}>
-            <input
-              value={draft.venue}
-              maxLength={MAX_VENUE_CHARS}
-              placeholder={copy.venuePlaceholder}
-              onChange={(event) => patch({ venue: event.target.value })}
-            />
-          </Field>
-          <Toggle
-            label={copy.holdersOnly}
-            checked={draft.venueHidden}
-            onChange={(on) => patch({ venueHidden: on })}
-            help={`${copy.venueHiddenHelp} · ${copy.venueHiddenOneWay}`}
-          />
-          {wrong('region')}
-          {wrong('venue')}
-          {wrong('venueTooLong')}
-        </section>
-
         <section id="scene-time">
           <h2>{copy.timeLabel}</h2>
           <Field label={copy.startsAt}>
@@ -264,23 +176,33 @@ export function CreateEvent() {
               onChange={(event) => patch({ startsAt: fromLocalInput(event.target.value) })}
             />
           </Field>
-          <Field label={copy.endsAt}>
-            <input
-              type="datetime-local"
-              value={toLocalInput(draft.endsAt)}
-              onChange={(event) => patch({ endsAt: fromLocalInput(event.target.value) })}
-            />
-          </Field>
-          <Toggle
-            label={copy.holdersOnly}
-            checked={draft.timeHidden}
-            onChange={(on) => patch({ timeHidden: on })}
-            help={copy.timeHiddenHelp}
-          />
-          <p className="muted">{copy.saleHelp}</p>
           {wrong('startsAt')}
-          {wrong('endsAt')}
-          {wrong('schedule')}
+        </section>
+
+        <section id="scene-venue">
+          <h2>{copy.placeLabel}</h2>
+          <div className="field-pair">
+            <Field label={copy.regionLabel}>
+              <select value={draft.regionCode} onChange={(event) => patch({ regionCode: event.target.value })}>
+                {KR_REGIONS.map((region) => (
+                  <option key={region.code} value={region.code}>
+                    {locale === 'en' ? region.labelEn : region.labelKo}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label={copy.placeLabel}>
+              <input
+                value={draft.venue}
+                maxLength={MAX_VENUE_CHARS}
+                placeholder={copy.venuePlaceholder}
+                onChange={(event) => patch({ venue: event.target.value })}
+              />
+            </Field>
+          </div>
+          {wrong('region')}
+          {wrong('venue')}
+          {wrong('venueTooLong')}
         </section>
 
         <TicketSection
@@ -289,6 +211,119 @@ export function CreateEvent() {
           problems={checked ? tiersWrong : []}
           blocked={blocked}
         />
+
+        {/* Everything an event can do without. It is closed on arrival: five fields and one
+            button is the whole of making an event, and a screen that opens with fourteen of
+            them is the screen the founder could not finish (plan section B-2). */}
+        <details
+          className="more"
+          open={more}
+          onToggle={(event) => setMore(event.currentTarget.open)}
+        >
+          <summary>{copy.more}</summary>
+
+          <section id="scene-body">
+            <Field label={copy.bodyLabel}>
+              <textarea
+                value={draft.description}
+                rows={6}
+                maxLength={MAX_BODY_CHARS}
+                placeholder={copy.bodyPlaceholder}
+                onChange={(event) => patch({ description: event.target.value })}
+              />
+            </Field>
+            <p className="muted">
+              {fmt(copy.count, { count: charCount(draft.description), max: MAX_BODY_CHARS })}
+            </p>
+            {wrong('body')}
+          </section>
+
+          <section id="scene-tags">
+            {/* One list, shared with the 탐색 filter, so a theme an organiser picks is a theme
+                an attendee can find (shared/eventThemes.ts). */}
+            <Field label={copy.themeLabel}>
+              <select
+                value={String(draft.category)}
+                onChange={(event) => patch({ category: Number(event.target.value) })}
+              >
+                {THEME_CODES.map((code) => (
+                  <option key={code} value={String(code)}>
+                    {themes[code]}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            <h2>{copy.tagsLabel}</h2>
+            <p className="muted">{copy.tagsHelp}</p>
+            <div className="chip-row">
+              {draft.tags.map((entry) => (
+                <button
+                  key={entry}
+                  type="button"
+                  className="chip chip--on"
+                  aria-label={fmt(copy.tagRemove, { tag: entry })}
+                  onClick={() => patch({ tags: draft.tags.filter((kept) => kept !== entry) })}
+                >
+                  {entry}
+                </button>
+              ))}
+            </div>
+            <Field label={copy.tagAdd}>
+              <input
+                value={tag}
+                maxLength={MAX_TAG_CHARS}
+                placeholder={copy.tagPlaceholder}
+                disabled={draft.tags.length >= MAX_TAGS}
+                onChange={(event) => setTag(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter') return;
+                  event.preventDefault();
+                  addTag();
+                }}
+              />
+            </Field>
+            <Button variant="ghost" disabled={draft.tags.length >= MAX_TAGS} onClick={addTag}>
+              {copy.tagAdd}
+            </Button>
+            {wrong('tags')}
+          </section>
+
+          <section>
+            <h2>{copy.timeLabel}</h2>
+            {/* Two hours after the start until somebody says otherwise, and the derived value
+                is what this box shows — so opening the fold never blanks the field. */}
+            <Field label={copy.endsAt}>
+              <input
+                type="datetime-local"
+                value={toLocalInput(endsAtOf(draft))}
+                onChange={(event) => patch({ endsAt: fromLocalInput(event.target.value) })}
+              />
+            </Field>
+            <p className="muted">{copy.endsAtHelp}</p>
+            <Toggle
+              label={copy.holdersOnly}
+              checked={draft.timeHidden}
+              onChange={(on) => patch({ timeHidden: on })}
+              help={copy.timeHiddenHelp}
+            />
+            <p className="muted">{copy.saleHelp}</p>
+            {wrong('endsAt')}
+            {wrong('schedule')}
+          </section>
+
+          <section>
+            <h2>{copy.placeLabel}</h2>
+            <Toggle
+              label={copy.holdersOnly}
+              checked={draft.venueHidden}
+              onChange={(on) => patch({ venueHidden: on })}
+              help={`${copy.venueHiddenHelp} · ${copy.venueHiddenOneWay}`}
+            />
+          </section>
+
+          <TicketExtras draft={draft} patch={patch} />
+        </details>
 
         {unsponsored ? <UnsponsoredNotice /> : null}
         {problem !== '' ? <Alert tone="error">{copy.publishProblems[problem]}</Alert> : null}

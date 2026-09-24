@@ -35,7 +35,9 @@ export interface TierCardProps {
  * way left to repair it.
  */
 export function TierCard({ index, tier, title, removable, onPatch, onRemove }: TierCardProps) {
-  const copy = useOrganizerCopy().scene.tiers;
+  const scene = useOrganizerCopy().scene;
+  const copy = scene.tiers;
+  const more = scene.more;
   const paid = tier.currency !== 'free';
   const art = tierArt(tier);
 
@@ -72,14 +74,20 @@ export function TierCard({ index, tier, title, removable, onPatch, onRemove }: T
           onChange={(event) => onPatch({ name: event.target.value })}
         />
       </Field>
-      <div className="tier-card__pair">
-        <Field label={copy.supply}>
-          <input
-            value={String(tier.supply)}
-            inputMode="numeric"
-            onChange={(event) => onPatch({ supply: whole(event.target.value) })}
-          />
-        </Field>
+      <p className="muted">{copy.nameHelp}</p>
+      <Field label={copy.supply}>
+        <input
+          value={String(tier.supply)}
+          inputMode="numeric"
+          onChange={(event) => onPatch({ supply: whole(event.target.value) })}
+        />
+      </Field>
+
+      {/* The per-person limit and the price are answers almost nobody changes — one each, free
+          — so they wait behind the fold with everything else optional (plan section B-2). A
+          paid kind is the exception and opens it, because it is blocking the button. */}
+      <details className="more" open={paid}>
+        <summary>{more}</summary>
         <Field label={copy.maxPerWallet}>
           <input
             value={String(tier.maxPerWallet)}
@@ -87,31 +95,31 @@ export function TierCard({ index, tier, title, removable, onPatch, onRemove }: T
             onChange={(event) => onPatch({ maxPerWallet: whole(event.target.value) })}
           />
         </Field>
-      </div>
 
-      <p className="muted">{copy.price}</p>
-      <div className="chip-row">
-        {CURRENCIES.map((currency) => (
-          <Chip
-            key={currency}
-            label={currency === 'free' ? copy.free : currency}
-            selected={tier.currency === currency}
-            onClick={() => onPatch({ currency })}
-          />
-        ))}
-      </div>
-      {paid ? (
-        <>
-          <Field label={copy.amount}>
-            <input
-              value={String(tier.amount)}
-              inputMode="numeric"
-              onChange={(event) => onPatch({ amount: whole(event.target.value) })}
+        <p className="muted">{copy.price}</p>
+        <div className="chip-row">
+          {CURRENCIES.map((currency) => (
+            <Chip
+              key={currency}
+              label={currency === 'free' ? copy.free : currency}
+              selected={tier.currency === currency}
+              onClick={() => onPatch({ currency })}
             />
-          </Field>
-          <Alert tone="warn">{copy.paidBlocked}</Alert>
-        </>
-      ) : null}
+          ))}
+        </div>
+        {paid ? (
+          <>
+            <Field label={copy.amount}>
+              <input
+                value={String(tier.amount)}
+                inputMode="numeric"
+                onChange={(event) => onPatch({ amount: whole(event.target.value) })}
+              />
+            </Field>
+            <Alert tone="warn">{copy.paidBlocked}</Alert>
+          </>
+        ) : null}
+      </details>
     </li>
   );
 }

@@ -11,7 +11,7 @@ import type { EventDraft } from '../../shared/api/firestore';
 import { buildEventMeta, buildTiers, type ChainDraft } from './buildEventMeta';
 import type { OrganizerCopy } from '../copy';
 import { saveDraft, type LifecycleProblem } from '../lifecycle';
-import { eventProblems, normalizeTags, saleWindow, tierProblems } from './draftRules';
+import { endsAtOf, eventProblems, normalizeTags, saleWindow, tierProblems } from './draftRules';
 import {
   followUpPlan, followUpsDone, runFollowUps, type FollowUpPlan, type FollowUpResult,
 } from './followUps';
@@ -116,7 +116,8 @@ function toChainDraft(draft: EventDraft, now: number): ChainDraft {
     regionCode: draft.regionCode,
     category: draft.category,
     startsAt: draft.startsAt,
-    endsAt: draft.endsAt,
+    // The derived end when the organiser never opened `더 설정하기`; theirs when they did.
+    endsAt: endsAtOf(draft),
     saleStart,
     saleEnd,
     transferable: draft.transferable,

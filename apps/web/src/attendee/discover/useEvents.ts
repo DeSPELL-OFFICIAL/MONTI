@@ -3,6 +3,7 @@ import { keccak256, toBytes } from 'viem';
 import { gql } from '../../shared/envio/client';
 import { EVENTS_QUERY, type EnvioEvent } from '../../shared/envio/queries';
 import { fetchEventMetadata, type EventMetadata } from '../../shared/envio/ipfs';
+import { isThemeCode } from '../../shared/eventThemes';
 
 export type DateRange = 'all' | 'today' | 'week' | 'month';
 
@@ -29,7 +30,6 @@ const STORAGE_KEY = 'monti.discover.filters';
 const DAY_MS = 86_400_000;
 
 export const REGION_CODES = ['KR-11', 'KR-26', 'KR-28', 'KR-30', 'KR-41', 'KR-48'] as const;
-export const CATEGORY_CODES = [0, 1, 2, 3] as const;
 export const DEFAULT_FILTERS: DiscoverFilters = { range: 'all', region: '', category: 'all', search: '' };
 
 const RANGES: ReadonlySet<string> = new Set<DateRange>(['all', 'today', 'week', 'month']);
@@ -91,7 +91,7 @@ export function loadFilters(): DiscoverFilters {
           ? saved.region
           : '',
       category:
-        typeof saved.category === 'number' && (CATEGORY_CODES as readonly number[]).includes(saved.category)
+        typeof saved.category === 'number' && isThemeCode(saved.category)
           ? saved.category
           : 'all',
       // A box that came back full would make a reopened screen look empty for no reason.

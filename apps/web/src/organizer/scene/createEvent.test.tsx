@@ -34,6 +34,8 @@ vi.mock('../../shared/config', async (orig) => ({
 }));
 
 const { CreateEvent } = await import('./CreateEvent');
+const { THEME_CODES } = await import('../../shared/eventThemes');
+const { toLocalInput } = await import('./datetime');
 const { ko: sharedCopy } = await import('../../shared/copy/index');
 const { EVENT_DRAFT_KEY, emptyEventDraft } = await import('../useEventDraft');
 const { organizerCopy } = await import('../copy');
@@ -91,18 +93,39 @@ beforeEach(() => {
 });
 
 describe('the scene layout', () => {
-  it('puts the poster card above every field, with the tickets in the same scroll', async () => {
+  /**
+   * Five fields and one button (plan section B-2). The poster, the title, the start, the place
+   * and the one ticket kind are what an event needs; everything else waits behind the fold.
+   */
+  it('shows five fields and folds the rest away', async () => {
     open();
     await waitFor(() => expect(listEventDrafts).toHaveBeenCalled());
-    const headings = screen.getAllByRole('heading', { level: 2 }).map((node) => node.textContent);
-    expect(headings).toEqual([
-      copy.poster, copy.themeLabel, copy.tagsLabel, copy.placeLabel, copy.timeLabel,
-      copy.tiers.title, copy.tiers.rules,
-    ]);
-    expect(screen.getByLabelText(copy.titleLabel)).toBeInTheDocument();
-    expect(screen.getByLabelText(copy.bodyLabel)).toBeInTheDocument();
-    // The ticket screen is gone: its one kind is a section here (plan section B-1).
-    expect(screen.getByLabelText(copy.tiers.name)).toBeInTheDocument();
+    // Two folds carry the same word: the kind card's own, and the scene's — this is the
+    // scene's, which comes last.
+    const folds = screen.getAllByText(copy.more);
+    expect(folds).toHaveLength(2);
+    expect(folds.every((summary) => (summary.closest('details') as HTMLDetailsElement).open)).toBe(false);
+
+    for (const field of [copy.titleLabel, copy.startsAt, copy.regionLabel, copy.placeLabel, copy.tiers.name]) {
+      expect(screen.getByLabelText(field).closest('details')).toBeNull();
+    }
+    // The poster card and the ticket kind are the two that are not plain boxes.
+    expect(screen.getByRole('heading', { level: 2, name: copy.poster }).closest('details')).toBeNull();
+    expect(screen.getByLabelText(copy.tiers.supply).closest('details')).toBeNull();
+
+    // And everything the founder never has to see again.
+    for (const folded of [copy.bodyLabel, copy.themeLabel, copy.tagAdd, copy.endsAt, copy.tiers.maxPerWallet]) {
+      expect(screen.getByLabelText(folded).closest('details')).not.toBeNull();
+    }
+  });
+
+  it('keeps the tickets in the same scroll as the event', async () => {
+    open();
+    await waitFor(() => expect(listEventDrafts).toHaveBeenCalled());
+    // The ticket screen is gone: its one kind is a section here (plan section B-1), and it
+    // starts named, so nothing on this screen is a required box that opens empty.
+    expect(screen.getByLabelText(copy.tiers.name)).toHaveValue('일반');
+    expect(screen.getByLabelText(copy.tiers.supply)).toHaveValue('100');
   });
 
   it('shows the organisation number nowhere: the address already carries it', async () => {
@@ -239,23 +262,42 @@ describe('tags and the two visibility switches', () => {
     open();
     await waitFor(() => expect(listEventDrafts).toHaveBeenCalled());
 
+    // Both live behind the fold now; the time comes first there, as it does above it.
     const switches = screen.getAllByRole('checkbox', { name: copy.holdersOnly });
     expect(switches).toHaveLength(2);
     await user.click(switches[0] as HTMLElement);
-    expect(mirror()).toMatchObject({ venueHidden: true, timeHidden: false });
+    expect(mirror()).toMatchObject({ venueHidden: false, timeHidden: true });
     await user.click(switches[1] as HTMLElement);
     expect(mirror()).toMatchObject({ venueHidden: true, timeHidden: true });
 
     expect(screen.getByText(new RegExp(copy.venueHiddenOneWay))).toBeInTheDocument();
   });
 
-  it('picks a theme with a chip rather than a dropdown', async () => {
+  /** Twelve themes now, so a row of chips is a wall of them: one dropdown instead. */
+  it('picks a theme from the shared list rather than a row of chips', async () => {
     const user = userEvent.setup();
     open();
     await waitFor(() => expect(listEventDrafts).toHaveBeenCalled());
-    await user.click(screen.getByRole('button', { name: copy.theme2 }));
-    expect(mirror().category).toBe(2);
-    expect(screen.getByRole('button', { name: copy.theme2 })).toHaveAttribute('aria-pressed', 'true');
+    const select = screen.getByLabelText(copy.themeLabel);
+    expect(select.tagName).toBe('SELECT');
+
+    await user.selectOptions(select, '4');
+    expect(mirror().category).toBe(4);
+    // Every theme an attendee can filter by is a theme an organiser can pick: one list.
+    const offered = [...(select as HTMLSelectElement).options].map((option) => Number(option.value));
+    expect(offered).toEqual([...THEME_CODES]);
+  });
+
+  it('starts the end time two hours after the start, without being asked', async () => {
+    const user = userEvent.setup();
+    open();
+    await waitFor(() => expect(listEventDrafts).toHaveBeenCalled());
+    await user.type(screen.getByLabelText(copy.startsAt), '2026-10-13T19:00');
+
+    const startsAt = mirror().startsAt;
+    // The draft keeps what was typed; the derived end is what the folded box shows.
+    expect(mirror().endsAt).toBe(0);
+    expect(screen.getByLabelText(copy.endsAt)).toHaveValue(toLocalInput(startsAt + 7_200));
   });
 });
 

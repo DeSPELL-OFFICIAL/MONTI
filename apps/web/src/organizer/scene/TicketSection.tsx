@@ -53,6 +53,30 @@ export function TicketSection({ draft, patch, problems, blocked }: TicketSection
         ))}
       </ul>
 
+      {problems
+        .filter((problem) => problem !== 'paidTier')
+        .map((problem) => (
+          <p className="problem" key={problem}>
+            {copy.tierProblems[problem]}
+          </p>
+        ))}
+      {blocked ? <Alert tone="warn">{copy.tierProblems.paidTier}</Alert> : null}
+    </section>
+  );
+}
+
+/**
+ * The ticket settings behind `더 설정하기`: a second kind, and the three rules that belong to
+ * the event. They are folded because an event with one free kind needs none of them — and the
+ * three rules are event-wide (`transferable`, `transferCutoffSeconds` and `requireKyc` live on
+ * `EventMeta`, and `Tier` has no room for any of them), so a per-kind switch would be a lie.
+ */
+export function TicketExtras({ draft, patch }: Pick<TicketSectionProps, 'draft' | 'patch'>) {
+  const copy = useOrganizerCopy().scene;
+
+  return (
+    <section>
+      <h2>{copy.tiers.title}</h2>
       <Button
         variant="ghost"
         disabled={draft.tiers.length >= MAX_TIERS}
@@ -86,15 +110,6 @@ export function TicketSection({ draft, patch, problems, blocked }: TicketSection
         onChange={(on) => patch({ requireKyc: on })}
         help={copy.tiers.requireKycHelp}
       />
-
-      {problems
-        .filter((problem) => problem !== 'paidTier')
-        .map((problem) => (
-          <p className="problem" key={problem}>
-            {copy.tierProblems[problem]}
-          </p>
-        ))}
-      {blocked ? <Alert tone="warn">{copy.tierProblems.paidTier}</Alert> : null}
     </section>
   );
 }

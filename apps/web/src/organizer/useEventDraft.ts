@@ -46,8 +46,16 @@ const DEFAULT_DESIGN = 'a';
 
 const CURRENCIES: readonly EventDraftCurrency[] = ['free', 'MON', 'USDT', 'USDC'];
 
+/**
+ * The name a first ticket kind starts with. It is filled in rather than blank because the one
+ * required field on a kind is its name, and a blank required field on a screen somebody just
+ * opened is the founder's "왜 또 적어야 하지" (plan section B-3). `일반` is what almost every
+ * event's first kind is called anyway, and it is one tap to change.
+ */
+const DEFAULT_TIER_NAME = '일반';
+
 export const emptyEventDraftTier: EventDraftTier = {
-  name: '', supply: 100, maxPerWallet: 1,
+  name: DEFAULT_TIER_NAME, supply: 100, maxPerWallet: 1,
   currency: 'free', amount: 0,
   design: DEFAULT_DESIGN, imageCid: '',
 };
