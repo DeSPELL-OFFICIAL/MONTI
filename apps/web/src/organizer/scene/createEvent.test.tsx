@@ -90,6 +90,17 @@ function mirror(): EventDraft {
   return JSON.parse(raw ?? '{}').draft as EventDraft;
 }
 
+/**
+ * The scene's own `더 설정하기`, which is the last of the two that carry that word — the other
+ * belongs to a ticket kind's card.
+ */
+function fold(): HTMLDetailsElement {
+  const summaries = screen.getAllByText(copy.more);
+  const details = summaries.at(-1)?.closest('details');
+  if (!details) throw new Error('no fold on screen');
+  return details;
+}
+
 function seed(id: string, draft: Partial<EventDraft>, updatedAt = 1_000): void {
   store = [...store, { id, updatedAt, data: { ...emptyEventDraft, ...draft } }];
 }
@@ -192,6 +203,37 @@ describe('the one button', () => {
     await waitFor(() => expect(screen.getByLabelText(copy.titleLabel)).toHaveValue(READY.title));
     await userEvent.setup().click(screen.getByRole('button', { name: copy.tiers.create }));
     expect(screen.getByText(copy.problems.schedule)).toBeInTheDocument();
+    // Both times live behind the fold, so the sentence is only a sentence once it is open.
+    expect(fold().open).toBe(true);
+  });
+
+  /**
+   * The half of `더 설정하기` nobody thought about: seven of the ten rules are about fields the
+   * scene starts with hidden, and a sentence printed inside a closed `<details>` is a 만들기
+   * that does nothing at all as far as the organiser can see. The fold opens first, and only
+   * then is the section scrolled to.
+   */
+  it('opens the fold when what is wrong is hiding inside it', async () => {
+    seed('d-1', { ...READY, description: 'ㄱ'.repeat(2_001) });
+    open('/org/new/d-1');
+    await waitFor(() => expect(screen.getByLabelText(copy.titleLabel)).toHaveValue(READY.title));
+    expect(fold().open).toBe(false);
+
+    await userEvent.setup().click(screen.getByRole('button', { name: copy.tiers.create }));
+    expect(fold().open).toBe(true);
+    expect(screen.getByText(copy.problems.body)).toBeInTheDocument();
+    // It is inside the fold and not beside it, which is the whole reason the fold had to open.
+    expect(screen.getByText(copy.problems.body).closest('details')).toBe(fold());
+  });
+
+  /** And it stays shut for a field that was on screen the whole time: nothing was hidden. */
+  it('leaves the fold shut when the missing field was never in it', async () => {
+    seed('d-1', { ...READY, title: '' });
+    open('/org/new/d-1');
+    await waitFor(() => expect(screen.getByLabelText(copy.titleLabel)).toHaveValue(''));
+    await userEvent.setup().click(screen.getByRole('button', { name: copy.tiers.create }));
+    expect(screen.getByText(copy.problems.title)).toBeInTheDocument();
+    expect(fold().open).toBe(false);
   });
 });
 

@@ -36,7 +36,8 @@ vi.mock('../../shared/api/functions', async (orig) => ({
 const { setSession } = await import('../../shared/session');
 const { Discover } = await import('./Discover');
 const { EventDetail } = await import('./EventDetail');
-const { METADATA_CONCURRENCY, mapWithPool } = await import('./useEvents');
+const { DEFAULT_FILTERS, METADATA_CONCURRENCY, loadFilters, mapWithPool, saveFilters } =
+  await import('./useEvents');
 const { THEME_CODES, themeLabels } = await import('../../shared/eventThemes');
 const { ko } = await import('../../shared/copy/index');
 
@@ -208,6 +209,24 @@ describe('Discover', () => {
       .toEqual(['all', ...THEME_CODES.map(String)]);
     expect([...theme.options].map((option) => option.textContent))
       .toEqual(['전체', ...THEME_CODES.map((code) => themeLabels(ko)[code])]);
+  });
+
+  /**
+   * The stored filter is the one place a theme number arrives from outside the twelve: a
+   * device that kept a filter from a build with a different list, or a hand-edited
+   * `localStorage`. A number nothing matches would open 탐색 on an empty screen with a theme
+   * box showing nothing selected, and no way to tell that the filter — not the city — is why.
+   */
+  it('keeps a stored theme only while it is one of the twelve', () => {
+    for (const category of THEME_CODES) {
+      saveFilters({ ...DEFAULT_FILTERS, category });
+      expect(loadFilters().category, String(category)).toBe(category);
+    }
+    // 12 is the first number past the list, and a negative one is what a bad edit looks like.
+    for (const bad of [12, -1, 99]) {
+      saveFilters({ ...DEFAULT_FILTERS, category: bad });
+      expect(loadFilters().category, String(bad)).toBe('all');
+    }
   });
 
   it('remembers the last filter across mounts', async () => {

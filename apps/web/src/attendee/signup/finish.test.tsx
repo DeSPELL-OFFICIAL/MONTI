@@ -1,7 +1,7 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ko } from '../../shared/copy/index';
 
 const PERSON_ID = `0x${'aa'.repeat(32)}`;
@@ -73,6 +73,7 @@ const { Register } = await import('./Register');
 const { Done } = await import('./Done');
 const { readSignup } = await import('./useSignup');
 const { getSession, setSession } = await import('../../shared/session');
+const { MAX_DISPLAY_NAME_CHARS } = await import('../../shared/api/firestore');
 
 /** Every screen here resumes from what the step before it left in sessionStorage. */
 function seedSignup(state: Record<string, unknown>): void {
@@ -97,6 +98,10 @@ beforeEach(() => {
   sessionStorage.clear();
   setSession({ status: 'anonymous' });
   getPlatform.mockReturnValue('ios');
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 /**
@@ -177,6 +182,28 @@ describe('register · one screen, one tap', () => {
     expect(screen.getByText(ko.signup.deviceWorking)).toBeInTheDocument();
     letDeviceKeyGo();
     await waitFor(() => expect(navigate).toHaveBeenCalledWith('/signup/done'));
+  });
+
+  /**
+   * `registerIdentity` waits for finality and can take thirty seconds. A percentage bar over a
+   * wait nobody can predict is a lie, so the screen says one sentence instead — and only after
+   * ten seconds, because saying it straight away would make every ordinary run look broken.
+   */
+  it('says nothing about the wait until ten seconds have actually passed', async () => {
+    vi.useFakeTimers();
+    // Held open on purpose: the sentence belongs to a run that is still going.
+    ensureDeviceKey.mockImplementationOnce(() => new Promise(() => undefined));
+    renderScreen(<Register />);
+    // `fireEvent` rather than `userEvent`, which schedules waits of its own on the same clock.
+    await act(async () => { fireEvent.click(start()); });
+    await act(async () => { vi.advanceTimersByTime(0); });
+    expect(ensureDeviceKey).toHaveBeenCalled();
+
+    await act(async () => { vi.advanceTimersByTime(9_000); });
+    expect(screen.queryByText(ko.signup.registerSlow)).toBeNull();
+
+    await act(async () => { vi.advanceTimersByTime(1_500); });
+    expect(screen.getByText(ko.signup.registerSlow)).toBeInTheDocument();
   });
 
   it('says the ceremony was cancelled and never calls the server', async () => {
@@ -381,6 +408,25 @@ describe('done screen', () => {
 
     await waitFor(() => expect(saveUserProfile).toHaveBeenCalledWith({ displayName: '김태완' }));
     expect(navigate).toHaveBeenCalledWith('/');
+  });
+
+  /**
+   * `users/{uid}` is written under a rule that measures this field (`displayName is string &&
+   * size() <= 24`), and the rule refuses the **whole document** rather than one key — so a
+   * twenty-fifth character would not be a message under the box, it would be a save that never
+   * happens, on the last screen of signing up.
+   */
+  it('stops the name where the security rule stops it', async () => {
+    renderScreen(<Done />);
+    const box = screen.getByRole('textbox');
+    expect(box).toHaveAttribute('maxlength', String(MAX_DISPLAY_NAME_CHARS));
+    expect(MAX_DISPLAY_NAME_CHARS).toBe(24);
+
+    await userEvent.type(box, 'ㄱ'.repeat(30));
+    await userEvent.click(screen.getByRole('button', { name: ko.signup.doneCta }));
+    await waitFor(() => expect(saveUserProfile).toHaveBeenCalled());
+    const sent = saveUserProfile.mock.calls[0]?.[0]?.displayName ?? '';
+    expect([...sent]).toHaveLength(24);
   });
 
   it('writes nothing at all when the name is left blank, and still finishes', async () => {

@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { emptyEventDraft } from '../useEventDraft';
+import { emptyEventDraft, emptyEventDraftTier } from '../useEventDraft';
 import type { EventDraft } from '../../shared/api/firestore';
+import { TICKET_BACKDROPS } from '../../shared/ui/ticketArt/presets';
 import {
-  DEFAULT_EVENT_SECONDS, MAX_TAGS, MAX_TIER_NAME_CHARS, endsAtOf, eventProblems, normalizeTags,
-  paidTiers, saleWindow, tierArt, tierProblems,
+  DEFAULT_EVENT_SECONDS, MAX_TAGS, MAX_TIER_NAME_CHARS, TICKET_ART_PRESETS, endsAtOf,
+  eventProblems, normalizeTags, paidTiers, saleWindow, tierArt, tierProblems,
 } from './draftRules';
 
 /** A draft with nothing left to fix, so each case below can break exactly one rule. */
@@ -182,5 +183,50 @@ describe('tierArt', () => {
 
   it('lets an uploaded picture win, and keeps the design the draft still remembers', () => {
     expect(tierArt({ ...tier, design: 'd', imageCid: 'bafkart' })).toEqual({ imageCid: 'bafkart' });
+  });
+});
+
+describe('the preset alphabet', () => {
+  /**
+   * Four places hold these letters — this list, the union `TicketArtPreset`, the validator in
+   * `shared/api/firestore.ts` and the drawings themselves — and the Firestore rule validates
+   * `^[a-l]$` on top of them. A letter this list offers that one of the others has never heard
+   * of does not draw a wrong picture: it fails the autosave for the **whole draft document**
+   * the moment somebody picks it, with nothing on screen saying which box did it.
+   */
+  it('is the twelve letters a to l, each once and in order', () => {
+    expect([...TICKET_ART_PRESETS]).toEqual(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l']);
+    expect(new Set(TICKET_ART_PRESETS).size).toBe(12);
+  });
+
+  /** A letter with no drawing behind it is a blank ticket, and nothing else would say so. */
+  it('has a drawing for every letter, and draws nothing that is not one', () => {
+    for (const preset of TICKET_ART_PRESETS) {
+      expect(TICKET_BACKDROPS[preset], preset).toBeTruthy();
+    }
+    expect(Object.keys(TICKET_BACKDROPS).sort()).toEqual([...TICKET_ART_PRESETS].sort());
+  });
+
+  /** The fold that reaches `saveEventArt`: every letter survives it as itself. */
+  it('keeps each of the twelve through the fold that reaches the callable', () => {
+    const tier = READY.tiers[0] as EventDraft['tiers'][number];
+    for (const preset of TICKET_ART_PRESETS) {
+      expect(tierArt({ ...tier, design: preset, imageCid: '' }), preset).toEqual({ preset });
+    }
+    // A thirteenth is not a letter anything downstream would accept, so it folds back.
+    expect(tierArt({ ...tier, design: 'm', imageCid: '' })).toEqual({ preset: 'a' });
+  });
+});
+
+describe('what a kind starts as', () => {
+  /**
+   * The founder opened the scene and found a required box with nothing in it (plan section
+   * B-3). A kind's name is the one thing `tierProblems` insists on, so it is filled in — and
+   * `일반` is what almost every first kind is called. A blank default would put a red line
+   * under a box nobody had touched the first time 만들기 was pressed.
+   */
+  it('is named 일반, so the one required field on it is already answered', () => {
+    expect(emptyEventDraftTier.name).toBe('일반');
+    expect(tierProblems(emptyEventDraft)).toEqual([]);
   });
 });

@@ -42,6 +42,7 @@ vi.mock('../../shared/config', async (orig) => ({
 const { CreateEvent } = await import('./CreateEvent');
 const { EVENT_DRAFT_KEY, emptyEventDraft, emptyEventDraftTier } = await import('../useEventDraft');
 const { organizerCopy } = await import('../copy');
+const { TICKET_ART_PRESETS } = await import('./draftRules');
 const { ko: sharedCopy } = await import('../../shared/copy/index');
 const copy = organizerCopy.ko.scene;
 
@@ -177,6 +178,26 @@ describe('the picture', () => {
     expect(mirror().tiers[0]?.design).toBe('c');
     expect(JSON.stringify(mirror())).not.toContain('aurora');
     expect(screen.getByRole('button', { name: copy.tiers.artNames.c })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  /**
+   * Twelve drawings and the upload, on the card where the choice is made. The row and the
+   * names are driven off the one alphabet (`TICKET_ART_PRESETS`) and a record typed by it, so
+   * a thirteenth drawing added without a name would fail the build — but a drawing the row
+   * silently stopped offering would not, and nobody could pick it.
+   */
+  it('offers every one of the twelve drawings, each under its own name', async () => {
+    open();
+    await ready();
+    for (const preset of TICKET_ART_PRESETS) {
+      expect(
+        screen.getByRole('button', { name: copy.tiers.artNames[preset] }),
+        preset,
+      ).toBeInTheDocument();
+    }
+    // The upload chip sits at the end of the same row and is not one of the twelve.
+    expect(new Set(TICKET_ART_PRESETS).size).toBe(12);
+    expect(screen.getByRole('button', { name: copy.tiers.artUpload })).toBeInTheDocument();
   });
 
   it('uploads one of their own through the same cropper, as a ticket and not a poster', async () => {

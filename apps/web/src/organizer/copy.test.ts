@@ -34,6 +34,21 @@ describe('organizer copy', () => {
     }
   });
 
+  /**
+   * The theme names live in `shared/copy` and are read through `shared/eventThemes`, because
+   * the organiser's dropdown and 탐색's filter have to offer the same twelve. This file carried
+   * its own `theme0`..`theme3` until the list grew; a second list here would drift silently —
+   * an organiser picking 페스티벌 that nobody could ever filter for.
+   */
+  it('names no theme of its own, because one list owns all twelve', () => {
+    for (const locale of ['ko', 'en'] as const) {
+      const scene = organizerCopy[locale].scene as Record<string, unknown>;
+      expect(Object.keys(scene).filter((key) => /^theme\d+$/.test(key)), locale).toEqual([]);
+      // The label for the box stays here: it is the scene's own word, not a theme's name.
+      expect(scene.themeLabel).toBeTruthy();
+    }
+  });
+
   it('carries the ruled notice for an organiser write nothing sponsors yet', () => {
     expect(organizerCopy.ko.unsponsored.notice).toBe('주최자 작업은 지금은 수수료 지갑이 필요해요');
     expect(organizerCopy.en.unsponsored.notice).toContain('wallet');

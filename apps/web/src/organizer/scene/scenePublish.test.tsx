@@ -216,6 +216,30 @@ describe('the publish path', () => {
     expect(deleteEventDraft).toHaveBeenCalledWith('d-42');
   });
 
+  /**
+   * The end time is behind `더 설정하기` and most organisers never open it (plan section B-3),
+   * so the number that reaches `Ticket.EventMeta` is almost always the derived one. `EventMeta`
+   * is written once and `updateEventMeta` closes at publish: an `endsAt` of 0 here would be an
+   * event that ended in 1970, with sign-ups closed before they opened, and nothing could repair
+   * it. Every reader goes through `endsAtOf`, and this is the one that proves the chain does.
+   */
+  it('sends the derived end, and closes sign-ups on it, when nobody opened the fold', async () => {
+    open({ ...READY, endsAt: 0 });
+    await create();
+    await waitFor(() => expect(screen.getByText('landed:/org/new/done/12')).toBeInTheDocument());
+
+    const derived = BigInt(READY.startsAt + 7_200);
+    const meta = ticketOp.mock.calls[0]?.[0].args[0] as {
+      startsAt: bigint; endsAt: bigint; saleStart: bigint; saleEnd: bigint;
+    };
+    expect(meta.endsAt).toBe(derived);
+    // `Ticket.createEvent` only asks that `saleStart < saleEnd`; the derived end is what makes
+    // that true without a second date field ever being shown.
+    expect(meta.saleEnd).toBe(derived);
+    expect(meta.saleStart).toBeLessThan(meta.saleEnd);
+    expect(meta.startsAt).toBeLessThan(meta.endsAt);
+  });
+
   it('keeps a hidden venue out of the pin and puts it behind the callable instead', async () => {
     open({ ...READY, venueHidden: true, timeHidden: true });
     await create();
