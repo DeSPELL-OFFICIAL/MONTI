@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -228,6 +228,32 @@ describe('resolving the organisation inside 만들기', () => {
     await waitFor(() => expect(pinEventMetadata).toHaveBeenCalledWith(
       expect.objectContaining({ orgId: '9' }),
     ));
+  });
+
+  /**
+   * The same re-entry, pressed twice in a row. `createOrganizerForMe` is not idempotent, so
+   * the second press must find the button already refusing: the phase is claimed before the
+   * indexer is asked, and 만들기 goes dead the moment the first press starts.
+   */
+  it('makes one organisation when 만들기 is double-tapped on that same draft', async () => {
+    let letTheIndexerAnswer = (): void => undefined;
+    orgRefetch.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => { letTheIndexerAnswer = resolve; });
+      return [];
+    });
+    open({ ...READY, orgPendingName: '몬티 크루' });
+    await ready();
+
+    const button = screen.getByRole('button', { name: copy.tiers.create });
+    await act(async () => { fireEvent.click(button); });
+    // The indexer has not answered; without the fix the button is still live here.
+    expect(button).toBeDisabled();
+    await act(async () => { fireEvent.click(button); });
+
+    await act(async () => { letTheIndexerAnswer(); });
+    await waitFor(() => expect(createOrganizerForMe).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(pinEventMetadata).toHaveBeenCalledTimes(1));
+    expect(orgRefetch).toHaveBeenCalledTimes(1);
   });
 
   it('makes one after all when the second look still finds nothing', async () => {

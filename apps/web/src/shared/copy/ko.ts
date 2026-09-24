@@ -36,6 +36,8 @@ export const ko = {
     passkeyCancelled: '잠금 설정을 취소했어요. 다시 시도해 주세요.',
     passkeyUnsupported: '이 휴대폰에서는 얼굴·지문 잠금을 쓸 수 없어요.',
     passkeyWorking: '잠금을 만들고 있어요',
+    // 챌린지가 아직 안 왔을 때만 보인다. 도착하면 알아서 이어지므로 다시 누를 일은 없다.
+    challengeWaiting: '준비 중이에요…',
     deviceFailed: '등록하지 못했어요. 다시 시도해 주세요.',
     deviceWorking: '휴대폰을 등록하고 있어요',
     deviceBusy: '지금 처리가 밀려 있어요. 잠시 뒤 다시 눌러 주세요.',

@@ -44,11 +44,20 @@ const TITLE_LINE_HEIGHT = 86;
 /** The last title line's baseline. Extra lines are stacked upwards from it, never downwards. */
 const TITLE_BASELINE = 1090;
 const TIER_SIZE = 34;
+/** The kind is tracked out, and every character pays for it — so the fit has to count it. */
+const TIER_SPACING = 4;
 /** How far the kind's baseline sits above the top of the title block. */
 const TIER_GAP = 34;
+/** The name on the stub. */
+const HOLDER_SIZE = 46;
 const MAX_TITLE_LINES = 2;
 /** The room one title line has, in the em units {@link textWidth} counts. */
 const TITLE_UNITS = (TICKET_WIDTH - PAD * 2) / TITLE_SIZE;
+/**
+ * The room a one-line string has, in the frame's own units. The title block is inset on both
+ * sides; the kind and the name start at the left margin and run to the frame's edge.
+ */
+const LINE_BUDGET = TICKET_WIDTH - PAD;
 
 /** The tear, and the stub below it. */
 const PERFORATION_Y = 1180;
@@ -120,6 +129,23 @@ function ellipsise(line: string, maxUnits: number): string {
   const chars = [...line];
   while (chars.length > 0 && textWidth(chars.join('')) + WIDE_WIDTH > maxUnits) chars.pop();
   return `${chars.join('').trimEnd()}${ELLIPSIS}`;
+}
+
+/**
+ * A string the layout gives exactly one line to — the ticket kind and the name on the stub —
+ * cut to fit {@link LINE_BUDGET} at the size and tracking it is drawn at.
+ *
+ * Neither is a title and neither has a second line reserved beneath it, so the answer to one
+ * that does not fit is an ellipsis rather than a wrap. Without this a 24-character Korean name
+ * (`24 x 46 = 1104`) or a 40-character Korean kind (`40 x 38 = 1520`) — both at their own caps
+ * — run past the right edge of a 1000-unit frame and are cut mid-character by it.
+ *
+ * `spacing` is `letter-spacing`, which SVG adds to every character: charging it per em keeps
+ * the sum conservative for Korean, which is exactly one em wide.
+ */
+export function fitLine(text: string, size: number, spacing = 0): string {
+  const maxUnits = LINE_BUDGET / (size + spacing);
+  return textWidth(text) <= maxUnits ? text : ellipsise(text, maxUnits);
 }
 
 /**
@@ -207,7 +233,7 @@ export function buildTicketSvg(input: TicketSvgInput): string {
   // The stub's lines flow: an empty name does not leave a gap where a name would have been,
   // it lets the date move up into the space. Nothing on this ticket is a placeholder.
   const stubLines = [
-    { text: holder, size: 46, weight: 600, fill: '#ffffff' },
+    { text: fitLine(holder, HOLDER_SIZE), size: HOLDER_SIZE, weight: 600, fill: '#ffffff' },
     { text: dateText, size: 36, weight: 400, fill: '#aab3c5' },
   ].filter((entry) => entry.text !== '');
 
@@ -244,8 +270,9 @@ export function buildTicketSvg(input: TicketSvgInput): string {
     `<circle cx="${TICKET_WIDTH}" cy="${PERFORATION_Y}" r="30" fill="#0a0c11"/>`,
 
     line('MONTI', { x: PAD, y: 130, size: 38, weight: 700, fill: '#ffffff', spacing: 10, opacity: 0.85 }),
-    line(tierName, {
-      x: PAD, y: titleTop - TIER_GAP, size: TIER_SIZE, weight: 600, fill: '#cfd6e4', spacing: 4,
+    line(fitLine(tierName, TIER_SIZE, TIER_SPACING), {
+      x: PAD, y: titleTop - TIER_GAP, size: TIER_SIZE, weight: 600, fill: '#cfd6e4',
+      spacing: TIER_SPACING,
     }),
     ...titleLines.map((text, at) =>
       line(text, {

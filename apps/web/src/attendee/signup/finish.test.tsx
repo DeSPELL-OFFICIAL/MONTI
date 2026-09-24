@@ -168,6 +168,70 @@ describe('register · one screen, one tap', () => {
     expect(loginChallenge).not.toHaveBeenCalled();
   });
 
+  /**
+   * Minting once on arrival was only half of it. A challenge lives sixty seconds, so somebody
+   * who reads the screen for a minute before pressing used to hold a dead one — and the tap
+   * then minted a replacement, putting the `loginChallenge` round trip back between the
+   * gesture and the ceremony, which is the bug the test above exists to stop.
+   */
+  it('replaces the challenge on a timer, so a tap after fifty seconds still asks nothing', async () => {
+    vi.useFakeTimers();
+    renderScreen(<Register />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(loginChallenge).toHaveBeenCalledTimes(1);
+
+    // Fifty seconds of reading. The one minted on arrival is past its life by now; the timer
+    // at forty already replaced it, and the replacement is ten seconds old.
+    await act(async () => { await vi.advanceTimersByTimeAsync(50_000); });
+    expect(loginChallenge).toHaveBeenCalledTimes(2);
+
+    loginChallenge.mockClear();
+    await act(async () => { fireEvent.click(start()); });
+    expect(createPasskey).toHaveBeenCalledWith('MONTI', CHALLENGE);
+    expect(loginChallenge).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The other half of the same bug: a cold-started function is still answering when the screen
+   * is tapped. Calling the ceremony after that round trip earns a `NotAllowedError` and the
+   * sentence about cancelling, so the run waits out loud instead — and picks itself back up.
+   */
+  it('waits for a challenge still in flight instead of calling the authenticator late', async () => {
+    let landTheChallenge = (): void => undefined;
+    loginChallenge.mockImplementationOnce(
+      () => new Promise<{ challenge: string; expiresAt: number }>((resolve) => {
+        landTheChallenge = () => resolve({ challenge: CHALLENGE, expiresAt: 0 });
+      }),
+    );
+    renderScreen(<Register />);
+    await userEvent.click(start());
+
+    // Nothing to hand the authenticator yet, so it is not asked.
+    expect(createPasskey).not.toHaveBeenCalled();
+    expect(screen.getByText(ko.signup.challengeWaiting)).toBeInTheDocument();
+
+    landTheChallenge();
+    // Nobody presses anything a second time: the run that was already going carries on.
+    await waitFor(() => expect(createPasskey).toHaveBeenCalledWith('MONTI', CHALLENGE));
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/signup/done'));
+    expect(screen.queryByText(ko.signup.challengeWaiting)).toBeNull();
+    // One round trip, joined — not one on arrival and a second one from the tap.
+    expect(loginChallenge).toHaveBeenCalledTimes(1);
+  });
+
+  /** A phone that slept through the timer wakes holding one that is already too old. */
+  it('mints again when the tab comes back into view', async () => {
+    vi.useFakeTimers();
+    renderScreen(<Register />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(loginChallenge).toHaveBeenCalledTimes(1);
+
+    loginChallenge.mockClear();
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+    expect(loginChallenge).toHaveBeenCalledWith({ purpose: 'register' });
+    expect(loginChallenge).toHaveBeenCalledTimes(1);
+  });
+
   it('walks the dots from the lock to this phone as the run goes on', async () => {
     let letDeviceKeyGo = (): void => undefined;
     ensureDeviceKey.mockImplementationOnce(async () => {

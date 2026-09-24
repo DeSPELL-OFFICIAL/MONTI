@@ -229,8 +229,15 @@ export function usePublish(
    * Step 3 is what keeps the damage at one stray organisation: a run that dies between the
    * write and the answer leaves a name behind, and the next attempt picks up what it made
    * rather than making a second. The chain's own cap of three is the backstop.
+   *
+   * The phase is claimed on the **first line**, before anything is awaited, because 만들기 is
+   * pressable for exactly as long as it says `idle`. Step 3 awaits the indexer, so a phase
+   * claimed any later than this left the button live across that round trip: two fast presses
+   * on a re-entered draft both came back empty-handed and both called `createOrganizerForMe`
+   * — two organisations out of one draft, against a cap of three.
    */
   const resolveOrg = useCallback(async (): Promise<string> => {
+    setPhase('org');
     const known = draft.orgId.trim();
     if (known !== '') return known;
 
@@ -255,7 +262,6 @@ export function usePublish(
     // The scene refuses to send without one; this is the guard for a draft that changed
     // underneath it, and it answers `''` rather than creating an organisation called nothing.
     if (name === '') return '';
-    setPhase('org');
     // Written first, and forced out: from here on a run that dies is a run the step above
     // can pick up. `save()` swallows its own failures, so the callable still goes either way
     // — a name that did not persist is a smaller loss than an event that never got made.

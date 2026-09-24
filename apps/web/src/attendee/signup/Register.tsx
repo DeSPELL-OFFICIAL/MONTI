@@ -92,45 +92,103 @@ async function refreshClaims(): Promise<void> {
 
 /** A challenge is good for 60 seconds; one held longer than this is replaced rather than used. */
 const CHALLENGE_TTL_MS = 45_000;
+/**
+ * How often the one in hand is replaced while this screen is open. Under the server's sixty
+ * seconds and comfortably under {@link CHALLENGE_TTL_MS}, so the hand is never found empty by
+ * a tap — which is the whole point: a mint that happens inside the tap is the bug this file
+ * exists to close.
+ */
+const CHALLENGE_REFRESH_MS = 40_000;
 /** How long a step may run before the screen says so out loud. */
 const SLOW_AFTER_MS = 10_000;
 
 /**
- * The registration challenge, minted **before** the tap.
+ * The registration challenge, minted **before** the tap and kept fresh for as long as the
+ * screen is open.
  *
  * `navigator.credentials.create` may only run inside a user gesture, and that gesture's window
  * is short (Chrome allows about five seconds, Safari less). The two screens this one replaced
  * spent that window on a `loginChallenge` round trip — a cold-started function then blew the
  * budget and the browser threw `NotAllowedError`, which the screen reported as "you cancelled
- * it": a sentence about the attendee that was actually about a server. So the round trip
- * happens on arrival, and the tap finds the answer already in hand.
+ * it": a sentence about the attendee that was actually about a server.
+ *
+ * Minting once on arrival is not enough on its own. Somebody who reads the screen for a minute
+ * before pressing, or whose phone slept with it open, used to hold a challenge past
+ * {@link CHALLENGE_TTL_MS} — and the tap then minted a new one, putting the round trip back
+ * exactly where it had been taken out of. So the mint repeats on a timer and whenever the tab
+ * comes back, and {@link HeldChallenge.take} never sends anything itself.
  */
-function useRegisterChallenge(): () => Promise<string> {
-  const held = useRef<{ at: number; challenge: Promise<string> } | null>(null);
+interface HeldChallenge {
+  /**
+   * The challenge in hand, handed over. **Synchronous**: the gesture is spent on the ceremony
+   * and on nothing else. `''` means there is none ready, and the caller waits rather than
+   * putting a round trip between the tap and `navigator.credentials.create`.
+   */
+  take: () => string;
+  /** The mint already on its way, for the wait an empty {@link take} asks for. */
+  wait: () => Promise<string>;
+}
+
+function useRegisterChallenge(): HeldChallenge {
+  const held = useRef<{ at: number; challenge: string } | null>(null);
+  const flight = useRef<Promise<string> | null>(null);
 
   const mint = useCallback((): Promise<string> => {
-    const challenge = api.loginChallenge({ purpose: 'register' }).then((answer) => answer.challenge);
-    const mine = { at: Date.now(), challenge };
-    held.current = mine;
-    // A challenge that never arrived is not one to hand out: the next ask mints a fresh one
-    // rather than replaying the same rejection. The rejection itself is the caller's.
-    challenge.catch(() => {
-      if (held.current === mine) held.current = null;
-    });
-    return challenge;
+    // One at a time. The timer, the tab coming back and a tap can all ask at once, and a
+    // second round trip would only throw away the answer the first one is about to give.
+    const already = flight.current;
+    if (already !== null) return already;
+    const run = api.loginChallenge({ purpose: 'register' }).then((answer) => answer.challenge);
+    flight.current = run;
+    run.then(
+      (challenge) => {
+        if (flight.current === run) flight.current = null;
+        held.current = { at: Date.now(), challenge };
+      },
+      () => {
+        // A challenge that never arrived is not one to hand out, and it is not replayed
+        // either: the next ask mints a fresh one. The rejection itself is the caller's.
+        if (flight.current === run) flight.current = null;
+      },
+    );
+    return run;
   }, []);
 
   useEffect(() => {
-    void mint();
+    const refresh = (): void => { void mint(); };
+    refresh();
+    const timer = setInterval(refresh, CHALLENGE_REFRESH_MS);
+    // A phone that slept through the timer wakes holding one that is already too old, and the
+    // person's next act is the tap. Asking on the way back in is what stops that.
+    const woken = (): void => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+    document.addEventListener('visibilitychange', woken);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', woken);
+    };
   }, [mint]);
 
-  return useCallback((): Promise<string> => {
+  const take = useCallback((): string => {
     const mine = held.current;
     // Single-use on the server, so it is single-use here too.
     held.current = null;
-    if (mine === null || Date.now() - mine.at > CHALLENGE_TTL_MS) return mint();
-    return mine.challenge;
+    if (mine !== null && Date.now() - mine.at <= CHALLENGE_TTL_MS) return mine.challenge;
+    // Nothing usable in hand — a cold start still answering, or a mint that was refused. One
+    // is started so the wait has an end, and **not** awaited: this is still the tap.
+    void mint();
+    return '';
   }, [mint]);
+
+  const wait = useCallback(async (): Promise<string> => {
+    const challenge = await mint();
+    // Handed over, like the one above: whichever of the two gives it out, it is given out once.
+    if (held.current?.challenge === challenge) held.current = null;
+    return challenge;
+  }, [mint]);
+
+  return { take, wait };
 }
 
 /**
@@ -162,7 +220,7 @@ export function Register() {
   const navigate = useNavigate();
   const returnTo = useReturnTo();
   const finishing = returnTo !== null;
-  const takeChallenge = useRegisterChallenge();
+  const registerChallenge = useRegisterChallenge();
 
   // Somebody sent here with an account already has the first step behind them.
   const [hasPasskey] = useState(() => {
@@ -173,6 +231,8 @@ export function Register() {
   const [running, setRunning] = useState(false);
   const [done, setDone] = useState(false);
   const [slow, setSlow] = useState(false);
+  // The run is up and the challenge is not here yet. It carries on by itself the moment it is.
+  const [gettingReady, setGettingReady] = useState(false);
   const [error, setError] = useState('');
   // True once this device is known to have no key store at all — a private window. Retrying
   // would fail identically, so the only thing left to offer is finishing without one.
@@ -219,9 +279,20 @@ export function Register() {
     setStep(at);
     try {
       if (!account) {
-        // **First, and with nothing awaited in front of it but a promise already resolved.**
-        // This is the call that owns the gesture.
-        const challenge = await takeChallenge();
+        // **First, and with nothing awaited in front of it at all.** `take` answers out of the
+        // hand the timer keeps full, so `createPasskey` is reached in the same turn as the tap
+        // and the gesture is still the browser's to spend on the ceremony.
+        let challenge = registerChallenge.take();
+        if (challenge === '') {
+          // The first mint is still in flight (a cold start), or the last one was refused.
+          // Calling the ceremony late would only earn a `NotAllowedError` and the sentence
+          // about cancelling that this whole file exists to stop saying — so the screen says
+          // it is getting ready instead, and the run resumes on its own the moment the
+          // challenge lands. Nobody is asked to press anything a second time.
+          setGettingReady(true);
+          challenge = await registerChallenge.wait();
+          setGettingReady(false);
+        }
         const credential = await createPasskey(RP_NAME, challenge);
         const registered = await api.registerPasskey({
           personId,
@@ -264,8 +335,15 @@ export function Register() {
       }
       setError(message(copy, at, failure));
     } finally {
+      setGettingReady(false);
       setRunning(false);
     }
+  }
+
+  /** What the spinner says: the wait for a challenge, or the step the run has reached. */
+  function workingLine(): string {
+    if (gettingReady) return copy.signup.challengeWaiting;
+    return step === 'passkey' ? copy.signup.passkeyWorking : copy.signup.deviceWorking;
   }
 
   const labels = [copy.signup.stepPasskey, copy.signup.stepDevice, copy.signup.stepDone];
@@ -281,7 +359,7 @@ export function Register() {
       {running ? (
         <div className="working">
           <Spinner />
-          {step === 'passkey' ? copy.signup.passkeyWorking : copy.signup.deviceWorking}
+          {workingLine()}
         </div>
       ) : null}
       {running && slow ? <p className="muted">{copy.signup.registerSlow}</p> : null}

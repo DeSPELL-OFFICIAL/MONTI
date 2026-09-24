@@ -36,6 +36,8 @@ export const en: typeof ko = {
     passkeyCancelled: 'You cancelled the lock setup. Please try again.',
     passkeyUnsupported: 'This phone cannot use a face or fingerprint lock.',
     passkeyWorking: 'Setting up the lock',
+    // See the Korean block: shown only until the challenge lands, and it carries on itself.
+    challengeWaiting: 'Getting ready…',
     deviceFailed: 'Could not register. Please try again.',
     deviceWorking: 'Registering this phone',
     deviceBusy: 'We are catching up on requests. Please tap again in a moment.',

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildTicketSvg, escapeXml, textWidth, wrapTitle } from './ticketArt/buildTicketSvg';
+import { buildTicketSvg, escapeXml, fitLine, textWidth, wrapTitle } from './ticketArt/buildTicketSvg';
 import { TICKET_BACKDROPS } from './ticketArt/presets';
 
 /**
@@ -61,6 +61,38 @@ describe('wrapTitle', () => {
   });
 });
 
+/**
+ * The two strings the layout gives one line each and no line beneath: the ticket kind and the
+ * name on the stub. Both start at the left margin (72) of a 1000-unit frame, so both have 928
+ * units and nothing to wrap into — and both have a cap that is comfortably past 928 in Korean.
+ */
+describe('fitLine', () => {
+  /** `MAX_DISPLAY_NAME_CHARS` is 24 and the name is drawn at 46: `24 x 46 = 1104`. */
+  it('ellipsises a display name at its cap and keeps it inside the frame', () => {
+    const fitted = fitLine('가'.repeat(24), 46);
+    expect(fitted.endsWith('…')).toBe(true);
+    expect(textWidth(fitted) * 46).toBeLessThanOrEqual(928);
+  });
+
+  /** The kind is drawn at 34 with 4 of tracking, so every character costs 38: `40 x 38 = 1520`. */
+  it('ellipsises a ticket kind at its cap, tracking included', () => {
+    const fitted = fitLine('종'.repeat(40), 34, 4);
+    expect(fitted.endsWith('…')).toBe(true);
+    expect(textWidth(fitted) * (34 + 4)).toBeLessThanOrEqual(928);
+  });
+
+  it('leaves a name and a kind that already fit exactly as they are', () => {
+    expect(fitLine('김태완', 46)).toBe('김태완');
+    expect(fitLine('일반', 34, 4)).toBe('일반');
+    expect(fitLine('Taewan Kim', 46)).toBe('Taewan Kim');
+  });
+
+  /** An empty string is no line at all, and must not become a lone ellipsis. */
+  it('leaves an empty string empty', () => {
+    expect(fitLine('', 46)).toBe('');
+  });
+});
+
 describe('escapeXml', () => {
   it('escapes every character that could end an attribute or open an element', () => {
     expect(escapeXml('<script>alert("x" & \'y\')</script>')).toBe(
@@ -99,6 +131,22 @@ describe('buildTicketSvg', () => {
     for (const text of ['재즈 나이트', '일반', '김태완', '2026. 10. 13.']) {
       expect(svg).toContain(`>${text}</text>`);
     }
+  });
+
+  /** Both at their caps: neither may reach the frame's right edge and be cut mid-character. */
+  it('cuts a capped holder and a capped kind rather than running them off the frame', () => {
+    const holder = '가'.repeat(24);
+    const tierName = '종'.repeat(40);
+    const svg = buildTicketSvg({ title: '재즈 나이트', tierName, holder });
+    expect(svg).not.toContain(`>${holder}</text>`);
+    expect(svg).not.toContain(`>${tierName}</text>`);
+    const drawn = [...svg.matchAll(/>([^<>]+)<\/text>/g)].map((hit) => hit[1] as string);
+    const holderLine = drawn.find((text) => text.startsWith('가'));
+    const tierLine = drawn.find((text) => text.startsWith('종'));
+    expect(holderLine?.endsWith('…')).toBe(true);
+    expect(tierLine?.endsWith('…')).toBe(true);
+    expect(textWidth(holderLine ?? '') * 46).toBeLessThanOrEqual(928);
+    expect(textWidth(tierLine ?? '') * (34 + 4)).toBeLessThanOrEqual(928);
   });
 
   it('draws no line at all for a holder or a date that is not there', () => {
