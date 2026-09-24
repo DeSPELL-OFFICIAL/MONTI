@@ -264,12 +264,17 @@ describe('Discover · 만들기', () => {
     expect(seen.at(-1)).toBe('/org/new');
   });
 
-  it('offers 주최사 만들기 to somebody who belongs to no organisation', async () => {
+  /**
+   * The founder's second tap (plan section B-4). Somebody with no organisation is not sent to a
+   * screen about organisations first: `만들기` means "make an event", and the scene asks for the
+   * organiser name inline on the way.
+   */
+  it('goes straight to creating for somebody who belongs to no organisation', async () => {
     setSession({ status: 'signedIn', account: ME });
     myOrgs({ orgs: [], canCreateEvent: false });
     const seen = renderDiscoverTracked();
     await tapCreate();
-    expect(seen.at(-1)).toBe('/org/become');
+    expect(seen.at(-1)).toBe('/org/new');
   });
 
   it('hands somebody who belongs but may not create to the screen that explains why', async () => {

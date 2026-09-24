@@ -437,7 +437,9 @@ describe('Profile', () => {
   it('offers to make one, and says what for, when there is no organisation', async () => {
     wrap(<Profile />);
     await userEvent.click(await screen.findByRole('button', { name: ko.me.organizerBecome }));
-    expect(navigate).toHaveBeenCalledWith('/org/become');
+    // The creation scene, not a screen about organisations: it asks for the organiser name
+    // inline and makes the organisation inside 만들기 (plan section B-4).
+    expect(navigate).toHaveBeenCalledWith('/org/new');
     expect(screen.getByText(ko.me.organizerHint)).toBeInTheDocument();
   });
 
