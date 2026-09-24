@@ -206,7 +206,16 @@ export const en: typeof ko = {
     sendFailed: 'Could not send that message. Please try again.',
   },
   me: {
-    title: 'Profile', nickname: 'Nickname', nicknameHint: '3-20 lowercase letters, digits or underscore',
+    title: 'Profile',
+    // See the Korean block: the name printed on a ticket, asked for once while signing up and
+    // changed here. It is not the nickname below it.
+    displayName: 'Display name',
+    displayNamePlaceholder: 'e.g. Taewan Kim',
+    displayNameHelp: 'The name printed on your ticket. You can change it whenever you like.',
+    displayNameVsNickname: 'Not the nickname below. That one is the single name that stands for you when a ticket is handed over or in a chat, so it takes only lowercase letters, digits and underscores.',
+    displayNameSaved: 'Display name saved',
+    displayNameFailed: 'Could not save your display name. Please try again in a moment.',
+    nickname: 'Nickname', nicknameHint: '3-20 lowercase letters, digits or underscore',
     nicknameTaken: 'That nickname is taken.', nicknameSaved: 'Nickname saved',
     nicknameInvalid: 'Use 3-20 lowercase letters, digits or underscore.',
     nicknameMine: 'That is already your nickname',

@@ -208,7 +208,16 @@ export const ko = {
     sendFailed: '메시지를 보내지 못했어요. 다시 시도해 주세요.',
   },
   me: {
-    title: '프로필', nickname: '별명', nicknameHint: '영문 소문자, 숫자, 밑줄 3~20자',
+    title: '프로필',
+    // 티켓에 찍히는 이름. 가입 마지막 화면에서 한 번만 묻고(T-UX2-4) 여기서 고친다 —
+    // 아래 별명과는 저장되는 곳도, 쓰이는 데도, 드는 비용도 다르다(계획 결정 6).
+    displayName: '표시 이름',
+    displayNamePlaceholder: '예: 김태완',
+    displayNameHelp: '티켓에 찍히는 이름이에요. 한글로 써도 되고, 언제든 바꿀 수 있어요.',
+    displayNameVsNickname: '아래 별명과는 달라요. 별명은 티켓을 주고받거나 대화방에서 나를 가리키는 하나뿐인 이름이라, 영문 소문자·숫자·밑줄만 쓸 수 있어요.',
+    displayNameSaved: '표시 이름을 저장했어요',
+    displayNameFailed: '표시 이름을 저장하지 못했어요. 잠시 뒤 다시 시도해 주세요.',
+    nickname: '별명', nicknameHint: '영문 소문자, 숫자, 밑줄 3~20자',
     nicknameTaken: '이미 쓰는 별명이에요.', nicknameSaved: '별명을 저장했어요',
     nicknameInvalid: '영문 소문자, 숫자, 밑줄만 3~20자로 써 주세요.',
     nicknameMine: '이미 쓰고 있는 별명이에요',
