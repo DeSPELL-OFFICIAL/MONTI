@@ -118,6 +118,9 @@ beforeEach(() => {
   localStorage.clear();
   store = [];
   listed = [];
+  // The scene reads the profile in two places now — the organiser line prefills from it and
+  // the ticket preview prints it — so this is a standing answer rather than a one-shot.
+  loadMyProfile.mockResolvedValue({ displayName: '김태완' });
   createOrganizerForMe.mockResolvedValue({ orgId: '9' });
   pinEventMetadata.mockResolvedValue({ metadataCid: 'bafyMeta' });
   ticketOp.mockResolvedValue({ success: true, userOpHash: `0x${'22'.repeat(32)}`, logs: [CREATED_LOG] });
@@ -144,7 +147,7 @@ describe('the organiser line', () => {
   });
 
   it('says what is wrong rather than sending an organisation called nothing', async () => {
-    loadMyProfile.mockResolvedValueOnce({ displayName: '' });
+    loadMyProfile.mockResolvedValue({ displayName: '' });
     open();
     await ready();
     await create();

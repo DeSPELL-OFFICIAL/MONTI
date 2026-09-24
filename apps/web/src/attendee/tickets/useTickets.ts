@@ -32,6 +32,12 @@ export interface MyTicket {
   title: string;
   /** The ticket kind's name as the index holds it, or '' when no Tier row named it. */
   tierName: string;
+  /**
+   * When the event starts, in Unix seconds, or `0` when no Event row named it — a handed-over
+   * token whose event is still arriving, or an index that has not caught up. Zero is drawn as
+   * no date rather than as 1970: the ticket carries a date or it carries nothing.
+   */
+  startsAt: number;
 }
 
 /** Event.status when the organiser called the whole thing off. */
@@ -113,6 +119,8 @@ export async function loadMyTickets(owner: string): Promise<MyTicket[]> {
   const tierNames = new Map(
     [...context.Tier, ...late.Tier].map((tier) => [tierKey(String(tier.eventId), tier.idx), tier.name]),
   );
+  // The index carries `startsAt` as a decimal string; anything unparseable is 'no date'.
+  const startTimes = new Map(events.map((event) => [event.id, Number(event.startsAt)]));
   // One gateway read per event, not per ticket: four tickets to the same event share a title,
   // and `fetchEventMetadata` memoises the document for the session on top of that.
   const titles = await loadTitles(events);
@@ -135,6 +143,7 @@ export async function loadMyTickets(owner: string): Promise<MyTicket[]> {
         used: checkIn !== null,
         title: titles.get(eventId) ?? '',
         tierName: tierNames.get(tierKey(eventId, ticket.tier)) ?? '',
+        startsAt: Number.isFinite(startTimes.get(eventId)) ? (startTimes.get(eventId) as number) : 0,
         state: deriveTicketState({
           ownerIsMe: ticket.owner.toLowerCase() === owner,
           revoked: ticket.revoked,

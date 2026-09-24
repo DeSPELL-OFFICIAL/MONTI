@@ -1,5 +1,7 @@
 import { Alert, Button, Field, Toggle } from '../../shared/ui';
 import type { EventDraft, EventDraftTier } from '../../shared/api/firestore';
+import { useDisplayName } from '../../shared/displayName';
+import { useCopy } from '../../shared/i18n';
 import { useOrganizerCopy } from '../copy';
 import { emptyEventDraftTier } from '../useEventDraft';
 import { TierCard } from './TierCard';
@@ -28,6 +30,12 @@ export interface TicketSectionProps {
  */
 export function TicketSection({ draft, patch, problems, blocked }: TicketSectionProps) {
   const copy = useOrganizerCopy().scene;
+  // Read once here rather than in each card: a draft may hold eight kinds, and the name is one
+  // document. The fallback is the attendee's own word, so the organiser's preview and the
+  // ticket somebody is handed cannot disagree about what an unnamed person is called.
+  const tickets = useCopy().tickets;
+  const displayName = useDisplayName();
+  const holder = displayName === '' ? tickets.artGuest : displayName;
 
   function patchTier(index: number, next: Partial<EventDraftTier>): void {
     patch({ tiers: draft.tiers.map((tier, at) => (at === index ? { ...tier, ...next } : tier)) });
@@ -46,6 +54,8 @@ export function TicketSection({ draft, patch, problems, blocked }: TicketSection
             index={index}
             tier={tier}
             title={draft.title}
+            startsAt={draft.startsAt}
+            holder={holder}
             removable={draft.tiers.length > 1}
             onPatch={(next) => patchTier(index, next)}
             onRemove={() => patch({ tiers: draft.tiers.filter((_, at) => at !== index) })}

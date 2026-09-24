@@ -115,6 +115,8 @@ export const ko = {
     artLabel: '{{title}} · {{tier}} 티켓 그림',
     artLabelUsed: '{{title}} · {{tier}} 티켓 그림 · 사용됨',
     artNoTitle: '이름 없는 행사', artNoTier: '티켓',
+    // 표시 이름을 비워 둔 사람의 티켓에 찍히는 말. 빈 줄보다 낫고, '이름 없음'보다 낫다.
+    artGuest: '게스트',
   },
   claim: {
     cta: '티켓 받기', working: '받는 중이에요', done: '티켓을 받았어요', tierLabel: '티켓 종류',

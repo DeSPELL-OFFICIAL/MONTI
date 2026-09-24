@@ -202,7 +202,12 @@ export function Dashboard() {
 
       {/* Shown whatever the status is: the picture is the one part of a ticket that stays
           editable once the event is public, which is exactly why it is not on the chain. */}
-      <EventArt eventId={eventId} tiers={tiers} title={title === '' ? dash.art.untitled : title} />
+      <EventArt
+        eventId={eventId}
+        tiers={tiers}
+        title={title === '' ? dash.art.untitled : title}
+        startsAt={Number(event?.startsAt ?? 0)}
+      />
 
       <Announce eventId={eventId} />
 

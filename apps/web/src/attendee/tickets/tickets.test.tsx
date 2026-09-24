@@ -24,15 +24,21 @@ vi.mock('../../shared/envio/ipfs', () => ({
  * picture is the seam under test. Mocking `loadEventArt` itself would mock the seam away.
  */
 const art: { docs: Map<string, unknown>; refuse: boolean } = { docs: new Map(), refuse: false };
+/**
+ * Who is signed in to Firebase, which is a different thing from the address in `setSession`:
+ * `users/{uid}` is where the name printed on a ticket lives, and `uid` is what reads it.
+ */
+const me: { uid: string | null } = { uid: null };
 vi.mock('../../shared/api/firebase', () => ({
   getDb: () => ({}),
-  getFirebaseAuth: () => ({ currentUser: null }),
+  getFirebaseAuth: () => ({ currentUser: me.uid === null ? null : { uid: me.uid } }),
 }));
 vi.mock('firebase/firestore', () => ({
   doc: (_db: unknown, path: string, id: string) => ({ path, id }),
   getDoc: async (ref: { path: string; id: string }) => {
     if (art.refuse) throw new Error('permission-denied');
-    return { data: () => art.docs.get(`${ref.path}/${ref.id}`) };
+    const key = `${ref.path}/${ref.id}`;
+    return { exists: () => art.docs.has(key), data: () => art.docs.get(key) };
   },
   addDoc: vi.fn(), collection: vi.fn(), deleteDoc: vi.fn(), getDocs: vi.fn(),
   limit: vi.fn(), onSnapshot: vi.fn(), orderBy: vi.fn(), query: vi.fn(),
@@ -43,6 +49,9 @@ const { TicketList } = await import('./List');
 const { TicketDetail } = await import('./Detail');
 
 const OWNER = `0x${'cd'.repeat(20)}`;
+/** One fixed moment, so the date on the ticket is asserted against the same clock that drew it. */
+const STARTS_AT = 1_790_000_000;
+const STARTS_ON = new Date(STARTS_AT * 1000).toLocaleDateString('ko', { dateStyle: 'medium' });
 const OTHER = `0x${'ef'.repeat(20)}`;
 const NOW = Math.floor(Date.now() / 1000);
 
@@ -71,8 +80,8 @@ const CONTEXT = {
   // still a ticket that was used — the one row where the badge and the picture must disagree.
   CheckIn: [checkIn('2'), checkIn('4')],
   Event: [
-    { id: '7', status: 'Published', imageCid: 'bafkevent7' },
-    { id: '9', status: 'Cancelled', imageCid: 'bafkevent9' },
+    { id: '7', status: 'Published', imageCid: 'bafkevent7', startsAt: String(STARTS_AT) },
+    { id: '9', status: 'Cancelled', imageCid: 'bafkevent9', startsAt: String(STARTS_AT) },
   ],
   Tier: [tier('7', 0, '일반'), tier('7', 1, '스탠딩'), tier('9', 0, '일반')],
   // Both handovers sit on events no held ticket names, so their status arrives one trip later.
@@ -80,9 +89,10 @@ const CONTEXT = {
 };
 const LATE_EVENTS = {
   Event: [
-    { id: '8', status: 'Published', imageCid: 'bafkevent8' },
-    // An event the organiser never pinned a document for: there is no CID to even ask about.
-    { id: '12', status: 'Cancelled', imageCid: '' },
+    { id: '8', status: 'Published', imageCid: 'bafkevent8', startsAt: String(STARTS_AT) },
+    // An event the organiser never pinned a document for: there is no CID to even ask about,
+    // and the index has no start time for it either — so its ticket carries no date.
+    { id: '12', status: 'Cancelled', imageCid: '', startsAt: '0' },
   ],
   Tier: [tier('8', 0, '앞자리')],
 };
@@ -140,6 +150,8 @@ beforeEach(() => {
   // No event has been through `saveEventArt` yet, which is the state the demo runs in today.
   art.docs.clear();
   art.refuse = false;
+  me.uid = 'uid-1';
+  art.docs.set('users/uid-1', { displayName: '김태완' });
 });
 
 afterEach(() => {
@@ -333,6 +345,51 @@ describe('ticket art', () => {
     expect(within(row('1')).getByText('일반')).toBeInTheDocument();
   });
 
+  /**
+   * The name is `users/{uid}.displayName` and not the chain nickname: that one is
+   * `^[a-z0-9_]{3,20}$` and cannot hold a Korean name at all (plan section E-3). It is read in
+   * `useTicketArtProps` and nowhere else, so the list and the detail screen cannot disagree.
+   */
+  it('prints whose ticket it is, from the profile', async () => {
+    renderList();
+    await screen.findByRole('link', { name: '#1 · 입장 전' });
+    await waitFor(() => expect(within(row('1')).getByText('김태완')).toBeInTheDocument());
+    // Every row is the same person's, so every row carries the same name.
+    expect(within(row('5')).getByText('김태완')).toBeInTheDocument();
+  });
+
+  it('falls back to a word for somebody who never gave a name', async () => {
+    art.docs.set('users/uid-1', { displayName: '' });
+    renderList();
+    await screen.findByRole('link', { name: '#1 · 입장 전' });
+    await waitFor(() => expect(within(row('1')).getByText('게스트')).toBeInTheDocument());
+    expect(within(row('1')).queryByText('김태완')).toBeNull();
+  });
+
+  it('falls back to the same word when there is no profile document at all', async () => {
+    me.uid = null;
+    renderList();
+    await screen.findByRole('link', { name: '#1 · 입장 전' });
+    await waitFor(() => expect(within(row('1')).getByText('게스트')).toBeInTheDocument());
+  });
+
+  /** The start time comes off the indexer's `Event.startsAt`, formatted for the locale. */
+  it('prints the day the event starts', async () => {
+    renderList();
+    await screen.findByRole('link', { name: '#1 · 입장 전' });
+    await waitFor(() => expect(within(row('1')).getByText(STARTS_ON)).toBeInTheDocument());
+  });
+
+  /** A ticket the index has no start time for carries no date — never a placeholder one. */
+  it('draws no date for a ticket whose event named no start', async () => {
+    renderList();
+    await screen.findByRole('link', { name: '#10 · 취소됨' });
+    await waitFor(() => expect(within(row('1')).getByText(STARTS_ON)).toBeInTheDocument());
+    expect(within(row('10')).queryByText(STARTS_ON)).toBeNull();
+    // The stub is drawn all the same — the name is on it, the date line simply is not there.
+    expect(within(row('10')).getByText('김태완')).toBeInTheDocument();
+  });
+
   /** A gateway that will not answer costs the ticket its title, never its row. */
   it('names a ticket whose event nothing could describe', async () => {
     renderList();
@@ -350,6 +407,13 @@ describe('ticket art', () => {
     expect(screen.getByText('사용됨')).toBeInTheDocument();
     expect(screen.getByText('한여름 밤의 재즈')).toBeInTheDocument();
     expect(presetIn(document)).toBe('a');
+  });
+
+  it('hands the detail screen the same name and the same date as the list', async () => {
+    renderDetail('1');
+    expect(await screen.findByText('입장 전')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('김태완')).toBeInTheDocument());
+    expect(screen.getByText(STARTS_ON)).toBeInTheDocument();
   });
 
   it('leaves the band off a ticket the detail screen still lets you enter with', async () => {

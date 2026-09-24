@@ -5,7 +5,9 @@ import type { TicketArtSource } from '../shared/ui';
 
 let stored: TicketArtSource[] = [];
 const loadEventArt = vi.fn(async () => stored);
-vi.mock('../shared/api/firestore', () => ({ loadEventArt }));
+/** The ticket preview prints whose ticket it is, so this screen reads the profile too. */
+const loadMyProfile = vi.fn(async () => ({ displayName: '박주최' }));
+vi.mock('../shared/api/firestore', () => ({ loadEventArt, loadMyProfile }));
 
 const saveEventArt = vi.fn(async (_args: { eventId: string; tiers: TicketArtSource[] }) => ({ ok: true as const }));
 const pinEventImage = vi.fn(async (_args: { bytesBase64: string; kind: string }) => ({ cid: 'bafkmine' }));

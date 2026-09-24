@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Alert, Button, TicketArt } from '../shared/ui';
+import { Alert, Button, TicketArt, formatTicketDate } from '../shared/ui';
 import type { TicketArtSource } from '../shared/ui';
-import { fmt } from '../shared/i18n';
+import { useDisplayName } from '../shared/displayName';
+import { fmt, useCopy, useLocale } from '../shared/i18n';
 import { api, callableFailure } from '../shared/api/functions';
 import { loadEventArt } from '../shared/api/firestore';
 import { useOrganizerCopy } from './copy';
@@ -26,6 +27,12 @@ export interface EventArtProps {
   tiers: readonly EventArtTier[];
   /** The event's own name, so the preview is the ticket an attendee will actually be handed. */
   title: string;
+  /**
+   * When the event starts, in Unix seconds. Optional and `0` by default: a caller with no
+   * start time to give simply gets a ticket with no date line, which is the truth. Nothing
+   * here invents one.
+   */
+  startsAt?: number;
 }
 
 /**
@@ -41,8 +48,13 @@ export interface EventArtProps {
  * also makes the write idempotent: sending the same list twice is the same as sending it once,
  * which is what lets a refused save simply be pressed again.
  */
-export function EventArt({ eventId, tiers, title }: EventArtProps) {
+export function EventArt({ eventId, tiers, title, startsAt = 0 }: EventArtProps) {
   const copy = useOrganizerCopy().dashboard.art;
+  // The same name and the same date function the attendee's ticket uses, so what an organiser
+  // looks at here is the picture that gets handed out and not a second rendering of it.
+  const tickets = useCopy().tickets;
+  const displayName = useDisplayName();
+  const dateText = formatTicketDate(startsAt, useLocale());
   const [art, setArt] = useState<TicketArtSource[]>([]);
   const [open, setOpen] = useState(NONE);
   const [state, setState] = useState<SaveState>('');
@@ -121,7 +133,13 @@ export function EventArt({ eventId, tiers, title }: EventArtProps) {
               </Button>
             </div>
             <div className="tier-card__art">
-              <TicketArt art={artOf(index)} title={title} tierName={tier.name} />
+              <TicketArt
+                art={artOf(index)}
+                title={title}
+                tierName={tier.name}
+                holder={displayName === '' ? tickets.artGuest : displayName}
+                dateText={dateText}
+              />
             </div>
             {open === index ? (
               <ArtPicker

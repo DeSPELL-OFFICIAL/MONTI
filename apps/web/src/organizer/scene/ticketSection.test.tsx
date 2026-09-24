@@ -90,6 +90,7 @@ beforeAll(() => {
 beforeEach(() => {
   localStorage.clear();
   store = [];
+  loadMyProfile.mockResolvedValue({ displayName: '김태완' });
   pinEventImage.mockResolvedValue({ cid: 'bafkart' });
 });
 
@@ -195,6 +196,37 @@ describe('the picture', () => {
     open({ ...READY, tiers: [{ ...emptyEventDraftTier, name: '학생' }] });
     await waitFor(() => expect(screen.getByLabelText(copy.tiers.name)).toHaveValue('학생'));
     expect(screen.getByRole('img', { name: /재즈 나이트/ })).toBeInTheDocument();
+  });
+
+  /**
+   * The preview is the ticket, not a picture of one: the same four strings, the organiser's
+   * own name out of the same profile field an attendee's ticket reads, and the draft's own
+   * start time through the same formatter (plan section E-3).
+   */
+  it('draws all four strings on the draft preview', async () => {
+    open({ ...READY, tiers: [{ ...emptyEventDraftTier, name: '학생' }] });
+    await waitFor(() => expect(screen.getByLabelText(copy.tiers.name)).toHaveValue('학생'));
+    const day = new Date(READY.startsAt * 1000).toLocaleDateString('ko', { dateStyle: 'medium' });
+    await waitFor(() => expect(screen.getByText('김태완')).toBeInTheDocument());
+    for (const text of ['재즈 나이트', '학생', day]) {
+      expect(screen.getByText(text)).toBeInTheDocument();
+    }
+  });
+
+  /** A draft nobody has given a start time draws no date at all, rather than inventing one. */
+  it('draws no date on a draft with no start time yet', async () => {
+    const day = new Date(READY.startsAt * 1000).toLocaleDateString('ko', { dateStyle: 'medium' });
+    open({ ...READY, startsAt: 0 });
+    await ready();
+    await waitFor(() => expect(screen.getByText('김태완')).toBeInTheDocument());
+    expect(screen.queryByText(day)).toBeNull();
+  });
+
+  it('falls back to the attendee word when the organiser gave no name either', async () => {
+    loadMyProfile.mockResolvedValue({ displayName: '' });
+    open();
+    await ready();
+    await waitFor(() => expect(screen.getByText(sharedCopy.tickets.artGuest)).toBeInTheDocument());
   });
 });
 

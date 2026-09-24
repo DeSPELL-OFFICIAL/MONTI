@@ -39,7 +39,9 @@ vi.mock('../shared/api/functions', async (orig) => ({
 // Two reads the picture section makes on its own. Stubbed rather than left out: both swallow
 // their own failures, so an unmocked one would be a real network call inside a unit test.
 const loadEventArt = vi.fn(async () => [{ preset: 'c' as const }]);
-vi.mock('../shared/api/firestore', () => ({ loadEventArt }));
+/** The ticket preview prints whose ticket it is, so this screen reads the profile too. */
+const loadMyProfile = vi.fn(async () => ({ displayName: '박주최' }));
+vi.mock('../shared/api/firestore', () => ({ loadEventArt, loadMyProfile }));
 
 const fetchEventMetadata = vi.fn(async () => ({ title: '재즈 나이트', tags: [] }));
 vi.mock('../shared/envio/ipfs', async (orig) => ({

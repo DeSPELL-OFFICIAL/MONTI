@@ -1,5 +1,5 @@
-import { Alert, Button, Chip, Field, TicketArt } from '../../shared/ui';
-import { fmt } from '../../shared/i18n';
+import { Alert, Button, Chip, Field, TicketArt, formatTicketDate } from '../../shared/ui';
+import { fmt, useLocale } from '../../shared/i18n';
 import type { EventDraftCurrency, EventDraftTier } from '../../shared/api/firestore';
 import { useOrganizerCopy } from '../copy';
 import { ArtPicker } from '../ArtPicker';
@@ -19,6 +19,15 @@ export interface TierCardProps {
   tier: EventDraftTier;
   /** The event title, shown on the picture exactly as the ticket will show it. */
   title: string;
+  /** The draft's start, in Unix seconds. `0` — nothing picked yet — draws no date line. */
+  startsAt: number;
+  /**
+   * The name to print on the ticket, fallback already applied. It is a prop rather than a
+   * `useDisplayName()` of this card's own because a draft may hold eight kinds, and eight
+   * cards each reading `users/{uid}` would be eight reads of one document for one screen.
+   * The section above reads it once; see {@link TicketSection}.
+   */
+  holder: string;
   removable: boolean;
   onPatch: (next: Partial<EventDraftTier>) => void;
   onRemove: () => void;
@@ -34,12 +43,18 @@ export interface TierCardProps {
  * is one `Ticket.claim` would refuse every single time, and after publishing there would be no
  * way left to repair it.
  */
-export function TierCard({ index, tier, title, removable, onPatch, onRemove }: TierCardProps) {
+export function TierCard({
+  index, tier, title, startsAt, holder, removable, onPatch, onRemove,
+}: TierCardProps) {
   const scene = useOrganizerCopy().scene;
   const copy = scene.tiers;
   const more = scene.more;
   const paid = tier.currency !== 'free';
   const art = tierArt(tier);
+  // The organiser's own name and their own start time, through the same function the
+  // attendee's ticket goes through: the preview is the ticket, not a picture of one. A draft
+  // with no start time yet simply has no date line — nothing is invented to fill the space.
+  const dateText = formatTicketDate(startsAt, useLocale());
 
   return (
     <li className="tier-card">
@@ -53,7 +68,13 @@ export function TierCard({ index, tier, title, removable, onPatch, onRemove }: T
       </div>
 
       <div className="tier-card__art">
-        <TicketArt art={art} title={title} tierName={tier.name} />
+        <TicketArt
+          art={art}
+          title={title}
+          tierName={tier.name}
+          holder={holder}
+          dateText={dateText}
+        />
       </div>
       <p className="muted">{copy.art}</p>
       <ArtPicker

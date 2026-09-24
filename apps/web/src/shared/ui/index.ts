@@ -22,6 +22,7 @@ export {
   buildTicketSvg, escapeXml, textWidth, wrapTitle, type TicketSvgInput,
 } from './ticketArt/buildTicketSvg';
 export { TICKET_BACKDROPS, TICKET_HEIGHT, TICKET_WIDTH, type TicketBackdrop } from './ticketArt/presets';
+export { formatTicketDate } from './ticketArt/ticketDate';
 export {
   cropToA4, sourceRect, turnedSize,
   A4_WIDTH, A4_HEIGHT, A4_MAX_BYTES, A4_QUALITY, A4_QUALITY_RESCUE,

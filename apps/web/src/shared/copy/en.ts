@@ -114,6 +114,7 @@ export const en: typeof ko = {
     artLabel: '{{title}} · {{tier}} ticket art',
     artLabelUsed: '{{title}} · {{tier}} ticket art · used',
     artNoTitle: 'Unnamed event', artNoTier: 'Ticket',
+    artGuest: 'Guest',
   },
   claim: {
     cta: 'Get a ticket', working: 'Getting your ticket', done: 'You got the ticket', tierLabel: 'Ticket type',
