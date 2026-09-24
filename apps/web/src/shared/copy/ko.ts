@@ -251,10 +251,12 @@ export const ko = {
     deleteFailed: '삭제 요청을 받지 못했어요. 잠시 뒤 다시 시도해 주세요.',
   },
   poster: {
-    pick: '포스터 올리기',
+    title: '포스터',
+    pick: '사진 고르기',
     frame: '포스터 미리보기',
     adjust: '끌어서 옮기고, 두 손가락으로 크기를 맞춰요',
-    crop: '자르기', again: '다시 고르기', working: '자르고 있어요',
+    rotate: '회전', close: '닫기',
+    crop: '이 사진으로 정하기', again: '다른 사진 고르기', working: '자르고 있어요',
     failed: '사진을 자르지 못했어요. 다시 시도해 주세요.',
   },
 };

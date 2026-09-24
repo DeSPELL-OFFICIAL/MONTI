@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import QRCode from 'qrcode';
-import { Alert, Button, Screen } from '../../shared/ui';
-import { gatewayUrl } from '../../shared/envio/ipfs';
+import { Alert, Button, Screen, posterUrl } from '../../shared/ui';
 import { useOrganizerCopy } from '../copy';
 import { forgetEventDraft } from '../useEventDraft';
 import { followUpsDone, runFollowUps, type FollowUpResult } from './followUps';
@@ -87,7 +86,7 @@ export function Created() {
         {handed.posterCid ? (
           <div className="poster-card">
             <div className="poster-card__filled">
-              <img src={gatewayUrl(handed.posterCid)} alt="" />
+              <img src={posterUrl(handed.posterCid)} alt="" />
             </div>
           </div>
         ) : null}

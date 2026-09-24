@@ -277,8 +277,12 @@ const ko = {
 
     poster: '포스터',
     posterEmpty: '포스터를 올리면 여기에 보여요',
+    posterAdd: '포스터 올리기',
     posterChange: '포스터 바꾸기',
     posterWorking: '포스터를 올리고 있어요',
+    posterRetry: '다시 올리기',
+    // 업로드가 아직 돌고 있을 때 만들기를 누른 경우. 막지 않고 기다린다(계획 D-3).
+    posterWaiting: '포스터를 올리는 중이에요. 곧 끝나요',
     posterAlt: '포스터 미리보기',
 
     titleLabel: '제목',
@@ -717,8 +721,12 @@ const en: typeof ko = {
 
     poster: 'Poster',
     posterEmpty: 'Your poster appears here',
+    posterAdd: 'Add a poster',
     posterChange: 'Change the poster',
     posterWorking: 'Uploading the poster',
+    posterRetry: 'Try again',
+    // See the Korean block: 만들기 pressed while the upload is still going waits for it.
+    posterWaiting: 'The poster is still going up. Nearly there',
     posterAlt: 'Poster preview',
 
     titleLabel: 'Title',

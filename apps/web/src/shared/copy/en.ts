@@ -251,10 +251,12 @@ export const en: typeof ko = {
     deleteFailed: 'That request did not go through. Please try again in a moment.',
   },
   poster: {
-    pick: 'Add a poster',
+    title: 'Poster',
+    pick: 'Choose a photo',
     frame: 'Poster preview',
     adjust: 'Drag to move it, pinch to resize it',
-    crop: 'Crop', again: 'Pick another', working: 'Cropping',
+    rotate: 'Rotate', close: 'Close',
+    crop: 'Use this photo', again: 'Choose another photo', working: 'Cropping',
     failed: 'That picture could not be cropped. Please try again.',
   },
 };

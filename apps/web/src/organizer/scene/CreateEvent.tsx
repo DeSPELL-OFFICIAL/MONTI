@@ -12,6 +12,7 @@ import { useEventDraft } from '../useEventDraft';
 import { KR_REGIONS } from './regions';
 import { fromLocalInput, toLocalInput } from './datetime';
 import { PosterCard } from './PosterCard';
+import { usePosterUpload } from './usePosterUpload';
 import { SaveStatus } from './SaveStatus';
 import { TicketExtras, TicketSection } from './TicketSection';
 import { usePublish } from './usePublish';
@@ -81,7 +82,17 @@ export function CreateEvent() {
   // or more are chosen in `더 설정하기` — neither is a question worth a box on this screen.
   const needsOrg = !editing && !myOrgs.isLoading && myOrgs.orgs.length === 0 && draft.orgId === '';
   const orgNameWrong = needsOrg && !isGoodOrgName(orgName);
-  const problems = eventProblems(draft);
+  /**
+   * The poster's own life, owned here rather than by the card, because `만들기` has to be able
+   * to wait for it. `patch` is the whole of what it reports: the draft carries the CID and
+   * never the bytes — a Firestore document stops at 1 MiB and a 600 KB JPEG is 800 KB as
+   * base64 — and the bytes themselves stay in memory behind an object URL.
+   */
+  const poster = usePosterUpload((cid) => patch({ posterCid: cid }));
+  // A poster that is halfway to the server is not a missing poster. Dropping the problem here
+  // rather than at the button is what keeps the red line from appearing under a picture the
+  // organiser is looking at (plan section D-3).
+  const problems = eventProblems(draft).filter((key) => !(key === 'poster' && poster.busy));
   const tiersWrong = tierProblems(draft);
   const blocked = paidTiers(draft).length > 0;
   const wrong = (key: EventProblem) =>
@@ -94,6 +105,14 @@ export function CreateEvent() {
     const prefill = draft.orgPendingName || displayName;
     if (prefill !== '') setOrgName(prefill);
   }, [displayName, draft.orgPendingName]);
+
+  // `만들기` pressed while the poster was still going up. The publish is not started from the
+  // click but from here, once the upload is over, and deliberately so: `publish` is closed
+  // over `draft`, and the thing being waited for *is* a change to `draft`. Awaiting inside the
+  // handler and then calling the `publish` that handler captured would send the draft as it
+  // was before the CID landed — which `usePublish` would silently drop on its own
+  // `eventProblems` guard.
+  const [waiting, setWaiting] = useState(false);
 
   const { phase, problem, unsponsored, publish } = usePublish({
     draft,
@@ -127,9 +146,19 @@ export function CreateEvent() {
     },
   });
 
+  useEffect(() => {
+    if (!waiting || poster.busy) return;
+    setWaiting(false);
+    // The upload came back refused. The sentence and the `다시 올리기` chip are under the
+    // picture already; starting a publish with no poster on it would only add a second one.
+    if (poster.problem !== '') return;
+    void publish();
+  }, [waiting, poster.busy, poster.problem, publish]);
+
   // `confirming` deliberately leaves the button pressable: that press is what asks the bundler
   // what became of an operation whose `wait` gave up, and it never sends a second one.
-  const working = phase === 'org' || phase === 'pinning' || phase === 'sending' || phase === 'finishing';
+  const working = waiting
+    || phase === 'org' || phase === 'pinning' || phase === 'sending' || phase === 'finishing';
 
   function scrollTo(section: string): void {
     // jsdom has no `scrollIntoView`, and neither does an older browser; the line under the
@@ -153,6 +182,11 @@ export function CreateEvent() {
     }
     if (orgNameWrong) {
       scrollTo('org');
+      return;
+    }
+    // Everything else is filled in and the only thing left is the upload. Wait for it.
+    if (poster.busy) {
+      setWaiting(true);
       return;
     }
     void publish();
@@ -181,8 +215,9 @@ export function CreateEvent() {
 
         <section id="scene-poster">
           <h2>{copy.poster}</h2>
-          <PosterCard posterCid={draft.posterCid} onPinned={(cid) => patch({ posterCid: cid })} />
-          {draft.posterCid === '' ? <p className="muted">{copy.posterEmpty}</p> : null}
+          <PosterCard posterCid={draft.posterCid} upload={poster} />
+          {draft.posterCid === '' && poster.localUrl === ''
+            ? <p className="muted">{copy.posterEmpty}</p> : null}
           {wrong('poster')}
         </section>
 
@@ -381,6 +416,7 @@ export function CreateEvent() {
         {phase === 'confirming' && problem === '' ? (
           <Alert tone="info">{editing ? copy.publish.confirmingEdit : copy.publish.confirming}</Alert>
         ) : null}
+        {waiting ? <p className="working"><Spinner />{copy.posterWaiting}</p> : null}
         {phase === 'org' || phase === 'pinning' || phase === 'sending' || phase === 'finishing' ? (
           <p className="working">
             <Spinner />

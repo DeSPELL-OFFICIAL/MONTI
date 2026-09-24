@@ -206,7 +206,9 @@ describe('the one button', () => {
 });
 
 describe('the poster', () => {
+  /** One full-screen modal: pick, frame, confirm — and it is gone (plan section D-1). */
   async function crop(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+    await user.click(screen.getByRole('button', { name: copy.posterAdd }));
     const file = new File([new Uint8Array([1, 2, 3])], 'poster.jpg', { type: 'image/jpeg' });
     await user.upload(screen.getByLabelText(sharedCopy.poster.pick), file);
     await user.click(await screen.findByRole('button', { name: sharedCopy.poster.crop }));
@@ -219,11 +221,14 @@ describe('the poster', () => {
     await crop(user);
 
     await waitFor(() => expect(pinEventImage).toHaveBeenCalledWith({ bytesBase64: 'AQID', kind: 'poster' }));
-    expect(mirror().posterCid).toBe('bafkposter');
+    await waitFor(() => expect(mirror().posterCid).toBe('bafkposter'));
     // The picture itself is never in the draft: a Firestore document stops at 1 MiB.
     expect(JSON.stringify(mirror())).not.toContain('AQID');
+    // The bytes on the card are the ones just cropped, and they stay that way: the gateway is
+    // never asked for a picture this tab already holds (plan section D-2, suspect 2).
     const preview = await screen.findByAltText(copy.posterAlt);
-    expect(preview).toHaveAttribute('src', 'https://gw.test/bafkposter');
+    expect(preview).toHaveAttribute('src', 'blob:poster');
+    expect(preview.getAttribute('src')).not.toContain('gw.test');
   });
 
   it('says which photo to pick next when the server refuses this one', async () => {
