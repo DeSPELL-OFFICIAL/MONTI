@@ -46,7 +46,11 @@ export const ko = {
     restart: '가입을 처음부터 다시 해 주세요.',
     retryStep: '시간이 조금 지났어요. 다시 눌러 주세요.',
     doneTitle: '준비가 끝났어요', doneBody: '이제 행사를 둘러보고 티켓을 받을 수 있어요.',
-    doneCta: '행사 둘러보기',
+    // 티켓에 찍히는 이름. 체인 닉네임과 다른 칸이고 비워 두면 그냥 넘어간다(계획 C-3).
+    nameTitle: '어떻게 불러 드릴까요?',
+    nameHelp: '티켓에 이 이름이 보여요. 나중에 프로필에서 바꿀 수 있어요.',
+    namePlaceholder: '예: 김태완',
+    doneCta: '시작하기',
   },
   login: {
     title: '다시 오셨네요', body: '얼굴이나 지문으로 바로 들어갈 수 있어요.', cta: '로그인',

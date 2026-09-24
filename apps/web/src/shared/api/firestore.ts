@@ -239,7 +239,19 @@ export async function sendChatMessage(eventId: string, text: string): Promise<st
   return ref.id;
 }
 
-export async function saveUserProfile(patch: { nickname?: string; locale?: 'ko' | 'en'; chatOrder?: string[] }): Promise<void> {
+/**
+ * The cap on `users/{uid}.displayName`, which the security rule holds to the same number. It is
+ * the name drawn on a ticket — not the chain nickname, which is `^[a-z0-9_]{3,20}$` and cannot
+ * hold a Korean name at all (plan section E-3).
+ */
+export const MAX_DISPLAY_NAME_CHARS = 24;
+
+export async function saveUserProfile(patch: {
+  nickname?: string;
+  displayName?: string;
+  locale?: 'ko' | 'en';
+  chatOrder?: string[];
+}): Promise<void> {
   const uid = getFirebaseAuth().currentUser?.uid;
   if (!uid) throw new Error('NOT_SIGNED_IN');
   await setDoc(doc(getDb(), 'users', uid), patch, { merge: true });

@@ -48,6 +48,12 @@ vi.mock('../../shared/deviceKey', () => ({
   DeviceKeyUnavailable,
 }));
 
+const saveUserProfile = vi.fn(async (_patch: { displayName?: string }) => undefined);
+vi.mock('../../shared/api/firestore', async (orig) => ({
+  ...(await orig<typeof import('../../shared/api/firestore')>()),
+  saveUserProfile,
+}));
+
 /** The hydrator reads the claims out of a fresh token; the screen only asks for one. */
 const getIdToken = vi.fn(async (_force?: boolean) => 'id-token');
 vi.mock('../../shared/api/firebase', () => ({
@@ -357,12 +363,41 @@ describe('register · the phone half', () => {
 });
 
 describe('done screen', () => {
+  beforeEach(() => seedSignup({ personId: PERSON_ID, account: ACCOUNT }));
+
   it('drops the leftover signup state and goes home', async () => {
-    seedSignup({ personId: PERSON_ID, account: ACCOUNT });
     renderScreen(<Done />);
-    await userEvent.click(screen.getByRole('button', { name: '행사 둘러보기' }));
+    await userEvent.click(screen.getByRole('button', { name: ko.signup.doneCta }));
 
     expect(sessionStorage.getItem('monti.signup')).toBeNull();
     expect(navigate).toHaveBeenCalledWith('/');
+  });
+
+  /** The name a ticket is drawn with. Its own field — the chain nickname cannot hold `김태완`. */
+  it('saves the name this person gave before going on', async () => {
+    renderScreen(<Done />);
+    await userEvent.type(screen.getByRole('textbox'), '  김태완  ');
+    await userEvent.click(screen.getByRole('button', { name: ko.signup.doneCta }));
+
+    await waitFor(() => expect(saveUserProfile).toHaveBeenCalledWith({ displayName: '김태완' }));
+    expect(navigate).toHaveBeenCalledWith('/');
+  });
+
+  it('writes nothing at all when the name is left blank, and still finishes', async () => {
+    renderScreen(<Done />);
+    await userEvent.click(screen.getByRole('button', { name: ko.signup.doneCta }));
+
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/'));
+    expect(saveUserProfile).not.toHaveBeenCalled();
+  });
+
+  /** Signing up is over either way: a refused write must not hold anybody on this screen. */
+  it('finishes even when the name could not be saved', async () => {
+    saveUserProfile.mockRejectedValueOnce(new Error('permission-denied'));
+    renderScreen(<Done />);
+    await userEvent.type(screen.getByRole('textbox'), '김태완');
+    await userEvent.click(screen.getByRole('button', { name: ko.signup.doneCta }));
+
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/'));
   });
 });

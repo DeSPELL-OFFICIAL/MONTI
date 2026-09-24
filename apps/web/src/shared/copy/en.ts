@@ -46,7 +46,11 @@ export const en: typeof ko = {
     restart: 'Please start sign-up again from the beginning.',
     retryStep: 'That took a little too long. Please tap again.',
     doneTitle: 'You are all set', doneBody: 'You can browse events and get tickets now.',
-    doneCta: 'Explore events',
+    // See the Korean block: the name drawn on a ticket, and blank is a real answer.
+    nameTitle: 'What should we call you?',
+    nameHelp: 'This name appears on your tickets. You can change it in your profile later.',
+    namePlaceholder: 'e.g. Taewan Kim',
+    doneCta: 'Get started',
   },
   login: {
     title: 'Welcome back', body: 'Your face or fingerprint gets you in.', cta: 'Sign in',
