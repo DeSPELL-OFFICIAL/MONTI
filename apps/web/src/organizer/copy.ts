@@ -308,6 +308,14 @@ const ko = {
     timeHiddenHelp: '탐색 화면에는 날짜만 보여요. 시작 시각은 티켓을 받은 사람에게만 알려줘요',
     saleHelp: '신청은 행사를 만든 순간 열리고 행사가 끝날 때 닫혀요',
 
+    // 주최사가 하나도 없을 때만 만들기 버튼 위에 뜨는 한 줄. 이름은 서버가 orgProfiles 에
+    // 적고 고칠 방법이 없으므로(계획 B-4), 그렇게 말해 둔다.
+    org: {
+      label: '주최자 이름',
+      help: '행사 화면에 이 이름이 보여요. 나중에 바꿀 수 없어요.',
+      placeholder: '예: 몬티 크루',
+    },
+
     problems: {
       poster: '포스터를 올려 주세요',
       title: '제목을 2자에서 60자 사이로 적어 주세요',
@@ -381,6 +389,7 @@ const ko = {
 
     publish: {
       pinning: '행사 정보를 올리고 있어요',
+      org: '주최사를 만들고 있어요',
       sending: '행사를 만들고 있어요',
       finishing: '마무리하고 있어요',
       updating: '행사 정보를 저장하고 있어요',
@@ -391,6 +400,10 @@ const ko = {
 
     publishProblems: {
       notYourOrg: '이 주최사에서 행사를 만들 권한이 없어요',
+      orgName: '주최자 이름을 2자에서 40자 사이로 적어 주세요',
+      orgLimit: '주최사는 3개까지 만들 수 있어요. 기존 주최사로 만들어 주세요',
+      orgNotActive: '가입을 먼저 마무리해 주세요',
+      orgFailed: '주최자 정보를 만들지 못했어요. 잠시 뒤 다시 시도해 주세요',
       // 행사는 만들어졌는데 영수증에서 번호를 못 읽은 경우. 초안과 오퍼레이션 해시를 남겨 두고,
       // 버튼을 다시 누르면 그 해시로 번호를 찾아온다 — 새 행사를 만들지 않는다.
       noEventId: '행사는 만들어졌어요. 번호만 아직 못 읽었으니 아래 \'행사 만들기\'를 한 번 더 눌러 번호를 찾아 주세요. 행사가 두 개로 만들어지지는 않아요',
@@ -735,6 +748,14 @@ const en: typeof ko = {
     timeHiddenHelp: 'Explore screens show the date only. People who got a ticket are told the start time',
     saleHelp: 'Sign-ups open the moment you create the event and close when it ends',
 
+    // See the Korean block: one line above the button, and only for somebody with no
+    // organiser yet. The server writes the name and nothing can change it afterwards.
+    org: {
+      label: 'Organiser name',
+      help: 'This name appears on the event. It cannot be changed later.',
+      placeholder: 'e.g. Monti Crew',
+    },
+
     problems: {
       poster: 'Please upload a poster',
       title: 'Write a title of 2 to 60 characters',
@@ -806,6 +827,7 @@ const en: typeof ko = {
 
     publish: {
       pinning: 'Uploading the event details',
+      org: 'Creating your organiser',
       sending: 'Creating the event',
       finishing: 'Finishing up',
       updating: 'Saving the event',
@@ -816,6 +838,10 @@ const en: typeof ko = {
 
     publishProblems: {
       notYourOrg: 'You may not create events for this organiser',
+      orgName: 'Write an organiser name of 2 to 40 characters',
+      orgLimit: 'You can have up to three organisers. Please use one you already have',
+      orgNotActive: 'Please finish signing up first',
+      orgFailed: 'Could not create your organiser. Please try again in a moment',
       // The event was made but the receipt did not name it. The draft and the operation hash
       // are kept, and pressing again looks the number up by that hash — it makes no new event.
       noEventId: 'Your event was created. Only its number has not come back yet — press "Create the event" once more to look it up. It will not create a second event',

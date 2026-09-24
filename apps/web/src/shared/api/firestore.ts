@@ -246,6 +246,19 @@ export async function sendChatMessage(eventId: string, text: string): Promise<st
  */
 export const MAX_DISPLAY_NAME_CHARS = 24;
 
+/**
+ * This account's own `users/{uid}` document, or `null` when it has none yet. Only the fields
+ * this side writes are read back — the rest of that document is the server's.
+ */
+export async function loadMyProfile(): Promise<{ displayName: string } | null> {
+  const uid = getFirebaseAuth().currentUser?.uid;
+  if (!uid) return null;
+  const snapshot = await getDoc(doc(getDb(), 'users', uid));
+  if (!snapshot.exists()) return null;
+  const data = snapshot.data() as { displayName?: unknown };
+  return { displayName: typeof data.displayName === 'string' ? data.displayName : '' };
+}
+
 export async function saveUserProfile(patch: {
   nickname?: string;
   displayName?: string;
@@ -344,6 +357,14 @@ export interface EventDraft {
    * made, the other an event this draft was opened from.
    */
   editingEventId: string;
+  /**
+   * The name a new organisation is being created under, or `''`. Written **before**
+   * `createOrganizerForMe` is called and cleared once it answers, because that callable is not
+   * idempotent: a second call is a second organisation. A draft that comes back with this
+   * still set is a run that died mid-call, and the next attempt asks the indexer what became
+   * of it before it makes another (plan section B-5).
+   */
+  orgPendingName: string;
 }
 
 /**

@@ -67,7 +67,7 @@ export const emptyEventDraft: EventDraft = {
   startsAt: 0, endsAt: 0, timeHidden: false,
   transferable: true, transferCutoffHours: 2, requireKyc: false,
   tiers: [emptyEventDraftTier],
-  submittedOpHash: '', createdEventId: '', editingEventId: '',
+  submittedOpHash: '', createdEventId: '', editingEventId: '', orgPendingName: '',
 };
 
 export type EventDraftStatus = 'saved' | 'saving' | 'error';
@@ -141,6 +141,7 @@ export function normalizeEventDraft(raw: unknown): EventDraft {
     submittedOpHash: text(saved.submittedOpHash, emptyEventDraft.submittedOpHash),
     createdEventId: text(saved.createdEventId, emptyEventDraft.createdEventId),
     editingEventId: text(saved.editingEventId, emptyEventDraft.editingEventId),
+    orgPendingName: text(saved.orgPendingName, emptyEventDraft.orgPendingName),
   };
 }
 

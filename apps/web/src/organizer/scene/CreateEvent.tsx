@@ -1,9 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Alert, Button, Field, Screen, Spinner, StickyBar, Toggle } from '../../shared/ui';
 import { fmt, useCopy, useLocale } from '../../shared/i18n';
 import { THEME_CODES, themeLabels } from '../../shared/eventThemes';
+import { useDisplayName } from '../../shared/displayName';
 import { useOrganizerCopy } from '../copy';
+import { useMyOrgs } from '../useMyOrgs';
+import { isGoodOrgName, ORG_NAME_MAX } from '../orgName';
 import { UnsponsoredNotice } from '../Unsponsored';
 import { useEventDraft } from '../useEventDraft';
 import { KR_REGIONS } from './regions';
@@ -53,6 +56,16 @@ export function CreateEvent() {
   const asked = useSearchParams()[0].get('org') ?? '';
   const { draft, draftId, resumed, status, savedAt, patch, save, discard } = useEventDraft(asked, wanted);
   const [tag, setTag] = useState('');
+  const myOrgs = useMyOrgs();
+  const displayName = useDisplayName();
+  /**
+   * The organiser name, when this person has none yet. It is one line above the button rather
+   * than a screen of its own: making an organisation is not a thing anybody sets out to do, it
+   * is a field on the way to an event (plan section B-4). It is prefilled with the name they
+   * already gave, so the whole of it is usually just pressing 만들기.
+   */
+  const [orgName, setOrgName] = useState('');
+  const orgTyped = useRef(false);
   // `더 설정하기`. Closed to begin with — the five fields above it are the whole of an event
   // that works — and opened by hand, or by a problem hiding inside it.
   const [more, setMore] = useState(false);
@@ -64,15 +77,29 @@ export function CreateEvent() {
   // to that event, and `처음부터` is hidden: on an edit it would throw the event's own fields
   // away and leave an empty draft that makes a *second* event.
   const editing = draft.editingEventId !== '';
+  // Only when there is nothing to pick from: one organisation is used without asking, and two
+  // or more are chosen in `더 설정하기` — neither is a question worth a box on this screen.
+  const needsOrg = !editing && !myOrgs.isLoading && myOrgs.orgs.length === 0 && draft.orgId === '';
+  const orgNameWrong = needsOrg && !isGoodOrgName(orgName);
   const problems = eventProblems(draft);
   const tiersWrong = tierProblems(draft);
   const blocked = paidTiers(draft).length > 0;
   const wrong = (key: EventProblem) =>
     (checked && problems.includes(key) ? <p className="problem">{copy.problems[key]}</p> : null);
 
+  useEffect(() => {
+    if (orgTyped.current) return;
+    // A name a previous attempt wrote down outranks the profile's: it may already be the name
+    // of an organisation that exists.
+    const prefill = draft.orgPendingName || displayName;
+    if (prefill !== '') setOrgName(prefill);
+  }, [displayName, draft.orgPendingName]);
+
   const { phase, problem, unsponsored, publish } = usePublish({
     draft,
     draftId,
+    myOrgs,
+    orgName,
     patch,
     save,
     discard,
@@ -102,7 +129,7 @@ export function CreateEvent() {
 
   // `confirming` deliberately leaves the button pressable: that press is what asks the bundler
   // what became of an operation whose `wait` gave up, and it never sends a second one.
-  const working = phase === 'pinning' || phase === 'sending' || phase === 'finishing';
+  const working = phase === 'org' || phase === 'pinning' || phase === 'sending' || phase === 'finishing';
 
   function scrollTo(section: string): void {
     // jsdom has no `scrollIntoView`, and neither does an older browser; the line under the
@@ -122,6 +149,10 @@ export function CreateEvent() {
     }
     if (tiersWrong.length > 0) {
       scrollTo('tickets');
+      return;
+    }
+    if (orgNameWrong) {
+      scrollTo('org');
       return;
     }
     void publish();
@@ -325,6 +356,24 @@ export function CreateEvent() {
           <TicketExtras draft={draft} patch={patch} />
         </details>
 
+        {needsOrg ? (
+          <section id="scene-org">
+            <Field label={copy.org.label}>
+              <input
+                value={orgName}
+                maxLength={ORG_NAME_MAX}
+                placeholder={copy.org.placeholder}
+                onChange={(event) => {
+                  orgTyped.current = true;
+                  setOrgName(event.target.value);
+                }}
+              />
+            </Field>
+            <p className="muted">{copy.org.help}</p>
+            {checked && orgNameWrong ? <p className="problem">{copy.publishProblems.orgName}</p> : null}
+          </section>
+        ) : null}
+
         {unsponsored ? <UnsponsoredNotice /> : null}
         {problem !== '' ? <Alert tone="error">{copy.publishProblems[problem]}</Alert> : null}
         {/* `confirming` covers two things — an operation still in flight, and one that landed
@@ -332,7 +381,7 @@ export function CreateEvent() {
         {phase === 'confirming' && problem === '' ? (
           <Alert tone="info">{editing ? copy.publish.confirmingEdit : copy.publish.confirming}</Alert>
         ) : null}
-        {phase === 'pinning' || phase === 'sending' || phase === 'finishing' ? (
+        {phase === 'org' || phase === 'pinning' || phase === 'sending' || phase === 'finishing' ? (
           <p className="working">
             <Spinner />
             {editing && phase === 'sending' ? copy.publish.updating : copy.publish[phase]}

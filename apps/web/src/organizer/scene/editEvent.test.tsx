@@ -14,9 +14,20 @@ const deleteEventDraft = vi.fn(async (id: string) => {
   store = store.filter((row) => row.id !== id);
 });
 const loadEventArt = vi.fn(async () => [{ preset: 'c' as const }, { imageCid: 'bafkmine' }]);
+const loadMyProfile = vi.fn(async () => ({ displayName: '김태완' }));
 vi.mock('../../shared/api/firestore', () => ({
-  listEventDrafts, saveEventDraft, deleteEventDraft, loadEventArt,
+  listEventDrafts, saveEventDraft, deleteEventDraft, loadEventArt, loadMyProfile,
 }));
+/** The indexer's answer about this person as an organiser, which the scene now reads too. */
+const orgRefetch = vi.fn(async () => [] as { orgId: string; canCreateEvent: boolean }[]);
+const orgsListed = vi.fn(() => [] as { orgId: string; canCreateEvent: boolean }[]);
+vi.mock('../useMyOrgs', () => ({
+  useMyOrgs: () => ({
+    orgs: orgsListed(), canCreateEvent: false, isLoading: false, isError: false,
+    error: null, refetch: orgRefetch,
+  }),
+}));
+
 
 const pinEventMetadata = vi.fn(async (_args: unknown) => ({ metadataCid: 'bafyNew' }));
 const saveEventArt = vi.fn(async (_args: unknown) => ({ ok: true as const }));

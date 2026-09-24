@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { loadOrgName } from '../shared/api/firestore';
 import { PERM_CREATE_EVENT } from '../shared/chain/permissions';
@@ -47,7 +47,13 @@ export interface MyOrgsResult {
   isLoading: boolean;
   isError: boolean;
   error: unknown;
-  refetch: () => void;
+  /**
+   * Asks the indexer again **and answers with what it said**. The answer matters because the
+   * publish path has one question the cached list cannot settle — "did the organisation a
+   * previous attempt started actually get made?" — and `createOrganizerForMe` is not
+   * idempotent, so guessing wrong is a second organisation (plan section B-5).
+   */
+  refetch: () => Promise<MyOrg[]>;
 }
 
 export interface OrgEventsResult {
@@ -127,13 +133,17 @@ export function useMyOrgs(): MyOrgsResult {
     enabled: session.status === 'signedIn' && me !== undefined,
   });
 
-  const orgs = useMemo(
-    () =>
-      (query.data ?? []).map((org) => ({
-        ...org,
-        name: org.name ?? fmt(copy.home.orgFallback, { id: org.orgId }),
-      })),
-    [query.data, copy],
+  // The fallback is copy, so it is put on outside the queryFn — a cache holding `주최사 #3`
+  // would go on saying that after a switch to English.
+  const named = useCallback(
+    (rows: readonly MyOrgRow[]): MyOrg[] =>
+      rows.map((org) => ({ ...org, name: org.name ?? fmt(copy.home.orgFallback, { id: org.orgId }) })),
+    [copy],
+  );
+  const orgs = useMemo(() => named(query.data ?? []), [named, query.data]);
+  const refetch = useCallback(
+    async (): Promise<MyOrg[]> => named((await query.refetch()).data ?? []),
+    [named, query],
   );
 
   return {
@@ -142,7 +152,7 @@ export function useMyOrgs(): MyOrgsResult {
     isLoading: query.isLoading,
     isError: query.isError,
     error: query.error,
-    refetch: () => void query.refetch(),
+    refetch,
   };
 }
 

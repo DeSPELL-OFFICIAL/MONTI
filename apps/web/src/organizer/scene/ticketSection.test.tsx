@@ -8,7 +8,20 @@ let store: StoredEventDraft[] = [];
 const listEventDrafts = vi.fn(async () => [...store].sort((a, b) => b.updatedAt - a.updatedAt));
 const saveEventDraft = vi.fn(async () => undefined);
 const deleteEventDraft = vi.fn(async () => undefined);
-vi.mock('../../shared/api/firestore', () => ({ listEventDrafts, saveEventDraft, deleteEventDraft }));
+const loadMyProfile = vi.fn(async () => ({ displayName: '김태완' }));
+vi.mock('../../shared/api/firestore', () => ({
+  listEventDrafts, saveEventDraft, deleteEventDraft, loadMyProfile,
+}));
+/** The indexer's answer about this person as an organiser, which the scene now reads too. */
+const orgRefetch = vi.fn(async () => [] as { orgId: string; canCreateEvent: boolean }[]);
+const orgsListed = vi.fn(() => [] as { orgId: string; canCreateEvent: boolean }[]);
+vi.mock('../useMyOrgs', () => ({
+  useMyOrgs: () => ({
+    orgs: orgsListed(), canCreateEvent: false, isLoading: false, isError: false,
+    error: null, refetch: orgRefetch,
+  }),
+}));
+
 
 const pinEventImage = vi.fn(async (_args: { bytesBase64: string; kind: string }) => ({ cid: 'bafkart' }));
 vi.mock('../../shared/api/functions', async (orig) => ({
