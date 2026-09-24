@@ -40,7 +40,7 @@ const REASONS: Readonly<Record<string, BecomeProblem>> = {
  * is somebody with a person record whose phone is not registered yet.
  */
 const RESUME: Readonly<Partial<Record<BecomeProblem, string>>> = {
-  notActive: '/signup/device',
+  notActive: '/signup/register',
   noSignup: '/signup/phone',
 };
 

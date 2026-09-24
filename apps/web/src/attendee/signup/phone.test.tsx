@@ -106,7 +106,7 @@ describe('Verify screen', () => {
     await userEvent.click(screen.getByRole('button', { name: '확인' }));
     expect(confirmOtp).toHaveBeenCalledWith('vid', '123456');
     expect(startSignup).toHaveBeenCalled();
-    expect(navigate).toHaveBeenCalledWith('/signup/passkey');
+    expect(navigate).toHaveBeenCalledWith('/signup/register');
     expect(JSON.parse(sessionStorage.getItem('monti.signup') ?? '{}')).toMatchObject({ personId: 'p1' });
   });
 
@@ -170,14 +170,14 @@ describe('Verify screen', () => {
     await userEvent.click(screen.getByRole('button', { name: '확인' }));
     expect(confirmOtp).toHaveBeenCalledTimes(1);
     expect(startSignup).toHaveBeenCalledTimes(2);
-    expect(navigate).toHaveBeenCalledWith('/signup/passkey');
+    expect(navigate).toHaveBeenCalledWith('/signup/register');
   });
 
   it('skips the code entirely when the platform verified the number instantly', async () => {
     // Android's Play-services path: no SMS, no verification id, already signed in.
     seedSignup({ verificationId: '', phoneE164: PHONE });
     renderScreen(<Verify />);
-    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/signup/passkey'));
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/signup/register'));
     expect(confirmOtp).not.toHaveBeenCalled();
     expect(screen.queryByRole('textbox')).toBeNull();
   });

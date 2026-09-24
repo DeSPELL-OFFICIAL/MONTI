@@ -208,3 +208,18 @@ body {
   border: 1px solid var(--line); border-radius: 999px;
   padding: 4px 10px; font-size: 13px; color: var(--muted);
 }
+
+/* The three dots on the one-tap register screen. The current one pulses rather than filling a
+   bar: `registerIdentity` waits for a block to finalise, so a percentage would be invented. */
+.steps { list-style: none; display: flex; gap: 8px; margin: 0 0 20px; padding: 0; }
+.steps__step { flex: 1; display: grid; justify-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.steps__dot { width: 10px; height: 10px; border-radius: 50%; background: var(--line); }
+.steps__step--done .steps__dot { background: var(--accent); }
+.steps__step--done { color: var(--text); }
+.steps__step--current .steps__dot { background: var(--accent); }
+.steps__step--current { color: var(--text); font-weight: 600; }
+.steps__step--pulse .steps__dot { animation: step-pulse 1.2s ease-in-out infinite; }
+@keyframes step-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.6); opacity: 0.45; }
+}

@@ -58,7 +58,7 @@ export function Verify() {
       }
       // Creates persons/{personId} and users/{uid} from the number in the phone session.
       await finishSignup();
-      navigate('/signup/passkey');
+      navigate('/signup/register');
     } catch (failure) {
       if (isAlreadyRegistered(failure)) {
         navigate('/login', { replace: true, state: { notice: copy.signup.alreadyRegistered } });

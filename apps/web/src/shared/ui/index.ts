@@ -11,6 +11,7 @@ export { ContactLink } from './ContactLink';
 export { Chip, type ChipProps } from './Chip';
 export { Toggle, type ToggleProps } from './Toggle';
 export { StickyBar } from './StickyBar';
+export { Steps, type StepsProps } from './Steps';
 export { A4Cropper, type A4CropperProps } from './A4Cropper';
 export {
   TicketArt, type TicketArtProps, type TicketArtPreset, type TicketArtSource,
