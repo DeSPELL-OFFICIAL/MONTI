@@ -19,17 +19,26 @@ service cloud.firestore {
         && changedOnly(['pushToken']);
     }
 
-    // 사용자가 직접 쓸 수 있는 유일한 세 필드.
+    // 사용자가 직접 쓸 수 있는 유일한 네 필드.
     match /users/{uid} {
       allow read: if signedIn() && request.auth.uid == uid;
       allow create, delete: if false;
       allow update: if signedIn()
         && request.auth.uid == uid
-        && changedOnly(['nickname', 'locale', 'chatOrder'])
+        && changedOnly(['nickname', 'locale', 'chatOrder', 'displayName'])
         && (!('locale' in request.resource.data.diff(resource.data).affectedKeys())
             || request.resource.data.locale in ['en', 'ko'])
         && (!('nickname' in request.resource.data.diff(resource.data).affectedKeys())
             || (request.resource.data.nickname is string && request.resource.data.nickname.size() <= 24))
+        // 티켓에 찍히는 표시 이름. 체인 닉네임(`^[a-z0-9_]{3,20}$`)과는 다른 칸이라 한글이
+        // 들어온다 — 글자 종류는 재지 않고 **길이와 제어문자만** 본다. 앞뒤 공백을 지운 뒤
+        // 1~24 자여야 한다: 공백만 남은 이름은 티켓에 빈칸을 그리고, 24 자는 티켓 도안이
+        // 한 줄에 담을 수 있는 폭이다. 제어문자(개행·NUL)는 SVG 한 줄을 깨뜨리므로 막는다.
+        && (!('displayName' in request.resource.data.diff(resource.data).affectedKeys())
+            || (request.resource.data.displayName is string
+                && request.resource.data.displayName.trim().size() >= 1
+                && request.resource.data.displayName.trim().size() <= 24
+                && request.resource.data.displayName.matches('^[^\\x00-\\x1f\\x7f]*$')))
         && (!('chatOrder' in request.resource.data.diff(resource.data).affectedKeys())
             || (request.resource.data.chatOrder is list && request.resource.data.chatOrder.size() <= 200));
     }
