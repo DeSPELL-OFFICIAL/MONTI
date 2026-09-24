@@ -27,8 +27,32 @@ export type Quarter = 0 | 1 | 2 | 3;
 /** `scale` 1 is the picture filling the frame; the pans are in frame widths, 0 being centred. */
 export interface CropView { scale: number; panX: number; panY: number }
 
+/**
+ * How long each part of making a poster took, in milliseconds (T-UX2-10). The plan ranked the
+ * suspects for why the poster felt slow by reading the code (section D-2); this is the part of
+ * the measurement that only this module can take, because only this module knows whether the
+ * rescue encode ran at all. The upload is added by whoever sends the bytes.
+ */
+export interface CropTimings {
+  /** `createImageBitmap` — a 12 MP photo off a phone. */
+  decodeMs: number;
+  /** The first draw and JPEG encode, at {@link A4_QUALITY}. */
+  encodeMs: number;
+  /** The second one, at {@link A4_QUALITY_RESCUE}; `0` when the first blob already fitted. */
+  rescueMs: number;
+  /** `FileReader` turning the blob into the base64 the pinning call carries. */
+  base64Ms: number;
+}
+
 /** `base64` is the blob without its `data:<mime>;base64,` prefix — what the pinning call takes. */
-export interface CroppedPoster { blob: Blob; base64: string; width: number; height: number }
+export interface CroppedPoster {
+  blob: Blob;
+  base64: string;
+  width: number;
+  height: number;
+  /** Optional because a test that stubs this whole module has no seconds to report. */
+  timings?: CropTimings;
+}
 
 export interface CropSource { sx: number; sy: number; sw: number; sh: number }
 
@@ -159,17 +183,40 @@ function toBase64(blob: Blob): Promise<string> {
  */
 export async function cropToA4(file: File, opts: CropOptions = {}): Promise<CroppedPoster> {
   const quarter = opts.quarter ?? 0;
+  // Four clocks, and the numbers ride out on the poster rather than into a console from here:
+  // this module has no business deciding what is worth printing, and a caller that wants to
+  // assert the figures should not have to spy on one (T-UX2-10).
+  const decodeAt = performance.now();
   const bitmap = await (opts.load ?? loadBitmap)(file);
+  const decodeMs = performance.now() - decodeAt;
+
   const encode = opts.encode ?? drawAndEncode;
   // Measured on the turned picture — the one that was on screen — and then mapped back.
   const turned = turnedSize(bitmap.width, bitmap.height, quarter);
   const framed = cropRect(turned.width, turned.height, opts.view ?? CENTRED);
   const rect = sourceRect(framed, quarter, bitmap.width, bitmap.height);
+
+  const encodeAt = performance.now();
   let blob = await encode(bitmap, rect, A4_QUALITY, quarter);
+  const encodeMs = performance.now() - encodeAt;
+  // Kept apart from the first pass on purpose: whether the rescue is worth avoiding is exactly
+  // what the plan left open (T-UX2-19), and one added-up number could not answer it.
+  let rescueMs = 0;
   if (blob && blob.size > A4_MAX_BYTES) {
+    const rescueAt = performance.now();
     blob = (await encode(bitmap, rect, A4_QUALITY_RESCUE, quarter)) ?? blob;
+    rescueMs = performance.now() - rescueAt;
   }
   bitmap.close();
   if (!blob) throw new Error('POSTER_ENCODE_FAILED');
-  return { blob, base64: await toBase64(blob), width: A4_WIDTH, height: A4_HEIGHT };
+
+  const base64At = performance.now();
+  const base64 = await toBase64(blob);
+  return {
+    blob,
+    base64,
+    width: A4_WIDTH,
+    height: A4_HEIGHT,
+    timings: { decodeMs, encodeMs, rescueMs, base64Ms: performance.now() - base64At },
+  };
 }

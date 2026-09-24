@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { rememberPoster } from '../../shared/ui';
 import type { CroppedPoster } from '../../shared/ui';
+import { posterTimings, reportPosterTimings } from './posterTimings';
 import { usePinImage } from './usePinImage';
 
 /** What the crop is doing right now, as far as the scene needs to know. */
@@ -49,6 +50,7 @@ export function usePosterUpload(onPinned: (cid: string) => void): PosterUpload {
   function send(entry: Held): void {
     setBusy(true);
     const run = (async () => {
+      const at = performance.now();
       const cid = await pin(entry.cropped);
       // Refused. `problem` says which refusal it was, and the bytes stay exactly where they
       // are so that the chip below the picture can send them again.
@@ -56,6 +58,11 @@ export function usePosterUpload(onPinned: (cid: string) => void): PosterUpload {
       entry.pinned = true;
       rememberPoster(cid, entry.url);
       onPinned(cid);
+      // One line per poster that landed, and only in a development build. The upload figure
+      // can only be taken here — this is the only place that holds both clocks (T-UX2-10).
+      reportPosterTimings(posterTimings(
+        entry.cropped.timings, performance.now() - at, entry.cropped.blob.size,
+      ));
     })();
     flight.current = run;
     void run.finally(() => {

@@ -21,5 +21,6 @@ export {
 export {
   cropToA4, sourceRect, turnedSize,
   A4_WIDTH, A4_HEIGHT, A4_MAX_BYTES, A4_QUALITY, A4_QUALITY_RESCUE,
-  type CropView, type CropOptions, type CropSource, type CroppedPoster, type Quarter,
+  type CropView, type CropOptions, type CropSource, type CroppedPoster,
+  type CropTimings, type Quarter,
 } from './a4Crop';

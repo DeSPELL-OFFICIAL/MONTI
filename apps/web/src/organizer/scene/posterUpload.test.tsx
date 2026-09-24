@@ -172,6 +172,26 @@ describe('the poster modal', () => {
     expect(posterUrl('bafkneverseen')).toBe('https://gw.test/bafkneverseen');
   });
 
+  /**
+   * T-UX2-10's one line, and one is what it is: the measurement is only useful if three real
+   * photos give three readable lines. The figures themselves are `posterTimings`'s own tests.
+   */
+  it('says where the poster seconds went once the pin lands, and only once', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    const user = userEvent.setup();
+    open();
+    await waitFor(() => expect(listEventDrafts).toHaveBeenCalled());
+    await crop(user);
+    expect(info).not.toHaveBeenCalled();
+
+    await land();
+    const lines = info.mock.calls
+      .map((call) => String(call[0]))
+      .filter((line) => line.startsWith('poster '));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('upload ');
+  });
+
   it('leaves the rest of the scene usable while the upload runs', async () => {
     const user = userEvent.setup();
     open();
