@@ -105,6 +105,25 @@ async function ready(): Promise<void> {
   await waitFor(() => expect(screen.getByLabelText(copy.titleLabel)).toHaveValue(READY.title));
 }
 
+/**
+ * {@link ready} plus the organiser line actually carrying its prefill.
+ *
+ * The draft's title and its `orgPendingName` arrive in the same state update, but the name
+ * reaches the box one render later — an effect reads `draft.orgPendingName || displayName`
+ * and sets it. A press landing inside that window finds `orgName` still empty, so `만들기`
+ * reports the empty box and scrolls to it instead of publishing: no organisation is made and
+ * the button never goes dead. Under a loaded runner that window is wide enough to hit, which
+ * is exactly how a green suite turned red once in three runs.
+ *
+ * Every test that presses `만들기` expecting a publish therefore waits for the box, not just
+ * for the title. This tightens the setup; it asserts nothing the test was not already relying
+ * on being true.
+ */
+async function readyToPublish(orgName: string): Promise<void> {
+  await ready();
+  await waitFor(() => expect(screen.getByLabelText(copy.org.label)).toHaveValue(orgName));
+}
+
 async function create(): Promise<void> {
   await userEvent.setup().click(screen.getByRole('button', { name: copy.tiers.create }));
 }
@@ -161,8 +180,7 @@ describe('the organiser line', () => {
 describe('resolving the organisation inside 만들기', () => {
   it('makes one under the name in the box, and creates the event under it', async () => {
     open();
-    await ready();
-    await waitFor(() => expect(screen.getByLabelText(copy.org.label)).toHaveValue('김태완'));
+    await readyToPublish('김태완');
     await create();
 
     await waitFor(() => expect(createOrganizerForMe).toHaveBeenCalledWith({ name: '김태완' }));
@@ -187,8 +205,7 @@ describe('resolving the organisation inside 만들기', () => {
   it('creates one at most once per draft, however often 만들기 is pressed', async () => {
     pinEventMetadata.mockRejectedValueOnce({ code: 'unavailable', message: 'offline' });
     open();
-    await ready();
-    await waitFor(() => expect(screen.getByLabelText(copy.org.label)).toHaveValue('김태완'));
+    await readyToPublish('김태완');
     await create();
     await waitFor(() => expect(createOrganizerForMe).toHaveBeenCalledTimes(1));
     await screen.findByText(copy.publishProblems.pinFailed);
@@ -220,7 +237,7 @@ describe('resolving the organisation inside 만들기', () => {
     listed = [];
     orgRefetch.mockImplementationOnce(async () => [ORG]);
     open({ ...READY, orgPendingName: '몬티 크루' });
-    await ready();
+    await readyToPublish('몬티 크루');
     await create();
 
     await waitFor(() => expect(orgRefetch).toHaveBeenCalled());
@@ -242,7 +259,7 @@ describe('resolving the organisation inside 만들기', () => {
       return [];
     });
     open({ ...READY, orgPendingName: '몬티 크루' });
-    await ready();
+    await readyToPublish('몬티 크루');
 
     const button = screen.getByRole('button', { name: copy.tiers.create });
     await act(async () => { fireEvent.click(button); });
@@ -258,7 +275,7 @@ describe('resolving the organisation inside 만들기', () => {
 
   it('makes one after all when the second look still finds nothing', async () => {
     open({ ...READY, orgPendingName: '몬티 크루' });
-    await ready();
+    await readyToPublish('몬티 크루');
     await create();
 
     await waitFor(() => expect(createOrganizerForMe).toHaveBeenCalledWith({ name: '몬티 크루' }));
@@ -270,8 +287,7 @@ describe('resolving the organisation inside 만들기', () => {
       Object.assign(new Error('ORG_LIMIT'), { code: 'failed-precondition' }),
     );
     open();
-    await ready();
-    await waitFor(() => expect(screen.getByLabelText(copy.org.label)).toHaveValue('김태완'));
+    await readyToPublish('김태완');
     await create();
 
     expect(await screen.findByText(copy.publishProblems.orgLimit)).toBeInTheDocument();
