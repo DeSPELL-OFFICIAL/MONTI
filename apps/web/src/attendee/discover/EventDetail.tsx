@@ -134,45 +134,47 @@ export function EventDetail() {
         ) : null}
         {metadata?.description ? <p>{metadata.description}</p> : null}
 
-      <p className="muted">
-        {timeHidden
-          ? `${formatEventDay(event.startsAt, locale)} · ${copy.discover.timeHidden}`
-          : formatEventDate(event.startsAt, locale)}
-        {metadata?.timeHidden && maySeePrivate ? (
-          <span className="badge">{copy.discover.privateOnly}</span>
-        ) : null}
-      </p>
-
-      {venue !== '' ? (
-        <p>
-          <a href={`https://maps.google.com/?q=${encodeURIComponent(venue)}`}>
-            {venue} · {copy.discover.map}
-          </a>
-          {metadata?.venueHidden ? <span className="badge">{copy.discover.privateOnly}</span> : null}
-        </p>
-      ) : null}
-      {metadata?.venueHidden && venue === '' ? (
         <p className="muted">
-          {region === '' ? '' : `${region} · `}
-          {venueWaiting ? copy.discover.privateLoading : copy.discover.venueHidden}
+          {timeHidden
+            ? `${formatEventDay(event.startsAt, locale)} · ${copy.discover.timeHidden}`
+            : formatEventDate(event.startsAt, locale)}
+          {metadata?.timeHidden && maySeePrivate ? (
+            <span className="badge">{copy.discover.privateOnly}</span>
+          ) : null}
         </p>
-      ) : null}
+
+        {venue !== '' ? (
+          <p>
+            <a href={`https://maps.google.com/?q=${encodeURIComponent(venue)}`}>
+              {venue} · {copy.discover.map}
+            </a>
+            {metadata?.venueHidden ? <span className="badge">{copy.discover.privateOnly}</span> : null}
+          </p>
+        ) : null}
+        {metadata?.venueHidden && venue === '' ? (
+          <p className="muted">
+            {region === '' ? '' : `${region} · `}
+            {venueWaiting ? copy.discover.privateLoading : copy.discover.venueHidden}
+          </p>
+        ) : null}
       </Card>
 
+      {/* What is left, and at what price. Its own pane because it is the one part of this
+          screen that changes while somebody is looking at it. */}
       <Card>
-      <ul className="tier-list">
-        {tiers.map((tier) => {
-          const left = Number(tier.supply) - Number(tier.minted);
-          return (
-            <li key={tier.id}>
-              <span>{tier.name}</span>
-              <span className="muted">
-                {left > 0 ? fmt(copy.discover.remaining, { count: left }) : copy.discover.soldOut}
-              </span>
-            </li>
-          );
-        })}
-      </ul>
+        <ul className="tier-list">
+          {tiers.map((tier) => {
+            const left = Number(tier.supply) - Number(tier.minted);
+            return (
+              <li key={tier.id}>
+                <span>{tier.name}</span>
+                <span className="muted">
+                  {left > 0 ? fmt(copy.discover.remaining, { count: left }) : copy.discover.soldOut}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
       </Card>
 
       {event.status === CANCELLED ? (
