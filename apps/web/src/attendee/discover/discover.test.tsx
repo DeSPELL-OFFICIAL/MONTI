@@ -146,6 +146,28 @@ function renderDetail(eventId = '1') {
   );
 }
 
+/** Records every address the router visits, so a route hop (or the absence of one) is read off it. */
+function renderDetailTracked(eventId = '1'): string[] {
+  const seen: string[] = [];
+  function Probe() {
+    seen.push(useLocation().pathname);
+    return null;
+  }
+  render(
+    <QueryClientProvider client={client()}>
+      <MemoryRouter initialEntries={[`/events/${eventId}`]}>
+        <Probe />
+        <Routes>
+          <Route path="/events/:eventId" element={<EventDetail />} />
+          {/* The claim route still exists (plan B1) — a hop here would show up in `seen`. */}
+          <Route path="/claim/:eventId" element={<div>claim route</div>} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  return seen;
+}
+
 beforeEach(() => {
   localStorage.clear();
   gql.mockReset();
@@ -539,6 +561,56 @@ describe('EventDetail', () => {
 });
 
 /**
+ * plan B1 / T-SIMP-5 — the claim was absorbed into an inline sheet on the detail screen. A
+ * signed-in visitor gets it in one tap with no route hop; the `/claim/:id` route survives for the
+ * deep-link and identity-check return, so a signed-out visitor is still sent there to sign in.
+ */
+describe('EventDetail · 받기 시트 (B1)', () => {
+  /** Clean answers for the claim engine's own reads, so opening the sheet paints its claimable state. */
+  function claimIndexer() {
+    gql.mockImplementation(async (query: string) => {
+      if (query.includes('OwnedTickets')) return { Ticket: [], Offer: [] };
+      if (query.includes('TicketContext')) return { CheckIn: [], Event: [], Tier: [], Ticket: [] };
+      if (query.includes('MyRequests')) return { ClaimRequest: [] };
+      return { Event: [EVENT_ONE], Tier: TIERS };
+    });
+  }
+
+  it('opens the claim as an inline sheet in one tap, with no hop to /claim', async () => {
+    claimIndexer();
+    setSession({ status: 'signedIn', account: ME });
+    const seen = renderDetailTracked();
+    await userEvent.click(await screen.findByRole('button', { name: '티켓 받기' }));
+    // The claim runs on this same screen: a dialog with the engine's own claim button in it.
+    const sheet = await screen.findByRole('dialog', { name: '티켓 받기' });
+    expect(within(sheet).getByRole('button', { name: '티켓 받기' })).toBeInTheDocument();
+    // The address never left the event page — the tap opened a sheet, it did not navigate.
+    expect(seen).not.toContain('/claim/1');
+    expect(seen.at(-1)).toBe('/events/1');
+  });
+
+  it('reassures in the sheet that it is free, by the claim button', async () => {
+    claimIndexer();
+    setSession({ status: 'signedIn', account: ME });
+    renderDetail();
+    await userEvent.click(await screen.findByRole('button', { name: '티켓 받기' }));
+    const sheet = await screen.findByRole('dialog', { name: '티켓 받기' });
+    expect(within(sheet).getByText('무료예요 · 돈 안 들어요')).toBeInTheDocument();
+  });
+
+  it('keeps the /claim route as the entry for a visitor who is not signed in yet', async () => {
+    gql.mockResolvedValue({ Event: [EVENT_ONE], Tier: TIERS });
+    setSession({ status: 'anonymous' });
+    renderDetail();
+    await screen.findByRole('heading', { name: '재즈 나이트' });
+    // No inline sheet before sign-in: the link sends them to /claim, where the session guard and
+    // then the surviving route take over (deep-link / resume path, plan B1).
+    expect(screen.getByRole('link', { name: '티켓 받기' })).toHaveAttribute('href', '/claim/1');
+    expect(screen.queryByRole('button', { name: '티켓 받기' })).toBeNull();
+  });
+});
+
+/**
  * T-EV-W8 — what an event's own organiser chose to tell only the people who hold a ticket.
  *
  * There is one authorisation for both halves and it is the callable: it asks the chain on
@@ -632,8 +704,9 @@ describe('EventDetail · what only ticket holders see', () => {
     getEventPrivate.mockReturnValue(new Promise(() => undefined));
     setSession({ status: 'signedIn', account: ME });
     renderDetail();
-    // The tiers and the call to action are already there; only the venue line is waiting.
-    expect(await screen.findByRole('link', { name: '티켓 받기' })).toBeInTheDocument();
+    // The tiers and the call to action are already there; only the venue line is waiting. For a
+    // signed-in visitor the claim is the inline-sheet opener (a button), not the /claim link (B1).
+    expect(await screen.findByRole('button', { name: '티켓 받기' })).toBeInTheDocument();
     expect(screen.getByText(/서울 · 확인하고 있어요/)).toBeInTheDocument();
   });
 

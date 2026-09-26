@@ -15,6 +15,7 @@ export const en: typeof ko = {
     contactHelp: 'Need a hand? Email us.',
     contactEmail: 'info@despell.io',
     montiHandles: "It's free · MONTI handles it for you",
+    free: "It's free · No cost",
   },
   // See the Korean block: the shared on-chain wait progress copy (plan §2c).
   op: {
