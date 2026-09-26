@@ -12,12 +12,16 @@ export const ko = {
     serviceDown: '지금 정보를 가져올 수 없어요. 잠시 뒤 다시 시도해 주세요.',
     contactHelp: '도움이 필요하면 메일로 연락해 주세요',
     contactEmail: 'info@despell.io',
+    // 티켓 받기 버튼 근처 안심 문구. 돈도 안 들고, 어려운 건 MONTI가 대신 한다는 약속.
+    montiHandles: '무료예요 · MONTI가 대신 처리해요',
   },
   // 온체인 대기 확정형 진행 UI(OpProgress) 공용 카피(계획 §2c). '저장'·'확인'만 쓰고 web3 낱말은 없다.
   op: {
     saving: '저장 중', confirming: '확인 중', done: '완료',
     elapsed: '{{sec}}초째', typical: '보통 3~10초 걸려요',
     timeout: '시간이 조금 걸리고 있어요. 다시 시도할까요?',
+    // 번들러가 대납 예산 부족으로 잠깐 거절할 때, 같은 요청을 자동으로 다시 보내는 동안 보여준다.
+    busy: '잠시 붐벼요. 다시 보내는 중…',
   },
   signup: {
     phoneTitle: '휴대폰 번호를 입력해 주세요', phoneHint: '문자로 인증번호를 보내드려요',
@@ -131,7 +135,7 @@ export const ko = {
     artGuest: '게스트',
   },
   claim: {
-    cta: '티켓 받기', working: '받는 중이에요', done: '티켓을 받았어요', tierLabel: '티켓 종류',
+    cta: '티켓 받기', working: '받는 중이에요', done: '티켓을 받았어요 · 내 티켓에 있어요', tierLabel: '티켓 종류',
     failed: '티켓을 받지 못했어요. 잠시 뒤 다시 시도해 주세요.',
     confirming: '아직 확인 중이에요. 잠시 뒤 내 티켓에서 확인해 주세요.',
     limitReached: '이 행사에서 받을 수 있는 티켓을 이미 다 받았어요.',

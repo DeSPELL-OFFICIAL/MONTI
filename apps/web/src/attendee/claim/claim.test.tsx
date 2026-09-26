@@ -75,6 +75,8 @@ function renderClaim(entry = '/claim/5') {
 }
 
 beforeEach(() => {
+  // The claim draft lives in sessionStorage; a fresh screen must not resume another test's op.
+  sessionStorage.clear();
   kycLevel.value = 1;
   kycLevel.loading = false;
   ownedTickets.rows = [];
@@ -109,6 +111,22 @@ describe('Claim', () => {
     expect(ticketOp).toHaveBeenCalledWith(
       expect.objectContaining({ orgId: 9n, functionName: 'claim', args: [5n, 0, '0x'] }),
     );
+  });
+
+  it('confirms a landed claim in place with a real 완료 state, not a silent redirect', async () => {
+    renderClaim();
+    await userEvent.click(await screen.findByRole('button', { name: '티켓 받기' }));
+    expect(await screen.findByText('티켓을 받았어요 · 내 티켓에 있어요')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '내 티켓 보기' })).toHaveAttribute('href', '/tickets');
+    // The old path navigated away the moment the op returned; the new one shows success and lets
+    // the person choose when to go.
+    expect(navigate).not.toHaveBeenCalledWith('/tickets');
+  });
+
+  it('reassures near the button that it is free and MONTI handles it', async () => {
+    renderClaim();
+    await screen.findByRole('button', { name: '티켓 받기' });
+    expect(screen.getByText('무료예요 · MONTI가 대신 처리해요')).toBeInTheDocument();
   });
 
   it('reads a timed-out op as still confirming, not as a failure', async () => {

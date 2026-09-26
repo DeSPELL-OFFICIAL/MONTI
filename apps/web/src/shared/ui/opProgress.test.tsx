@@ -102,4 +102,12 @@ describe('OpProgress', () => {
     expect(screen.queryByText(op.timeout)).toBeNull();
     expect(currentStep()).toBe(op.done);
   });
+
+  it('shows a caller note above the wait while the op is in flight', () => {
+    render(<OpProgress phase="saving" note={op.busy} />);
+    expect(screen.getByText(op.busy)).toBeInTheDocument();
+    // A note is for the in-flight state only: once done, only the step remains.
+    act(() => vi.advanceTimersByTime(1_000));
+    expect(screen.getByText(op.busy)).toBeInTheDocument();
+  });
 });

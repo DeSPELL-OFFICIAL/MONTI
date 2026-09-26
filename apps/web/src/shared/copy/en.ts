@@ -14,12 +14,14 @@ export const en: typeof ko = {
     serviceDown: 'That information is not available right now. Please try again in a moment.',
     contactHelp: 'Need a hand? Email us.',
     contactEmail: 'info@despell.io',
+    montiHandles: "It's free · MONTI handles it for you",
   },
   // See the Korean block: the shared on-chain wait progress copy (plan §2c).
   op: {
     saving: 'Saving', confirming: 'Confirming', done: 'Done',
     elapsed: '{{sec}}s', typical: 'Usually 3–10 seconds',
     timeout: 'This is taking a little longer than usual. Try again?',
+    busy: 'A little busy right now. Resending…',
   },
   signup: {
     phoneTitle: 'Enter your phone number', phoneHint: 'We will text you a code',
@@ -128,7 +130,7 @@ export const en: typeof ko = {
     artGuest: 'Guest',
   },
   claim: {
-    cta: 'Get a ticket', working: 'Getting your ticket', done: 'You got the ticket', tierLabel: 'Ticket type',
+    cta: 'Get a ticket', working: 'Getting your ticket', done: "You got your ticket · It's in My Tickets", tierLabel: 'Ticket type',
     failed: 'Could not get the ticket. Please try again shortly.',
     confirming: 'Still confirming. Your ticket will show up under My tickets shortly.',
     limitReached: 'You already have every ticket this event allows.',
