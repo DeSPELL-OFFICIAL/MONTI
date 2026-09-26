@@ -6,6 +6,7 @@ import { readGateCodeWebNfc, readThenWriteWebNfc } from './webnfc';
 import type { NfcTapOptions } from './session';
 
 export * from './errors';
+export * from './ndef';
 export * from './records';
 export { NFC_SESSION_TIMEOUT_MS, type NfcTapOptions } from './session';
 

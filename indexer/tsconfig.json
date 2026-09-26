@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    // envio 는 핸들러를 ts-node 의 CJS 로더로 require 한다. ESM 으로 내보내면
+    // generated(CJS) 의 named export 를 못 읽어 인덱서가 초기화에서 죽는다.
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["src", "test", "generated"]
+}

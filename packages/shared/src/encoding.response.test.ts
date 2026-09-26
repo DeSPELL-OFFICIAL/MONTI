@@ -149,4 +149,14 @@ describe('QR fallback', () => {
   it('rejects a well-prefixed payload whose body is not a gate response', () => {
     expect(() => fromQrPayload('MONTI1:AAEC')).toThrow('BAD_GATE_RESPONSE');
   });
+
+  it('is the QR string both branches pin', () => {
+    expect(toQrPayload(wire)).toBe(
+      'MONTI1:pGF2Amd0b2tlbklkYTdlbm9uY2V4QjB4MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExM' +
+      'TExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMWlkZXZpY2VTaWd4gjB4MjIyMjIyMjIyMjIyM' +
+      'jIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjMzMzMzMzMzM' +
+      'zMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM',
+    );
+  });
 });
+

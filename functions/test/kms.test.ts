@@ -1,18 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Hex } from '@monti/shared';
 import { decryptField, encryptField, piiAad, piiKeyName, type KmsCryptoClient } from '../src/lib/kms.js';
+import { KeyManagementServiceClient } from './helpers/fakeKms.js';
 
-/** DEK를 'W' 한 바이트로 감싸는 가짜 KMS. 실제 KMS 왕복 없이 봉투 로직만 검증한다. */
-const fakeKms: KmsCryptoClient = {
-  async encrypt({ plaintext }) {
-    return [{ ciphertext: Buffer.concat([Buffer.from('W'), Buffer.from(plaintext)]) }];
-  },
-  async decrypt({ ciphertext }) {
-    const buf = Buffer.from(ciphertext);
-    if (buf[0] !== 'W'.charCodeAt(0)) throw new Error('FAKE_KMS_BAD_WRAP');
-    return [{ plaintext: buf.subarray(1) }];
-  },
-};
+// 모듈을 가로채지 않고 같은 가짜를 인자로 직접 넣는다 — 여긴 봉투 로직만 보면 된다.
+const fakeKms: KmsCryptoClient = new KeyManagementServiceClient();
 
 // piiKeyName()은 encryptField/decryptField가 매 호출 참조하므로 프로젝트 ID가 필요하다.
 let savedProject: string | undefined;
@@ -51,7 +43,7 @@ describe('envelope encryption', () => {
   it('rejects a tampered ciphertext', async () => {
     const envelope = await encryptField('홍길동', '', fakeKms);
     const bytes = Buffer.from(envelope, 'base64');
-    bytes[bytes.length - 1] ^= 0xff;
+    bytes[bytes.length - 1]! ^= 0xff;
     await expect(decryptField(bytes.toString('base64'), '', fakeKms)).rejects.toThrow();
   });
 

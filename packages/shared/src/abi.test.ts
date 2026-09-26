@@ -36,7 +36,7 @@ describe('Identity ABI', () => {
         'register', 'rotateAccount', 'setActiveDevice', 'lockDevice', 'setKycLevel', 'setNickname',
         'accountOf', 'personOf', 'isMember', 'activeDevice', 'isLocked', 'deviceUpdatedAt',
         'kycLevelOf', 'nicknameOwner', 'nicknameOf', 'attester',
-        // 01b: the rotation undo (C3). `rotatedFrom` is the flag, `rotatedAt` only the timestamp.
+        // 01b: 회전 되돌리기(C3)
         'cancelRotation', 'rotatedAt', 'rotatedFrom', 'ROTATION_UNDO_WINDOW',
       ]),
     );
@@ -70,16 +70,31 @@ describe('Ticket ABI', () => {
     expect(names(ticketAbi, 'function')).toEqual(
       expect.arrayContaining(['ownerOf', 'balanceOf', 'eventOf', 'tierOf', 'eventOrg', 'checkInOf',
         'balanceOfEvent', 'eventMeta', 'eventStatus', 'tiers', 'createOffer', 'cancelOffer', 'acceptOffer', 'offerOf',
-        // 01b: the offline flush, the two digests clients must agree with, and the two windows.
+        // 01b: 오프라인 큐 flush, EIP-712 오퍼 다이제스트, 7워드 기기 다이제스트, 두 상수, 계정 회전 이관
         'checkInLate', 'offerDigest', 'eip712Domain', 'deviceDigest', 'LATE_WINDOW', 'MIGRATE_DELAY', 'migrate']),
     );
     expect(names(ticketAbi, 'event')).toEqual(
       expect.arrayContaining(['EventCreated', 'EventStatusChanged', 'Claimed', 'Transfer', 'CheckedIn',
         'OverrideRequested', 'ManualOverride', 'Revoked', 'Migrated',
         'OfferCreated', 'OfferCancelled', 'OfferAccepted',
-        // 01b: emitted *alongside* CheckedIn on the late path — never instead of it.
+        // 01b: 늦은 체크인은 CheckedIn 에 더해서 나온다 — 입장 수를 셀 때 두 번 세면 안 된다.
         'CheckedInLate']),
     );
+  });
+
+  // abi-delta-01b §5. 같은 셀렉터, 두 번 바뀐 튜플. nonceHash 가 ts 앞으로 옮겨 가
+  // ts+manual+late 가 한 슬롯을 쓴다. Solidity 는 필드 이름으로 읽어 눈치채지 못했지만
+  // viem 과 Envio 는 위치로 디코드한다 — 이 순서가 틀리면 조용히 잘못 읽는다.
+  it('pins the checkInOf return tuple component order', () => {
+    const checkInOf = fn(ticketAbi, 'checkInOf');
+    expect(checkInOf?.outputs?.[0]?.type).toBe('tuple');
+    expect(checkInOf?.outputs?.[0]?.components?.map((c) => c.name)).toEqual([
+      'gateId',
+      'nonceHash',
+      'ts',
+      'manual',
+      'late',
+    ]);
   });
 
   it('matches sub-plan 01 offer event signatures exactly', () => {
@@ -143,7 +158,11 @@ describe('MontiPaymaster ABI', () => {
 
 describe('other ABIs', () => {
   it('exposes the paymaster budget calls and the Coinbase factory getAddress', () => {
-    expect(names(montiPaymasterAbi, 'function')).toEqual(expect.arrayContaining(['depositPlatform', 'budgetOf']));
+    expect(names(montiPaymasterAbi, 'function')).toEqual(
+      // 01b: 셀렉터 단위 킬 스위치와 인자 워드 조회
+      expect.arrayContaining(['depositPlatform', 'budgetOf', 'setAllowed', 'argWordOf']),
+    );
+    expect(names(montiPaymasterAbi, 'event')).toEqual(expect.arrayContaining(['SelectorAllowed']));
     expect(names(coinbaseFactoryAbi, 'function')).toEqual(expect.arrayContaining(['getAddress', 'createAccount']));
   });
 });

@@ -137,6 +137,25 @@ export interface PendingOffer {
 const callPendingOffers = call<void, { offers: PendingOffer[] }>('pendingOffers');
 
 /**
+ * One staff device asking to be registered as a gate, field for field
+ * (functions/src/functions/pendingGates.ts). These four are the whole of it: the server
+ * validates exactly them, stores exactly them, and hands exactly them back to the organizer
+ * as the arguments of `Organizers.registerGate(eventId, gateAccount, kx, ky)`.
+ *
+ * There is deliberately no device label. The callable reads `request.data.eventId`,
+ * `gateAccount`, `kx` and `ky` and nothing else, so a label would be typed as sent, shown on
+ * the setup screen's fallback, and silently dropped — a field the staff device only thinks
+ * the organizer can see.
+ */
+export interface PendingGateSubmission {
+  /** Decimal, as the server normalises it: `BigInt(value).toString()`. */
+  eventId: string;
+  gateAccount: Hex;
+  kx: Hex;
+  ky: Hex;
+}
+
+/**
  * One terminal waiting on the organiser's approval. These four values are the whole of
  * `Organizers.registerGate(eventId, gateAccount, kx, ky)` plus the time the staff phone sent
  * it; `submittedAt` is epoch milliseconds.
@@ -292,9 +311,7 @@ export const api = {
   // Sub-plan 04's staff gate-registration screen calls this instead of writing Firestore
   // directly. The server records the submitting uid and nothing else about the device — there
   // is no label, so nothing here invents one.
-  submitPendingGate: call<{ eventId: string; gateAccount: Hex; kx: Hex; ky: Hex }, { ok: true }>(
-    'submitPendingGate',
-  ),
+  submitPendingGate: call<PendingGateSubmission, { ok: true }>('submitPendingGate'),
   /** The queue the organiser's gate screen approves from. Every field is an argument of
    *  `Organizers.registerGate`, plus the time it arrived; who submitted it never leaves the
    *  server (functions/src/functions/pendingGates.ts). */
@@ -500,3 +517,22 @@ export const api = {
     'requestAccountDeletion',
   ),
 };
+
+/**
+ * The staff setup screen's one call, named rather than reached through `api`, so the screen
+ * and its tests depend on this single callable instead of the whole surface. It is the same
+ * wrapper, not a second one.
+ */
+export const submitPendingGate = api.submitPendingGate;
+
+/**
+ * The gate's two callables, named for the same reason as `submitPendingGate`: the snapshot
+ * store (Task 25) depends on these two and not on the whole callable surface, so its tests can
+ * replace them without standing up every other call in this module. Same wrappers, not copies.
+ *
+ * Both take `gateAccount`, and neither is authorised by it: the request goes out on the signed-in
+ * staff member's Firebase session and the server checks that this gate is registered to this
+ * event before it decrypts one photo. That is why a stolen terminal does not leak faces.
+ */
+export const issueSnapshot = api.issueSnapshot;
+export const getPhotoForGate = api.getPhotoForGate;

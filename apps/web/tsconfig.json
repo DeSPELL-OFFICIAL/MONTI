@@ -14,5 +14,14 @@
     "noEmit": true,
     "types": ["vitest/globals", "@testing-library/jest-dom"]
   },
-  "include": ["src", "vite.config.ts", "vitest.setup.ts", "capacitor.config.ts", "e2e"]
+  "include": [
+    "src",
+    "vite.config.ts",
+    "vite.staff.config.ts",
+    "vitest.setup.ts",
+    "capacitor.config.ts",
+    "capacitor.attendee.config.ts",
+    "capacitor.staff.config.ts",
+    "e2e"
+  ]
 }

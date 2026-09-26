@@ -1,0 +1,48 @@
+ext {
+    // 31 is not a copy-paste: device-key already pins the app to 31 (StrongBox read-back), and a
+    // merged manifest takes the highest floor of every module. A lower number here would be a
+    // figure that can never take effect, so it would only mislead.
+    montiMinSdkVersion = 31
+    montiCompileSdkVersion = 35
+    junitVersion = '4.13.2'
+}
+
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.7.2'
+        classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.0.21'
+    }
+}
+
+apply plugin: 'com.android.library'
+apply plugin: 'org.jetbrains.kotlin.android'
+
+android {
+    namespace 'app.monti.hce'
+    compileSdk project.hasProperty('compileSdkVersion') ? rootProject.ext.compileSdkVersion : montiCompileSdkVersion
+    defaultConfig {
+        minSdk montiMinSdkVersion
+        targetSdk project.hasProperty('targetSdkVersion') ? rootProject.ext.targetSdkVersion : montiCompileSdkVersion
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_21
+        targetCompatibility JavaVersion.VERSION_21
+    }
+    kotlinOptions {
+        jvmTarget = '21'
+    }
+}
+
+repositories {
+    google()
+    mavenCentral()
+}
+
+dependencies {
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+}

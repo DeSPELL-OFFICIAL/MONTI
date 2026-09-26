@@ -86,6 +86,49 @@ export const DIDIT_WEBHOOK_TOLERANCE_SECONDS = 300;
 export const SNAPSHOT_TTL_SECONDS = 12 * 60 * 60;
 export const AUTH_CHALLENGE_TTL_SECONDS = 300;
 
+/**
+ * 수동 승인(스펙 §7.5)의 사유 코드. `Ticket.requestOverride` 와 `Ticket.manualOverride` 가
+ * `uint8 reason` 으로 **체인에 기록하는 바로 그 숫자**이므로 순서는 얼어 있다 — 번호를 다시
+ * 매기면 이미 기록된 모든 승인의 사유가 통째로 바뀐다.
+ *
+ * 숫자만 여기 있고 문장은 없다. 문장은 로케일마다 다르고 화면의 것이라서 `staff/copy.ts` 에
+ * 산다. 여기 있는 것은 계약이 읽는 값이고, 그래서 계약을 읽는 모든 앱이 같은 곳에서 가져간다.
+ */
+export const OVERRIDE_REASON = {
+  /** 신분증·사진을 스태프가 직접 대조했다. */
+  photoChecked: 1,
+  /** 관객 휴대폰이 잠겼거나 NFC 가 되지 않는다. */
+  phoneTrouble: 2,
+  /** 표시가 시간이 지나 게이트가 받아 주지 않는다. */
+  staleCode: 3,
+  /** 그 밖의 현장 판단. */
+  other: 4,
+} as const;
+
+export type OverrideReasonCode = (typeof OVERRIDE_REASON)[keyof typeof OVERRIDE_REASON];
+
+/** 화면에 늘어놓는 차례. 코드 순서 그대로이고, 화면이 자기 목록을 따로 들지 않게 한다. */
+export const OVERRIDE_REASONS = [
+  OVERRIDE_REASON.photoChecked,
+  OVERRIDE_REASON.phoneTrouble,
+  OVERRIDE_REASON.staleCode,
+  OVERRIDE_REASON.other,
+] as const;
+
+/**
+ * `Ticket.ROLE_*`(`contracts/src/Ticket.sol:80-82`). `ManualOverride` 이벤트가 승인자와 함께
+ * 남기는 역할 표식이다: `approver` 는 `PERM_APPROVE_OVERRIDE` 를 가진 소유자·관리자,
+ * `manager` 는 `canApprove` 가 켜진 매니저. `none` 은 계약이 되돌리는 값이라 체인에 남지 않는다.
+ */
+export const OVERRIDE_ROLE = { none: 0, approver: 1, manager: 2 } as const;
+export type OverrideRoleCode = (typeof OVERRIDE_ROLE)[keyof typeof OVERRIDE_ROLE];
+
+/**
+ * `Organizers.PERM_APPROVE_OVERRIDE`. 계약은 이 비트를 `private` 으로 두고 값으로만 쓰므로
+ * (`Ticket.sol:86`) ABI 로는 읽을 수 없다. 수동 승인 권한을 묻는 모든 화면이 여기서 가져간다.
+ */
+export const PERM_APPROVE_OVERRIDE = 4;
+
 export const FIREBASE_REGION = 'us-east1';
 
 /**

@@ -10,8 +10,7 @@ import { getConfig } from '../config';
 import { getPublicClient } from './client';
 
 let bundlerClient: BundlerClient | null = null;
-let smartAccount: SmartAccount | null = null;
-let smartAccountKey: string | null = null;
+const smartAccounts = new Map<string, SmartAccount>();
 
 export function getBundlerClient(): BundlerClient {
   if (bundlerClient) return bundlerClient;
@@ -39,23 +38,27 @@ export function getBundlerClient(): BundlerClient {
  * Identity contract and firestore.rules have never heard of.
  */
 export async function getSmartAccount(webAuthnAccount: WebAuthnAccount): Promise<SmartAccount> {
-  // Memo keyed on the owner: after clearCredential() + re-login the stale account must not come back.
+  // Memo keyed on the owner: after clearCredential() + re-login the stale account is never
+  // looked up again. One entry per owner rather than one slot, because the staff build holds
+  // two accounts at once — the member's passkey account and the gate's device-key account
+  // (`gateAccount.ts`) — and a single slot would make them evict each other, paying a factory
+  // `getAddress` round trip on venue wifi every time a screen switched.
   const key = String(webAuthnAccount.publicKey);
-  if (smartAccount && smartAccountKey === key) return smartAccount;
-  smartAccount = await toCoinbaseSmartAccount({
+  const memoised = smartAccounts.get(key);
+  if (memoised) return memoised;
+  const account = await toCoinbaseSmartAccount({
     client: getPublicClient(),
     owners: [webAuthnAccount],
     nonce: 0n,
     version: '1.1',
   });
-  smartAccountKey = key;
-  return smartAccount;
+  smartAccounts.set(key, account);
+  return account;
 }
 
 export function resetBundler(): void {
   bundlerClient = null;
-  smartAccount = null;
-  smartAccountKey = null;
+  smartAccounts.clear();
 }
 
 /** Raw bundler JSON-RPC, used for eth_estimateUserOperationGas and eth_sendUserOperation. */

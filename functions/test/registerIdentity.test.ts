@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
+import type { Abi } from 'viem';
+import type { Hex } from '@monti/shared';
+import type { AttesterTx } from '../src/lib/chain.js';
 
 process.env.GCP_PROJECT_ID = 'monti-dev';
 
@@ -19,6 +22,8 @@ const auth = { uid: 'uid-1', token: {} };
  * (`chain.registerPending` 을 지우면서 `chain.registerTx` 를 날리면 안 된다).
  */
 const docs = new Map<string, Record<string, unknown>>();
+/** 세션 클레임. loginVerify 가 만드는 것과 같은 모양이어야 웹이 토큰 하나만 새로 받으면 된다. */
+const setCustomUserClaims = vi.fn(async (_uid: string, _claims: Record<string, unknown>) => {});
 /** 체인 호출이 트랜잭션 안에서 일어나면 실제 Firestore 는 재시도로 중복 전송을 만든다. */
 let inTransaction = false;
 /** 리스 반납(`holder: null` 쓰기)만 골라 실패시킨다. 반납이 결과를 덮어쓰는지 보는 용도다. */
@@ -104,6 +109,7 @@ vi.mock('../src/lib/db.js', async () => {
     DEVICES: 'devices',
     SYSTEM: 'system',
     assertStatusTransition: real.assertStatusTransition,
+    authAdmin: { setCustomUserClaims },
     db: {
       collection: (name: string) => ({ doc: (id: string) => docRef(`${name}/${id}`) }),
       runTransaction: async <T>(body: (tx: unknown) => Promise<T>): Promise<T> => {
@@ -139,8 +145,13 @@ function guard<T>(value: T): T {
   return value;
 }
 
-const sendAttesterTx = vi.fn(async () => guard(TX));
-const readContract = vi.fn(async () => guard(false));
+const sendAttesterTx = vi.fn(async (_tx: AttesterTx) => guard(TX));
+// `publicClient()` 를 통째로 가짜로 바꾸므로, 인자는 실제 호출부가 넘기는 모양 그대로 적는다 —
+// 빈 인자로 두면 `mock.calls[0][0]` 이 타입상 존재하지 않는 칸이 된다.
+const readContract = vi.fn(
+  async (_args: { address: Hex; abi: Abi; functionName: string; args: readonly unknown[] }) =>
+    guard(false),
+);
 const waitForTransactionReceipt = vi.fn(async () => guard({ status: 'success', blockNumber: 100n }));
 const awaitFinalized = vi.fn(async (_blockNumber: bigint) => guard(undefined));
 
@@ -177,6 +188,7 @@ beforeEach(() => {
   readContract.mockClear();
   waitForTransactionReceipt.mockClear();
   awaitFinalized.mockClear();
+  setCustomUserClaims.mockClear();
   seedCaller();
   seedPerson();
 });
@@ -261,7 +273,7 @@ describe('registerIdentity — idempotency (spec §10.4 rule 3)', () => {
 
   it('never re-reads a finalized transaction from the chain', async () => {
     write(`persons/${PERSON_ID}`, { chain: { registerTx: OTHER_TX, block: 12 } }, { merge: true });
-    await expect(call()).resolves.toEqual({ txHash: OTHER_TX });
+    await expect(call()).resolves.toEqual({ txHash: OTHER_TX, claimsUpdated: true });
     expect(waitForTransactionReceipt).not.toHaveBeenCalled();
     expect(readContract).not.toHaveBeenCalled();
   });
@@ -270,7 +282,7 @@ describe('registerIdentity — idempotency (spec §10.4 rule 3)', () => {
     readContract.mockResolvedValueOnce(true as never);
     // 이미 끝난 등록은 오류가 아니라 성공이다. 오류로 올리면 일반적인 콜러블 래퍼가
     // 멀쩡히 가입된 사람에게 실패 화면을 보여 준다. 우리가 보낸 적이 없으니 txHash 는 없다.
-    await expect(call()).resolves.toEqual({ alreadyRegistered: true });
+    await expect(call()).resolves.toEqual({ alreadyRegistered: true, claimsUpdated: true });
     expect(sendAttesterTx).not.toHaveBeenCalled();
     expect(readContract.mock.calls[0]![0]).toMatchObject({
       address: IDENTITY,
@@ -298,7 +310,7 @@ describe('registerIdentity — idempotency (spec §10.4 rule 3)', () => {
       { chain: { registerPending: true, registerPendingAt: Date.now() - 61_000 } },
       { merge: true },
     );
-    await expect(call()).resolves.toEqual({ txHash: TX });
+    await expect(call()).resolves.toEqual({ txHash: TX, claimsUpdated: true });
     expect(sendAttesterTx).toHaveBeenCalledTimes(1);
     const person = snapshot(`persons/${PERSON_ID}`);
     expect(person.get('status')).toBe('active');
@@ -308,7 +320,7 @@ describe('registerIdentity — idempotency (spec §10.4 rule 3)', () => {
 
   it('treats a pending flag with no timestamp as stale', async () => {
     write(`persons/${PERSON_ID}`, { chain: { registerPending: true } }, { merge: true });
-    await expect(call()).resolves.toEqual({ txHash: TX });
+    await expect(call()).resolves.toEqual({ txHash: TX, claimsUpdated: true });
   });
 });
 
@@ -324,12 +336,12 @@ describe('registerIdentity — the attester is a single key', () => {
 
   it('takes an expired lease over', async () => {
     write('system/attester', { holder: 'someone-else', lockedUntil: Date.now() - 1 });
-    await expect(call()).resolves.toEqual({ txHash: TX });
+    await expect(call()).resolves.toEqual({ txHash: TX, claimsUpdated: true });
   });
 
   it('retries once when the node rejects the nonce as too low', async () => {
     sendAttesterTx.mockRejectedValueOnce(new Error('nonce too low'));
-    await expect(call()).resolves.toEqual({ txHash: TX });
+    await expect(call()).resolves.toEqual({ txHash: TX, claimsUpdated: true });
     expect(sendAttesterTx).toHaveBeenCalledTimes(2);
     expect(snapshot(`persons/${PERSON_ID}`).get('status')).toBe('active');
   });
@@ -349,7 +361,7 @@ describe('registerIdentity — the attester is a single key', () => {
     // 반납 실패가 결과를 덮어쓰면 보내 놓고 기록하지 못한 트랜잭션이 남는다 —
     // 세 겹 멱등 장치 중 어느 것도 복구하지 못하는 유일한 상태다.
     failLeaseRelease = true;
-    await expect(call()).resolves.toEqual({ txHash: TX });
+    await expect(call()).resolves.toEqual({ txHash: TX, claimsUpdated: true });
     expect(snapshot(`persons/${PERSON_ID}`).get('chain.registerTx')).toBe(TX);
     expect(snapshot(`persons/${PERSON_ID}`).get('status')).toBe('active');
   });
@@ -439,5 +451,78 @@ describe('registerIdentity — input', () => {
   ])('rejects malformed input with %s', async (code, data) => {
     await expect(call(data as Record<string, unknown>)).rejects.toThrow(code);
     expect(sendAttesterTx).not.toHaveBeenCalled();
+  });
+});
+
+describe('registerIdentity — the session claims follow the chain', () => {
+  /**
+   * 가입 직후의 세션은 아직 `personId`·`account` 를 모르는 토큰이다. 규칙 파일이 그 클레임을 읽으므로
+   * 등록이 끝난 자리에서 바로 심어 주지 않으면, 사람은 가입을 마치고도 자기 문서를 못 읽는다.
+   * 모양은 loginVerify 가 만드는 것과 **한 글자도 다르면 안 된다** — 토큰 두 개가 갈라진다.
+   */
+  it('mints the same claims loginVerify does once the registration is finalized', async () => {
+    await expect(call()).resolves.toEqual({ txHash: TX, claimsUpdated: true });
+    expect(setCustomUserClaims).toHaveBeenCalledTimes(1);
+    expect(setCustomUserClaims).toHaveBeenCalledWith(auth.uid, {
+      personId: PERSON_ID,
+      account: ACCOUNT,
+    });
+    // 전화번호는 커스텀 토큰에 싣지 않는다(클라이언트가 읽을 수 있다).
+    expect(Object.keys(setCustomUserClaims.mock.calls[0]![1]).sort()).toEqual([
+      'account',
+      'personId',
+    ]);
+  });
+
+  it('checksums the account exactly as loginVerify does', async () => {
+    const lower = '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd';
+    write(`persons/${PERSON_ID}`, { account: lower }, { merge: true });
+    await call();
+    expect(setCustomUserClaims.mock.calls[0]![1].account).toBe(
+      '0xABcdEFABcdEFabcdEfAbCdefabcdeFABcDEFabCD',
+    );
+  });
+
+  it('sets the claims on the already-registered short circuit too', async () => {
+    // 전송 뒤 인스턴스가 죽어 다시 부른 경우다. 여기서 클레임을 건너뛰면 재시도한 사람만
+    // 영원히 쓸 수 없는 세션을 들고 있게 된다.
+    readContract.mockResolvedValueOnce(true as never);
+    await expect(call()).resolves.toEqual({ alreadyRegistered: true, claimsUpdated: true });
+    expect(setCustomUserClaims).toHaveBeenCalledWith(auth.uid, {
+      personId: PERSON_ID,
+      account: ACCOUNT,
+    });
+  });
+
+  it('sets the claims again for a transaction that was already finalized', async () => {
+    write(`persons/${PERSON_ID}`, { chain: { registerTx: OTHER_TX, block: 12 } }, { merge: true });
+    await expect(call()).resolves.toEqual({ txHash: OTHER_TX, claimsUpdated: true });
+    expect(setCustomUserClaims).toHaveBeenCalledTimes(1);
+  });
+
+  it('never mints claims for a send that failed', async () => {
+    sendAttesterTx.mockRejectedValue(new Error('insufficient funds'));
+    await expect(call()).rejects.toThrow('REGISTER_SEND_FAILED:insufficient funds');
+    expect(setCustomUserClaims).not.toHaveBeenCalled();
+    sendAttesterTx.mockReset();
+    sendAttesterTx.mockImplementation(async () => guard(TX));
+  });
+
+  it('never mints claims for a transaction that reverted', async () => {
+    waitForTransactionReceipt.mockResolvedValueOnce({
+      status: 'reverted',
+      blockNumber: 100n,
+    } as never);
+    await expect(call()).rejects.toThrow('REGISTER_REVERTED');
+    expect(setCustomUserClaims).not.toHaveBeenCalled();
+  });
+
+  it('never mints claims for a caller registering someone else', async () => {
+    const victim = `0x${'bb'.repeat(32)}`;
+    write(`persons/${victim}`, { status: 'pending', kycLevel: 0, account: ACCOUNT });
+    await expect(call({ personId: victim, deviceX: X, deviceY: Y })).rejects.toThrow(
+      'PERSON_MISMATCH',
+    );
+    expect(setCustomUserClaims).not.toHaveBeenCalled();
   });
 });

@@ -4,6 +4,7 @@ import { identityAbi, type Hex, type PersonStatus } from '@monti/shared';
 import { ATTESTER_PK } from '../config.js';
 import { sendSerialized } from '../lib/attesterLock.js';
 import { awaitFinalized, deployment, publicClient, sendAttesterTx } from '../lib/chain.js';
+import { mintSessionClaims } from '../lib/claims.js';
 import { DEVICES, PERSONS, USERS, assertStatusTransition, db } from '../lib/db.js';
 
 const B32_RE = /^0x[0-9a-fA-F]{64}$/;
@@ -23,8 +24,15 @@ const PENDING_TTL_MS = 60_000;
  * `alreadyRegistered: true` 는 **성공**이고 — 체인이 이미 그 계정을 알고 있어서
  * 이번에 보낼 것이 없었다는 뜻이다. 그때 `txHash` 는 없다(우리가 보낸 적이 없으므로).
  * 웹 래퍼는 이 값을 오류가 아니라 "가입 완료"로 다뤄야 한다.
+ *
+ * `claimsUpdated` 는 언제나 붙는다 — 성공으로 돌아온 순간 세션 클레임은 이미 심어져 있으니
+ * 웹은 `getIdToken(true)` 를 **한 번만** 부르면 된다.
  */
-export type RegisterIdentityResult = { txHash?: Hex; alreadyRegistered?: true };
+export type RegisterIdentityResult = {
+  txHash?: Hex;
+  alreadyRegistered?: true;
+  claimsUpdated: true;
+};
 
 /** 체인에 올라간 뒤의 마무리. 성공 경로와 "이미 보낸 트랜잭션" 경로가 같이 쓴다. */
 async function settle(input: {
@@ -130,8 +138,13 @@ export const registerIdentity = onCall(
     // 멱등 ①: 이미 보낸 트랜잭션. 확정됐으면 해시만, 아니면 그 트랜잭션을 기다린다.
     const existingTx = person.get('chain.registerTx') as Hex | undefined;
     if (existingTx) {
-      if (person.get('chain.block') !== undefined) return { txHash: existingTx };
-      return { txHash: await settle({ personRef, txHash: existingTx, status, account, ...device }) };
+      if (person.get('chain.block') !== undefined) {
+        await mintSessionClaims(uid, personId as Hex, account);
+        return { txHash: existingTx, claimsUpdated: true };
+      }
+      const txHash = await settle({ personRef, txHash: existingTx, status, account, ...device });
+      await mintSessionClaims(uid, personId as Hex, account);
+      return { txHash, claimsUpdated: true };
     }
 
     // 멱등 ②: 체인이 이미 알고 있으면 보내지 않고 DB 만 맞춘다.
@@ -150,7 +163,9 @@ export const registerIdentity = onCall(
       );
       // 등록은 이미 끝났다. 이것은 오류가 아니라 성공이다 — 오류로 올리면 일반적인
       // 콜러블 래퍼가 멀쩡히 가입된 사람에게 실패 화면을 보여 준다.
-      return { alreadyRegistered: true };
+      // 전송 뒤 죽은 인스턴스를 대신해 재시도한 경우이므로 세션도 여기서 쓸 수 있게 만든다.
+      await mintSessionClaims(uid, personId as Hex, account);
+      return { alreadyRegistered: true, claimsUpdated: true };
     }
 
     // 멱등 ③: 동시 호출 잠금. Firestore 트랜잭션이 직렬화를 보장한다.
@@ -205,6 +220,8 @@ export const registerIdentity = onCall(
       { merge: true },
     );
 
-    return { txHash: await settle({ personRef, txHash, status, account, ...device }) };
+    const settled = await settle({ personRef, txHash, status, account, ...device });
+    await mintSessionClaims(uid, personId as Hex, account);
+    return { txHash: settled, claimsUpdated: true };
   },
 );

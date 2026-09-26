@@ -1,5 +1,5 @@
 import { Encoder } from 'cbor-x';
-import { encodeAbiParameters, keccak256, parseAbiParameters, sha256, stringToBytes } from 'viem';
+import { encodeAbiParameters, hashTypedData, keccak256, parseAbiParameters, sha256, stringToBytes } from 'viem';
 import { DEVICE_DIGEST_FORM, QR_PREFIX } from './constants.js';
 import {
   GATE_RESPONSE_VERSION,
@@ -145,20 +145,42 @@ export function recipientCommitment(hmacPhoneHex: string): Hex {
   return keccak256(`0x${bare.toLowerCase()}` as Hex);
 }
 
-/** 어테스터가 acceptOffer 용으로 서명하는 다이제스트. */
+/**
+ * 어테스터가 acceptOffer 용으로 서명하는 다이제스트.
+ * EIP-712 다. 도메인이 chainId 와 Ticket 주소를 묶으므로, 테스트넷 서명은 메인넷에서,
+ * 옛 배포본의 서명은 새 배포본에서 쓸 수 없다. Ticket.offerDigest(...) 와 같은 값이어야 한다.
+ */
 export function offerDigest(input: {
+  chainId: number;
+  ticket: Hex;
   tokenId: bigint;
   recipientCommitment: Hex;
   recipientAccount: Hex;
 }): Hex {
   assertBytes32(input.recipientCommitment, 'BAD_COMMITMENT');
   if (!/^0x[0-9a-fA-F]{40}$/.test(input.recipientAccount)) throw new Error('BAD_ACCOUNT');
-  return keccak256(
-    encodeAbiParameters(
-      parseAbiParameters('uint256 tokenId, bytes32 recipientCommitment, address recipientAccount'),
-      [input.tokenId, input.recipientCommitment, input.recipientAccount],
-    ),
-  );
+  if (!/^0x[0-9a-fA-F]{40}$/.test(input.ticket)) throw new Error('BAD_TICKET');
+  return hashTypedData({
+    domain: {
+      name: 'MONTI Ticket',
+      version: '1',
+      chainId: input.chainId,
+      verifyingContract: input.ticket,
+    },
+    types: {
+      TransferApproval: [
+        { name: 'tokenId', type: 'uint256' },
+        { name: 'recipientCommitment', type: 'bytes32' },
+        { name: 'recipient', type: 'address' },
+      ],
+    },
+    primaryType: 'TransferApproval',
+    message: {
+      tokenId: input.tokenId,
+      recipientCommitment: input.recipientCommitment,
+      recipient: input.recipientAccount,
+    },
+  });
 }
 
 /**

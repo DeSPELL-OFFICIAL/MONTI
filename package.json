@@ -1,3 +1,5 @@
 { "name": "monti", "private": true, "packageManager": "pnpm@10.33.0",
   "engines": { "node": "22.x" },
-  "scripts": { "lint:copy": "pnpm --filter @monti/shared build && node packages/shared/dist/copy-lint.js apps/web/src/attendee apps/web/src/shared/copy" } }
+  "scripts": { "indexer:config": "pnpm --filter monti-indexer gen:config",
+    "indexer:check": "pnpm --filter monti-indexer check",
+    "lint:copy": "pnpm --filter @monti/shared build && node packages/shared/dist/copy-lint.js apps/web/src/attendee apps/web/src/shared/copy apps/web/src/staff" } }
