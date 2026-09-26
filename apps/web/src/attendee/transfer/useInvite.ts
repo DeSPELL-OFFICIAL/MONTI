@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api, type TransferInviteResult } from '../../shared/api/functions';
 import { getAttendeeAccount } from '../../shared/chain/accounts';
 import { ticketOp } from '../../shared/chain/ops';
+import { MAX_WAIT_TIMEOUT_MS } from '../../shared/chain/sendSponsoredOp';
 import { readTicket } from '../../shared/chain/reads';
 import { useCopy } from '../../shared/i18n';
 import { inviteFailure, isOpenOffer, isStillConfirming, orgIdOfTicket } from './offers';
@@ -94,6 +95,8 @@ export function useInvite(tokenId: string): InviteState {
         orgId: await orgIdOfTicket(BigInt(tokenId)),
         functionName: 'createOffer',
         args: [BigInt(tokenId), created.commitment, BigInt(created.expiresAt)],
+        // Wait to the 45s cap, so a late offer still lands instead of giving up at 15s (T-SIMP-7).
+        maxTimeoutMs: MAX_WAIT_TIMEOUT_MS,
       });
       // Only now. A text for an offer that never landed is a dead link in somebody's inbox.
       setInvite(created);
@@ -138,6 +141,8 @@ export function useInvite(tokenId: string): InviteState {
         orgId: await orgIdOfTicket(BigInt(tokenId)),
         functionName: 'cancelOffer',
         args: [BigInt(tokenId)],
+        // Wait to the 45s cap, so a late cancel still lands instead of giving up at 15s (T-SIMP-7).
+        maxTimeoutMs: MAX_WAIT_TIMEOUT_MS,
       });
       setInvite(null);
       setCancelled(true);

@@ -41,6 +41,7 @@ const { TransferRecipient } = await import('./Recipient');
 const { TransferConfirm } = await import('./Confirm');
 const { CallableError } = await import('../../shared/api/functions');
 const { OpReverted } = await import('../../shared/chain/ops');
+const { MAX_WAIT_TIMEOUT_MS } = await import('../../shared/chain/sendSponsoredOp');
 const { revertMatch, revertRule } = await import('./useTransfer');
 const { acceptFailure } = await import('./offers');
 const { ko } = await import('../../shared/copy/index');
@@ -163,7 +164,7 @@ describe('TransferConfirm', () => {
     renderFlow(CONFIRM);
     await userEvent.click(screen.getByRole('button', { name: '친구에게 주기' }));
     expect(ticketOp).toHaveBeenCalledWith(
-      expect.objectContaining({ orgId: 9n, functionName: 'safeTransferFrom', args: [ME, YOU, 1n] }),
+      expect.objectContaining({ orgId: 9n, functionName: 'safeTransferFrom', args: [ME, YOU, 1n], maxTimeoutMs: MAX_WAIT_TIMEOUT_MS }),
     );
     expect(await screen.findByText('내 티켓 목록')).toBeInTheDocument();
   });

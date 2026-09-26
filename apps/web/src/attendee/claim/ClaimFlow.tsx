@@ -9,6 +9,7 @@ import { describeFailure } from '../../shared/errors';
 import { EVENT_QUERY, type EnvioEvent, type EnvioTier } from '../../shared/envio/queries';
 import { useMyRequest } from '../../shared/envio/claimRequests';
 import { ticketOp, resolveSubmittedOp, OpReverted } from '../../shared/chain/ops';
+import { MAX_WAIT_TIMEOUT_MS } from '../../shared/chain/sendSponsoredOp';
 import { ticketAbi } from '../../shared/chain/abis';
 import { revertMatch } from '../../shared/chain/revert';
 import { getAttendeeAccount } from '../../shared/chain/accounts';
@@ -223,6 +224,9 @@ export function ClaimFlow({ eventId, present }: ClaimFlowProps) {
         orgId: BigInt(event.orgId),
         functionName: fn,
         args,
+        // Poll the receipt to the same 45s cap OpProgress shows, so a late inclusion lands on
+        // its own instead of dropping to 확인/stuck at 15s while the counter still runs (T-SIMP-7).
+        maxTimeoutMs: MAX_WAIT_TIMEOUT_MS,
         // Recorded the moment the bundler accepts it, before the wait, so a page closed mid-wait
         // resolves this op next time instead of claiming twice. This is also what turns 저장 → 확인.
         onSubmitted: (hash) => {
@@ -268,6 +272,8 @@ export function ClaimFlow({ eventId, present }: ClaimFlowProps) {
         orgId: BigInt(event.orgId),
         functionName: 'cancelRequest',
         args: [BigInt(eventId), BigInt(myRequest.requestId)],
+        // Same 45s cap the cancel's OpProgress counts to, so a late inclusion still lands (T-SIMP-7).
+        maxTimeoutMs: MAX_WAIT_TIMEOUT_MS,
         onSubmitted: () => setPhase('sent'),
         onSendRetry: () => setRetrying(true),
       });

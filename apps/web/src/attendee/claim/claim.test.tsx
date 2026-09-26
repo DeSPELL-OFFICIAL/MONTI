@@ -52,6 +52,7 @@ vi.mock('../me/useKycLevel', () => ({
 const { Claim } = await import('./Claim');
 const { OpReverted } = await import('../../shared/chain/ops');
 const { ticketAbi } = await import('../../shared/chain/abis');
+const { MAX_WAIT_TIMEOUT_MS } = await import('../../shared/chain/sendSponsoredOp');
 
 /** `setSearchParams` navigates for real under MemoryRouter, so the address is read back here. */
 function Address() {
@@ -109,7 +110,7 @@ describe('Claim', () => {
     renderClaim();
     await userEvent.click(await screen.findByRole('button', { name: '티켓 받기' }));
     expect(ticketOp).toHaveBeenCalledWith(
-      expect.objectContaining({ orgId: 9n, functionName: 'claim', args: [5n, 0, '0x'] }),
+      expect.objectContaining({ orgId: 9n, functionName: 'claim', args: [5n, 0, '0x'], maxTimeoutMs: MAX_WAIT_TIMEOUT_MS }),
     );
   });
 
@@ -254,7 +255,7 @@ describe('Claim · resuming after the identity check', () => {
     renderClaim(RESUME);
     await waitFor(() => expect(ticketOp).toHaveBeenCalledTimes(1));
     expect(ticketOp).toHaveBeenCalledWith(
-      expect.objectContaining({ orgId: 9n, functionName: 'claim', args: [5n, 0, '0x'] }),
+      expect.objectContaining({ orgId: 9n, functionName: 'claim', args: [5n, 0, '0x'], maxTimeoutMs: MAX_WAIT_TIMEOUT_MS }),
     );
     // Stripped first, so a refresh in the middle of the claim cannot start a second one.
     expect(screen.getByTestId('address')).toHaveTextContent('/claim/5');
@@ -360,7 +361,7 @@ describe('Claim · approval mode', () => {
     await userEvent.click(await screen.findByRole('button', { name: '신청하기' }));
     await waitFor(() => expect(ticketOp).toHaveBeenCalled());
     expect(ticketOp).toHaveBeenCalledWith(
-      expect.objectContaining({ orgId: 9n, functionName: 'requestClaim', args: [5n, 0] }),
+      expect.objectContaining({ orgId: 9n, functionName: 'requestClaim', args: [5n, 0], maxTimeoutMs: MAX_WAIT_TIMEOUT_MS }),
     );
     // A request is not a claim: approval decides the ticket later, so it never leaves for /tickets.
     expect(navigate).not.toHaveBeenCalledWith('/tickets');
@@ -373,7 +374,7 @@ describe('Claim · approval mode', () => {
     await userEvent.click(screen.getByRole('button', { name: '신청 취소' }));
     await waitFor(() => expect(ticketOp).toHaveBeenCalled());
     expect(ticketOp).toHaveBeenCalledWith(
-      expect.objectContaining({ functionName: 'cancelRequest', args: [5n, 3n] }),
+      expect.objectContaining({ functionName: 'cancelRequest', args: [5n, 3n], maxTimeoutMs: MAX_WAIT_TIMEOUT_MS }),
     );
   });
 
