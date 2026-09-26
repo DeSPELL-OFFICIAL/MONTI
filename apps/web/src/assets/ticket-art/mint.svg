@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 1754" width="1240" height="1754">
+  <defs>
+    <linearGradient id="mi-bg" x1="0.1" y1="0" x2="0.9" y2="1">
+      <stop offset="0" stop-color="#03211f"/>
+      <stop offset="0.55" stop-color="#0c5f52"/>
+      <stop offset="1" stop-color="#6ff0c0"/>
+    </linearGradient>
+    <linearGradient id="mi-sheen" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <pattern id="mi-lines" width="56" height="56" patternUnits="userSpaceOnUse" patternTransform="rotate(-24)">
+      <path d="M0 0v56" stroke="#d8fff2" stroke-width="2" opacity="0.3"/>
+    </pattern>
+  </defs>
+  <rect width="1240" height="1754" fill="url(#mi-bg)"/>
+  <rect width="1240" height="1754" fill="url(#mi-lines)"/>
+  <path d="M-80 1020L1320 240v320L-80 1340Z" fill="url(#mi-sheen)" opacity="0.5"/>
+  <g fill="none" stroke="#eafff8" stroke-width="4" opacity="0.32">
+    <rect x="128" y="1206" width="984" height="360" rx="28"/>
+  </g>
+  <g opacity="0.5" transform="translate(96 112)">
+    <rect x="0" y="0" width="52" height="52" rx="14" fill="none" stroke="#eafff8" stroke-width="4"/>
+    <path d="M14 38V18l12 12 12-12v20" fill="none" stroke="#eafff8" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="72" y="39" font-family="system-ui, -apple-system, 'Helvetica Neue', sans-serif" font-size="30" font-weight="700" letter-spacing="8" fill="#eafff8">MONTI</text>
+  </g>
+</svg>

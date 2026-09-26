@@ -20,3 +20,4 @@ functions/.env.*
 !functions/.env.example
 indexer/generated
 *-debug.log
+.vercel

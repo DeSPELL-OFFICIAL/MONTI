@@ -1,0 +1,30 @@
+# Nothing in the deployment source may carry a real value: the build reads its
+# `VITE_*` variables from the Vercel project, never from a checked-in file.
+.env
+.env.*
+!.env.example
+apps/web/.env
+apps/web/.env.*
+!apps/web/.env.example
+functions/.env
+functions/.env.*
+
+node_modules
+.git
+.vercel
+
+# Built by the build command, never uploaded.
+dist
+*.tsbuildinfo
+functions/lib
+indexer/generated
+
+# Foundry's build tree. `contracts/deployments/*.json` is NOT excluded: the shared
+# package's prebuild copies those addresses into the bundle.
+contracts/lib
+contracts/out
+contracts/cache
+contracts/broadcast
+
+docs
+.superpowers

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  android:description 은 리소스 참조만 받는다(리터럴을 쓰면 aapt 가 빌드를 막는다). 설정 >
+  연결 > NFC > 탭하고 결제하기 목록에서 사용자가 실제로 보는 문구다.
+-->
+<resources>
+    <string name="monti_hce_description">MONTI gate</string>
+    <string name="monti_hce_aid_group">MONTI gate code</string>
+</resources>

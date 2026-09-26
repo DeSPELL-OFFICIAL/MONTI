@@ -1,6 +1,8 @@
-# MONTI 기획서 v2.6 (최종 고정) · NFC 본인 확인 티켓팅 (Monad Metropolis 출품)
+# MONTI 기획서 v2.7 · NFC 본인 확인 티켓팅 (Monad Metropolis 출품)
 
-작성일 2026-09-20 · v2.6 · 상태: **확정, 구현 계획 진행** · 대상: 창업자와 팀, 해커톤 write-up 원본
+작성일 2026-09-20 · v2.7 · 상태: **확정, 구현 계획 진행** · 대상: 창업자와 팀, 해커톤 write-up 원본
+
+v2.7 (2026-09-26): 01c — **승인제(관리자 승인 후 발급)를 온체인으로 강제.** `Ticket` 에 `requestClaim`(신청·공급 예약, 발급 없음)·`approveClaims`/`rejectClaims`(승인 권한자)·`cancelRequest`(신청자 취소) 4개와 이벤트 `ClaimRequested`/`ClaimApproved`/`ClaimRejected`, 권한 비트 `PERM_APPROVE_CLAIM=32` 추가. 승인제 이벤트에서 `claim` 은 `ApprovalRequired()` 로 막힌다(옛 `ApprovalRequiredNotSupported` 제거). 공급을 신청 시점에 예약해 승인이 초과 발행하지 않고, 지갑당 한도가 대기+발급을 함께 센다. 페이마스터는 재배포 없이 `setAllowed` 로 셀렉터 4개(모두 `ArgKind.EventId`)를 추가한다. 근거는 `contracts/docs/abi-delta-01c.md`, 기획서 §B(UX revision 3). 아직 배포 전이다. **Ticket 만 바뀐다.**
 
 v2.6 (2026-09-21): 01b redeploy bundle — 배포된 컨트랙트에 맞춰 본문을 고쳤다. 고친 절: **5.5**(교체 되돌리기·24시간), **5.8**(행사 취소는 파생), **6.3**(T11 백엔드 침해, T14 가짜 게이트), **7.2**(4단계 기기 서명 다이제스트, 5·6단계 늦은 경로), **7.3**(큐 유효기간), **7.3**(NFC 페이로드 실측), **8.4**(페이마스터는 `postOp`으로 정산한다), **9.4**(`Ticket.revoke` 권한 행), **10.2**(`rotateAccount` 한 줄 + v2.6 추가 블록), **10.3**(어테스터 키는 MVP Secret Manager EOA, KMS는 메인넷 전 필수), **12**(오프라인 큐가 `checkInLate`로 들어간다), **13**(OFFLINE 배지·오프라인 카운터·DENY 문구. DENY **코드 집합은 그대로**다). 근거는 `contracts/docs/abi-delta-01b.md`이고, 아직 배포 전이다(01b Task 15에서 재배포).
 
@@ -579,6 +581,11 @@ Monad 실측(2026-09-20): 기본 수수료 100 gwei 고정, MON 약 32원, **가
 - `revoke(tokenId)`, `migrate(tokenId)`
 - `tokenURI`: 체인 데이터로 JSON 조립 → `data:` URI. 이름, 설명, 이미지(IPFS CID), 속성(공연, 일시, 장소, 종류, 좌석, **상태: 입장 전/입장 완료**, 양도 가능)
 - 이벤트 `EventCreated`, `Claimed`, `Transfer`, `CheckedIn(tokenId, eventId, gateId, nonceHash, ts)`, `OverrideRequested`, `ManualOverride(tokenId, gateId, approver, role, reason)`, `Revoked`, `Migrated`
+
+**v2.7 추가(컨트랙트, 01c 승인제)**
+- `Ticket`: 승인제 이벤트(`approvalRequired==true`)는 이제 온체인 신청→승인 경로로만 발급된다. `requestClaim(eventId, tier)` — 관객이 신청하고 `requestId`를 받는다(민팅 없음). `claim`과 같은 자격 검사(발행·판매창·멤버·KYC·티어·무료 전용)에 더해 **공급을 신청 시점에 예약**(`t.minted+=1`)해 승인이 초과 발행할 수 없고, **지갑당 한도를 대기+발급 합으로** 센다. `approveClaims(eventId, requestIds[])`/`rejectClaims(...)` — 소유자·`PERM_APPROVE_CLAIM`(비트 32) admin·`canApprove` 매니저. 승인은 `claim` 내부 경로로 민팅하고 `Claimed`도 함께 내보내 인덱서 `Ticket` 행이 정상 생성된다. 이미 대기가 아닌 요청은 배치를 되돌리지 않고 건너뛴다. `cancelRequest(eventId, requestId)` — 신청자 본인이 대기 요청을 취소(예약 해제). 이벤트 `ClaimRequested(eventId,requestId,requester,tier)`·`ClaimApproved(eventId,requestId,tokenId)`·`ClaimRejected(eventId,requestId)`(거절·취소 공용). 조회 `claimRequest(eventId,requestId)`·`pendingCount(eventId)`. 에러: `ApprovalRequiredNotSupported` **제거**, `ApprovalRequired`(승인제에서 직접 `claim`)·`ApprovalNotRequired`(선착순에서 `requestClaim`)·`RequestNotPending` 추가.
+- `Paymaster`: 재배포 없이 배포 후 `setAllowed`로 셀렉터 4개 추가 — `requestClaim`·`approveClaims`·`rejectClaims`·`cancelRequest` 모두 `ArgKind.EventId` word 0(첫 인자 `eventId` 스칼라). 동적 배열이 뒤에 와도 첫 워드만 읽어 문제없다.
+- **크기**: `Ticket` 런타임 26,351 → 29,574바이트(+3,223), Monad 한도 131,072 대비 여유 101,498바이트. `test/ContractSize.t.sol` 그대로 녹색.
 
 **v2.6 추가(컨트랙트, 01b 번들 재배포 2026-10-05)**
 - `Ticket`: `checkInLate(tokenId, G, S)` — 오프라인 큐 전용 입장 기록(12장). 게이트 계정만, 증명은 `checkIn`과 동일, 시계만 넓다(개장 −`LATE_WINDOW` ~ 폐장 +`LATE_WINDOW`, 12시간). 게이트가 열려 있을 필요는 없고 폐기된 게이트는 막힌다. 1회용 번호는 두 경로를 합쳐 **한 번만** 쓰인다. `CheckIn`에 `late` 추가, 이벤트 `CheckedInLate(tokenId, gateId, issuedAt, ts)`가 `CheckedIn`과 **함께** 나온다(입장 수를 셀 때는 `CheckedIn`만 센다). 되돌리는 사유 **12개는 `checkIn`과 완전히 같다** — 13장 DENY 코드는 움직이지 않는다.

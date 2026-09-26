@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.NFC" />
+
+    <!--
+      이 줄이 없으면 위의 NFC 권한이 `android.hardware.nfc` 를 required="true" 로 **암묵 선언**하고
+      (플랫폼의 permission→feature 표), Play 가 NFC 없는 기기를 걸러 낸다. 그러면 바로 아래
+      .hce required="false" 로 얻으려던 것이 두 줄 위에서 무효가 된다. 명시로 덮어써야 한다.
+    -->
+    <uses-feature
+        android:name="android.hardware.nfc"
+        android:required="false" />
+
+    <!--
+      required="false" 는 브리핑(true)에서 의도적으로 벗어난 값이다. 이 라이브러리 매니페스트는
+      apps/web 한 앱으로 병합되는데, 그 앱에는 attendee·organizer·staff 세 갈래가 다 들어 있다.
+      true 로 두면 Play 가 HCE 없는 기기를 설치 대상에서 걸러 내므로, 게이트를 열 일이 없는
+      관객까지 설치하지 못하게 된다. 없는 기기는 HcePlugin.start() 가 "this device has no NFC
+      adapter" 로 거절한다 — 브리핑이 직접 쓴 그 분기가 이 선택의 짝이다.
+    -->
+    <uses-feature
+        android:name="android.hardware.nfc.hce"
+        android:required="false" />
+
+    <application>
+        <!--
+          exported="true" + BIND_NFC_SERVICE: 이 서비스를 묶는 쪽은 우리 앱이 아니라 OS 의 NFC
+          스택이므로 밖에서 보여야 하고, 그 권한은 시스템만 가지고 있으므로 다른 앱은 묶지
+          못한다. 둘 중 하나라도 빠지면 탭이 조용히 아무 일도 하지 않는다 — exported 가 없으면
+          OS 가 묶지 못하고, permission 이 없으면 아무 앱이나 묶을 수 있다.
+        -->
+        <service
+            android:name="app.monti.hce.MontiHostApduService"
+            android:exported="true"
+            android:permission="android.permission.BIND_NFC_SERVICE">
+            <intent-filter>
+                <action android:name="android.nfc.cardemulation.action.HOST_APDU_SERVICE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.nfc.cardemulation.host_apdu_service"
+                android:resource="@xml/monti_apduservice" />
+        </service>
+    </application>
+</manifest>
