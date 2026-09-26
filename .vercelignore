@@ -28,3 +28,9 @@ contracts/broadcast
 
 docs
 .superpowers
+
+# Playwright persona harness output — traces/videos can exceed Vercel's 100 MB file limit.
+apps/web/e2e/.artifacts
+apps/web/e2e/.state
+apps/web/test-results
+apps/web/playwright-report
