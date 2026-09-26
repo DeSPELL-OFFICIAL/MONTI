@@ -119,3 +119,64 @@
 - `apps/web/src/organizer/scene/usePublish.ts` 의 주석(옛 되돌림 설명)을 갱신.
 - `packages/shared/src/chain/abis.ts`·`UsedFunction` 에 네 함수 추가(T-UX3-2 웹 몫).
 - 인덱서 `schema.graphql`/`EventHandlers.ts` 에 `ClaimRequest` 타입 + 3개 핸들러(기획서 §B-4).
+
+## 10. Deployed 2026-09-26 — Monad testnet (chain 10143)
+
+T-UX3-3. A **new Ticket and a new MontiPaymaster** on the **kept** Identity and Organizers — no
+account was reset. `forge script DeployTicket` then `forge script Seed`, both `--broadcast --slow
+--non-interactive --code-size-limit 131072`, RPC `https://testnet-rpc.monad.xyz`. 369 tests (363 +
+6 new `DeployTicketTest`) and `.github-checks.sh` green on `8fbebab` beforehand.
+
+| | Address |
+|---|---|
+| `ticket` (new) | `0x40D90AF3a3B22542AEeF0ec3E6a66F1EAb6f7AFA` |
+| `paymaster` (new) | `0xf73220B082114D4E37bAE8d3ab7E76CAdA858dE4` |
+| `identity` (kept) | `0x961a895b47Cf200C14acf38F5689979FF5bd8133` |
+| `organizers` (kept) | `0xa88C8D110Ca8f0c925A781AB8042bA012d7281F0` |
+| `attester` (kept) | `0x6af898aA4d99375839d7069431A7019a6D84C4Ed` |
+| `entryPoint` (kept) | `0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789` |
+| `coinbaseFactory` (kept) | `0xBA5ED110eFDBa3D005bfC882d75358ACBbB85842` |
+| retired (`previous[0]`) | `ticket 0x4B8353C9…1367` / `paymaster 0xBDDBDaA9…28B2` |
+
+`block` = **65856800** (simulation-time lower bound; the eight deploy tx landed in
+65856830–65856857, the eight seed tx in 65857217–65857256).
+
+**Why a new paymaster and not a Ticket-only redeploy** — see §8: `MontiPaymaster.ticket` is immutable
+and `_slotOfInnerCall` refuses any other target, so a Ticket at a new address is unsponsored by the
+old paymaster. **Why Organizers was not re-pointed** — `setTicket` is once-only and already spent on
+the retired Ticket; it does not need re-pointing, because every `Ticket → Organizers` call
+(`hasPermission`/`ownerOf`/`isOpenGate`/`gateInfo`/`gateOf`/`managerOf`) is independent of
+`Organizers.ticket`, and gate management for the reused org 1 / event 1 resolves the same org through
+the retired Ticket (`eventOrg(1) = 1`). A gate for an event that exists only on the new Ticket cannot
+be registered through this Organizers — out of scope for the demo, flagged for the record.
+
+**Allow-list on the new paymaster** — the constructor re-seeded the whole 2026-09-23 table (§10 of
+`abi-delta-01b.md`, 29 selectors), and `DeployTicket.installApprovalSelectors` added the four 01c
+rows with `setAllowed`, for **33** total. The four new, read back with `argKindOf`/`argWordOf`
+(2 = EventId):
+
+| Selector | Signature | Kind | Word |
+|---|---|---|---|
+| `0x85563044` | `requestClaim(uint256,uint8)` | 2 | 0 |
+| `0x0b177ad6` | `approveClaims(uint256,uint256[])` | 2 | 0 |
+| `0x2c261b04` | `rejectClaims(uint256,uint256[])` | 2 | 0 |
+| `0xd586d2e4` | `cancelRequest(uint256,uint256)` | 2 | 0 |
+
+**Seed** (`SEED_REUSE_ORG=1`): org 1 reused (owner = deployer), a fresh event 1 created and published
+on the new Ticket, the placeholder gate reused (already registered and open, bound to event 1, which
+the new Ticket's first event also is), the three demo members skipped on `register` (already on the
+kept Identity) and re-issued tickets 1/2/3 on the new Ticket. `isOpenGate(1, gate)` on the new event
+is true. `seed-10143.json` is byte-identical to the 2026-09-23 file — the ids did not change.
+
+**Cost.** Deploy: 8 tx (CREATE Ticket + CREATE paymaster + `addStake` + `depositPlatform` +
+4 × `setAllowed`), plus 1 MON stake and 1 MON EntryPoint deposit. Seed: 8 tx (deployer 5, three
+members one claim each; zero attester tx — the members were already registered). Gas at 102 gwei.
+Deployer `0x509ed82E…BCf3` 11.530 → **8.004 MON** (−3.526, of which **2 MON is the recoverable stake
++ deposit**, ~1.53 MON gas + member top-ups). New Ticket runtime ≈ 29,574 B (Monad's 131,072 B
+limit; EIP-170 not enforced here).
+
+**Old paymaster funds — recovery pending (not executed).**
+`0xBDDBDaA9811C8944AF82319b19169A209A0928B2` still holds **1 MON deposit + 1 MON stake**
+(`getDepositInfo` = `(1e18, true, 1e18, 86400, 0)` — unlock not started). Recovery:
+`withdrawPlatform(to, 1e18)` for the deposit now (deployer-only), and `unlockStake()` → wait 24 h →
+`withdrawStake(to)` for the stake. Both are deployer-only and safe to run any time.
