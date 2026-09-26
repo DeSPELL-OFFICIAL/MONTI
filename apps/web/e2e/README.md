@@ -21,16 +21,21 @@ fnm exec --using=22 pnpm -F web e2e e2e/tests/01-public-surface.spec.ts   # 로�
 |---|---|---|
 | `E2E_BASE_URL` | 대상 URL | `https://monti.despell.io` |
 | `E2E_HEADLESS=1` | 헤드리스 강제 | 헤디드 |
-| `E2E_MANUAL_CAPTCHA=1` | 가입 시 reCAPTCHA 이미지 챌린지를 **사람이 직접** 풀도록 최대 5분 대기 | off |
 | `E2E_APPROVAL=1` | 승인제 시나리오(d) 및 승인 행사 생성 활성화 | off |
 
-## 지금 막혀 있는 것 (중요)
+## 가입 캡차 우회 (monti:e2e)
 
-- **가입의 reCAPTCHA**: Firebase 전화 인증의 invisible reCAPTCHA 가 자동화 환경에서 점수가
-  낮아 한국어 이미지 챌린지("자전거가 포함된…")로 승격된다. 봇이 풀 수 없으므로 **완전 자동
-  가입은 현재 막혀 있다.** 두 경로 중 하나가 필요하다.
-  1) 헤디드로 `E2E_MANUAL_CAPTCHA=1` 실행 후 사람이 챌린지를 1회씩 푼다(재실행 시 세션 재사용).
-  2) 다음 배포에서 테스트 번호에 한해 `appVerificationDisabledForTesting` 를 켜는 훅을 노출한다.
+모든 페르소나 컨텍스트는 첫 페이지 로드 전에 `addInitScript` 로 `localStorage['monti:e2e']='1'`
+를 심는다(`e2e/utils/session.ts`). 앱의 `shared/api/auth.ts` 가 이 값을 보고 `verifier()` 에서
+`appVerificationDisabledForTesting` 를 켜, 프로젝트에 등록된 **테스트 번호에 한해** reCAPTCHA 를
+목(mock) 검증기로 바꾼다 — 실번호는 여전히 실제 챌린지를 받으므로 악용 불가. 따라서 테스트 번호
+가입은 이미지 챌린지 없이 바로 코드 화면으로 넘어간다.
+
+> 이 우회를 담은 프로덕션 배포가 나가야 라이브 시나리오가 통과한다. 배포 전에는 여전히 실제
+> reCAPTCHA 가 뜬다.
+
+## 아직 막혀 있는 것
+
 - **승인제(d)**: 신청 관리(승인) 화면과 `VITE_APPROVAL_MODES=on` 은 01c 배포에서 도착한다.
 - **유료 티켓**: 컨트랙트가 계속 거절 — 시나리오 a 는 "발행 버튼 비활성 + 안내 문구"만 검증한다.
 
