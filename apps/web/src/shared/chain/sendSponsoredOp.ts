@@ -90,7 +90,11 @@ export interface SponsoredOpReceipt {
 }
 export interface SponsoredOpHandle {
   userOpHash: Hex;
-  wait(timeoutMs?: number): Promise<SponsoredOpReceipt>;
+  /**
+   * Waits for the operation's receipt. `timeoutMs` is the ordinary horizon; pass `maxTimeoutMs`
+   * (e.g. {@link MAX_WAIT_TIMEOUT_MS}) to keep polling past it, up to that cap, before giving up.
+   */
+  wait(timeoutMs?: number, maxTimeoutMs?: number): Promise<SponsoredOpReceipt>;
 }
 export interface SendSponsoredOpArgs {
   account: SmartAccount;
@@ -102,6 +106,16 @@ export interface SendSponsoredOpArgs {
 }
 
 export const DEFAULT_WAIT_TIMEOUT_MS = 15_000;
+/**
+ * The extended horizon a caller may hand {@link SponsoredOpHandle.wait}. A normally-priced op has
+ * a receipt well inside {@link DEFAULT_WAIT_TIMEOUT_MS} on Monad's ~0.3s blocks, but an op the
+ * bundler includes a little late — a busy block, the fee padding rundler adds — used to make
+ * `wait` give up at 15s and park the organiser on "확인 중". Passed the extended cap, `wait` keeps
+ * polling past that first horizon up to here before it declares the op unconfirmed, so a late
+ * inclusion still resolves on its own. It matches the create scene's own 45s progress cap, so the
+ * poll and the UI give up at the same moment rather than the poll first.
+ */
+export const MAX_WAIT_TIMEOUT_MS = 45_000;
 const RECEIPT_POLL_INTERVAL_MS = 300;
 /** Sentinel that wins the poll race when the deadline elapses first. */
 const TIMED_OUT = Symbol('sponsored-op-timeout');
@@ -153,6 +167,10 @@ export async function sendSponsoredOp({ account, calls, orgId, gasFloors }: Send
   const factoryArgs = await account.getFactoryArgs();
   const initCode: Hex =
     factoryArgs.factory && factoryArgs.factoryData ? concat([factoryArgs.factory, factoryArgs.factoryData]) : '0x';
+  // The `maxFeePerGas` ceiling reaches 2× the base fee, not viem's default 1.2×, so a Monad op
+  // clears rundler's bundling threshold and is actually included. The multiplier lives on the
+  // chain definition (`chain.ts` BASE_FEE_MULTIPLIER) because viem 2.38 reads it from the chain,
+  // not from a per-call argument — see the S1 root-cause report (task-create-failure-3).
   const fees = await getPublicClient().estimateFeesPerGas();
   const paymasterAndData = encodePaymasterAndData(config.addresses.paymaster, orgId);
 
@@ -208,8 +226,12 @@ export async function sendSponsoredOp({ account, calls, orgId, gasFloors }: Send
 
   return {
     userOpHash,
-    async wait(timeoutMs = DEFAULT_WAIT_TIMEOUT_MS): Promise<SponsoredOpReceipt> {
-      const deadline = Date.now() + timeoutMs;
+    async wait(timeoutMs = DEFAULT_WAIT_TIMEOUT_MS, maxTimeoutMs?: number): Promise<SponsoredOpReceipt> {
+      // Two horizons collapse into one deadline: `timeoutMs` is when a normally-priced op should
+      // have landed, and `maxTimeoutMs`, when a caller passes it, keeps the same poll running past
+      // that first horizon rather than giving up — so a late inclusion is still returned instead of
+      // becoming a "확인 중" park the organiser has to escape by hand.
+      const deadline = Date.now() + Math.max(timeoutMs, maxTimeoutMs ?? 0);
 
       while (Date.now() < deadline) {
         const remaining = deadline - Date.now();
