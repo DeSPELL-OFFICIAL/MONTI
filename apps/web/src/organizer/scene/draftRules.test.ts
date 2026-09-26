@@ -12,7 +12,7 @@ const READY: EventDraft = {
   ...emptyEventDraft,
   orgId: '9',
   title: '재즈 나이트',
-  description: '한남동 라이브',
+  description: '한남동 재즈 라이브 공연',
   posterCid: 'bafkposter',
   regionCode: 'KR-11',
   venue: '서울 용산구 한남동',
@@ -36,10 +36,12 @@ describe('eventProblems', () => {
     expect(eventProblems(READY)).toEqual([]);
   });
 
-  /** Five things are asked for and the description is not one of them (plan section B-3). */
+  /** 소개는 이제 필수(최소 10자, plan section A-4): 빈 소개는 bodyTooShort 로 잡힌다. */
   it('names an empty draft section by section, in the order the scene asks', () => {
-    expect(eventProblems(emptyEventDraft)).toEqual(['poster', 'title', 'venue', 'startsAt', 'endsAt']);
-    expect(eventProblems({ ...READY, description: '' })).toEqual([]);
+    expect(eventProblems(emptyEventDraft)).toEqual(
+      ['poster', 'title', 'bodyTooShort', 'venue', 'startsAt', 'endsAt'],
+    );
+    expect(eventProblems({ ...READY, description: '' })).toEqual(['bodyTooShort']);
   });
 
   /**
@@ -53,6 +55,13 @@ describe('eventProblems', () => {
     expect(eventProblems({ ...READY, title: 'ㄱ'.repeat(61) })).toEqual(['title']);
     expect(eventProblems({ ...READY, description: 'ㄱ'.repeat(2_000) })).toEqual([]);
     expect(eventProblems({ ...READY, description: 'ㄱ'.repeat(2_001) })).toEqual(['body']);
+  });
+
+  /** 소개는 최소 10자. 9자는 bodyTooShort, 10자는 통과 — 공백은 세지 않는다(trim). */
+  it('requires a description of at least ten code points (plan section A-4)', () => {
+    expect(eventProblems({ ...READY, description: 'ㄱ'.repeat(9) })).toEqual(['bodyTooShort']);
+    expect(eventProblems({ ...READY, description: 'ㄱ'.repeat(10) })).toEqual([]);
+    expect(eventProblems({ ...READY, description: `  ${'ㄱ'.repeat(9)}  ` })).toEqual(['bodyTooShort']);
   });
 
   it('counts code points rather than UTF-16 units, as the server does', () => {

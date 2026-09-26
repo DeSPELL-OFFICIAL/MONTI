@@ -104,7 +104,7 @@ const READY: EventDraft = {
   ...emptyEventDraft,
   orgId: '9',
   title: '  재즈 나이트  ',
-  description: '한남동 라이브',
+  description: '한남동 재즈 라이브 공연',
   posterCid: 'bafkposter',
   category: 2,
   tags: [' #재즈 ', '라이브', '재즈'],
@@ -165,7 +165,7 @@ describe('the publish path', () => {
       orgId: '9',
       meta: {
         name: '재즈 나이트',
-        description: '한남동 라이브',
+        description: '한남동 재즈 라이브 공연',
         imageCid: 'bafkposter',
         category: 2,
         region: 'KR-11',

@@ -75,7 +75,7 @@ const TIERS = [
   { id: '7-1', eventId: '7', idx: 1, name: '학생', priceUsdCents: '0', supply: '20', minted: '0', maxPerWallet: '1', seated: false },
 ];
 const META = {
-  title: '재즈 나이트', description: '한남동 라이브', image: 'https://gw.test/bafkposter',
+  title: '재즈 나이트', description: '한남동 재즈 라이브 공연', image: 'https://gw.test/bafkposter',
   imageCid: 'bafkposter', venue: '', category: 2, region: 'KR-11',
   tags: ['재즈', '라이브'], venueHidden: true, timeHidden: false,
 };
@@ -147,7 +147,7 @@ describe('reopening the scene on an event that already exists', () => {
     // holds only `keccak256('KR-11')`, which nothing can turn back into a region.
     expect(draft).toMatchObject({
       title: '재즈 나이트',
-      description: '한남동 라이브',
+      description: '한남동 재즈 라이브 공연',
       posterCid: 'bafkposter',
       regionCode: 'KR-11',
       tags: ['재즈', '라이브'],

@@ -53,7 +53,7 @@ const { toLocalInput } = await import('./datetime');
 const { ko: sharedCopy } = await import('../../shared/copy/index');
 const { EVENT_DRAFT_KEY, emptyEventDraft } = await import('../useEventDraft');
 const { organizerCopy } = await import('../copy');
-const { PROBLEM_SECTION } = await import('./draftRules');
+const { PROBLEM_SECTION, MAX_BODY_CHARS, MAX_TAG_CHARS } = await import('./draftRules');
 const copy = organizerCopy.ko.scene;
 
 /** Where a navigation landed, so the route SCENE 1 hands over to is checked and not guessed. */
@@ -65,7 +65,7 @@ const READY: EventDraft = {
   ...emptyEventDraft,
   orgId: '9',
   title: '재즈 나이트',
-  description: '한남동 라이브',
+  description: '한남동 재즈 라이브 공연',
   posterCid: 'bafkposter',
   regionCode: 'KR-11',
   venue: '서울 용산구 한남동',
@@ -132,7 +132,7 @@ describe('the scene layout', () => {
     expect(folds).toHaveLength(1);
     expect(folds.every((summary) => (summary.closest('details') as HTMLDetailsElement).open)).toBe(false);
 
-    for (const field of [copy.titleLabel, copy.startsAt, copy.regionLabel, copy.placeLabel, copy.tiers.name]) {
+    for (const field of [copy.titleLabel, copy.bodyLabel, copy.startsAt, copy.regionLabel, copy.placeLabel, copy.tiers.name]) {
       expect(screen.getByLabelText(field).closest('details')).toBeNull();
     }
     // The poster card and the ticket kind are the two that are not plain boxes.
@@ -140,7 +140,7 @@ describe('the scene layout', () => {
     expect(screen.getByLabelText(copy.tiers.supply).closest('details')).toBeNull();
 
     // And everything the founder never has to see again.
-    for (const folded of [copy.bodyLabel, copy.themeLabel, copy.tagAdd, copy.endsAt]) {
+    for (const folded of [copy.themeLabel, copy.tagAdd, copy.endsAt]) {
       expect(screen.getByLabelText(folded).closest('details')).not.toBeNull();
     }
   });
@@ -211,9 +211,20 @@ describe('the one button', () => {
       expect(target, section).not.toBeNull();
       // Inside the fold the sections stay plain: a pane drawn inside a pane is two edges
       // for one boundary. Everything above it is a card.
-      if (!['body', 'tags'].includes(section)) expect(target, section).toHaveClass('card');
+      if (!['tags'].includes(section)) expect(target, section).toHaveClass('card');
     }
     expect(document.getElementById('scene-tickets')).toHaveClass('card');
+  });
+
+  /** 소개는 항상 보이고(더 설정하기 밖), 카운터가 n/2000 을 실시간으로 보여준다(plan A-4). */
+  it('shows the description outside the fold with a live counter', async () => {
+    open();
+    await waitFor(() => expect(listEventDrafts).toHaveBeenCalled());
+    const body = screen.getByLabelText(copy.bodyLabel);
+    expect(body.closest('details')).toBeNull();
+    expect(screen.getByText(fmt(copy.count, { count: 0, max: MAX_BODY_CHARS }))).toBeInTheDocument();
+    await userEvent.setup().type(body, '123456789');
+    expect(screen.getByText(fmt(copy.count, { count: 9, max: MAX_BODY_CHARS }))).toBeInTheDocument();
   });
 
   /**
@@ -246,16 +257,16 @@ describe('the one button', () => {
    * then is the section scrolled to.
    */
   it('opens the fold when what is wrong is hiding inside it', async () => {
-    seed('d-1', { ...READY, description: 'ㄱ'.repeat(2_001) });
+    seed('d-1', { ...READY, tags: ['ㄱ'.repeat(MAX_TAG_CHARS + 1)] });
     open('/org/new/d-1');
     await waitFor(() => expect(screen.getByLabelText(copy.titleLabel)).toHaveValue(READY.title));
     expect(fold().open).toBe(false);
 
     await userEvent.setup().click(screen.getByRole('button', { name: copy.tiers.create }));
     expect(fold().open).toBe(true);
-    expect(screen.getByText(copy.problems.body)).toBeInTheDocument();
+    expect(screen.getByText(copy.problems.tags)).toBeInTheDocument();
     // It is inside the fold and not beside it, which is the whole reason the fold had to open.
-    expect(screen.getByText(copy.problems.body).closest('details')).toBe(fold());
+    expect(screen.getByText(copy.problems.tags).closest('details')).toBe(fold());
   });
 
   /** And it stays shut for a field that was on screen the whole time: nothing was hidden. */

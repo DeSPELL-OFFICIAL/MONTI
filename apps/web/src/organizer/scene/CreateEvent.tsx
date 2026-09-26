@@ -28,7 +28,7 @@ import {
  * a sentence nobody can see is worse than no sentence at all.
  */
 const FOLDED_PROBLEMS: ReadonlySet<EventProblem> = new Set<EventProblem>([
-  'tags', 'body', 'endsAt', 'schedule',
+  'tags', 'endsAt', 'schedule',
 ]);
 
 /**
@@ -276,6 +276,25 @@ export function CreateEvent() {
           {wrong('title')}
         </Card>
 
+        {/* 소개는 항상 보인다: 더 설정하기 밖의 제 카드다(plan section A-4). 서버는 빈 소개를
+            허용하지만 이 화면은 최소 10자를 요구한다. */}
+        <Card id="scene-body">
+          <Field label={copy.bodyLabel}>
+            <textarea
+              value={draft.description}
+              rows={6}
+              maxLength={MAX_BODY_CHARS}
+              placeholder={copy.bodyPlaceholder}
+              onChange={(event) => patch({ description: event.target.value })}
+            />
+          </Field>
+          <p className="muted">
+            {fmt(copy.count, { count: charCount(draft.description), max: MAX_BODY_CHARS })}
+          </p>
+          {wrong('bodyTooShort')}
+          {wrong('body')}
+        </Card>
+
         <Card title={copy.timeLabel} id="scene-time">
           <Field label={copy.startsAt}>
             <input
@@ -329,22 +348,6 @@ export function CreateEvent() {
           onToggle={(event) => setMore(event.currentTarget.open)}
         >
           <summary>{copy.more}</summary>
-
-          <section id="scene-body">
-            <Field label={copy.bodyLabel}>
-              <textarea
-                value={draft.description}
-                rows={6}
-                maxLength={MAX_BODY_CHARS}
-                placeholder={copy.bodyPlaceholder}
-                onChange={(event) => patch({ description: event.target.value })}
-              />
-            </Field>
-            <p className="muted">
-              {fmt(copy.count, { count: charCount(draft.description), max: MAX_BODY_CHARS })}
-            </p>
-            {wrong('body')}
-          </section>
 
           <section id="scene-tags">
             {/* One list, shared with the 탐색 filter, so a theme an organiser picks is a theme

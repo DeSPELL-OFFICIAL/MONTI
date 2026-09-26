@@ -79,6 +79,7 @@ const ALMOST: EventDraft = {
   ...emptyEventDraft,
   orgId: '9',
   title: '재즈 나이트',
+  description: '한남동 재즈 라이브 공연',
   regionCode: 'KR-11',
   venue: '서울 용산구 한남동',
   startsAt: 1_900_000_000,

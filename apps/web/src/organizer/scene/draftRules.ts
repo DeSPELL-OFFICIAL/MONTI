@@ -18,6 +18,7 @@ import { REGION_CODES } from './regions';
  */
 export const MIN_TITLE_CHARS = 2;
 export const MAX_TITLE_CHARS = 60;
+export const MIN_BODY_CHARS = 10;
 export const MAX_BODY_CHARS = 2_000;
 export const MAX_VENUE_CHARS = 200;
 export const MAX_TAGS = 5;
@@ -25,12 +26,12 @@ export const MAX_TAG_CHARS = 12;
 
 /** One named rule; `organizer/copy.ts` owns a sentence for each, and each names a section. */
 export type EventProblem =
-  | 'poster' | 'title' | 'tags' | 'body' | 'region' | 'venue' | 'venueTooLong'
+  | 'poster' | 'title' | 'tags' | 'bodyTooShort' | 'body' | 'region' | 'venue' | 'venueTooLong'
   | 'startsAt' | 'endsAt' | 'schedule' | 'eventPast';
 
 /** Which section of SCENE 1 a problem belongs to, so `다음` can scroll to the first one. */
 export const PROBLEM_SECTION: Readonly<Record<EventProblem, string>> = {
-  poster: 'poster', title: 'title', tags: 'tags', body: 'body',
+  poster: 'poster', title: 'title', tags: 'tags', bodyTooShort: 'body', body: 'body',
   region: 'venue', venue: 'venue', venueTooLong: 'venue',
   startsAt: 'time', endsAt: 'time', schedule: 'time', eventPast: 'time',
 };
@@ -106,10 +107,13 @@ export function eventProblems(
     problems.push('tags');
   }
 
-  // Not required: `pinEventMetadata` measures a description and refuses only a long one — an
-  // empty one is fine by the server (`functions/src/functions/organizer.ts:206-212`), and a
-  // required 소개 is one more wall between an organiser and their event (plan section B-3).
-  if (charCount(draft.description.trim()) > MAX_BODY_CHARS) problems.push('body');
+  // Required, at least ten code points. The server still allows an empty description
+  // (`functions/src/functions/organizer.ts:206-212`), but the founder's phone test asked for a
+  // 소개 that says something (plan section A-4), so the scene is the stricter of the two — and
+  // `pinEventMetadata` refuses one over 2,000 with `BAD_META` at publish.
+  const body = charCount(draft.description.trim());
+  if (body < MIN_BODY_CHARS) problems.push('bodyTooShort');
+  else if (body > MAX_BODY_CHARS) problems.push('body');
 
   if (!REGION_CODES.has(draft.regionCode)) problems.push('region');
   const venue = draft.venue.trim();
