@@ -116,4 +116,55 @@ describe('TicketArt', () => {
     // The characters are still drawn — escaped, not dropped.
     expect(container.textContent).toContain('<script>');
   });
+
+  /**
+   * A large, animated ticket stops animating when it scrolls out of view — the observer adds a
+   * paused class the stylesheet turns into `animation-play-state: paused`. jsdom ships no
+   * `IntersectionObserver`, so the test installs one that hands its callback back.
+   */
+  it('pauses an animated ticket while it is off-screen and resumes it on-screen', () => {
+    const callbacks: IntersectionObserverCallback[] = [];
+    class MockIO {
+      constructor(cb: IntersectionObserverCallback) { callbacks.push(cb); }
+      observe(): void {}
+      disconnect(): void {}
+    }
+    const original = globalThis.IntersectionObserver;
+    globalThis.IntersectionObserver = MockIO as unknown as typeof IntersectionObserver;
+    try {
+      const { container } = render(
+        <TicketArt art={{ preset: 'a' }} title="재즈 나이트" tierName="일반" animated />,
+      );
+      const frame = container.querySelector('.ticket-art');
+      expect(frame).not.toBeNull();
+      const fire = callbacks[0];
+      expect(fire).toBeDefined();
+
+      fire?.([{ isIntersecting: false } as IntersectionObserverEntry], {} as IntersectionObserver);
+      expect(frame?.classList.contains('ticket-art--paused')).toBe(true);
+
+      fire?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver);
+      expect(frame?.classList.contains('ticket-art--paused')).toBe(false);
+    } finally {
+      globalThis.IntersectionObserver = original;
+    }
+  });
+
+  /** A still ticket (the default) attaches no observer at all — there is nothing to pause. */
+  it('attaches no observer to a still ticket', () => {
+    const seen: unknown[] = [];
+    class MockIO {
+      constructor(cb: unknown) { seen.push(cb); }
+      observe(): void {}
+      disconnect(): void {}
+    }
+    const original = globalThis.IntersectionObserver;
+    globalThis.IntersectionObserver = MockIO as unknown as typeof IntersectionObserver;
+    try {
+      render(<TicketArt art={{ preset: 'a' }} title="재즈 나이트" tierName="일반" />);
+      expect(seen).toHaveLength(0);
+    } finally {
+      globalThis.IntersectionObserver = original;
+    }
+  });
 });

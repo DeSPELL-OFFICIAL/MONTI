@@ -1,6 +1,20 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { useCopy } from '../i18n';
+import { m, SPRING, useReducedMotion } from '../motion';
+
+/** A tab that presses and, when active, carries the sliding indicator. */
+const MNavLink = m.create(NavLink);
+
+/**
+ * Which tab owns this path. It mirrors what `NavLink` itself does — an exact match for the
+ * `end` tab (탐색, at `/`), a prefix match for the others — so the indicator lands on the same
+ * tab `NavLink` marks with `aria-current`. `NavLink` still sets `aria-current` on its own; this
+ * only decides where the decorative pill is drawn.
+ */
+function tabIsActive(pathname: string, to: string, end: boolean): boolean {
+  return end ? pathname === to : pathname === to || pathname.startsWith(`${to}/`);
+}
 
 /**
  * The four glyphs. They are drawn here rather than fetched because the app ships no icon font
@@ -44,6 +58,10 @@ function Glyph({ name }: { name: string }) {
 
 export function BottomTabs() {
   const copy = useCopy();
+  const { pathname } = useLocation();
+  const reduce = useReducedMotion();
+  // The press feedback, dropped entirely when the OS asks for reduced motion.
+  const tap = reduce ? undefined : { whileTap: { scale: 0.97 }, transition: SPRING.snappy };
   const tabs = [
     { to: '/', name: 'discover', label: copy.tabs.discover, end: true },
     { to: '/tickets', name: 'tickets', label: copy.tabs.tickets, end: false },
@@ -53,10 +71,16 @@ export function BottomTabs() {
   return (
     <nav className="tabbar">
       {tabs.map((tab) => (
-        <NavLink key={tab.to} to={tab.to} end={tab.end}>
+        <MNavLink key={tab.to} to={tab.to} end={tab.end} {...tap}>
           <Glyph name={tab.name} />
           <span>{tab.label}</span>
-        </NavLink>
+          {/* The shared indicator. One `layoutId` across all four tabs means framer springs the
+              same element from the old tab to the new one; under reduced motion the config makes
+              that jump instant, and the tint under `aria-current` is the cue that always shows. */}
+          {tabIsActive(pathname, tab.to, tab.end) ? (
+            <m.div className="tabbar__ind" layoutId="tabbar-ind" transition={SPRING.snappy} aria-hidden="true" />
+          ) : null}
+        </MNavLink>
       ))}
     </nav>
   );

@@ -139,6 +139,7 @@ export function EventArt({ eventId, tiers, title, startsAt = 0 }: EventArtProps)
                 tierName={tier.name}
                 holder={displayName === '' ? tickets.artGuest : displayName}
                 dateText={dateText}
+                animated
               />
             </div>
             {open === index ? (

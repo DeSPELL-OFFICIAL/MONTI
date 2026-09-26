@@ -183,6 +183,13 @@ export interface TicketSvgInput {
   dateText?: string;
   used?: boolean;
   /**
+   * Whether this ticket should play its backdrop's animation, when it has one. Off by default and
+   * left off for every thumbnail, list row and picker tile, so a page of still tickets stays
+   * still; a large preview and the ticket detail turn it on. An uploaded picture is never
+   * animated, and a backdrop with no `anim` is drawn exactly as it is whatever this says.
+   */
+  animated?: boolean;
+  /**
    * The word across a spent ticket. It is a parameter and not a literal because it is Korean
    * product copy, and product copy lives in the copy modules — this one is `tickets.artUsed`,
    * the same string the picture's accessible name already ends with.
@@ -222,10 +229,16 @@ function line(text: string, attrs: LineAttrs): string {
 export function buildTicketSvg(input: TicketSvgInput): string {
   const {
     preset = 'a', imageHref = '', title, tierName,
-    holder = '', dateText = '', used = false, usedLabel = '',
+    holder = '', dateText = '', used = false, animated = false, usedLabel = '',
   } = input;
   const uploaded = imageHref !== '';
   const backdrop = TICKET_BACKDROPS[preset] ?? TICKET_BACKDROPS.a;
+  // An animated ticket carries a marker class and an inline `<style>`; a still one carries
+  // neither and is byte-for-byte what it always was. The style is scoped under `.ta-live` (see
+  // `TicketBackdrop.anim`), so it animates this document alone and never a still one beside it on
+  // the page. An uploaded picture has no backdrop animation, so it is never live.
+  const anim = uploaded ? undefined : backdrop.anim;
+  const live = animated && anim !== undefined;
 
   const titleLines = wrapTitle(title);
   const titleTop = TITLE_BASELINE - (titleLines.length - 1) * TITLE_LINE_HEIGHT - TITLE_SIZE;
@@ -243,7 +256,7 @@ export function buildTicketSvg(input: TicketSvgInput): string {
     : backdrop.body;
 
   return [
-    '<svg xmlns="http://www.w3.org/2000/svg" class="ticket-art__svg"',
+    `<svg xmlns="http://www.w3.org/2000/svg" class="ticket-art__svg${live ? ' ta-live' : ''}"`,
     ` viewBox="0 0 ${TICKET_WIDTH} ${TICKET_HEIGHT}" preserveAspectRatio="xMidYMid slice"`,
     ' width="100%" height="100%" focusable="false"',
     uploaded ? '' : ` data-preset="${preset}"`,
@@ -256,6 +269,9 @@ export function buildTicketSvg(input: TicketSvgInput): string {
     '<stop offset="1" stop-color="#08090c" stop-opacity="0.88"/>',
     '</linearGradient>',
     '</defs>',
+
+    // The animation, scoped under `.ta-live`, so a still ticket on the same page cannot pick it up.
+    live ? `<style>${anim}</style>` : '',
 
     `<g class="ticket-art__backdrop"${used ? ` style="filter: ${USED_FILTER}"` : ''}>${art}</g>`,
 

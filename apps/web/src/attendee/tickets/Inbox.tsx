@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import type { Hex } from '@monti/shared';
 import { Alert, Button, Screen, Spinner } from '../../shared/ui';
 import { fmt, useCopy } from '../../shared/i18n';
+import { LIST_STAGGER, m, useReducedMotion } from '../../shared/motion';
 import { api, type PendingOffer } from '../../shared/api/functions';
 import { getAttendeeAccount } from '../../shared/chain/accounts';
 import { ticketOp } from '../../shared/chain/ops';
@@ -75,6 +76,10 @@ export function Inbox() {
     queryFn: () => loadInbox(account as Hex),
   });
   const rows = data ?? [];
+  const reduce = useReducedMotion();
+  // Reduced motion drops the stagger so the rows are all there at once (see LIST_STAGGER).
+  const list = reduce ? {} : { variants: LIST_STAGGER.container, initial: 'hidden' as const, animate: 'show' as const };
+  const item = reduce ? {} : { variants: LIST_STAGGER.item };
 
   async function take(row: InboxRow): Promise<void> {
     const key = row.offer.inviteId;
@@ -108,11 +113,11 @@ export function Inbox() {
       {isLoading ? <Spinner /> : null}
       {!isLoading && rows.length === 0 ? <p className="muted">{copy.tickets.inboxEmpty}</p> : null}
       {rows.length > 0 ? <p>{fmt(copy.tickets.inboxCount, { count: rows.length })}</p> : null}
-      <ul className="event-list">
+      <m.ul className="event-list" {...list}>
         {rows.map((row) => {
           const key = row.offer.inviteId;
           return (
-            <li key={key}>
+            <m.li key={key} {...item}>
               {/* The number is all there is when the document did not load — better than a
                   blank line, and the person can still see which invite is which. */}
               <span>{row.title === '' ? `#${row.offer.tokenId}` : row.title}</span>
@@ -130,10 +135,10 @@ export function Inbox() {
                   {copy.transfer.accept}
                 </Button>
               )}
-            </li>
+            </m.li>
           );
         })}
-      </ul>
+      </m.ul>
     </Screen>
   );
 }

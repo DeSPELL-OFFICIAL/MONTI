@@ -4,6 +4,7 @@ import {
   Alert, Button, Card, Field, OpProgress, Screen, Spinner, Steps, StickyBar, Toast, Toggle, type OpPhase,
 } from '../../shared/ui';
 import { fmt, useCopy, useLocale } from '../../shared/i18n';
+import { AnimatePresence } from '../../shared/motion';
 import { THEME_CODES, themeLabels } from '../../shared/eventThemes';
 import { useDisplayName } from '../../shared/displayName';
 import { useOrganizerCopy } from '../copy';
@@ -85,6 +86,8 @@ export function CreateEvent() {
    */
   const [orgName, setOrgName] = useState('');
   const orgTyped = useRef(false);
+  // Tapping the title on a ticket preview takes the organiser here, to the one box that owns it.
+  const titleRef = useRef<HTMLInputElement>(null);
   // `더 설정하기`. Closed to begin with — the five fields above it are the whole of an event
   // that works — and opened by hand, or by a problem hiding inside it.
   const [more, setMore] = useState(false);
@@ -212,6 +215,13 @@ export function CreateEvent() {
     });
   }
 
+  // Tapping the title region of a ticket preview: scroll to the title card and put the cursor in
+  // it, so the preview is where the editing starts and the box is where it lands.
+  function editTitle(): void {
+    scrollTo('title');
+    titleRef.current?.focus();
+  }
+
   function create(): void {
     setChecked(true);
     const first = problems[0];
@@ -260,17 +270,20 @@ export function CreateEvent() {
         </p>
         {/* 만들기 ≠ 발행: 생성 씬은 1단계, done 화면이 2단계다(계획 §2b). 편집 모드에는 해당 없음. */}
         {editing ? null : <Steps labels={[copy.stepCreate, copy.stepPublish]} at={0} />}
-        {asking ? (
-          <ResumeSheet
-            title={draft.title}
-            at={resumedAt}
-            onResume={() => setDecided(true)}
-            onFresh={() => {
-              setDecided(true);
-              void startNew();
-            }}
-          />
-        ) : null}
+        <AnimatePresence>
+          {asking ? (
+            <ResumeSheet
+              key="resume"
+              title={draft.title}
+              at={resumedAt}
+              onResume={() => setDecided(true)}
+              onFresh={() => {
+                setDecided(true);
+                void startNew();
+              }}
+            />
+          ) : null}
+        </AnimatePresence>
 
         <Card title={copy.poster} id="scene-poster">
           <PosterCard posterCid={draft.posterCid} upload={poster} />
@@ -283,6 +296,7 @@ export function CreateEvent() {
         <Card id="scene-title">
           <Field label={copy.titleLabel}>
             <input
+              ref={titleRef}
               value={draft.title}
               maxLength={MAX_TITLE_CHARS}
               placeholder={copy.titlePlaceholder}
@@ -353,6 +367,7 @@ export function CreateEvent() {
           patch={patch}
           problems={checked ? tiersWrong : []}
           blocked={blocked}
+          onEditTitle={editTitle}
         />
 
         {/* Everything an event can do without. It is closed on arrival: five fields and one
@@ -490,9 +505,11 @@ export function CreateEvent() {
           </Button>
         </div>
       </StickyBar>
-      {toast === '' ? null : (
-        <Toast text={toast} dismiss={shared.common.close} onDone={() => setToast('')} />
-      )}
+      <AnimatePresence>
+        {toast === '' ? null : (
+          <Toast key="toast" text={toast} dismiss={shared.common.close} onDone={() => setToast('')} />
+        )}
+      </AnimatePresence>
     </Screen>
   );
 }
