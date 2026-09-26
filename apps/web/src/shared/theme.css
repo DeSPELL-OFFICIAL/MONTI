@@ -812,3 +812,9 @@ table { width: 100%; display: block; overflow-x: auto; }
 }
 .skeleton-bar--title { height: 16px; width: 70%; margin-top: 0; }
 @keyframes skeleton-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+/* ── publish summary sheet (plan §2b) ───────────────────────────────────────────────────── */
+.publish-summary { display: grid; gap: var(--s-2); margin: var(--s-3) 0; }
+.publish-summary > div { display: flex; justify-content: space-between; gap: var(--s-3); }
+.publish-summary dt { color: var(--ink-2); font-size: var(--t-cap); }
+.publish-summary dd { margin: 0; font-weight: 600; text-align: right; }

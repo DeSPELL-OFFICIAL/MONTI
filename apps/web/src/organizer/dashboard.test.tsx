@@ -44,7 +44,7 @@ const loadEventArt = vi.fn(async () => [{ preset: 'c' as const }]);
 const loadMyProfile = vi.fn(async () => ({ displayName: '박주최' }));
 vi.mock('../shared/api/firestore', () => ({ loadEventArt, loadMyProfile }));
 
-const fetchEventMetadata = vi.fn(async () => ({ title: '재즈 나이트', tags: [] }));
+const fetchEventMetadata = vi.fn(async (): Promise<Record<string, unknown>> => ({ title: '재즈 나이트', tags: [] }));
 vi.mock('../shared/envio/ipfs', async (orig) => ({
   ...(await orig<typeof import('../shared/envio/ipfs')>()),
   fetchEventMetadata,
@@ -120,6 +120,48 @@ describe('publishing and cancelling', () => {
         expect.objectContaining({ orgId: 9n, functionName: 'publishEvent', args: [5n] }),
       ),
     );
+  });
+
+  /** Plan §2b: the summary sheet shows what goes public, and confirming publishes exactly once. */
+  it('summarises the event in a sheet and publishes exactly once', async () => {
+    const user = userEvent.setup();
+    fetchEventMetadata.mockResolvedValue({
+      title: '재즈 나이트', venue: '한남동 클럽', region: 'KR-11', venueHidden: false, timeHidden: false, tags: [],
+    });
+    gql.mockResolvedValue({ Event: [{ ...DRAFT_EVENT, requireKyc: true }], Tier: TIERS });
+    open();
+    await user.click(await screen.findByRole('button', { name: life.publish }));
+
+    // The summary: place, the ticket-kind count and the identity check, then the confirmation.
+    expect(await screen.findByText('한남동 클럽')).toBeInTheDocument();
+    expect(screen.getByText(life.summary.kycOn)).toBeInTheDocument();
+    expect(screen.getByText('1종')).toBeInTheDocument();
+    expect(screen.getByText(life.publishConfirm)).toBeInTheDocument();
+    expect(ticketOp).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: life.confirm }));
+    await waitFor(() =>
+      expect(ticketOp).toHaveBeenCalledWith(
+        expect.objectContaining({ functionName: 'publishEvent', args: [5n] }),
+      ),
+    );
+    expect(ticketOp).toHaveBeenCalledTimes(1);
+  });
+
+  /** Plan §2b: 지금 발행하기 on the done screen arrives here with ?publish=1 and opens the sheet. */
+  it('opens the publish sheet on its own when arrived at with ?publish=1', async () => {
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter initialEntries={['/org/events/5?publish=1']}>
+          <Routes>
+            <Route path="/org/events/:eventId" element={<Dashboard />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText(life.publishConfirm)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: life.confirm })).toBeInTheDocument();
+    expect(ticketOp).not.toHaveBeenCalled();
   });
 
   /** Ruling 3: after sub-plan 01b a cancelled event blocks hand-overs — say so beforehand. */

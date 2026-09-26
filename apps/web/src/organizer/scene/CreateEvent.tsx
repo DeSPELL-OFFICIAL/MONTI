@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Alert, Button, Card, Field, Screen, Spinner, StickyBar, Toast, Toggle } from '../../shared/ui';
+import { Alert, Button, Card, Field, Screen, Spinner, Steps, StickyBar, Toast, Toggle } from '../../shared/ui';
 import { fmt, useCopy, useLocale } from '../../shared/i18n';
 import { THEME_CODES, themeLabels } from '../../shared/eventThemes';
 import { useDisplayName } from '../../shared/displayName';
@@ -244,6 +244,8 @@ export function CreateEvent() {
         <p>
           <Link to={editing ? `/org/events/${draft.editingEventId}` : '/org'}>{copy.leave}</Link>
         </p>
+        {/* 만들기 ≠ 발행: 생성 씬은 1단계, done 화면이 2단계다(계획 §2b). 편집 모드에는 해당 없음. */}
+        {editing ? null : <Steps labels={[copy.stepCreate, copy.stepPublish]} at={0} />}
         {asking ? (
           <ResumeSheet
             title={draft.title}
