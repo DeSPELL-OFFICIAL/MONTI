@@ -168,12 +168,25 @@ contract Seed is Script {
             members.push(vm.addr(memberKey(i)));
         }
 
+        // A redeploy keeps the Organizers, whose org and demo gate already exist. SEED_REUSE_ORG makes
+        // the seed reuse org SEED_ORG_ID (default 1, owned by the deployer) instead of creating a second
+        // one -- createOrganizer would otherwise orphan org 1 and misnumber seed-<chainid>.json.
+        bool reuseOrg = vm.envOr("SEED_REUSE_ORG", false);
+
         vm.startBroadcast(deployerPk);
-        orgId = organizers.createOrganizer(deployer);
+        orgId = reuseOrg ? vm.envOr("SEED_ORG_ID", uint256(1)) : organizers.createOrganizer(deployer);
         eventId = ticket.createEvent(_meta(imageCid_), _tiers());
         ticket.publishEvent(eventId);
-        gateId = organizers.registerGate(eventId, gateAccount, gateKx_, gateKy_);
-        organizers.openGate(gateId);
+        // registerGate takes a gate account exactly once (GateAccountInUse). On a kept Organizers the
+        // demo gate is already registered and bound to event 1 -- which the new Ticket's first event also
+        // is -- so it is reused rather than re-registered; a fresh Organizers has none and registers one.
+        uint256 existingGate = organizers.gateOf(gateAccount);
+        if (existingGate != 0) {
+            gateId = existingGate;
+        } else {
+            gateId = organizers.registerGate(eventId, gateAccount, gateKx_, gateKy_);
+            organizers.openGate(gateId);
+        }
         for (uint256 i; i < members.length; ++i) {
             if (members[i].balance >= memberFundWei) continue;
             (bool sent,) = payable(members[i]).call{value: memberFundWei - members[i].balance}("");
