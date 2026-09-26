@@ -208,6 +208,7 @@ const ko = {
     checkedIn: '입장함',
     notCheckedIn: '아직',
     gates: '입구 단말기',
+    requests: '신청 관리',
     // 공개 전에만 열린다 — updateEventMeta 는 Draft 에서만 된다(Ticket.sol:235).
     edit: '행사 정보 고치기',
     notIndexed: '없는 행사 번호이거나 아직 색인 전이에요',
@@ -234,6 +235,22 @@ const ko = {
       failed: '티켓 그림을 저장하지 못했어요. 잠시 뒤 다시 시도해 주세요',
       untitled: '이름 없는 행사',
     },
+  },
+
+  requests: {
+    title: '신청 관리',
+    back: '행사 현황으로',
+    empty: '기다리는 신청이 없어요',
+    loadFailed: '신청 목록을 불러오지 못했어요. 잠시 뒤 다시 시도해 주세요',
+    retry: '다시 시도',
+    noPermission: '이 행사의 신청을 처리할 권한이 없어요',
+    approveSelected: '선택 승인',
+    approveAll: '전체 승인',
+    reject: '거절',
+    tier: '{{tier}}번째 종류',
+    working: '처리하고 있어요',
+    confirming: '아직 확인 중이에요. 잠시 뒤 새로고침하면 반영돼요',
+    failed: '처리하지 못했어요. 잠시 뒤 다시 시도해 주세요',
   },
 
   announce: {
@@ -688,6 +705,7 @@ const en: typeof ko = {
     checkedIn: 'In',
     notCheckedIn: 'Not yet',
     gates: 'Entry terminals',
+    requests: 'Requests',
     /** Only before publishing: the chain refuses `updateEventMeta` past Draft. */
     edit: 'Edit this event',
     notIndexed: 'No event has that number, or it has not been indexed yet',
@@ -709,6 +727,22 @@ const en: typeof ko = {
       failed: 'Could not save the picture. Please try again in a moment',
       untitled: 'Unnamed event',
     },
+  },
+
+  requests: {
+    title: 'Requests',
+    back: 'Back to event status',
+    empty: 'No requests are waiting',
+    loadFailed: 'Could not load the requests. Please try again in a moment',
+    retry: 'Try again',
+    noPermission: 'You may not handle requests for this event',
+    approveSelected: 'Approve selected',
+    approveAll: 'Approve all',
+    reject: 'Reject',
+    tier: 'Kind {{tier}}',
+    working: 'Working',
+    confirming: 'Still confirming. Refresh in a moment to see the change',
+    failed: 'Could not finish. Please try again in a moment',
   },
 
   announce: {

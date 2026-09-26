@@ -115,6 +115,20 @@ describe('useMyOrgs', () => {
     expect(result.current.canCreateEvent).toBe(true);
   });
 
+  it('grants approval to an owner, an admin holding the bit, and a manager who may approve', async () => {
+    // bits 32 is PERM_APPROVE_CLAIM; bits 2 is manageGates, which says nothing about approving.
+    gql.mockResolvedValue({
+      Organizer: [organizer('1')],
+      Admin: [admin('2', '32'), admin('3', '2')],
+      Manager: [manager('4')],
+    });
+    const { result } = renderMyOrgs();
+
+    await waitFor(() => expect(result.current.orgs).toHaveLength(4));
+    // manager() sets canApprove: true, so org 4 passes on the manager row alone.
+    expect(result.current.orgs.map((org) => org.canApprove)).toEqual([true, true, false, true]);
+  });
+
   it('offers no event creation to somebody who only manages and only holds other bits', async () => {
     gql.mockResolvedValue({ Organizer: [], Admin: [admin('3', '2')], Manager: [manager('4')] });
     const { result } = renderMyOrgs();
