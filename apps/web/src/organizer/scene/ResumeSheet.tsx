@@ -30,7 +30,7 @@ export function ResumeSheet({ title, at, onResume, onFresh }: ResumeSheetProps) 
   const named = title.trim() === '' ? copy.resume.untitled : title;
 
   return (
-    <Sheet label={copy.resume.title}>
+    <Sheet label={copy.resume.title} onDismiss={onFresh}>
       <h2>{copy.resume.title}</h2>
       <p className="muted">
         {fmt(copy.resume.body, { title: named, when: timeAgo(Date.now() - at, copy) })}

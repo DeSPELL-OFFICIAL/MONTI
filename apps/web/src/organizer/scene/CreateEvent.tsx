@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Alert, Button, Card, Field, Screen, Spinner, StickyBar, Toast, Toggle } from '../../shared/ui';
 import { fmt, useCopy, useLocale } from '../../shared/i18n';
+import { AnimatePresence } from '../../shared/motion';
 import { THEME_CODES, themeLabels } from '../../shared/eventThemes';
 import { useDisplayName } from '../../shared/displayName';
 import { useOrganizerCopy } from '../copy';
@@ -244,17 +245,20 @@ export function CreateEvent() {
         <p>
           <Link to={editing ? `/org/events/${draft.editingEventId}` : '/org'}>{copy.leave}</Link>
         </p>
-        {asking ? (
-          <ResumeSheet
-            title={draft.title}
-            at={resumedAt}
-            onResume={() => setDecided(true)}
-            onFresh={() => {
-              setDecided(true);
-              void startNew();
-            }}
-          />
-        ) : null}
+        <AnimatePresence>
+          {asking ? (
+            <ResumeSheet
+              key="resume"
+              title={draft.title}
+              at={resumedAt}
+              onResume={() => setDecided(true)}
+              onFresh={() => {
+                setDecided(true);
+                void startNew();
+              }}
+            />
+          ) : null}
+        </AnimatePresence>
 
         <Card title={copy.poster} id="scene-poster">
           <PosterCard posterCid={draft.posterCid} upload={poster} />
@@ -479,9 +483,11 @@ export function CreateEvent() {
           </Button>
         </div>
       </StickyBar>
-      {toast === '' ? null : (
-        <Toast text={toast} dismiss={shared.common.close} onDone={() => setToast('')} />
-      )}
+      <AnimatePresence>
+        {toast === '' ? null : (
+          <Toast key="toast" text={toast} dismiss={shared.common.close} onDone={() => setToast('')} />
+        )}
+      </AnimatePresence>
     </Screen>
   );
 }

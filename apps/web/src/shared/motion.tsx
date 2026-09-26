@@ -8,6 +8,7 @@ import {
   m,
   useReducedMotion,
   type HTMLMotionProps,
+  type Variants,
 } from 'motion/react';
 
 /**
@@ -44,6 +45,18 @@ export const SPRING = {
   snappy: { type: 'spring', stiffness: 520, damping: 38 },
   gentle: { type: 'spring', stiffness: 260, damping: 30 },
 } as const;
+
+/**
+ * A list that deals its rows in rather than snapping the whole block on at once. The container
+ * hands each child a 30ms head start; a row rises 8px and fades as it lands. A screen picks these,
+ * it does not invent its own stagger. Under reduced motion a screen drops them entirely so the
+ * list appears at once — framer would otherwise keep the stagger timing with only the movement
+ * removed, which is a list that arrives late for no reason.
+ */
+export const LIST_STAGGER: Record<'container' | 'item', Variants> = {
+  container: { hidden: {}, show: { transition: { staggerChildren: 0.03, delayChildren: 0.02 } } },
+  item: { hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0, transition: SPRING.gentle } },
+};
 
 /** The one press feedback: the element gives 3% under the thumb and springs back. */
 const TAP = { scale: 0.97 } as const;

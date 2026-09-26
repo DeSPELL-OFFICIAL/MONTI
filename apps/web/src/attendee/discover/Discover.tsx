@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Alert, Button, Fab, Field, KycBadge, Screen, Spinner } from '../../shared/ui';
+import { Alert, Button, Fab, Field, KycBadge, Screen, Skeleton } from '../../shared/ui';
 import { isThemeCode, themeLabels } from '../../shared/eventThemes';
 import { fmt, useCopy, useLocale } from '../../shared/i18n';
+import { LIST_STAGGER, m, useReducedMotion } from '../../shared/motion';
 import { describeFailure } from '../../shared/errors';
 import { useSession } from '../../shared/session';
 import { useOrganizerEntry } from '../../organizer/useOrganizerEntry';
@@ -25,6 +26,9 @@ import {
  */
 const CARD_TAGS = 2;
 
+/** How many placeholder cards the loading state shows before the real ones arrive. */
+const SKELETON_CARDS = 3;
+
 export function Discover() {
   const copy = useCopy();
   const locale = useLocale();
@@ -42,6 +46,10 @@ export function Discover() {
   const organizer = useOrganizerEntry();
   const { data, isLoading, isError, error, refetch } = useEvents();
   const items = applyFilters(data ?? [], filters);
+  const reduce = useReducedMotion();
+  // Reduced motion drops the stagger so the cards are all there at once (see LIST_STAGGER).
+  const list = reduce ? {} : { variants: LIST_STAGGER.container, initial: 'hidden' as const, animate: 'show' as const };
+  const item = reduce ? {} : { variants: LIST_STAGGER.item };
 
   function update(next: DiscoverFilters): void {
     setFilters(next);
@@ -61,7 +69,19 @@ export function Discover() {
 
       <Filters value={filters} onChange={update} />
 
-      {isLoading ? <Spinner /> : null}
+      {isLoading ? (
+        <ul className="event-list" aria-busy="true">
+          {Array.from({ length: SKELETON_CARDS }, (_, row) => (
+            <li key={row} className="event-card">
+              <Skeleton width={64} height={90} radius={8} />
+              <div className="event-card__body">
+                <Skeleton width="70%" height={16} />
+                <Skeleton width="45%" height={12} />
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : null}
 
       {isError ? (
         <>
@@ -72,9 +92,9 @@ export function Discover() {
 
       {!isLoading && !isError && items.length === 0 ? <p className="muted">{copy.discover.empty}</p> : null}
 
-      <ul className="event-list">
+      <m.ul className="event-list" {...list}>
         {items.map(({ event, metadata }) => (
-          <li key={event.id} className="event-card">
+          <m.li key={event.id} className="event-card" {...item}>
             {/* The poster, at the size a thumbnail of an A4 page wants to be. `alt=""` on
                 purpose: the title is the line beside it, and a screen reader reading the
                 event's name twice per card is worse than not seeing the picture at all. */}
@@ -115,9 +135,9 @@ export function Discover() {
                 </ul>
               ) : null}
             </div>
-          </li>
+          </m.li>
         ))}
-      </ul>
+      </m.ul>
 
       <Fab label={copy.discover.create} onClick={() => navigate(organizer.to)} />
     </Screen>
