@@ -1,0 +1,4 @@
+# Run artifacts and persisted persona state are local-only.
+.artifacts/
+.report/
+.state/
