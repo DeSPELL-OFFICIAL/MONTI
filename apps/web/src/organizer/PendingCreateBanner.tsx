@@ -70,7 +70,7 @@ export function PendingCreateBanner() {
     let live = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const tick = async (): Promise<void> => {
-      const result = await resolveSubmittedOp(pending.hash).catch(
+      const result = await resolveSubmittedOp(pending.hash, pending.draft.submittedAt).catch(
         () => ({ state: 'pending', logs: [] }) as const,
       );
       if (!live) return;
@@ -78,7 +78,9 @@ export function PendingCreateBanner() {
         timer = setTimeout(() => void tick(), POLL_MS);
         return;
       }
-      if (result.state === 'failed') {
+      // `failed` (dropped or reverted) and `stale` (stuck in the mempool) both mean the op will
+      // not land on its own — the resend lives in the draft, so surface the way back in.
+      if (result.state === 'failed' || result.state === 'stale') {
         setFailed(true);
         return;
       }

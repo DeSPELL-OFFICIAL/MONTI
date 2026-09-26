@@ -349,6 +349,11 @@ export interface EventDraft {
    */
   submittedOpHash: string;
   /**
+   * Epoch ms {@link submittedOpHash} was recorded, or 0. `resolveSubmittedOp` uses it to tell a
+   * young op still on its way from one that has been stuck in the mempool too long to land.
+   */
+  submittedAt: number;
+  /**
    * The id of the event this draft already created, or `''`. Written the moment the chain
    * names it and **before** anything that could still fail, so a draft can never make a second
    * event — and so the two writes that need the id (`saveEventArt`, `setEventPrivate`) can be
