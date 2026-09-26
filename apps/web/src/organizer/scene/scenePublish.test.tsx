@@ -5,6 +5,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { encodeErrorResult, encodeEventTopics, keccak256, numberToHex, toBytes } from 'viem';
 import { ticketAbi } from '../../shared/chain/abis';
 import type { EventDraft, StoredEventDraft } from '../../shared/api/firestore';
+import { ko as sharedKo } from '../../shared/copy/index';
 
 let store: StoredEventDraft[] = [];
 const listEventDrafts = vi.fn(async () => [...store].sort((a, b) => b.updatedAt - a.updatedAt));
@@ -304,7 +305,10 @@ describe('when it does not land', () => {
     ticketOp.mockRejectedValue(new OpReverted('createEvent', 'TIMEOUT', SUBMITTED));
     open();
     await create();
-    expect(await screen.findByText(copy.publish.confirming)).toBeInTheDocument();
+    // The scene shows the determinate wait's 확인 중 step, not an info-alert stacked on it (계획 §2a).
+    await waitFor(() => expect(
+      document.querySelector('.op-progress .steps__step--current .steps__label')?.textContent,
+    ).toBe(sharedKo.op.confirming));
     expect(ticketOp).toHaveBeenCalledTimes(1);
 
     // Pressing again asks the bundler what became of the first one. It is still pending.

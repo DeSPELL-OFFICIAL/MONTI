@@ -42,10 +42,13 @@ describe('OpProgress', () => {
     expect(screen.getByText(ko.signup.registerSlow)).toBeInTheDocument();
   });
 
-  it('shows the timeout line and 다시 시도 at thirty seconds, never a bare spinner', () => {
+  it('shows the timeout line and 다시 시도 at forty-five seconds, never a bare spinner', () => {
     const onRetry = vi.fn();
     render(<OpProgress phase="confirming" onRetry={onRetry} />);
-    act(() => vi.advanceTimersByTime(30_000));
+    act(() => vi.advanceTimersByTime(44_000));
+    // Not yet: the cap is 45s, so a run at 44s is still just going.
+    expect(screen.queryByText(op.timeout)).toBeNull();
+    act(() => vi.advanceTimersByTime(1_000));
     expect(screen.getByText(op.timeout)).toBeInTheDocument();
     // The reassuring line and the counter give way to the timeout, and there is no bare spinner.
     expect(screen.queryByText(ko.signup.registerSlow)).toBeNull();
@@ -56,9 +59,39 @@ describe('OpProgress', () => {
 
   it('leaves the retry button out when the caller has no idempotent retry', () => {
     render(<OpProgress phase="saving" />);
-    act(() => vi.advanceTimersByTime(30_000));
+    act(() => vi.advanceTimersByTime(45_000));
     expect(screen.getByText(op.timeout)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: ko.common.retry })).toBeNull();
+  });
+
+  it('offers a second choice and its own line at the cap when the caller passes them', () => {
+    const onRetry = vi.fn();
+    const onLater = vi.fn();
+    render(
+      <OpProgress
+        phase="confirming"
+        onRetry={onRetry}
+        onLater={onLater}
+        laterLabel="나중에 확인"
+        timeoutMessage="아직 확인 중이에요"
+      />,
+    );
+    act(() => vi.advanceTimersByTime(45_000));
+    // The caller's own line replaces the generic timeout line.
+    expect(screen.getByText('아직 확인 중이에요')).toBeInTheDocument();
+    expect(screen.queryByText(op.timeout)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '나중에 확인' }));
+    expect(onLater).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: ko.common.retry }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves the second button out without a label, even when onLater is passed', () => {
+    render(<OpProgress phase="confirming" onLater={vi.fn()} />);
+    act(() => vi.advanceTimersByTime(45_000));
+    expect(screen.getByText(op.timeout)).toBeInTheDocument();
+    // No 다시 시도 (no onRetry) and no second button (no label): just the line.
+    expect(screen.queryByRole('button')).toBeNull();
   });
 
   it('stops the counter once the operation is done', () => {

@@ -469,9 +469,10 @@ const ko = {
       sending: '행사를 만들고 있어요',
       finishing: '마무리하고 있어요',
       updating: '행사 정보를 저장하고 있어요',
-      // 시간 초과는 실패가 아니다. 두 번 보내면 행사가 두 개가 된다.
-      confirming: '만드는 중이에요. 화면을 나가도 돼요. 잠시 뒤 주최자 화면에서 확인해 주세요',
-      confirmingEdit: '저장하는 중이에요. 화면을 나가도 돼요. 잠시 뒤 행사 화면에서 확인해 주세요',
+      // 45s 하드캡에 걸렸을 때 결정 블록의 문구와 버튼(계획 §2a·§3). 시간 초과는 실패가 아니고,
+      // 다시 시도는 op 해시를 재확인하므로 두 번 눌러도 행사는 하나다.
+      stuck: '아직 확인 중이에요. 다시 시도하거나 나중에 주최자 화면에서 확인할 수 있어요',
+      checkLater: '나중에 확인',
     },
 
     publishProblems: {
@@ -982,9 +983,10 @@ const en: typeof ko = {
       sending: 'Creating the event',
       finishing: 'Finishing up',
       updating: 'Saving the event',
-      // A timeout is not a failure. Sending it twice would be two events.
-      confirming: 'Still being created. You can leave this screen — check your organiser screen in a moment',
-      confirmingEdit: 'Still being saved. You can leave this screen — check the event screen in a moment',
+      // See the Korean block: the decision block's line and buttons at the 45s cap. A timeout is not
+      // a failure, and 다시 시도 re-checks the op hash, so pressing twice still makes one event.
+      stuck: 'Still confirming. Try again, or check it later on your organiser screen',
+      checkLater: 'Check later',
     },
 
     publishProblems: {

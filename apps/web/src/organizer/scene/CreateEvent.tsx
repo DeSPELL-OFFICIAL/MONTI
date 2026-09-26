@@ -487,13 +487,21 @@ export function CreateEvent() {
 
         {unsponsored ? <UnsponsoredNotice /> : null}
         {problem !== '' ? <Alert tone="error">{copy.publishProblems[problem]}</Alert> : null}
-        {/* `confirming` covers two things — an operation still in flight, and one that landed
-            without naming its event. The second says so itself, so only one line shows. */}
-        {phase === 'confirming' && problem === '' ? (
-          <Alert tone="info">{editing ? copy.publish.confirmingEdit : copy.publish.confirming}</Alert>
-        ) : null}
         {waiting ? <p className="working"><Spinner />{copy.posterWaiting}</p> : null}
-        {opPhase ? <OpProgress phase={opPhase} onRetry={create} /> : null}
+        {/* One determinate wait, never an info-alert stacked on top of it (계획 §2a). At the 45s cap
+            it turns into the decision block: 다시 시도 (re-checks the op hash — never a second event)
+            and, for a create, 나중에 확인 (leaves to /org, where the home banner resolves it). Both are
+            offered only once `confirming` has recorded the hash, so neither can fire while the first
+            send is still in flight. */}
+        {opPhase ? (
+          <OpProgress
+            phase={opPhase}
+            onRetry={phase === 'confirming' ? create : undefined}
+            onLater={phase === 'confirming' && !editing ? () => navigate('/org') : undefined}
+            laterLabel={copy.publish.checkLater}
+            timeoutMessage={phase === 'confirming' && !editing ? copy.publish.stuck : undefined}
+          />
+        ) : null}
         <p className="muted">{copy.tiers.feeNote}</p>
       </div>
 
