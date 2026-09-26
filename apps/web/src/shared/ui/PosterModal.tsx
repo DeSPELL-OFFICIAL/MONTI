@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useCopy } from '../i18n';
 import { A4Frame } from './A4Cropper';
 import { Alert } from './Alert';
@@ -24,17 +24,42 @@ export interface PosterModalProps {
  * with two buttons under it, then a round trip to the server with the card frozen. A poster on
  * a phone is a picture the size of the phone, and a 240px card was never where to choose it.
  *
- * A `<dialog open>` rather than a route, like the deletion confirmation in `attendee/me`: it
- * is one decision with a way out, and a route would put it in the back button's history.
+ * A `<dialog>` rather than a route, like the deletion confirmation in `attendee/me`: it is one
+ * decision with a way out, and a route would put it in the back button's history. It is opened
+ * with `showModal()`, not the `open` attribute, so the browser puts it in the top layer — above
+ * the `.route-view` transform and the sticky bar — and paints a `::backdrop` that swallows the
+ * taps behind it. Without that the confirm button sat under the sticky bar's hit target and the
+ * tap missed (S4b).
  */
 export function PosterModal({ onConfirm, onClose }: PosterModalProps) {
   const copy = useCopy().poster;
+  const dialogRef = useRef<HTMLDialogElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [url, setUrl] = useState('');
   const [view, setView] = useState<CropView>(CENTRED);
   const [quarter, setQuarter] = useState<Quarter>(0);
   const [working, setWorking] = useState(false);
   const [failed, setFailed] = useState(false);
+
+  // Open it in the top layer on mount. `showModal` is what lifts it above the route transform and
+  // the sticky bar; a browser (or jsdom) that will not run it falls back to the plain open attribute
+  // so the modal still renders — it just loses the top-layer guarantee there.
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (dialog === null) return undefined;
+    try {
+      dialog.showModal();
+    } catch {
+      dialog.setAttribute('open', '');
+    }
+    return () => {
+      try {
+        dialog.close();
+      } catch {
+        dialog.removeAttribute('open');
+      }
+    };
+  }, []);
 
   // The preview reads the same bytes the crop will, so it is an object URL rather than a
   // second decode of the file. Nothing else would revoke it.
@@ -70,7 +95,16 @@ export function PosterModal({ onConfirm, onClose }: PosterModalProps) {
   }
 
   return (
-    <dialog open className="poster-modal" aria-label={copy.title}>
+    <dialog
+      ref={dialogRef}
+      className="poster-modal"
+      aria-label={copy.title}
+      // Escape closes through the same path the ✕ uses, and never mid-crop.
+      onCancel={(event) => {
+        event.preventDefault();
+        if (!working) onClose();
+      }}
+    >
       <div className="poster-modal__body">
         <div className="poster-modal__head">
           <Button variant="ghost" aria-label={copy.close} onClick={onClose} disabled={working}>
