@@ -64,8 +64,8 @@ const OP_HASH = `0x${'22'.repeat(32)}` as const;
 const ticketOp = vi.fn(async (_options: SentOp) => ({
   success: true, userOpHash: OP_HASH, logs: [CREATED_LOG],
 }));
-const resolveSubmittedOp = vi.fn(async (_hash: string) => ({
-  state: 'pending' as 'pending' | 'landed' | 'failed',
+const resolveSubmittedOp = vi.fn(async (_hash: string, _submittedAt?: number) => ({
+  state: 'pending' as 'pending' | 'landed' | 'failed' | 'stale',
   logs: [] as unknown[],
 }));
 vi.mock('../../shared/chain/ops', async (orig) => ({
@@ -313,7 +313,7 @@ describe('when it does not land', () => {
 
     // Pressing again asks the bundler what became of the first one. It is still pending.
     await user.click(screen.getByRole('button', { name: copy.tiers.create }));
-    await waitFor(() => expect(resolveSubmittedOp).toHaveBeenCalledWith(SUBMITTED));
+    await waitFor(() => expect(resolveSubmittedOp).toHaveBeenCalledWith(SUBMITTED, expect.any(Number)));
     expect(ticketOp).toHaveBeenCalledTimes(1);
   });
 
@@ -324,6 +324,37 @@ describe('when it does not land', () => {
     await waitFor(() => expect(screen.getByText('landed:/org/new/done/12')).toBeInTheDocument());
     expect(ticketOp).not.toHaveBeenCalled();
     expect(saveEventArt).toHaveBeenCalled();
+  });
+
+  /**
+   * A recorded op that will never land — dropped, reverted, or stuck in the mempool underpriced
+   * or too old (task-create-failure-4). The guard clears it and sends one fresh createEvent with
+   * the corrected fees; the undeployed account's deployment nonce keeps the two mutually
+   * exclusive, so exactly one event is ever made.
+   */
+  it('clears a stale op and sends one fresh createEvent, naming the resend', async () => {
+    resolveSubmittedOp.mockResolvedValue({ state: 'stale', logs: [] });
+    let releasePin = (): void => undefined;
+    pinEventMetadata.mockReturnValueOnce(
+      new Promise((resolve) => { releasePin = () => resolve({ metadataCid: 'bafyMeta' }); }),
+    );
+    open({ ...READY, submittedOpHash: SUBMITTED });
+    await create();
+    // The organiser is told the earlier request expired while the resend is on its way.
+    expect(await screen.findByText(copy.publishProblems.opExpired)).toBeInTheDocument();
+    releasePin();
+    await waitFor(() => expect(screen.getByText('landed:/org/new/done/12')).toBeInTheDocument());
+    expect(resolveSubmittedOp).toHaveBeenCalledWith(SUBMITTED, expect.any(Number));
+    expect(ticketOp).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears a failed op and sends one fresh createEvent, with no resend notice', async () => {
+    resolveSubmittedOp.mockResolvedValue({ state: 'failed', logs: [] });
+    open({ ...READY, submittedOpHash: SUBMITTED });
+    await create();
+    await waitFor(() => expect(screen.getByText('landed:/org/new/done/12')).toBeInTheDocument());
+    expect(ticketOp).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(copy.publishProblems.opExpired)).toBeNull();
   });
 
   it('shows the organiser notice when nothing agreed to pay for the operation', async () => {
@@ -377,7 +408,7 @@ describe('when it does not land', () => {
     // The press the copy asks for. It resolves; it does not create.
     expect(screen.getByRole('button', { name: copy.tiers.create })).toBeEnabled();
     await user.click(screen.getByRole('button', { name: copy.tiers.create }));
-    await waitFor(() => expect(resolveSubmittedOp).toHaveBeenCalledWith(OP_HASH));
+    await waitFor(() => expect(resolveSubmittedOp).toHaveBeenCalledWith(OP_HASH, expect.any(Number)));
     expect(ticketOp).toHaveBeenCalledTimes(1);
     expect(pinEventMetadata).toHaveBeenCalledTimes(1);
   });

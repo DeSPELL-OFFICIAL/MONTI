@@ -420,11 +420,12 @@ export function usePublish(
     // flight and the draft outlives the page, so the first question is always what became of
     // that one — never "send it again". A bundler we cannot reach answers `pending`, because
     // the safe reply to "did my event get created?" is never a second event.
+    let resent: PublishProblem | '' = '';
     if (draft.submittedOpHash !== '') {
       setProblem('');
       setUnsponsored(false);
       setPhase('confirming');
-      const submitted = await resolveSubmittedOp(draft.submittedOpHash as Hex).catch(
+      const submitted = await resolveSubmittedOp(draft.submittedOpHash as Hex, draft.submittedAt).catch(
         () => ({ state: 'pending', logs: [] }) as const,
       );
       if (submitted.state === 'pending') return;
@@ -440,8 +441,15 @@ export function usePublish(
         await finish(landed);
         return;
       }
-      // It reverted. The same draft may be sent again, so the hash goes away first.
-      patch({ submittedOpHash: '' });
+      // `failed` (reverted, or dropped from the mempool) or `stale` (still in the mempool but
+      // stuck: priced below the corrected fee, or waiting past the stale horizon). Either way the
+      // recorded op will never land, and because this account is still undeployed its deployment
+      // nonce makes that op mutually exclusive with a fresh one — the new op deploys the account
+      // and lands; the old one can never win the deployment. So drop the record and fall through
+      // to a fresh send with the current (corrected) fees. A stale resend the organiser did not
+      // ask for is named, so the wait that follows reads as a re-send and not a fresh hang.
+      if (submitted.state === 'stale') resent = 'opExpired';
+      patch({ submittedOpHash: '', submittedAt: 0 });
     }
 
     // The scene says which field; this is the guard that stops a draft that changed underneath.
@@ -450,7 +458,7 @@ export function usePublish(
       return;
     }
 
-    setProblem('');
+    setProblem(resent);
     setUnsponsored(false);
     try {
       // Before the pin, because `pinEventMetadata` checks on chain that this person organises
@@ -489,7 +497,7 @@ export function usePublish(
       // The empty-id case is the one this exists for: the operation landed, the event is on
       // chain, and the only way to find out which one is to ask the bundler again by hash.
       patch(eventId === ''
-        ? { submittedOpHash: receipt.userOpHash }
+        ? { submittedOpHash: receipt.userOpHash, submittedAt: Date.now() }
         : { createdEventId: eventId });
       await save().catch(() => undefined);
       await finish(eventId);
@@ -501,8 +509,11 @@ export function usePublish(
       }
       // The operation is still on its way; it did not fail. Same rule as the hand-over screen.
       if (cause instanceof OpReverted && cause.revertReason === 'TIMEOUT') {
-        // Remember which one, so the next press asks after it instead of sending another.
-        if (cause.userOpHash) patch({ submittedOpHash: cause.userOpHash });
+        // Remember which one, and when, so the next press asks after it instead of sending another.
+        if (cause.userOpHash) patch({ submittedOpHash: cause.userOpHash, submittedAt: Date.now() });
+        // This op is the one in flight now; clear any earlier resend notice so the confirming wait
+        // reads cleanly rather than still saying the previous request expired.
+        setProblem('');
         setPhase('confirming');
         return;
       }

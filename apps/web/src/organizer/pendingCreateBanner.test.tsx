@@ -134,4 +134,14 @@ describe('the home pending-create banner', () => {
       .toHaveAttribute('href', '/org/new/d-1');
     expect(navigate).not.toHaveBeenCalled();
   });
+
+  it('surfaces the same way back in when the op is stuck in the mempool (stale)', async () => {
+    store = [{ id: 'd-1', updatedAt: 1, data: WAITING }];
+    resolveSubmittedOp.mockResolvedValue({ state: 'stale', logs: [] });
+    open();
+    expect(await screen.findByText(copy.pendingCreateFailed)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: copy.pendingCreateOpen }))
+      .toHaveAttribute('href', '/org/new/d-1');
+    expect(navigate).not.toHaveBeenCalled();
+  });
 });

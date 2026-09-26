@@ -488,6 +488,8 @@ const ko = {
       // 행사는 만들어졌는데 영수증에서 번호를 못 읽은 경우. 초안과 오퍼레이션 해시를 남겨 두고,
       // 버튼을 다시 누르면 그 해시로 번호를 찾아온다 — 새 행사를 만들지 않는다.
       noEventId: '행사는 만들어졌어요. 번호만 아직 못 읽었으니 아래 \'행사 만들기\'를 한 번 더 눌러 번호를 찾아 주세요. 행사가 두 개로 만들어지지는 않아요',
+      // 기록해 둔 옵이 문턱 미달이거나 너무 오래돼(만료) 새 수수료로 다시 보낼 때 뜨는 진행 안내. 고칠 문제가 아니다.
+      opExpired: '이전 요청이 만료되어 다시 보내요',
       pinFailed: '지금은 저장할 수 없어요. 잠시 뒤 다시 시도해 주세요',
       badMeta: '제목이나 소개가 너무 길어요. 줄이고 다시 시도해 주세요',
       badTags: '태그를 다시 확인해 주세요',
@@ -1006,6 +1008,9 @@ const en: typeof ko = {
       // The event was made but the receipt did not name it. The draft and the operation hash
       // are kept, and pressing again looks the number up by that hash — it makes no new event.
       noEventId: 'Your event was created. Only its number has not come back yet — press "Create the event" once more to look it up. It will not create a second event',
+      // Shown while a recorded op that was underpriced or too old is being resent at the current
+      // fee — progress, not a problem the organiser has to fix.
+      opExpired: 'The earlier request expired — sending again',
       pinFailed: 'Cannot save that right now. Please try again in a moment',
       badMeta: 'The title or the description is too long. Please shorten it and try again',
       badTags: 'Please check the tags again',

@@ -68,7 +68,7 @@ export const emptyEventDraft: EventDraft = {
   transferable: true, transferCutoffHours: 2, requireKyc: false,
   approvalRequired: false,
   tiers: [emptyEventDraftTier],
-  submittedOpHash: '', createdEventId: '', editingEventId: '', orgPendingName: '',
+  submittedOpHash: '', submittedAt: 0, createdEventId: '', editingEventId: '', orgPendingName: '',
 };
 
 export type EventDraftStatus = 'saved' | 'saving' | 'error';
@@ -141,6 +141,7 @@ export function normalizeEventDraft(raw: unknown): EventDraft {
     approvalRequired: flag(saved.approvalRequired, emptyEventDraft.approvalRequired),
     tiers: tiers.length > 0 ? tiers : emptyEventDraft.tiers,
     submittedOpHash: text(saved.submittedOpHash, emptyEventDraft.submittedOpHash),
+    submittedAt: count(saved.submittedAt, emptyEventDraft.submittedAt),
     createdEventId: text(saved.createdEventId, emptyEventDraft.createdEventId),
     editingEventId: text(saved.editingEventId, emptyEventDraft.editingEventId),
     orgPendingName: text(saved.orgPendingName, emptyEventDraft.orgPendingName),
