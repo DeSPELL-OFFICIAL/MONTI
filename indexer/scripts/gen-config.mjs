@@ -87,6 +87,13 @@ const CONTRACTS = [
       'EventStatusChanged',
       'EventMetaUpdated',
       'Claimed',
+      // 01c: 승인제 클레임. requestClaim → ClaimRequested 로 Pending 을 열고,
+      // approveClaims → ClaimApproved(+tokenId) 로 Approved, rejectClaims/cancelRequest
+      // → ClaimRejected 로 Rejected 로 닫는다. cancel 은 별도 이벤트가 없어 reject 와
+      // 같은 ClaimRejected 를 낸다(Ticket.sol) — 인덱서에선 둘 다 Rejected 다.
+      'ClaimRequested',
+      'ClaimApproved',
+      'ClaimRejected',
       'Transfer',
       'CheckedIn',
       // 01b C1: 오프라인 큐 기록. 2026-09-23 재배포로 ABI 에 들어와 실제 구독한다.
