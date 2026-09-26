@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useParams } from 'react-router-dom';
 import type { AttendeeRow } from '@monti/shared';
 import { Alert, Button, OpProgress, Screen, Sheet, Spinner } from '../shared/ui';
 import { fmt, useLocale } from '../shared/i18n';
@@ -106,16 +106,6 @@ export function Dashboard() {
       cancelled = true;
     };
   }, [imageCid]);
-
-  // 지금 발행하기(done 화면)가 ?publish=1 로 데려오면 발행 시트를 한 번 자동으로 연다(계획 §2b).
-  const [params] = useSearchParams();
-  const autoPublish = useRef(false);
-  useEffect(() => {
-    if (autoPublish.current) return;
-    if (params.get('publish') !== '1' || event?.status !== 'Draft') return;
-    autoPublish.current = true;
-    setPending('publish');
-  }, [params, event?.status]);
 
   // While a publish or cancel is confirming, poll the indexer for the event until it shows the
   // status the write was for — no manual refresh (plan §2c). The refetch is silent: it never sets

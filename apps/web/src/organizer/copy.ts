@@ -447,10 +447,12 @@ const ko = {
 
     done: {
       title: '행사를 만들었어요',
-      // createEvent 는 Draft 로 만들고(Ticket.sol:196) claim 은 Published 가 아니면 거절한다(:265).
-      notYetPublic: '아직은 아무도 볼 수 없어요. 준비가 되면 행사 화면에서 발행해 주세요',
-      // done 화면의 1차 버튼: 발행 시트로 바로 보낸다(계획 §2b). manage 링크는 보조로 내려간다.
-      publishNow: '지금 발행하기',
+      // 발행 전에는 공유 링크·QR을 숨기고, 이 사실을 그대로 말한다(T-SIMP-6). 공개는 이 화면에서 바로 한다.
+      notYetPublic: '아직 아무에게도 안 보여요',
+      // 이 화면의 1차 버튼: 다른 화면으로 보내지 않고 여기서 바로 공개한다(T-SIMP-6).
+      publishNow: '지금 공개하기',
+      // 공개에 성공한 뒤, 그 자리서 나타나는 공유 링크·QR 카드 위에 놓는 안내(T-SIMP-6).
+      nowPublic: '공개했어요 · 이제 아래 링크로 초대할 수 있어요',
       manage: '행사 화면 열기',
       link: '행사 주소',
       copy: '주소 복사',
@@ -967,10 +969,12 @@ const en: typeof ko = {
 
     done: {
       title: 'Your event is made',
-      // createEvent makes it a Draft (Ticket.sol:196) and claim refuses anything but Published.
-      notYetPublic: 'Nobody can see it yet. Publish it from the event screen when you are ready',
-      // See the Korean block: the primary button that opens the publish sheet.
-      publishNow: 'Publish now',
+      // See the Korean block: before publishing the share link and QR are hidden; publishing runs here.
+      notYetPublic: 'Nobody can see it yet',
+      // See the Korean block: the primary button that publishes the event right on this screen.
+      publishNow: 'Make it public',
+      // See the Korean block: shown above the share link and QR once the event is public.
+      nowPublic: "It's public now · share the link below to invite people",
       manage: 'Open the event screen',
       link: 'Event address',
       copy: 'Copy the address',
