@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { m, SPRING } from '../motion';
 
 /**
  * One sentence, said for a moment and then gone.
@@ -7,10 +8,14 @@ import { useEffect, useRef } from 'react';
  * which writes a draft the organiser is still looking at — otherwise leaves the person
  * wondering whether the button did anything (plan section F-2).
  *
- * It is deliberately not a `<dialog>`: nothing is being asked, so nothing may take focus. A
- * person typing into the scene behind it keeps their cursor and their keyboard, the ✕ is there
- * for anybody who wants it gone sooner, and it leaves by itself either way. `role="status"`
- * makes a screen reader announce it politely rather than interrupting whatever it was reading.
+ * It is deliberately not a dialog: nothing is being asked, so nothing may take focus. A person
+ * typing into the scene behind it keeps their cursor and their keyboard, the ✕ is there for
+ * anybody who wants it gone sooner, and it leaves by itself either way. `role="status"` makes a
+ * screen reader announce it politely rather than interrupting whatever it was reading.
+ *
+ * It slides and fades in on a spring, and — wrapped in `AnimatePresence` at the call site —
+ * fades back out rather than vanishing. Under reduced motion framer makes the slide instant; the
+ * fade is opacity only, which reduced motion leaves alone.
  */
 
 /** Long enough to read a short sentence, short enough that nobody waits for it to go. */
@@ -37,9 +42,16 @@ export function Toast({ text, dismiss, onDone }: ToastProps) {
   }, [text]);
 
   return (
-    <div className="toast" role="status">
+    <m.div
+      className="toast"
+      role="status"
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 8 }}
+      transition={SPRING.gentle}
+    >
       <span>{text}</span>
       <button type="button" className="toast__x" aria-label={dismiss} onClick={onDone}>✕</button>
-    </div>
+    </m.div>
   );
 }

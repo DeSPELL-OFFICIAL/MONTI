@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Alert, Button, Fab, Field, KycBadge, Screen } from '../../shared/ui';
 import { isThemeCode, themeLabels } from '../../shared/eventThemes';
 import { fmt, useCopy, useLocale } from '../../shared/i18n';
+import { LIST_STAGGER, m, useReducedMotion } from '../../shared/motion';
 import { describeFailure } from '../../shared/errors';
 import { useSession } from '../../shared/session';
 import { useOrganizerEntry } from '../../organizer/useOrganizerEntry';
@@ -26,6 +27,7 @@ import {
  */
 const CARD_TAGS = 2;
 
+
 export function Discover() {
   const copy = useCopy();
   const locale = useLocale();
@@ -43,6 +45,10 @@ export function Discover() {
   const organizer = useOrganizerEntry();
   const { data, isLoading, isError, error, refetch } = useEvents();
   const items = applyFilters(data ?? [], filters);
+  const reduce = useReducedMotion();
+  // Reduced motion drops the stagger so the cards are all there at once (see LIST_STAGGER).
+  const list = reduce ? {} : { variants: LIST_STAGGER.container, initial: 'hidden' as const, animate: 'show' as const };
+  const item = reduce ? {} : { variants: LIST_STAGGER.item };
 
   function update(next: DiscoverFilters): void {
     setFilters(next);
@@ -108,9 +114,9 @@ export function Discover() {
         )
       ) : null}
 
-      <ul className="event-list">
+      <m.ul className="event-list" {...list}>
         {items.map(({ event, metadata }) => (
-          <li key={event.id} className="event-card">
+          <m.li key={event.id} className="event-card" {...item}>
             {/* The poster, at the size a thumbnail of an A4 page wants to be. `alt=""` on
                 purpose: the title is the line beside it, and a screen reader reading the
                 event's name twice per card is worse than not seeing the picture at all. */}
@@ -151,9 +157,9 @@ export function Discover() {
                 </ul>
               ) : null}
             </div>
-          </li>
+          </m.li>
         ))}
-      </ul>
+      </m.ul>
 
       <Fab label={copy.discover.create} onClick={() => navigate(organizer.to)} />
     </Screen>

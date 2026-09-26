@@ -202,4 +202,58 @@ describe('buildTicketSvg', () => {
     expect(svg).toContain('it&apos;s today');
     expect(svg).toContain('href="https://gw.test/a&quot;onerror=&quot;x"');
   });
+
+  /** Twelve letters, because the server's `ART_PRESETS` and the Firestore rule both say `a`-`l`. */
+  it('bundles exactly the twelve letters the stored preset may hold', () => {
+    expect(Object.keys(TICKET_BACKDROPS)).toHaveLength(12);
+    expect(Object.keys(TICKET_BACKDROPS).join('')).toBe('abcdefghijkl');
+  });
+
+  /**
+   * A still ticket carries neither the marker class nor the `<style>` — which is what keeps a
+   * page of thumbnails still while one large preview animates: the keyframes are document-global,
+   * but the rules that use them are scoped under `.ta-live`, and a still ticket has no `.ta-live`.
+   */
+  it('is still, with no marker and no style, unless animation is asked for', () => {
+    const svg = buildTicketSvg({ ...base, preset: 'a' });
+    expect(svg).not.toContain('ta-live');
+    expect(svg).not.toContain('<style>');
+  });
+
+  it('leaves the still document byte-for-byte what it was when animation is off', () => {
+    // `animated: false` is the default, so passing it must change nothing at all.
+    expect(buildTicketSvg({ ...base, preset: 'g', animated: false }))
+      .toBe(buildTicketSvg({ ...base, preset: 'g' }));
+  });
+
+  it('marks the root and injects the scoped style once animation is on', () => {
+    const svg = buildTicketSvg({ ...base, preset: 'a', animated: true });
+    expect(svg).toContain('class="ticket-art__svg ta-live"');
+    expect(svg).toContain('<style>');
+    expect(svg).toContain('@keyframes ta-a-');
+    // Every rule is scoped under the marker, so a still ticket beside it cannot pick it up.
+    expect(svg).toContain('.ta-live .ta-a-veil-1');
+  });
+
+  it('animates no more than two layers on any backdrop that moves', () => {
+    for (const preset of ['a', 'c', 'e', 'g', 'i', 'k'] as const) {
+      const svg = buildTicketSvg({ ...base, preset, animated: true });
+      const rules = svg.match(/animation:/g) ?? [];
+      expect(rules.length).toBeGreaterThanOrEqual(1);
+      expect(rules.length).toBeLessThanOrEqual(2);
+    }
+  });
+
+  it('leaves a backdrop with no animation still even when animation is on', () => {
+    // `b` has no `anim`, so asking to animate it adds neither a marker nor a style.
+    const svg = buildTicketSvg({ ...base, preset: 'b', animated: true });
+    expect(svg).not.toContain('ta-live');
+    expect(svg).not.toContain('<style>');
+  });
+
+  it('never animates an uploaded picture, whatever the flag says', () => {
+    const svg = buildTicketSvg({ ...base, imageHref: 'https://gw.test/bafkmine', animated: true });
+    expect(svg).not.toContain('ta-live');
+    expect(svg).not.toContain('<style>');
+  });
 });

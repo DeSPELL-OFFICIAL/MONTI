@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { gatewayUrl } from '../envio/ipfs';
 import { fmt, useCopy } from '../i18n';
 import { buildTicketSvg } from './ticketArt/buildTicketSvg';
@@ -30,6 +31,12 @@ export interface TicketArtProps {
   dateText?: string;
   /** Derived from the index (`checkIn != null`) by whoever renders this; see T-EV-W9. */
   used?: boolean;
+  /**
+   * Whether the backdrop should animate. Off by default and left off for every thumbnail, list
+   * row and picker tile; the large preview and the ticket detail turn it on. When on, an
+   * `IntersectionObserver` pauses the animation while the ticket is scrolled off-screen.
+   */
+  animated?: boolean;
 }
 
 /**
@@ -50,7 +57,7 @@ export interface TicketArtProps {
  * fifteen `<text>` nodes that make up the drawing.
  */
 export function TicketArt({
-  art, title, tierName, holder = '', dateText = '', used = false,
+  art, title, tierName, holder = '', dateText = '', used = false, animated = false,
 }: TicketArtProps) {
   const copy = useCopy().tickets;
   const label = fmt(used ? copy.artLabelUsed : copy.artLabel, { title, tier: tierName });
@@ -61,11 +68,36 @@ export function TicketArt({
     holder,
     dateText,
     used,
+    animated,
     usedLabel: copy.artUsed,
   });
 
+  // An animated ticket that scrolls out of view stops animating: off-screen work is wasted, and a
+  // phone full of playing tickets is what drains a battery. The paused class flips
+  // `animation-play-state` on the SVG (theme.css); a still ticket needs none of this, so the
+  // observer is attached only when `animated`. Guarded for the server and for jsdom, which has no
+  // `IntersectionObserver` — there the ticket simply plays (reduced motion still stops it).
+  const frame = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!animated) return undefined;
+    if (typeof IntersectionObserver === 'undefined') return undefined;
+    const el = frame.current;
+    if (!el) return undefined;
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          el.classList.toggle('ticket-art--paused', !entry.isIntersecting);
+        }
+      },
+      { threshold: 0 },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [animated]);
+
   return (
     <div
+      ref={frame}
       className="ticket-art"
       role="img"
       aria-label={label}

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import QRCode from 'qrcode';
-import { Alert, Button, Card, Screen, Steps, posterUrl } from '../../shared/ui';
+import { Alert, Button, Card, Screen, Steps, SuccessCheck, posterUrl } from '../../shared/ui';
 import { useOrganizerCopy } from '../copy';
 import { forgetEventDraft } from '../useEventDraft';
 import { followUpsDone, runFollowUps, type FollowUpResult } from './followUps';
@@ -86,6 +86,7 @@ export function Created() {
       <div className="scene">
         {/* 2단계 헤더: 발행이 아직 남았음을 처음부터 알린다(계획 §2b). */}
         <Steps labels={[scene.stepCreate, scene.stepPublish]} at={1} />
+        <SuccessCheck />
         {handed.posterCid ? (
           <div className="poster-card">
             <div className="poster-card__filled">

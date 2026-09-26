@@ -72,11 +72,15 @@
   --s-6: 32px;
 
   /* ── type ───────────────────────────────────────────────────────────────────────────── */
+  /** The large title on a screen top — Apple's rhythm: one big line, then the body. */
+  --t-large: 28px;
+  --t-large-lh: 34px;
   --t-title: 22px;
   --t-title-lh: 28px;
   --t-head: 17px;
   --t-head-lh: 24px;
-  --t-body: 15px;
+  /** Body sits at 17 now — the reading size the rest of the type scale is built around. */
+  --t-body: 17px;
   --t-body-lh: 22px;
   --t-cap: 13px;
   --t-cap-lh: 18px;
@@ -192,8 +196,8 @@ input, select, textarea { scroll-margin-bottom: calc(var(--sticky-bar-h) + var(-
   padding-bottom: calc(var(--sab) + var(--tabbar-h) + var(--btn-h) + var(--s-4) + var(--s-4));
 }
 .screen h1 {
-  font-size: var(--t-title);
-  line-height: var(--t-title-lh);
+  font-size: var(--t-large);
+  line-height: var(--t-large-lh);
   letter-spacing: -0.02em;
   margin: 0 0 var(--s-4);
 }
@@ -219,9 +223,9 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
   display: grid; grid-template-columns: repeat(4, 1fr);
   gap: var(--s-1);
   background: var(--glass-bg-strong);
-  border: 0; border-top: 1px solid var(--glass-border);
+  border: 0; border-top: 1px solid var(--glass-hairline);
   border-radius: var(--r-xl) var(--r-xl) 0 0;
-  box-shadow: 0 -8px 24px rgba(131, 110, 249, 0.10);
+  box-shadow: 0 -8px 24px rgba(131, 110, 249, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.6);
   padding: var(--s-2) var(--s-2) calc(var(--sab) + var(--s-2));
 }
 .tabbar a {
@@ -250,7 +254,7 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
   box-shadow: 0 10px 28px rgba(91, 63, 217, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.3);
   transition: transform var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
 }
-.fab:active { transform: translateY(1px) scale(0.99); box-shadow: 0 6px 18px rgba(91, 63, 217, 0.3); }
+.fab:active { transform: translateY(1px) scale(0.97); box-shadow: 0 6px 18px rgba(91, 63, 217, 0.3); }
 .fab[disabled] { opacity: 0.45; box-shadow: none; }
 
 /* ── buttons ───────────────────────────────────────────────────────────────────────────── */
@@ -261,7 +265,7 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
   transition: transform var(--fast) var(--ease), background var(--fast) var(--ease),
               box-shadow var(--fast) var(--ease);
 }
-.btn:active:not([disabled]) { transform: translateY(1px) scale(0.995); }
+.btn:active:not([disabled]) { transform: translateY(1px) scale(0.97); }
 .btn--primary {
   background: var(--brand-grad); color: #fff;
   box-shadow: 0 8px 20px rgba(91, 63, 217, 0.26), inset 0 1px 0 rgba(255, 255, 255, 0.28);
@@ -277,7 +281,7 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
 .btn--danger { background: var(--danger); color: #fff; box-shadow: 0 8px 20px rgba(160, 5, 93, 0.24); }
 .btn[disabled] { opacity: 0.45; box-shadow: none; }
 .btn--link { display: grid; place-items: center; text-decoration: none; }
-:where(.btn, .chip, .fab, .tabbar a, input, select, textarea):focus-visible {
+:where(.btn, .chip, .fab, .tabbar a, a, summary, input, select, textarea):focus-visible {
   outline: 2px solid var(--brand-ink);
   outline-offset: 2px;
 }
@@ -366,11 +370,19 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
   display: block; width: 100%; border-radius: var(--r-lg); margin-bottom: var(--s-3);
   box-shadow: var(--glass-shadow);
 }
-.tier-list { list-style: none; margin: var(--s-4) 0; padding: 0; display: grid; gap: var(--s-2); }
+/* A grouped inset list: the enclosing card is the rounded-20 group with the 16px gutter, and the
+   rows inside it are told apart by a hairline rather than by a gap — iOS's own list, with the last
+   row flush to the card's foot and no rule under it. */
+.tier-list { list-style: none; margin: 0; padding: 0; }
 .tier-list li {
   display: flex; justify-content: space-between; gap: var(--s-3);
-  border-bottom: 1px solid var(--glass-hairline); padding-bottom: var(--s-2);
+  min-width: 0;
+  padding: var(--s-3) 0;
+  border-bottom: 1px solid var(--glass-hairline);
 }
+.tier-list li > span { min-width: 0; }
+.tier-list li:first-child { padding-top: 0; }
+.tier-list li:last-child { padding-bottom: 0; border-bottom: 0; }
 .muted { color: var(--ink-2); font-size: var(--t-cap); line-height: var(--t-cap-lh); }
 
 /* ── badges, chips, tags ───────────────────────────────────────────────────────────────── */
@@ -474,6 +486,16 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
 .toggle__row input { width: 22px; height: 22px; accent-color: var(--brand); flex: 0 0 auto; }
 .toggle__row span { font-size: var(--t-body); }
 .toggle__help { margin: 6px 0 0; }
+/* A glyph between the switch and the label — decoration, so it never carries a name of its own. */
+.toggle__icon { display: inline-flex; align-items: center; color: var(--brand-ink); flex: 0 0 auto; }
+/* The event's whole-event rules as one compact row: the two switches side by side, wrapping to a
+   stack when the phone is too narrow for both. Each toggle drops its own vertical margin here. */
+.tier-extras-row {
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: var(--s-2) var(--s-5); margin: var(--s-2) 0;
+}
+.tier-extras-row .toggle { margin: 0; }
+.tier-extras-row__kyc { display: inline-flex; align-items: center; gap: var(--s-2); }
 
 /* ── progress, spinners ────────────────────────────────────────────────────────────────── */
 .countdown { font-size: 44px; font-weight: 700; text-align: center; font-variant-numeric: tabular-nums; color: var(--ink); }
@@ -486,6 +508,31 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
 .working { display: flex; align-items: center; gap: 10px; margin: var(--s-3) 0; color: var(--ink-2); font-size: 14px; }
 .working .spinner { width: 18px; height: 18px; margin: 0; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── loading placeholders ───────────────────────────────────────────────────────────────────
+   A calm grey block in the shape of what is coming, with a highlight that sweeps across it. The
+   sweep is a pseudo-element moved by transform only, so the reduced-motion killswitch below
+   freezes it to a flat grey — no flashing, just the shape. `.skeleton` blocks are decoration,
+   so the loading region carries `aria-busy` and the blocks themselves are `aria-hidden`. */
+.skeleton {
+  display: block;
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  height: 1em;
+  border-radius: var(--r-md);
+  background: var(--brand-tint-strong);
+  isolation: isolate;
+}
+.skeleton + .skeleton { margin-top: var(--s-2); }
+.skeleton::after {
+  content: '';
+  position: absolute; inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
+  animation: skeleton-sweep 1.4s var(--ease) infinite;
+}
+@keyframes skeleton-sweep { to { transform: translateX(100%); } }
 
 /* The three dots on the one-tap register screen. The current one pulses rather than filling a
    bar: `registerIdentity` waits for a block to finalise, so a percentage would be invented. */
@@ -543,6 +590,10 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
    is why the caption rules that used to live here are gone: type inside the picture scales
    with the picture, so a thumbnail and a full ticket need one rule instead of three each. */
 .ticket-art__svg { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+/* An animated ticket scrolled off-screen stops playing: TicketArt attaches an IntersectionObserver
+   that adds this class. Only `.ta-live` documents carry any animation, so this reaches nothing on a
+   still ticket; reduced motion is handled separately, by the global killswitch further down. */
+.ticket-art--paused .ticket-art__svg * { animation-play-state: paused; }
 
 /* A ticket row: the picture as a thumbnail, the number and the state beside it. The column is
    a fixed width rather than a share of the row because the art is 1.41x as tall as it is wide
@@ -567,9 +618,9 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
   min-height: var(--sticky-bar-h);
   padding: 10px var(--s-4) calc(var(--sab) + 10px);
   background: var(--glass-bg-strong);
-  border: 0; border-top: 1px solid var(--glass-border);
+  border: 0; border-top: 1px solid var(--glass-hairline);
   border-radius: var(--r-xl) var(--r-xl) 0 0;
-  box-shadow: 0 -8px 24px rgba(131, 110, 249, 0.12);
+  box-shadow: 0 -8px 24px rgba(131, 110, 249, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.6);
 }
 .sticky-bar__status { flex: 1; min-width: 0; color: var(--ink-2); font-size: var(--t-cap); line-height: var(--t-cap-lh); }
 .sticky-bar__action { flex: 0 0 auto; min-width: 128px; }
@@ -589,14 +640,12 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
   display: flex; align-items: center; gap: 10px;
   padding: var(--s-3) var(--s-4); border-radius: var(--r-md);
   font-size: 14px;
-  animation: toast-in var(--slow) var(--ease);
 }
 .toast span { flex: 1; }
 .toast__x {
   border: 0; background: transparent; color: var(--ink-2);
   font-size: var(--t-body); min-width: var(--tap); min-height: var(--tap); padding: 0 var(--s-1);
 }
-@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
 /* The question a draft left behind asks on the way back in (plan section F-3). A sheet rather
    than a screen: it is one decision with both answers on it, and a route would put it in the
@@ -610,7 +659,6 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
   background: var(--glass-bg-strong);
   color: var(--ink);
   box-shadow: 0 -16px 40px rgba(31, 27, 75, 0.18);
-  animation: sheet-up var(--slow) var(--ease);
 }
 /* The grab bar every phone sheet has. Decoration — the buttons inside are what closes it. */
 .sheet__body::before {
@@ -624,7 +672,6 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
 }
 .sheet__body h2 { margin: 0; font-size: var(--t-head); line-height: var(--t-head-lh); }
 .sheet__body p { margin: 0; }
-@keyframes sheet-up { from { transform: translateY(100%); } to { transform: none; } }
 
 /* The preview card is the poster upload: what the organiser is making is always on screen. */
 .poster-card { margin: 0 0 var(--s-2); }
@@ -689,7 +736,38 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
 .tier-card__head h3 { font-size: 14px; margin: 0; color: var(--ink-2); font-weight: 700; }
 .tier-card__head .btn { width: auto; min-height: 0; height: 36px; padding: 0 var(--s-4); font-size: 14px; }
 /* The picture is A4, so at card width it would be taller than the phone. It is a preview. */
-.tier-card__art { max-width: 150px; margin: var(--s-3) auto var(--s-1); }
+/* The preview is the form: it is the positioning context for the transparent tap regions and the
+   price badge laid over it, and it is a little larger than a thumbnail now because it is a control
+   the organiser aims at, not only a picture they glance at. */
+.tier-card__art { position: relative; max-width: 200px; margin: var(--s-3) auto var(--s-1); }
+/* The tap regions cover only the picture. Each is a transparent button over one band of the
+   drawing (see TierCard's TAP_REGION); a tap edits the thing under the thumb. They carry a full
+   tap target as a floor, so on this small preview the thin kind/title bands overlap — the later
+   one in source wins, which keeps the picture region and the badge the two unambiguous targets. */
+.tier-preview__taps { position: absolute; inset: 0; }
+.tier-preview__tap {
+  position: absolute; left: 0; right: 0;
+  min-height: var(--tap);
+  margin: 0; padding: 0; border: 0; background: transparent;
+  border-radius: var(--r-sm); cursor: pointer;
+  transition: background var(--fast) var(--ease);
+}
+.tier-preview__tap:hover { background: rgba(131, 110, 249, 0.16); }
+.tier-preview__tap:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+/* The price the drawing never bakes in, as a corner chip. Its own dark ground keeps white text
+   well past 4.5:1 whatever pixels of the picture sit behind it. */
+.tier-preview__badge {
+  position: absolute; top: var(--s-2); right: var(--s-2); z-index: 2;
+  display: inline-flex; align-items: center; min-height: 32px;
+  padding: 0 12px; border-radius: var(--r-pill);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: var(--brand-deep); color: #fff;
+  font-size: 13px; font-weight: 700; line-height: 1; cursor: pointer;
+  box-shadow: 0 2px 8px rgba(32, 0, 82, 0.35);
+  transition: transform var(--fast) var(--ease);
+}
+.tier-preview__badge:active { transform: scale(0.96); }
+.tier-preview__badge:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .tier-card__pair { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-3); }
 .tier-card .a4-frame { max-width: 200px; margin: var(--s-2) auto; }
 
@@ -748,8 +826,15 @@ table { width: 100%; display: block; overflow-x: auto; }
 
 /* A tab is a glyph over a word. The glyph is what the thumb aims at; the word is what the
    screen reader says — and what a test asks for the link by. */
-.tabbar a { grid-auto-flow: row; gap: 2px; padding: 4px 0; }
+.tabbar a { grid-auto-flow: row; gap: 2px; padding: 4px 0; position: relative; }
 .tabbar__icon { display: block; }
+/* The sliding tab indicator (BottomTabs). A shared `layoutId` element springs it from one tab
+   to the next; the `aria-current` tint above is the cue that shows with reduced motion or no JS,
+   so this line is decoration only. Inset from the edges so it reads as an underline, not a rule. */
+.tabbar__ind {
+  position: absolute; left: 22%; right: 22%; bottom: 2px;
+  height: 3px; border-radius: var(--r-pill); background: var(--brand);
+}
 
 /* What an event asks, and where the person stands, are two different kinds of fact and are
    coloured as such — side by side on a card they read as one phrase otherwise. */
@@ -825,3 +910,28 @@ table { width: 100%; display: block; overflow-x: auto; }
 .op-progress { margin: var(--s-3) 0; }
 .op-progress__status { display: grid; gap: var(--s-2); justify-items: start; }
 .op-progress__status .muted { margin: 0; }
+/* ── the success mark ─────────────────────────────────────────────────────────────────────────
+   The check on the two "done" screens (SuccessCheck). The ring's scale-in, the tick's draw and
+   the confetti are all framer's — on SPRING.bouncy, dropped to a still check with no confetti
+   when the OS asks (useReducedMotion). So this is only the box they sit in: a fixed square the
+   confetti spends itself inside, centred on the 8-pt rhythm, in the palette's own success green. */
+.success-mark {
+  position: relative;
+  display: grid; place-items: center;
+  width: 96px; height: 96px;
+  margin: var(--s-5) auto var(--s-4);
+}
+.success-mark__ring { display: block; }
+.success-mark__disc { fill: var(--success-tint); stroke: var(--success); stroke-width: 2; }
+.success-mark__tick {
+  fill: none; stroke: var(--success); stroke-width: 4;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+/* The confetti keeps to the mark's own footprint and moves by transform only, so nothing it does
+   reaches the page's width — the body clips the x axis either way. Decoration: it carries no words. */
+.confetti { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
+.confetti__bit {
+  position: absolute; left: 50%; top: 50%;
+  width: 7px; height: 7px; border-radius: 2px;
+  will-change: transform, opacity;
+}
