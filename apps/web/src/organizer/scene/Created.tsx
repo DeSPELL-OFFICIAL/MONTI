@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import QRCode from 'qrcode';
-import { Alert, Button, Screen, posterUrl } from '../../shared/ui';
+import { Alert, Button, Card, Screen, posterUrl } from '../../shared/ui';
 import { useOrganizerCopy } from '../copy';
 import { forgetEventDraft } from '../useEventDraft';
 import { followUpsDone, runFollowUps, type FollowUpResult } from './followUps';
@@ -105,15 +105,14 @@ export function Created() {
         ) : null}
         {!missing && handed.followUpFailed ? <p className="muted">{copy.retryDone}</p> : null}
 
-        <section>
-          <h2>{copy.link}</h2>
+        <Card title={copy.link}>
           <p className="event-link">{link}</p>
           <Button variant="ghost" onClick={() => void copyLink()}>
             {copy.copy}
           </Button>
           {copied !== '' ? <p className="muted">{copied}</p> : null}
           {dataUrl !== '' ? <img className="event-qr" src={dataUrl} alt={copy.qr} /> : null}
-        </section>
+        </Card>
 
         <Link to={`/events/${eventId}`} className="btn btn--primary btn--link">
           {copy.view}

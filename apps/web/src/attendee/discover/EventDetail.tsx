@@ -1,6 +1,6 @@
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Alert, Button, KycBadge, Screen, Spinner } from '../../shared/ui';
+import { Alert, Button, Card, KycBadge, Screen, Spinner } from '../../shared/ui';
 import { fmt, useCopy, useLocale } from '../../shared/i18n';
 import type { Copy } from '../../shared/copy/index';
 import { gql } from '../../shared/envio/client';
@@ -123,15 +123,16 @@ export function EventDetail() {
   return (
     <Screen title={metadata?.title || copy.discover.untitled}>
       {metadata?.image ? <img className="event-hero" src={metadata.image} alt="" /> : null}
-      <KycBadge required={event.requireKyc} level={kycLevel} signedIn={signedIn} />
-      {metadata && metadata.tags.length > 0 ? (
-        <ul className="tag-row">
-          {metadata.tags.map((tag) => (
-            <li key={tag}>{tag}</li>
-          ))}
-        </ul>
-      ) : null}
-      {metadata?.description ? <p>{metadata.description}</p> : null}
+      <Card>
+        <KycBadge required={event.requireKyc} level={kycLevel} signedIn={signedIn} />
+        {metadata && metadata.tags.length > 0 ? (
+          <ul className="tag-row">
+            {metadata.tags.map((tag) => (
+              <li key={tag}>{tag}</li>
+            ))}
+          </ul>
+        ) : null}
+        {metadata?.description ? <p>{metadata.description}</p> : null}
 
       <p className="muted">
         {timeHidden
@@ -156,7 +157,9 @@ export function EventDetail() {
           {venueWaiting ? copy.discover.privateLoading : copy.discover.venueHidden}
         </p>
       ) : null}
+      </Card>
 
+      <Card>
       <ul className="tier-list">
         {tiers.map((tier) => {
           const left = Number(tier.supply) - Number(tier.minted);
@@ -170,6 +173,7 @@ export function EventDetail() {
           );
         })}
       </ul>
+      </Card>
 
       {event.status === CANCELLED ? (
         <Alert tone="warn">{copy.discover.cancelled}</Alert>

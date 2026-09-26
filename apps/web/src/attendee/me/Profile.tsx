@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
-import { Alert, Button, ContactLink, Field, Screen, Spinner } from '../../shared/ui';
+import { Alert, Button, Card, ContactLink, Field, Screen, Spinner } from '../../shared/ui';
 import { fmt, setLocale, useCopy, useLocale } from '../../shared/i18n';
 import type { Locale } from '../../shared/copy/index';
 import { api } from '../../shared/api/functions';
@@ -25,13 +25,12 @@ export function KycStatus() {
   const { kycLevel } = useKycLevel();
   const verified = kycLevel >= VERIFIED_LEVEL;
   return (
-    <section>
-      <h2>{copy.kyc.status}</h2>
+    <Card title={copy.kyc.status}>
       <p>{verified ? copy.kyc.mineVerified : copy.kyc.mineUnverified}</p>
       {verified ? null : (
         <Button onClick={() => navigate('/me/verify?returnTo=/me')}>{copy.kyc.cta}</Button>
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -85,7 +84,7 @@ function DisplayName() {
   }
 
   return (
-    <section>
+    <Card>
       <Field label={copy.me.displayName}>
         <input
           value={value}
@@ -101,7 +100,7 @@ function DisplayName() {
       <p className="muted">{copy.me.displayNameVsNickname}</p>
       {message ? <Alert tone={tone}>{message}</Alert> : null}
       <Button onClick={() => void save()} disabled={busy}>{copy.common.save}</Button>
-    </section>
+    </Card>
   );
 }
 
@@ -122,8 +121,7 @@ function OrganizerSection() {
   const { profileTo, hasOrg, isLoading } = useOrganizerEntry();
 
   return (
-    <section>
-      <h2>{copy.me.organizer}</h2>
+    <Card title={copy.me.organizer}>
       {isLoading ? <Spinner /> : null}
       {isLoading ? null : (
         <>
@@ -133,7 +131,7 @@ function OrganizerSection() {
           </Button>
         </>
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -182,8 +180,7 @@ function DeleteAccount() {
   }
 
   return (
-    <section>
-      <h2>{copy.me.deleteAccount}</h2>
+    <Card title={copy.me.deleteAccount}>
       {scheduled ? <Alert tone="info">{scheduled}</Alert> : null}
       {error ? <Alert tone="error">{error}</Alert> : null}
       {asking ? (
@@ -205,7 +202,7 @@ function DeleteAccount() {
       {asking || scheduled ? null : (
         <Button variant="ghost" onClick={() => setAsking(true)}>{copy.me.deleteCta}</Button>
       )}
-    </section>
+    </Card>
   );
 }
 

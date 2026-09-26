@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Alert, Button, Fab, Field, Screen, Spinner } from '../shared/ui';
+import { Alert, Button, Card, Fab, Field, Screen, Spinner } from '../shared/ui';
 import { fmt, useLocale } from '../shared/i18n';
 import { formatEventDate } from '../attendee/discover/useEvents';
 import { useOrganizerCopy, type OrganizerCopy } from './copy';
@@ -57,8 +57,7 @@ function OrganizerHome() {
         <Link to="/">{copy.home.backToDiscover}</Link>
       </p>
 
-      <section>
-        <h2>{copy.home.orgs}</h2>
+      <Card title={copy.home.orgs}>
         {orgsLoading ? <Spinner /> : null}
 
         {pending ? (
@@ -101,10 +100,9 @@ function OrganizerHome() {
             {!selected.canCreateEvent ? <Alert tone="warn">{copy.home.noPermission}</Alert> : null}
           </>
         ) : null}
-      </section>
+      </Card>
 
-      <section>
-        <h2>{copy.home.events}</h2>
+      <Card title={copy.home.events}>
         {eventsLoading ? <Spinner /> : null}
 
         {eventsError ? (
@@ -129,10 +127,10 @@ function OrganizerHome() {
             </li>
           ))}
         </ul>
-      </section>
+      </Card>
 
       {/* Folded, not deleted: the indexer being down is exactly when this is needed. */}
-      <details>
+      <details className="more">
         <summary>{copy.home.manual}</summary>
         <Field label={copy.home.eventId}>
           <input value={eventId} inputMode="numeric" onChange={(event) => setEventId(event.target.value)} />

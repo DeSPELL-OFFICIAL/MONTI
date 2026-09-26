@@ -50,7 +50,10 @@ export function TicketList() {
               <span className="ticket-row__art" aria-hidden="true">
                 <TicketArt {...artPropsOf(ticket)} />
               </span>
-              <span>
+              {/* The number and the state, and deliberately nothing else: the event's own
+                  name is printed inside the picture beside this, and adding it here would
+                  make the row's accessible name read the event out twice. */}
+              <span className="ticket-row__text">
                 #{ticket.tokenId} · {labels[ticket.state]}
               </span>
             </Link>

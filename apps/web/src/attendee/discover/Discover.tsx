@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Alert, Button, Fab, Field, KycBadge, Screen, Spinner } from '../../shared/ui';
+import { isThemeCode, themeLabels } from '../../shared/eventThemes';
 import { fmt, useCopy, useLocale } from '../../shared/i18n';
 import { describeFailure } from '../../shared/errors';
 import { useSession } from '../../shared/session';
@@ -27,6 +28,9 @@ const CARD_TAGS = 2;
 export function Discover() {
   const copy = useCopy();
   const locale = useLocale();
+  // The organiser's list and this one are the same list (shared/eventThemes.ts), so the chip
+  // on a card says the word the organiser picked and the filter above it offers.
+  const themes = themeLabels(copy);
   const [filters, setFilters] = useState<DiscoverFilters>(loadFilters);
   // Asked once for the whole page, not once per card, and not at all for a signed-out visitor.
   const signedIn = useSession().status === 'signedIn';
@@ -70,30 +74,47 @@ export function Discover() {
 
       <ul className="event-list">
         {items.map(({ event, metadata }) => (
-          <li key={event.id}>
-            <Link to={`/events/${event.id}`}>{metadata?.title || copy.discover.untitled}</Link>
-            <KycBadge required={event.requireKyc} level={kycLevel} signedIn={signedIn} />
-            {/* The same rule the detail screen keeps: an organiser who told only ticket
-                holders when their event starts must not have it printed to the minute on the
-                card everybody sees. The card already holds the document that says so. */}
-            <p className="muted">
-              {metadata?.timeHidden
-                ? formatEventDay(event.startsAt, locale)
-                : formatEventDate(event.startsAt, locale)}
-            </p>
-            {/* Reading only. Nothing filters on a tag and nothing here is pressable: the
-                indexer has no column for tags (`schema.graphql`), so filtering on them would
-                mean fetching every event's document before the first card could be drawn. */}
-            {metadata !== null && metadata.tags.length > 0 ? (
-              <ul className="tag-row tag-row--card">
-                {metadata.tags.slice(0, CARD_TAGS).map((tag) => (
-                  <li key={tag}>{tag}</li>
-                ))}
-                {metadata.tags.length > CARD_TAGS ? (
-                  <li>{fmt(copy.discover.tagsMore, { count: metadata.tags.length - CARD_TAGS })}</li>
+          <li key={event.id} className="event-card">
+            {/* The poster, at the size a thumbnail of an A4 page wants to be. `alt=""` on
+                purpose: the title is the line beside it, and a screen reader reading the
+                event's name twice per card is worse than not seeing the picture at all. */}
+            {metadata?.image ? (
+              <img className="event-card__art" src={metadata.image} alt="" loading="lazy" />
+            ) : (
+              <span className="event-card__art event-card__art--none" aria-hidden="true" />
+            )}
+            <div className="event-card__body">
+              <p className="event-card__title">
+                <Link to={`/events/${event.id}`}>{metadata?.title || copy.discover.untitled}</Link>
+                <KycBadge required={event.requireKyc} level={kycLevel} signedIn={signedIn} />
+              </p>
+              {/* The same rule the detail screen keeps: an organiser who told only ticket
+                  holders when their event starts must not have it printed to the minute on the
+                  card everybody sees. The card already holds the document that says so. */}
+              <p className="muted">
+                {/* An event the chain gave a theme this app has no word for gets no chip
+                    rather than an empty one — the indexer's numbers outlive this list. */}
+                {isThemeCode(event.category) ? (
+                  <><span className="chip chip--tiny">{themes[event.category]}</span>{' '}</>
                 ) : null}
-              </ul>
-            ) : null}
+                {metadata?.timeHidden
+                  ? formatEventDay(event.startsAt, locale)
+                  : formatEventDate(event.startsAt, locale)}
+              </p>
+              {/* Reading only. Nothing filters on a tag and nothing here is pressable: the
+                  indexer has no column for tags (`schema.graphql`), so filtering on them would
+                  mean fetching every event's document before the first card could be drawn. */}
+              {metadata !== null && metadata.tags.length > 0 ? (
+                <ul className="tag-row tag-row--card">
+                  {metadata.tags.slice(0, CARD_TAGS).map((tag) => (
+                    <li key={tag}>{tag}</li>
+                  ))}
+                  {metadata.tags.length > CARD_TAGS ? (
+                    <li>{fmt(copy.discover.tagsMore, { count: metadata.tags.length - CARD_TAGS })}</li>
+                  ) : null}
+                </ul>
+              ) : null}
+            </div>
           </li>
         ))}
       </ul>
