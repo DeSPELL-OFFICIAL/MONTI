@@ -2,6 +2,8 @@ export { Screen } from './Screen';
 export { BottomTabs } from './BottomTabs';
 export { Fab } from './Fab';
 export { Button } from './Button';
+export { Card, type CardProps } from './Card';
+export { Sheet, type SheetProps } from './Sheet';
 export { Alert } from './Alert';
 export { Countdown } from './Countdown';
 export { Spinner } from './Spinner';

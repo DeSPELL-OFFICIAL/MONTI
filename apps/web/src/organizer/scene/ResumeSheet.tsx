@@ -1,4 +1,4 @@
-import { Button } from '../../shared/ui';
+import { Button, Sheet } from '../../shared/ui';
 import { fmt } from '../../shared/i18n';
 import { useOrganizerCopy } from '../copy';
 import { timeAgo } from './relativeTime';
@@ -21,25 +21,23 @@ export interface ResumeSheetProps {
  * names which draft it is and when it was last written — a person with two abandoned drafts
  * cannot answer this question without those two facts.
  *
- * A `<dialog open>` rather than a route, like the poster modal and the deletion confirmation:
- * it is one decision with both answers on it, and a route would put it in the back button's
- * history. Non-modal, so it never fights the browser for focus on a phone keyboard.
+ * The panel itself is the shared {@link Sheet} — a `<dialog open>` rather than a route, like
+ * the poster modal and the deletion confirmation: one decision with both answers on it, and a
+ * route would put it in the back button's history.
  */
 export function ResumeSheet({ title, at, onResume, onFresh }: ResumeSheetProps) {
   const copy = useOrganizerCopy().scene;
   const named = title.trim() === '' ? copy.resume.untitled : title;
 
   return (
-    <dialog open className="sheet" aria-label={copy.resume.title}>
-      <div className="sheet__body">
-        <h2>{copy.resume.title}</h2>
-        <p className="muted">
-          {fmt(copy.resume.body, { title: named, when: timeAgo(Date.now() - at, copy) })}
-        </p>
-        <Button onClick={onResume}>{copy.resume.keep}</Button>
-        {/* The old draft is not deleted by this — `startNew`, not `discard` (plan section F-4). */}
-        <Button variant="ghost" onClick={onFresh}>{copy.resume.fresh}</Button>
-      </div>
-    </dialog>
+    <Sheet label={copy.resume.title}>
+      <h2>{copy.resume.title}</h2>
+      <p className="muted">
+        {fmt(copy.resume.body, { title: named, when: timeAgo(Date.now() - at, copy) })}
+      </p>
+      <Button onClick={onResume}>{copy.resume.keep}</Button>
+      {/* The old draft is not deleted by this — `startNew`, not `discard` (plan section F-4). */}
+      <Button variant="ghost" onClick={onFresh}>{copy.resume.fresh}</Button>
+    </Sheet>
   );
 }

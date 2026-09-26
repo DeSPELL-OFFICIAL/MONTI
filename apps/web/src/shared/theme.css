@@ -677,3 +677,22 @@ table { width: 100%; display: block; overflow-x: auto; }
     scroll-behavior: auto !important;
   }
 }
+
+/* ── parts added with the glass pass ───────────────────────────────────────────────────── */
+/* A card's title line: the heading, and whatever belongs beside it. */
+.card__head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-3);
+  margin-bottom: var(--s-3);
+}
+.card__head h2 { margin: 0; }
+
+/* A tab is a glyph over a word. The glyph is what the thumb aims at; the word is what the
+   screen reader says — and what a test asks for the link by. */
+.tabbar a { grid-auto-flow: row; gap: 2px; padding: 4px 0; }
+.tabbar__icon { display: block; }
+
+/* What an event asks, and where the person stands, are two different kinds of fact and are
+   coloured as such — side by side on a card they read as one phrase otherwise. */
+.badge--ask { background: var(--brand-tint); border-color: var(--glass-hairline); color: var(--brand-ink); }
+.badge--ok { background: var(--success-tint); border-color: rgba(15, 122, 90, 0.24); color: var(--success); }
+.badge--todo { background: var(--warn-tint); border-color: rgba(138, 82, 0, 0.24); color: var(--warn); }

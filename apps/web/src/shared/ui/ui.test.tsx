@@ -1,8 +1,8 @@
-import { render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { act } from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { BottomTabs, Countdown, KycBadge, Screen } from './index';
+import { BottomTabs, Card, Countdown, KycBadge, Screen, Sheet } from './index';
 
 describe('ui primitives', () => {
   it('Screen renders a main landmark with the mobile max width', () => {
@@ -10,6 +10,26 @@ describe('ui primitives', () => {
     const main = screen.getByRole('main');
     expect(main).toHaveClass('screen');
     expect(screen.getByRole('heading', { name: '내 티켓' })).toBeInTheDocument();
+  });
+
+  it('Card is a titled glass section, and a bare pane without a title', () => {
+    const { container } = render(<Card title="티켓" aside={<span>3</span>}>본문</Card>);
+    expect(screen.getByRole('heading', { name: '티켓' })).toBeInTheDocument();
+    expect(container.querySelector('.card')).not.toBeNull();
+    cleanup();
+    const bare = render(<Card>본문</Card>);
+    expect(bare.container.querySelector('.card__head')).toBeNull();
+  });
+
+  /**
+   * Non-modal on purpose: `showModal()` takes focus, which on a phone closes the keyboard of
+   * whatever was being typed behind it.
+   */
+  it('Sheet is a named, non-modal dialog', () => {
+    render(<Sheet label="이어서 쓸까요?"><p>본문</p></Sheet>);
+    const sheet = screen.getByRole('dialog', { name: '이어서 쓸까요?' });
+    expect(sheet).toHaveClass('sheet');
+    expect(sheet).not.toHaveAttribute('aria-modal', 'true');
   });
 
   it('BottomTabs marks the active route', () => {
@@ -20,6 +40,23 @@ describe('ui primitives', () => {
     );
     expect(screen.getByRole('link', { name: '내 티켓' })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('link', { name: '탐색' })).not.toHaveAttribute('aria-current');
+  });
+
+  /**
+   * The glyph is decoration and the word is the name. If the drawing ever stopped being
+   * `aria-hidden`, every one of the four links above would be asked for by a name nobody
+   * wrote — which is exactly the kind of break a screen reader hears first.
+   */
+  it('BottomTabs draws a glyph over each word without renaming the link', () => {
+    const { container } = render(
+      <MemoryRouter initialEntries={['/']}>
+        <BottomTabs />
+      </MemoryRouter>,
+    );
+    const glyphs = container.querySelectorAll('svg.tabbar__icon');
+    expect(glyphs).toHaveLength(4);
+    for (const glyph of glyphs) expect(glyph).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.getByRole('link', { name: '탐색' })).toBeInTheDocument();
   });
 
   /**
