@@ -28,7 +28,9 @@ const account = {
   signUserOperation: vi.fn(async () => '0xsig' as const),
 } as never;
 
-const { applyGasBuffer, encodePaymasterAndData, readOpLogs, sendSponsoredOp } = await import('./sendSponsoredOp');
+const {
+  applyGasBuffer, encodePaymasterAndData, readOpLogs, revertDataOf, sendSponsoredOp,
+} = await import('./sendSponsoredOp');
 
 // restoreMocks only restores spies; a bare vi.fn() keeps its call history between tests.
 beforeEach(() => {
@@ -154,5 +156,26 @@ describe('the logs one operation emitted', () => {
     expect(readOpLogs(undefined)).toEqual([]);
     expect(readOpLogs({})).toEqual([]);
     expect(readOpLogs({ logs: 'nope' })).toEqual([]);
+  });
+});
+
+describe('the reason a simulated operation reverted with', () => {
+  it('reads it out of the bundler rejection, however deep viem wrapped it', () => {
+    expect(revertDataOf({ data: { revertData: '0xdba16ce8' } })).toBe('0xdba16ce8');
+    expect(revertDataOf({ cause: { cause: { data: { revertData: '0xDBA16CE8' } } } })).toBe('0xDBA16CE8');
+    // A revert with arguments is longer than a selector, and is kept whole.
+    expect(revertDataOf({ data: { revertData: `0x08c379a0${'00'.repeat(32)}` } }))
+      .toBe(`0x08c379a0${'00'.repeat(32)}`);
+  });
+
+  it('yields nothing for anything that is not one', () => {
+    expect(revertDataOf(new Error('fetch failed'))).toBeUndefined();
+    expect(revertDataOf({ data: 'execution reverted' })).toBeUndefined();
+    expect(revertDataOf({ data: { revertData: '0x' } })).toBeUndefined();
+    expect(revertDataOf({ data: { revertData: 42 } })).toBeUndefined();
+    expect(revertDataOf(null)).toBeUndefined();
+    // A cycle deeper than the walk goes is not found, and does not hang.
+    expect(revertDataOf({ cause: { cause: { cause: { cause: { cause: { data: { revertData: '0xdba16ce8' } } } } } } }))
+      .toBeUndefined();
   });
 });

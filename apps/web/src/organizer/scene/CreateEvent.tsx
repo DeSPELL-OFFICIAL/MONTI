@@ -43,8 +43,11 @@ const FOLDED_PROBLEMS: ReadonlySet<EventProblem> = new Set<EventProblem>([
  * `만들기` is never disabled for an empty field. An organiser who has not filled one in yet is
  * scrolled to it and shown one line under it; they are not stopped, because a half-written
  * draft that cannot move is a draft that gets abandoned on the field it was stuck on — which is
- * the whole complaint the six-step wizard was replaced over. A paid kind is the one exception:
- * that is a choice to undo, not a field to fill in, and it does disable the button.
+ * the whole complaint the six-step wizard was replaced over. There are two exceptions, and both
+ * are a value that is set and wrong rather than a box that is empty: a paid kind, and an event
+ * whose end time has already passed. Both would be refused by the chain every single time, so
+ * the button says so instead of spending twenty seconds finding out — and because neither is
+ * reached by pressing it, both sentences are on screen from the start rather than after a press.
  */
 
 export function CreateEvent() {
@@ -113,6 +116,14 @@ export function CreateEvent() {
   // organiser is looking at (plan section D-3).
   const problems = eventProblems(draft).filter((key) => !(key === 'poster' && poster.busy));
   const tiersWrong = tierProblems(draft);
+  /**
+   * The draft written days ago and opened again today. `saleWindow` derives 지금 -> `endsAt`,
+   * so a passed end time is a sign-up window that runs backwards and a `createEvent` that
+   * reverts `InvalidSchedule()` while it is still being estimated — which is the founder's
+   * "행사를 만들지 못했어요" (task-create-failure-2 report §0). Nothing on the screen looks
+   * wrong, so the sentence is shown without waiting for a press.
+   */
+  const past = problems.includes('eventPast');
   const blocked = paidTiers(draft).length > 0;
   const wrong = (key: EventProblem) =>
     (checked && problems.includes(key) ? <p className="problem">{copy.problems[key]}</p> : null);
@@ -275,6 +286,7 @@ export function CreateEvent() {
             />
           </Field>
           {wrong('startsAt')}
+          {past ? <p className="problem">{copy.problems.eventPast}</p> : null}
         </section>
 
         <section id="scene-venue">
@@ -461,7 +473,7 @@ export function CreateEvent() {
       <StickyBar status={<SaveStatus status={status} savedAt={savedAt} />}>
         <div className="sticky-bar__buttons">
           <Button variant="ghost" onClick={() => void saveDraft()}>{copy.saveDraft}</Button>
-          <Button disabled={blocked || working} onClick={create}>
+          <Button disabled={blocked || past || working} onClick={create}>
             {editing ? copy.tiers.save : copy.tiers.create}
           </Button>
         </div>

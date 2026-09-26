@@ -72,6 +72,29 @@ interface RawReceipt {
   receipt: { transactionHash: Hex; blockNumber: Hex };
 }
 
+/**
+ * The four bytes a contract reverted with, dug out of a bundler rejection.
+ *
+ * `eth_estimateUserOperationGas` is a simulation: a contract that refuses there produces no
+ * operation, no receipt and no `UserOperationRevertReason` log — only a JSON-RPC error. Every
+ * bundler this app talks to puts the reason in the same place,
+ *
+ *     { "code": -32521, "message": "execution reverted", "data": { "revertData": "0xdba16ce8" } }
+ *
+ * and viem wraps that a few `cause` levels deep, so the search walks down. Anything that is not
+ * a selector-length hex string is not a revert reason and yields nothing — the caller then
+ * rethrows the original error untouched.
+ */
+export function revertDataOf(cause: unknown, depth = 0): Hex | undefined {
+  if (depth > 4 || typeof cause !== 'object' || cause === null) return undefined;
+  const error = cause as { data?: unknown; cause?: unknown };
+  const data = error.data as { revertData?: unknown } | null | undefined;
+  const reason = typeof data === 'object' && data !== null ? data.revertData : undefined;
+  // A selector is four bytes; a revert with arguments is longer. Shorter is not a revert.
+  if (typeof reason === 'string' && /^0x[0-9a-f]{8,}$/i.test(reason)) return reason as Hex;
+  return revertDataOf(error.cause, depth + 1);
+}
+
 /** A bundler that omits `logs`, or sends something other than an array, yields none. */
 export function readOpLogs(raw: { logs?: unknown } | null | undefined): readonly SponsoredOpLog[] {
   return Array.isArray(raw?.logs) ? (raw.logs as SponsoredOpLog[]) : [];

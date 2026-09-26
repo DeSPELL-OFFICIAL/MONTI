@@ -26,13 +26,13 @@ export const MAX_TAG_CHARS = 12;
 /** One named rule; `organizer/copy.ts` owns a sentence for each, and each names a section. */
 export type EventProblem =
   | 'poster' | 'title' | 'tags' | 'body' | 'region' | 'venue' | 'venueTooLong'
-  | 'startsAt' | 'endsAt' | 'schedule';
+  | 'startsAt' | 'endsAt' | 'schedule' | 'eventPast';
 
 /** Which section of SCENE 1 a problem belongs to, so `다음` can scroll to the first one. */
 export const PROBLEM_SECTION: Readonly<Record<EventProblem, string>> = {
   poster: 'poster', title: 'title', tags: 'tags', body: 'body',
   region: 'venue', venue: 'venue', venueTooLong: 'venue',
-  startsAt: 'time', endsAt: 'time', schedule: 'time',
+  startsAt: 'time', endsAt: 'time', schedule: 'time', eventPast: 'time',
 };
 
 /**
@@ -89,7 +89,10 @@ export function endsAtOf(draft: EventDraft): number {
  * Everything SCENE 1 refuses, in the order the sections ask for it — so the first entry is
  * both the sentence to show and the section to scroll to.
  */
-export function eventProblems(draft: EventDraft): EventProblem[] {
+export function eventProblems(
+  draft: EventDraft,
+  now: number = Math.floor(Date.now() / 1_000),
+): EventProblem[] {
   const problems: EventProblem[] = [];
 
   if (draft.posterCid.trim() === '') problems.push('poster');
@@ -117,6 +120,13 @@ export function eventProblems(draft: EventDraft): EventProblem[] {
   const endsAt = endsAtOf(draft);
   if (!isTimestamp(endsAt)) problems.push('endsAt');
   else if (isTimestamp(draft.startsAt) && draft.startsAt >= endsAt) problems.push('schedule');
+  // A draft written days ago and published today. Nothing on the screen is wrong and nothing
+  // the organiser typed has changed, but `saleWindow` derives 지금 -> `endsAt`, so the window
+  // runs backwards and `Ticket.createEvent` reverts `InvalidSchedule()` — during the *estimate*,
+  // where there is no receipt and no `OpReverted` to name it. That is exactly the failure the
+  // founder hit (task-create-failure-2 report §0): a correct-looking screen and the most
+  // generic sentence the app has. It is a rule now, said before anything is sent.
+  else if (endsAt <= now) problems.push('eventPast');
 
   return problems;
 }

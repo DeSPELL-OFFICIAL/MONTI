@@ -16,8 +16,8 @@ const READY: EventDraft = {
   posterCid: 'bafkposter',
   regionCode: 'KR-11',
   venue: '서울 용산구 한남동',
-  startsAt: 1_790_000_000,
-  endsAt: 1_790_010_000,
+  startsAt: 1_900_000_000,
+  endsAt: 1_900_010_000,
 };
 
 describe('normalizeTags', () => {
@@ -83,6 +83,27 @@ describe('eventProblems', () => {
     expect(eventProblems({ ...READY, endsAt: 0 })).toEqual([]);
     expect(eventProblems({ ...READY, startsAt: 0, endsAt: 0 })).toEqual(['startsAt', 'endsAt']);
     expect(eventProblems({ ...READY, endsAt: READY.startsAt })).toEqual(['schedule']);
+  });
+
+  /**
+   * The founder's "행사를 만들지 못했어요" (task-create-failure-2 report §0). The draft was
+   * written on the 24th and published on the 26th; every field on the screen was right, but
+   * `saleWindow` derives 지금 -> `endsAt`, so the sign-up window ran backwards and
+   * `Ticket.createEvent` reverted `InvalidSchedule()` — during the *estimate*, where there is
+   * no receipt and therefore no reason the app could read. It is a rule here now, checked
+   * against a `now` the caller passes rather than against the clock, so this test cannot
+   * itself go stale the way that draft did.
+   */
+  it('refuses a draft whose end time has already gone by', () => {
+    expect(eventProblems(READY, READY.endsAt - 1)).toEqual([]);
+    expect(eventProblems(READY, READY.endsAt)).toEqual(['eventPast']);
+    expect(eventProblems(READY, READY.endsAt + 86_400)).toEqual(['eventPast']);
+    // The derived end — two hours after the start — is measured exactly the same way.
+    const derived = { ...READY, endsAt: 0 };
+    expect(eventProblems(derived, READY.startsAt + DEFAULT_EVENT_SECONDS - 1)).toEqual([]);
+    expect(eventProblems(derived, READY.startsAt + DEFAULT_EVENT_SECONDS + 1)).toEqual(['eventPast']);
+    // One sentence at a time: a window that runs backwards is `schedule`, and only that.
+    expect(eventProblems({ ...READY, endsAt: READY.startsAt }, READY.endsAt + 1)).toEqual(['schedule']);
   });
 });
 

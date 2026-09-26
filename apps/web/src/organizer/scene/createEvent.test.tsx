@@ -68,8 +68,8 @@ const READY: EventDraft = {
   posterCid: 'bafkposter',
   regionCode: 'KR-11',
   venue: '서울 용산구 한남동',
-  startsAt: 1_790_000_000,
-  endsAt: 1_790_010_000,
+  startsAt: 1_900_000_000,
+  endsAt: 1_900_010_000,
 };
 
 function open(path = '/org/new'): void {
@@ -195,6 +195,19 @@ describe('the one button', () => {
     await waitFor(() => expect(screen.getByLabelText(copy.titleLabel)).toHaveValue(READY.title));
     expect(screen.getByRole('button', { name: copy.tiers.create })).toBeEnabled();
     expect(screen.queryByText('landed:/org/new/d-42/tickets')).toBeNull();
+  });
+
+  /**
+   * The draft the founder came back to two days later. Nothing on the screen was wrong, so the
+   * sentence does not wait for a press — and 만들기 is held, because the estimate would refuse
+   * it every single time (task-create-failure-2 report §0).
+   */
+  it('holds 만들기 on a draft whose end time has passed, and says so without a press', async () => {
+    seed('d-old', { ...READY, startsAt: 1_700_000_000, endsAt: 1_700_003_600 });
+    open('/org/new/d-old');
+    await waitFor(() => expect(screen.getByLabelText(copy.titleLabel)).toHaveValue(READY.title));
+    expect(screen.getByText(copy.problems.eventPast)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: copy.tiers.create })).toBeDisabled();
   });
 
   it('says the end has to come after the start', async () => {

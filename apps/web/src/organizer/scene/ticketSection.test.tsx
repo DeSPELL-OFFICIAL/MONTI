@@ -58,8 +58,8 @@ const READY: EventDraft = {
   posterCid: 'bafkposter',
   regionCode: 'KR-11',
   venue: '서울 용산구 한남동',
-  startsAt: 1_790_000_000,
-  endsAt: 1_790_010_000,
+  startsAt: 1_900_000_000,
+  endsAt: 1_900_010_000,
   tiers: [{ ...emptyEventDraftTier, name: '일반' }],
 };
 

@@ -342,6 +342,8 @@ const ko = {
       startsAt: '시작 시각을 골라 주세요',
       endsAt: '종료 시각을 골라 주세요',
       schedule: '종료 시각이 시작 시각보다 뒤여야 해요',
+      // 며칠 전에 써 둔 초안을 오늘 발행할 때. 신청 기간이 지금~종료라 거꾸로가 된다.
+      eventPast: '종료 시각이 이미 지났어요. 앞으로의 시각으로 고쳐 주세요',
     },
 
 
@@ -802,6 +804,7 @@ const en: typeof ko = {
       startsAt: 'Please pick a start time',
       endsAt: 'Please pick an end time',
       schedule: 'The end has to come after the start',
+      eventPast: 'The end time has already passed. Please pick a time in the future',
     },
 
 

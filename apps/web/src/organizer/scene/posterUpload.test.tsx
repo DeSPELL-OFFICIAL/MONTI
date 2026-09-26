@@ -81,8 +81,8 @@ const ALMOST: EventDraft = {
   title: '재즈 나이트',
   regionCode: 'KR-11',
   venue: '서울 용산구 한남동',
-  startsAt: 1_790_000_000,
-  endsAt: 1_790_010_000,
+  startsAt: 1_900_000_000,
+  endsAt: 1_900_010_000,
 };
 
 function open(path = '/org/new'): void {
