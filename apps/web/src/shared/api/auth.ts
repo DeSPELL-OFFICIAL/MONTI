@@ -108,7 +108,21 @@ let recaptcha: RecaptchaVerifier | null = null;
  * leak a widget per re-render into the same container.
  */
 function verifier(): RecaptchaVerifier {
-  recaptcha ??= new RecaptchaVerifier(getFirebaseAuth(), RECAPTCHA_CONTAINER_ID, { size: 'invisible' });
+  const auth = getFirebaseAuth();
+  // E2E only. An opt-in flag the Playwright persona harness sets with `addInitScript` before the
+  // page loads swaps the live reCAPTCHA for Firebase's mock app verifier. The SDK honours it
+  // solely for the project's whitelisted TEST phone numbers, so a real number still gets a real
+  // challenge and the flag cannot be abused. Set before `new RecaptchaVerifier`, so the mock is
+  // what gets constructed. try/catch because `localStorage` throws in a sandboxed frame.
+  try {
+    if (window.localStorage.getItem('monti:e2e') === '1') {
+      auth.settings.appVerificationDisabledForTesting = true;
+      console.info('[monti] e2e verification bypass on (test numbers only)');
+    }
+  } catch {
+    // No localStorage, or access denied: the flag is off, fall through to a real verifier.
+  }
+  recaptcha ??= new RecaptchaVerifier(auth, RECAPTCHA_CONTAINER_ID, { size: 'invisible' });
   return recaptcha;
 }
 
