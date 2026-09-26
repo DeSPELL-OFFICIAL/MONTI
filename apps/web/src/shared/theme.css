@@ -190,9 +190,10 @@ input, select, textarea { scroll-margin-bottom: calc(var(--sticky-bar-h) + var(-
   min-height: 100dvh;
 }
 /* A screen that floats a Fab above the tab bar has to reserve the pill's height as well, or the
-   last card sits under it. `:has(.fab)` scopes it to exactly the screens that render one (Discover,
-   the ticket detail, the organiser home) — the Fab is a child of `.screen` on each. */
-.screen:has(.fab) {
+   last card sits under it. The Fab button itself is portaled to `document.body` (out of the route
+   transform), so it leaves a hidden `.fab-anchor` behind and `:has(.fab-anchor)` scopes this to
+   exactly the screens that render one (Discover, the ticket detail, the organiser home). */
+.screen:has(.fab-anchor) {
   padding-bottom: calc(var(--sab) + var(--tabbar-h) + var(--btn-h) + var(--s-4) + var(--s-4));
 }
 .screen h1 {

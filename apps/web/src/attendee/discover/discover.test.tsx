@@ -347,7 +347,10 @@ describe('Discover · 만들기', () => {
   it('shows the button to a visitor who is not signed in, rather than hiding the way in', async () => {
     setSession({ status: 'anonymous' });
     renderDiscoverTracked();
-    expect(await screen.findByRole('button', { name: '만들기' })).toBeEnabled();
+    const fab = await screen.findByRole('button', { name: '만들기' });
+    expect(fab).toBeEnabled();
+    // Portaled out of the screen (and so out of the route transform) so it never rides the slide (R1).
+    expect(fab.closest('.screen')).toBeNull();
   });
 
   it('sends a visitor who is not signed in to signing up', async () => {
