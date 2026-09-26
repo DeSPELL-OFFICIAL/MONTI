@@ -428,6 +428,33 @@ describe('the resume sheet', () => {
     expect(screen.getByLabelText(copy.titleLabel)).toHaveValue('지난 초안');
   });
 
+  it('asks on the first paint from the device mirror, before any Firestore round-trip', () => {
+    // The mirror is on the device synchronously, so the question is up before the list comes back —
+    // no more sheet dropping over input a few seconds late (계획 §2d / S4a).
+    localStorage.setItem(
+      EVENT_DRAFT_KEY,
+      JSON.stringify({ id: 'kept', draft: { ...emptyEventDraft, title: '미러 초안' }, at: FIVE_MINUTES_AGO() }),
+    );
+    open();
+    // getByText, not findByText: it is already there on the first render.
+    expect(screen.getByText(copy.resume.title)).toBeInTheDocument();
+  });
+
+  it('locks the scene until the resume question is answered', async () => {
+    seed('kept', { title: '지난 초안' }, FIVE_MINUTES_AGO());
+    open();
+    await screen.findByText(copy.resume.title);
+
+    // The scene is inert and 만들기 is disabled — nothing can be typed before the decision.
+    const scene = document.querySelector('.scene');
+    expect(scene).toHaveAttribute('inert');
+    expect(screen.getByRole('button', { name: copy.tiers.create })).toBeDisabled();
+
+    await userEvent.setup().click(screen.getByRole('button', { name: copy.resume.keep }));
+    expect(scene).not.toHaveAttribute('inert');
+    expect(screen.getByRole('button', { name: copy.tiers.create })).toBeEnabled();
+  });
+
   it('calls a draft with no title what it is rather than showing a gap', async () => {
     seed('kept', { title: '' }, FIVE_MINUTES_AGO());
     open();
