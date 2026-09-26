@@ -25,6 +25,7 @@ vi.mock('react-router-dom', async (orig) => ({
 
 const { OrganizerRoutes } = await import('./Layout');
 const { organizerCopy } = await import('./copy');
+const { setSession } = await import('../shared/session');
 const { formatEventDate } = await import('../attendee/discover/useEvents');
 const copy = organizerCopy.ko.home;
 
@@ -111,6 +112,8 @@ beforeEach(() => {
   navigate.mockReset();
   refetchOrgs.mockReset();
   refetchEvents.mockReset();
+  // The home is a signed-in screen; the session is the one source the FAB reads (S5).
+  setSession({ status: 'signedIn' });
   withOrgs([ORG_A]);
   withEvents([]);
 });
@@ -295,6 +298,15 @@ describe('organiser home', () => {
 
   it('refuses the floating action when there is no organisation at all', () => {
     withOrgs([]);
+    open();
+    expect(screen.getByRole('button', { name: copy.create })).toBeDisabled();
+  });
+
+  it('holds the create action while the session is still re-hydrating (S5)', () => {
+    // Even with an organisation to hand, a reload's unresolved session keeps 만들기 disabled until
+    // the session is known, rather than offering it as if nobody were signed in.
+    setSession({ status: 'loading' });
+    withOrgs([ORG_A]);
     open();
     expect(screen.getByRole('button', { name: copy.create })).toBeDisabled();
   });

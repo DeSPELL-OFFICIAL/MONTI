@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Alert, Button, Card, Fab, Field, Screen, Spinner } from '../shared/ui';
 import { fmt, useLocale } from '../shared/i18n';
+import { useSession } from '../shared/session';
 import { formatEventDate } from '../attendee/discover/useEvents';
 import { useOrganizerCopy, type OrganizerCopy } from './copy';
 import { useMyOrgs, useOrgEvents } from './useMyOrgs';
@@ -39,6 +40,10 @@ function OrganizerHome() {
   const [eventId, setEventId] = useState('');
   const [orgId, setOrgId] = useState('');
 
+  // The one session source (S5). On a reload it re-hydrates as 'loading' before it is known, and
+  // `useMyOrgs` is asleep until it is signed in — so without this the home would flash its empty
+  // state and offer 만들기 as if nobody were signed in.
+  const sessionLoading = useSession().status === 'loading';
   const { orgs, isLoading: orgsLoading, refetch: refetchOrgs } = useMyOrgs();
   // The choice lives in the address, so a reload keeps it and `/org?org=<new id>` can land on
   // one — which is exactly how an organiser arrives from `주최사 만들기`.
@@ -64,7 +69,7 @@ function OrganizerHome() {
       <PendingCreateBanner />
 
       <Card title={copy.home.orgs}>
-        {orgsLoading ? <Spinner /> : null}
+        {orgsLoading || sessionLoading ? <Spinner /> : null}
 
         {pending ? (
           <>
@@ -75,7 +80,7 @@ function OrganizerHome() {
           </>
         ) : null}
 
-        {!orgsLoading && !pending && orgs.length === 0 ? (
+        {!orgsLoading && !sessionLoading && !pending && orgs.length === 0 ? (
           <>
             <p className="muted">{copy.home.orgsEmpty}</p>
             <p>
@@ -155,7 +160,7 @@ function OrganizerHome() {
 
       <Fab
         label={copy.home.create}
-        disabled={selected === undefined || !selected.canCreateEvent}
+        disabled={sessionLoading || selected === undefined || !selected.canCreateEvent}
         onClick={() => navigate(selected === undefined ? '/org/new' : `/org/new?org=${selected.orgId}`)}
       />
     </Screen>

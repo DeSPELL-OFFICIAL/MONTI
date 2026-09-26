@@ -43,6 +43,9 @@ export function Discover() {
   // `useOrganizerEntry`'s, and it sends a visitor to signing up rather than refusing them:
   // hiding the button is exactly how a founder with a fresh account finds nothing at all.
   const organizer = useOrganizerEntry();
+  // Held until the session is known: a tap mid-refresh would read an unresolved session and send a
+  // signed-in organiser to /signup/phone (S5). It clears the moment the session resolves.
+  const sessionLoading = useSession().status === 'loading';
   const { data, isLoading, isError, error, refetch } = useEvents();
   const items = applyFilters(data ?? [], filters);
   const reduce = useReducedMotion();
@@ -161,7 +164,7 @@ export function Discover() {
         ))}
       </m.ul>
 
-      <Fab label={copy.discover.create} onClick={() => navigate(organizer.to)} />
+      <Fab label={copy.discover.create} disabled={sessionLoading} onClick={() => navigate(organizer.to)} />
     </Screen>
   );
 }

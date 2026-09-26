@@ -335,12 +335,23 @@ describe('Discover · loading and empty states', () => {
  * than through the hook that decides it.
  */
 describe('Discover · 만들기', () => {
+  it('holds the button while the session is still re-hydrating, rather than guessing (S5)', async () => {
+    // The beforeEach state is 'loading': a tap here must not read an unresolved session and send a
+    // signed-in organiser to /signup/phone.
+    const seen = renderDiscoverTracked();
+    expect(await screen.findByRole('button', { name: '만들기' })).toBeDisabled();
+    await tapCreate();
+    expect(seen.at(-1)).toBe('/');
+  });
+
   it('shows the button to a visitor who is not signed in, rather than hiding the way in', async () => {
+    setSession({ status: 'anonymous' });
     renderDiscoverTracked();
     expect(await screen.findByRole('button', { name: '만들기' })).toBeEnabled();
   });
 
   it('sends a visitor who is not signed in to signing up', async () => {
+    setSession({ status: 'anonymous' });
     const seen = renderDiscoverTracked();
     await tapCreate();
     expect(seen.at(-1)).toBe('/signup/phone');
