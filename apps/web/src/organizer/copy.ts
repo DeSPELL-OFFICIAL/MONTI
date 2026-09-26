@@ -31,6 +31,10 @@ const ko = {
 
     create: '만들기',
     retry: '다시 시도',
+    // 45s 하드캡에서 '나중에 확인'으로 나온 뒤, 홈에서 그 생성 op를 이어서 확인하는 배경 배너(계획 §2a).
+    pendingCreate: '만들던 행사를 확인하고 있어요',
+    pendingCreateFailed: '행사를 만들지 못했어요. 다시 시도해 주세요',
+    pendingCreateOpen: '이어서 확인',
 
     manual: '행사 번호로 열기',
     eventId: '행사 번호',
@@ -552,6 +556,10 @@ const en: typeof ko = {
 
     create: 'Create',
     retry: 'Try again',
+    // See the Korean block: the background banner that resolves a create left mid-confirm.
+    pendingCreate: 'Checking on the event you were making',
+    pendingCreateFailed: 'Could not create the event. Please try again',
+    pendingCreateOpen: 'Check it',
 
     manual: 'Open by event number',
     eventId: 'Event number',

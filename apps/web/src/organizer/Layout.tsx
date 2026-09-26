@@ -12,6 +12,7 @@ import { Gates } from './gates/Gates';
 import { AcceptInvite } from './invites/Accept';
 import { CreateEvent } from './scene/CreateEvent';
 import { Created } from './scene/Created';
+import { PendingCreateBanner } from './PendingCreateBanner';
 import { EditEvent } from './scene/EditEvent';
 import { Requests } from './requests/Requests';
 
@@ -57,6 +58,10 @@ function OrganizerHome() {
       <p>
         <Link to="/">{copy.home.backToDiscover}</Link>
       </p>
+
+      {/* Resolves a createEvent that ran past the scene's 45s cap and was left with 나중에 확인
+          (계획 §2a): the promise "잠시 뒤 주최자 화면에서 확인" kept without a manual refresh. */}
+      <PendingCreateBanner />
 
       <Card title={copy.home.orgs}>
         {orgsLoading ? <Spinner /> : null}
