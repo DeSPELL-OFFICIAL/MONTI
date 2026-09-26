@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { timed } from '../fixtures/timings';
@@ -73,6 +73,17 @@ export interface CreateResult {
   blocked: boolean;
 }
 
+/**
+ * A field's control (input/textarea/select), located structurally by its wrapping
+ * `<label class="field">` and the exact label text (Field.tsx). R2's "motion + Apple-like polish"
+ * re-renders the scene while the poster uploads behind it, which churns the accessible-name
+ * resolution getByLabel relied on and keeps the field "not stable"; a structural locator always
+ * resolves, and `.fill(v, { force: true })` at the call site skips the stability gate.
+ */
+function fieldInput(scope: Page | Locator, label: string): Locator {
+  return scope.locator('label.field', { hasText: label }).locator('input, textarea, select').first();
+}
+
 /** A YYYY-MM-DDTHH:00 string in Asia/Seoul, `days` from now — safely in the future. */
 function futureLocal(days: number, hour: number): string {
   const d = new Date(Date.now() + days * 86_400_000);
@@ -92,58 +103,69 @@ export async function createOrganizerAndEvent(page: Page, spec: EventSpec): Prom
   return timed(spec.personaId, 'create-event', async () => {
     await gotoCreate(page);
 
-    // Firestore keeps prior drafts, so the resume sheet appears — often a few seconds late, after
-    // the Firestore read — and its dialog intercepts field edits. Auto-dismiss it with 이어서
-    // 작성하기 (keep, so nothing already entered is wiped) whenever it shows up during any action;
-    // every field below is overwritten regardless of what the kept draft held.
-    await page.addLocatorHandler(
-      page.getByRole('button', { name: C.resumeKeep, exact: true }),
-      async (button) => { await button.click().catch(() => undefined); },
-      { times: 6, noWaitAfter: true },
-    );
+    // R2 change (was: addLocatorHandler auto-dismiss mid-action): the creation scene now renders
+    // **inert** behind a resume sheet whenever a prior draft exists — `<div className="scene"
+    // inert={asking}>` in CreateEvent — so *nothing* in the scene (the poster button included) can
+    // be interacted with until the "이어서 작성할까요?" question is answered. The sheet is a motion
+    // spring (Sheet = m.div sliding up), so its button is briefly "not stable"; fire the DOM click
+    // directly and wait for the sheet to leave (asking→false lifts inert) before touching the scene.
+    // 이어서 작성하기 keeps the draft; every field below is overwritten regardless. (The old
+    // addLocatorHandler looped here: it fought the spring and the inert scene instead of resolving
+    // the decision up front.)
+    const resumeKeep = page.getByRole('button', { name: C.resumeKeep, exact: true });
+    if (await resumeKeep.waitFor({ state: 'visible', timeout: 8000 }).then(() => true).catch(() => false)) {
+      await resumeKeep.evaluate((el) => (el as HTMLButtonElement).click()).catch(() => undefined);
+      await resumeKeep.waitFor({ state: 'hidden', timeout: 15_000 }).catch(() => undefined);
+    }
 
     // Poster. Open the picker whether the card offers 포스터 올리기 (empty) or 포스터 바꾸기 (a
-    // resumed draft already had one). The picker is a `<dialog open>` (not showModal), so its
-    // confirm button is present and wired but can fail Playwright's visibility gate; fire it
-    // directly.
+    // resumed draft already had one). Fire the DOM click directly — the card can still be settling
+    // from the sheet's exit, and the button's own onClick is all that opens the modal.
     await page.getByRole('button', { name: C.posterAdd, exact: true })
       .or(page.getByRole('button', { name: C.posterChange, exact: true }))
       .first()
-      .click();
-    await page.getByLabel(C.filePick, { exact: true }).setInputFiles(POSTER);
+      .evaluate((el) => (el as HTMLButtonElement).click());
+    // R2 change (was: getByLabel('사진 고르기')): the picker is now a showModal
+    // <dialog class="poster-modal"> and its file input sits inside a wrapping <label> (Field.tsx)
+    // whose text Chromium does not apply as the input's accessible name, so getByLabel no longer
+    // resolves (the input shows as a nameless button in the AX tree). Target it by CSS in the modal.
+    await page.locator('dialog.poster-modal input[type="file"]').setInputFiles(POSTER);
     const crop = page.getByRole('button', { name: C.crop, exact: true });
     await crop.waitFor({ state: 'attached', timeout: 15_000 });
     await crop.evaluate((el) => (el as HTMLButtonElement).click());
     // The modal closes and the card shows the picture; the upload runs behind the scene.
     await expect(page.getByRole('button', { name: C.posterChange, exact: true })).toBeVisible({ timeout: 30_000 });
 
-    await page.getByLabel(C.title, { exact: true }).fill(spec.title);
-    await page.getByLabel(C.intro, { exact: true }).fill(spec.intro);
-    await page.getByLabel(C.startsAt, { exact: true }).fill(futureLocal(2, 12));
-    await page.getByLabel(C.venue, { exact: true }).fill(spec.venue);
+    // Force-fill through the structural field locator: the poster upload keeps the scene
+    // re-rendering, so getByLabel churns and the plain fill stalls on the stability gate.
+    await fieldInput(page, C.title).fill(spec.title, { force: true });
+    await fieldInput(page, C.intro).fill(spec.intro, { force: true });
+    await fieldInput(page, C.startsAt).fill(futureLocal(2, 12), { force: true });
+    await fieldInput(page, C.venue).fill(spec.venue, { force: true });
 
     // Ticket kind via the 빠른 시작 preset — one tap sets the first kind and its receiving method.
+    // Fire the DOM click directly (evaluate) for the same reason the fields are force-filled.
     const t0 = spec.tiers[0]!;
     const quick = page.getByRole('group', { name: C.quickStart });
     if (t0.kind === '유료') {
-      await quick.getByRole('button', { name: C.quickPaid, exact: true }).click();
+      await quick.getByRole('button', { name: C.quickPaid, exact: true }).evaluate((el) => (el as HTMLButtonElement).click());
     } else if (t0.mode === '관리자 승인') {
       const chip = quick.getByRole('button', { name: C.quickApproval, exact: true });
       if (!(await chip.isEnabled())) {
         throw new Error('APPROVAL_MODE_DISABLED: VITE_APPROVAL_MODES is off in this build; the approval preset opens with the 01c deploy');
       }
-      await chip.click();
+      await chip.evaluate((el) => (el as HTMLButtonElement).click());
     } else {
-      await quick.getByRole('button', { name: C.quickFree, exact: true }).click();
+      await quick.getByRole('button', { name: C.quickFree, exact: true }).evaluate((el) => (el as HTMLButtonElement).click());
     }
     // Fine-tune the first kind's name and supply in its card.
     const card = page.locator('.tier-card').first();
-    if (t0.name) await card.getByLabel(C.tierName, { exact: true }).fill(t0.name);
-    if (t0.supply !== undefined) await card.getByLabel(C.supply, { exact: true }).fill(String(t0.supply));
+    if (t0.name) await fieldInput(card, C.tierName).fill(t0.name, { force: true });
+    if (t0.supply !== undefined) await fieldInput(card, C.supply).fill(String(t0.supply), { force: true });
 
     // Organiser name, only when this person has none yet (first event).
-    const org = page.getByLabel(C.orgName, { exact: true });
-    if (await org.isVisible().catch(() => false)) await org.fill(spec.orgName);
+    const org = fieldInput(page, C.orgName);
+    if (await org.isVisible().catch(() => false)) await org.fill(spec.orgName, { force: true });
 
     const hasPaid = spec.tiers.some((t) => t.kind === '유료');
     const createBtn = page.getByRole('button', { name: C.create, exact: true });
