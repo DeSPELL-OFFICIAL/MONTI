@@ -31,12 +31,24 @@ export interface PersonaSession {
 }
 
 /**
- * Trim the loudest automation signals before any page script runs. Firebase's invisible
- * reCAPTCHA scores a headless/automated browser low enough to escalate to a picture challenge;
- * these do not defeat reCAPTCHA on their own (IP reputation and a Google cookie dominate) but
- * they are the cheap, honest half of the fingerprint under our control.
+ * Prepare every persona context before its first page load. Two init scripts, run on every
+ * document (fresh contexts and the storage-state reuse path alike):
+ *
+ * 1. The `monti:e2e` opt-in flag. `shared/api/auth.ts` reads it in `verifier()` before building
+ *    the RecaptchaVerifier and, when it is `'1'`, sets `appVerificationDisabledForTesting` — the
+ *    SDK swaps in a mock verifier, but only for the project's whitelisted TEST phone numbers, so
+ *    the flag cannot be abused. This is what lets test-number signups skip the captcha.
+ * 2. A trim of the loudest automation signals — harmless with the bypass on, kept so a run
+ *    without the flag (or against a build that predates it) still fares as well as it can.
  */
-async function applyStealth(context: BrowserContext): Promise<void> {
+async function prepareContext(context: BrowserContext): Promise<void> {
+  await context.addInitScript(() => {
+    try {
+      localStorage.setItem('monti:e2e', '1');
+    } catch {
+      /* localStorage throws in a sandboxed/opaque-origin frame; the flag simply stays off */
+    }
+  });
   await context.addInitScript(() => {
     try {
       Object.defineProperty(navigator, 'webdriver', { get: () => false });
@@ -61,7 +73,7 @@ export async function openPersona(browser: Browser, persona: Persona): Promise<P
     ...MOBILE,
     storageState: hasState ? statePath(persona) : undefined,
   });
-  await applyStealth(context);
+  await prepareContext(context);
   const page = await context.newPage();
   const auth = await attachAuthenticator(page);
   if (existsSync(credsPath(persona))) {

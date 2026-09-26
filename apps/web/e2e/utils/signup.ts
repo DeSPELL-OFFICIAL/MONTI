@@ -31,27 +31,10 @@ export async function signUp(page: Page, persona: Persona): Promise<void> {
     await page.goto('/signup/phone');
     await page.getByLabel(C.phoneLabel, { exact: true }).fill(persona.phone);
     await page.getByRole('button', { name: C.sendCode }).click();
-    // Firebase phone auth (invisible reCAPTCHA + test number) hands us the code screen.
-    // Under automation the invisible reCAPTCHA can escalate to a picture challenge; when it
-    // does, E2E_MANUAL_CAPTCHA=1 (with a headed browser) waits for a human to solve it once.
-    const manual = process.env.E2E_MANUAL_CAPTCHA === '1';
-    try {
-      await expect(page).toHaveURL(/\/signup\/verify/, { timeout: manual ? 5 * 60 * 1000 : 45_000 });
-    } catch (error) {
-      const challenged = await page
-        .frameLocator('iframe[title*="recaptcha" i], iframe[src*="recaptcha"]')
-        .locator('body')
-        .isVisible()
-        .catch(() => false);
-      if (challenged) {
-        throw new Error(
-          'RECAPTCHA_CHALLENGE: Firebase phone-auth reCAPTCHA escalated to an image ' +
-            'challenge under automation. Run headed with E2E_MANUAL_CAPTCHA=1 to solve it by ' +
-            'hand, or have the next deploy honour appVerificationDisabledForTesting for test numbers.',
-        );
-      }
-      throw error;
-    }
+    // Firebase phone auth hands us the code screen. The `monti:e2e` flag every persona context
+    // sets (see session.ts) swaps the live reCAPTCHA for Firebase's mock verifier on the
+    // whitelisted test numbers, so no picture challenge appears and the send is immediate.
+    await expect(page).toHaveURL(/\/signup\/verify/, { timeout: 60_000 });
   });
 
   await timed(persona.id, 'signup.verify', async () => {
