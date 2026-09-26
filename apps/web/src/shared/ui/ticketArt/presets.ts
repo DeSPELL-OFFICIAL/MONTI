@@ -17,6 +17,15 @@ export const TICKET_HEIGHT = 1600;
 export interface TicketBackdrop {
   defs: string;
   body: string;
+  /**
+   * The scoped CSS that animates this backdrop, or absent for a still one. It is injected as an
+   * inline `<style>` only when a ticket is built with `animated`, and every rule is prefixed with
+   * `.ta-live` — the marker class the same build puts on the svg root — so a still thumbnail on
+   * the same page, which has no `.ta-live`, can never match these rules even though the document
+   * cannot scope a `<style>` and the `@keyframes` are global. Transform and opacity only, at most
+   * two layers, and never far enough to uncover the frame the backdrop must always fill.
+   */
+  anim?: string;
 }
 
 /**
@@ -49,12 +58,19 @@ export const TICKET_BACKDROPS: Record<TicketArtPreset, TicketBackdrop> = {
     body:
       '<rect width="1000" height="1600" fill="url(#ta-a-sky)"/>'
       + '<g filter="url(#ta-a-soft)">'
-      + '<path d="M-120 430C200 230 430 610 1120 300L1120 560C430 860 200 470 -120 690Z" fill="url(#ta-a-veil)"/>'
-      + '<path d="M-120 790C240 590 540 950 1120 680L1120 880C540 1150 240 820 -120 1000Z" fill="url(#ta-a-veil)" opacity="0.6"/>'
+      + '<path class="ta-a-veil-1" d="M-120 430C200 230 430 610 1120 300L1120 560C430 860 200 470 -120 690Z" fill="url(#ta-a-veil)"/>'
+      + '<path class="ta-a-veil-2" d="M-120 790C240 590 540 950 1120 680L1120 880C540 1150 240 820 -120 1000Z" fill="url(#ta-a-veil)" opacity="0.6"/>'
       + '</g>'
       + '<g fill="#ffffff" opacity="0.34"><circle cx="170" cy="240" r="3"/><circle cx="325" cy="160" r="2"/>'
       + '<circle cx="520" cy="275" r="3.5"/><circle cx="700" cy="195" r="2.5"/><circle cx="865" cy="335" r="3"/>'
       + '<circle cx="130" cy="410" r="2"/><circle cx="615" cy="120" r="2"/><circle cx="820" cy="105" r="3"/></g>',
+    // The two veils drift sideways at different speeds — an aurora's slow undulation. They
+    // overhang the frame by 120 on each side, so ±26 never uncovers an edge, and the sky rect
+    // behind them never moves.
+    anim:
+      '@keyframes ta-a-drift{from{transform:translateX(-26px)}to{transform:translateX(26px)}}'
+      + '.ta-live .ta-a-veil-1{animation:ta-a-drift 11s ease-in-out infinite alternate}'
+      + '.ta-live .ta-a-veil-2{animation:ta-a-drift 14s ease-in-out infinite alternate-reverse}',
   },
 
   // b — embers rising out of the dark.
@@ -79,10 +95,18 @@ export const TICKET_BACKDROPS: Record<TicketArtPreset, TicketBackdrop> = {
       + '<stop offset="0" stop-color="#04231f"/><stop offset="1" stop-color="#0d6b5c"/></linearGradient>',
     body:
       '<rect width="1000" height="1600" fill="url(#ta-c-bg)"/>'
-      + '<g fill="none" stroke="#7ff0d4" stroke-opacity="0.3" stroke-width="7">'
+      + '<g class="ta-c-rings" fill="none" stroke="#7ff0d4" stroke-opacity="0.3" stroke-width="7">'
       + '<circle cx="500" cy="500" r="130"/><circle cx="500" cy="500" r="245"/><circle cx="500" cy="500" r="375"/>'
       + '<circle cx="500" cy="500" r="520"/><circle cx="500" cy="500" r="680"/></g>'
-      + '<circle cx="500" cy="500" r="58" fill="#7ff0d4" opacity="0.45"/>',
+      + '<circle class="ta-c-core" cx="500" cy="500" r="58" fill="#7ff0d4" opacity="0.45"/>',
+    // The rings breathe out from their shared centre while the core pulses with them. The bg
+    // rect never scales, so the growing rings never reveal a frame edge.
+    anim:
+      '@keyframes ta-c-pulse{from{transform:scale(1)}to{transform:scale(1.06)}}'
+      + '@keyframes ta-c-glow{from{opacity:.3}to{opacity:.55}}'
+      + '.ta-live .ta-c-rings{transform-box:view-box;transform-origin:500px 500px;'
+      + 'animation:ta-c-pulse 7s ease-in-out infinite alternate}'
+      + '.ta-live .ta-c-core{animation:ta-c-glow 7s ease-in-out infinite alternate}',
   },
 
   // d — the sun going down behind a banded horizon.
@@ -108,11 +132,19 @@ export const TICKET_BACKDROPS: Record<TicketArtPreset, TicketBackdrop> = {
       + '<stop offset="1" stop-color="#2a0b42"/></linearGradient>',
     body:
       '<rect width="1000" height="1600" fill="url(#ta-e-bg)"/>'
-      + '<circle cx="500" cy="720" r="150" fill="#ff2fb0" opacity="0.55"/>'
-      + '<g stroke="#38f2ff" stroke-opacity="0.45" stroke-width="4">'
+      + '<circle class="ta-e-glow" cx="500" cy="720" r="150" fill="#ff2fb0" opacity="0.55"/>'
+      + '<g class="ta-e-grid" stroke="#38f2ff" stroke-opacity="0.45" stroke-width="4">'
       + '<path d="M500 820L-700 1600M500 820L-220 1600M500 820L140 1600M500 820L500 1600'
       + 'M500 820L860 1600M500 820L1220 1600M500 820L1700 1600"/>'
       + '<path d="M0 858H1000M0 906H1000M0 972H1000M0 1064H1000M0 1196H1000M0 1386H1000"/></g>',
+    // The magenta core glows and swells a touch while the grid shimmers — the neon coming and
+    // going. Both stay put; the bg rect covers the frame throughout.
+    anim:
+      '@keyframes ta-e-glow{from{opacity:.4;transform:scale(1)}to{opacity:.72;transform:scale(1.06)}}'
+      + '@keyframes ta-e-grid{from{opacity:.7}to{opacity:1}}'
+      + '.ta-live .ta-e-glow{transform-box:view-box;transform-origin:500px 720px;'
+      + 'animation:ta-e-glow 6s ease-in-out infinite alternate}'
+      + '.ta-live .ta-e-grid{animation:ta-e-grid 8s ease-in-out infinite alternate}',
   },
 
   // f — confetti over a deep violet.
@@ -149,8 +181,14 @@ export const TICKET_BACKDROPS: Record<TicketArtPreset, TicketBackdrop> = {
       '<rect width="1000" height="1600" fill="url(#ta-g-bg)"/>'
       + '<path d="M0 560C200 480 320 640 520 580S820 500 1000 570V1600H0Z" fill="#0a5ca8" opacity="0.55"/>'
       + '<path d="M0 720C220 650 360 810 560 750S840 680 1000 740V1600H0Z" fill="#1279cf" opacity="0.5"/>'
-      + '<path d="M0 900C180 830 380 980 580 920S850 860 1000 910V1600H0Z" fill="#2f9bea" opacity="0.45"/>'
-      + '<path d="M0 1080C240 1010 400 1150 620 1090S880 1040 1000 1080V1600H0Z" fill="#69c3f5" opacity="0.4"/>',
+      + '<path class="ta-g-wave-1" d="M0 900C180 830 380 980 580 920S850 860 1000 910V1600H0Z" fill="#2f9bea" opacity="0.45"/>'
+      + '<path class="ta-g-wave-2" d="M0 1080C240 1010 400 1150 620 1090S880 1040 1000 1080V1600H0Z" fill="#69c3f5" opacity="0.4"/>',
+    // The two front waves sway sideways out of phase — the water rolling. Each closes down to the
+    // frame's foot, and the still waves and bg behind them keep every edge covered as they move.
+    anim:
+      '@keyframes ta-g-sway{from{transform:translateX(-18px)}to{transform:translateX(18px)}}'
+      + '.ta-live .ta-g-wave-1{animation:ta-g-sway 9s ease-in-out infinite alternate}'
+      + '.ta-live .ta-g-wave-2{animation:ta-g-sway 12s ease-in-out infinite alternate-reverse}',
   },
 
   // h — a sunburst out of the top of the frame.
@@ -182,10 +220,17 @@ export const TICKET_BACKDROPS: Record<TicketArtPreset, TicketBackdrop> = {
     body:
       '<rect width="1000" height="1600" fill="#161a24"/>'
       + '<g filter="url(#ta-i-soft)" opacity="0.7">'
-      + '<circle cx="240" cy="330" r="230" fill="#7c6cf0"/>'
+      + '<circle class="ta-i-blob-1" cx="240" cy="330" r="230" fill="#7c6cf0"/>'
       + '<circle cx="790" cy="520" r="280" fill="#2f8f9d"/>'
-      + '<circle cx="380" cy="860" r="250" fill="#c25e8f"/>'
+      + '<circle class="ta-i-blob-2" cx="380" cy="860" r="250" fill="#c25e8f"/>'
       + '<circle cx="880" cy="1080" r="210" fill="#4a6ff0"/></g>',
+    // Two of the four blobs drift on both axes — the haze breathing. Under a 110-blur the shift
+    // reads as motion, not travel; ±22 stays well inside the group's filter region.
+    anim:
+      '@keyframes ta-i-drift-1{from{transform:translate(-22px,-14px)}to{transform:translate(22px,14px)}}'
+      + '@keyframes ta-i-drift-2{from{transform:translate(18px,16px)}to{transform:translate(-18px,-16px)}}'
+      + '.ta-live .ta-i-blob-1{animation:ta-i-drift-1 13s ease-in-out infinite alternate}'
+      + '.ta-live .ta-i-blob-2{animation:ta-i-drift-2 11s ease-in-out infinite alternate}',
   },
 
   // j — broad diagonal bars.
@@ -209,7 +254,12 @@ export const TICKET_BACKDROPS: Record<TicketArtPreset, TicketBackdrop> = {
       + '<circle cx="60" cy="60" r="6" fill="#5ef0a6" fill-opacity="0.28"/></pattern>',
     body:
       '<rect width="1000" height="1600" fill="url(#ta-k-bg)"/>'
-      + '<rect width="1000" height="1600" fill="url(#ta-k-dots)"/>',
+      + '<rect class="ta-k-dots" width="1000" height="1600" fill="url(#ta-k-dots)"/>',
+    // The dot field drifts a few units — the halftone floating. The green gradient behind it fills
+    // the frame, so the small shift only slides dots over their own ground, never off an edge.
+    anim:
+      '@keyframes ta-k-drift{from{transform:translate(0,0)}to{transform:translate(10px,-12px)}}'
+      + '.ta-live .ta-k-dots{animation:ta-k-drift 10s ease-in-out infinite alternate}',
   },
 
   // l — traces and nodes on charcoal.

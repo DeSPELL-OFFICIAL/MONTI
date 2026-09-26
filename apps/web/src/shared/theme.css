@@ -568,6 +568,10 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
    is why the caption rules that used to live here are gone: type inside the picture scales
    with the picture, so a thumbnail and a full ticket need one rule instead of three each. */
 .ticket-art__svg { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+/* An animated ticket scrolled off-screen stops playing: TicketArt attaches an IntersectionObserver
+   that adds this class. Only `.ta-live` documents carry any animation, so this reaches nothing on a
+   still ticket; reduced motion is handled separately, by the global killswitch further down. */
+.ticket-art--paused .ticket-art__svg * { animation-play-state: paused; }
 
 /* A ticket row: the picture as a thumbnail, the number and the state beside it. The column is
    a fixed width rather than a share of the row because the art is 1.41x as tall as it is wide

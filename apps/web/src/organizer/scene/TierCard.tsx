@@ -89,6 +89,7 @@ export function TierCard({
           tierName={tier.name}
           holder={holder}
           dateText={dateText}
+          animated
         />
       </div>
       <p className="muted">{copy.art}</p>
