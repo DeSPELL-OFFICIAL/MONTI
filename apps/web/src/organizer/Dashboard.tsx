@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import type { AttendeeRow } from '@monti/shared';
-import { Alert, Button, Screen, Sheet, Spinner } from '../shared/ui';
+import { Alert, Button, OpProgress, Screen, Sheet, Spinner } from '../shared/ui';
 import { fmt, useLocale } from '../shared/i18n';
 import { api } from '../shared/api/functions';
 import { readTicket } from '../shared/chain/reads';
@@ -28,6 +28,9 @@ type Pending = '' | 'publish' | 'cancel';
  * cancelled would read 발행했어요. The action that ran is not in doubt.
  */
 type Outcome = LifecycleResult & { which: Exclude<Pending, ''> };
+
+/** How often a confirming publish/cancel asks the indexer whether it has landed (plan §2c). */
+const CONFIRM_POLL_MS = 3_000;
 
 /**
  * One event, from the indexer. Every number on this screen is a chain fact the indexer already
@@ -114,6 +117,39 @@ export function Dashboard() {
     setPending('publish');
   }, [params, event?.status]);
 
+  // While a publish or cancel is confirming, poll the indexer for the event until it shows the
+  // status the write was for — no manual refresh (plan §2c). The refetch is silent: it never sets
+  // `loading`, so the screen keeps the determinate progress rather than blinking to a full spinner.
+  useEffect(() => {
+    if (outcome?.state !== 'confirming') return undefined;
+    let live = true;
+    const poll = async (): Promise<void> => {
+      const indexed = await gql<{ Event: EnvioEvent[]; Tier: EnvioTier[] }>(
+        EVENT_QUERY,
+        { id: eventId, eventId },
+      ).catch(() => null);
+      if (!live || indexed === null) return;
+      const next = indexed.Event[0] ?? null;
+      if (next !== null) {
+        setEvent(next);
+        setTiers(indexed.Tier ?? []);
+      }
+    };
+    const timer = setInterval(() => void poll(), CONFIRM_POLL_MS);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [outcome, eventId]);
+
+  // The confirming write is done the instant the indexer shows the status it was for — the screen
+  // turns to 발행했어요 / 취소했어요 on its own, with no refresh.
+  useEffect(() => {
+    if (outcome?.state !== 'confirming') return;
+    const target = outcome.which === 'publish' ? 'Published' : 'Cancelled';
+    if (event?.status === target) setOutcome({ state: 'done', which: outcome.which });
+  }, [event?.status, outcome]);
+
   async function run(which: Exclude<Pending, ''>): Promise<void> {
     setBusy(true);
     setOutcome(null);
@@ -169,7 +205,11 @@ export function Dashboard() {
       {!failed && event === null ? <Alert tone="warn">{dash.notIndexed}</Alert> : null}
 
       {outcome?.state === 'unsponsored' ? <UnsponsoredNotice /> : null}
-      {outcome?.state === 'confirming' ? <Alert tone="info">{life.confirming}</Alert> : null}
+      {/* A timed-out write is not a failure and not a dead end: the determinate wait stays up while
+          the poll above confirms it, so there is no "다시 열어/새로고침" to do (plan §2c). */}
+      {outcome?.state === 'confirming'
+        ? <OpProgress phase="confirming" onRetry={() => setReload((count) => count + 1)} />
+        : null}
       {outcome?.state === 'refused' ? <Alert tone="error">{life[outcome.problem]}</Alert> : null}
       {/* The sentence comes from the write that ran, not from an indexer that may be behind. */}
       {outcome?.state === 'done' ? (

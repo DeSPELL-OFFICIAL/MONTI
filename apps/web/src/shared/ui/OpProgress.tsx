@@ -21,12 +21,18 @@ import { Button } from './Button';
 export type OpPhase = 'saving' | 'confirming' | 'done';
 
 /**
- * After this many seconds a run is treated as stuck: the timeout line and 다시 시도 replace the
- * counter — never a bare spinner. The operation itself is safe in the background, because every
- * caller's retry is idempotent (publish re-checks its `submittedOpHash`, and the others replace
- * rather than add), so pressing again cannot double anything.
+ * After this many seconds a run is treated as stuck: the timeout line (and the caller's own
+ * decision — 다시 시도, and for create 나중에 확인) replace the counter — never a bare spinner. The
+ * operation itself is safe in the background, because every caller's retry is idempotent (publish
+ * re-checks its `submittedOpHash`, and the others replace rather than add), so pressing again
+ * cannot double anything.
+ *
+ * 45, not 30: a sponsored op on Monad normally settles in seconds, but the paymaster and bundler
+ * can add a wholly normal delay, and giving up at 30s turned that into a false alarm. 45 matches
+ * `sendSponsoredOp`'s `MAX_WAIT_TIMEOUT_MS`, so the receipt poll and this counter give up together
+ * rather than the counter first (persona R2 P0-1 / S1).
  */
-export const OP_TIMEOUT_SECONDS = 30;
+export const OP_TIMEOUT_SECONDS = 45;
 /** When the reassuring "almost there" line joins the counter. Monad normally settles well before. */
 const OP_SLOW_SECONDS = 10;
 
@@ -36,9 +42,21 @@ export interface OpProgressProps {
   phase: OpPhase;
   /** Run again — shown only past the timeout, and only when the caller has an idempotent retry. */
   onRetry?: () => void;
+  /**
+   * A second choice offered beside 다시 시도 at the timeout — the create scene's 나중에 확인, which
+   * leaves the screen with the draft and op hash already preserved. Shown only with {@link laterLabel}.
+   */
+  onLater?: () => void;
+  /** The label for {@link onLater}; without it no second button shows. */
+  laterLabel?: string;
+  /**
+   * Replaces the generic timeout line at the cap — the create scene's "아직 확인 중… 다시 시도하거나
+   * 나중에…" — so the two choices below it read as one decision. Falls back to `copy.op.timeout`.
+   */
+  timeoutMessage?: string;
 }
 
-export function OpProgress({ phase, onRetry }: OpProgressProps) {
+export function OpProgress({ phase, onRetry, onLater, laterLabel, timeoutMessage }: OpProgressProps) {
   const copy = useCopy();
   const [seconds, setSeconds] = useState(0);
   const done = phase === 'done';
@@ -65,9 +83,12 @@ export function OpProgress({ phase, onRetry }: OpProgressProps) {
       <div className="op-progress__status" role="status" aria-live="polite">
         {timedOut ? (
           <>
-            <p className="muted">{copy.op.timeout}</p>
+            <p className="muted">{timeoutMessage ?? copy.op.timeout}</p>
             {onRetry ? (
               <Button variant="ghost" onClick={onRetry}>{copy.common.retry}</Button>
+            ) : null}
+            {onLater && laterLabel ? (
+              <Button variant="ghost" onClick={onLater}>{laterLabel}</Button>
             ) : null}
           </>
         ) : done ? null : (

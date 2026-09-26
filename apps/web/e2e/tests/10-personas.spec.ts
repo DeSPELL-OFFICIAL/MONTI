@@ -18,7 +18,10 @@ const FREE_TITLE = '무료 선착순 테스트 행사';
 const SOLDOUT_TITLE = '5석 한정 마감 테스트';
 const APPROVAL_TITLE = '관리자 승인 테스트 행사';
 
-test.describe.serial('MONTI persona harness (admin + 9 users)', () => {
+// Plain describe (not .serial) with workers=1: scenarios run in order but a failure in one does
+// not skip the rest — each guards on the shared state it needs and fails fast if it is missing,
+// so a mid-suite failure still lets the remaining scenarios run and report.
+test.describe('MONTI persona harness (admin + 9 users)', () => {
   let admin: PersonaSession;
   const users: PersonaSession[] = [];
   let freeEventId = '';

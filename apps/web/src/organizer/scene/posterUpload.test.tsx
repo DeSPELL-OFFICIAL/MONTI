@@ -138,6 +138,34 @@ beforeEach(() => {
 });
 
 describe('the poster modal', () => {
+  it('opens the picker in the browser top layer with showModal, above the sticky bar (S4b)', async () => {
+    // jsdom has no dialog methods; stand them in so the call the modal makes can be observed.
+    const dialogProto = HTMLDialogElement.prototype as unknown as {
+      showModal?: () => void;
+      close?: () => void;
+    };
+    const showModal = vi.fn(function openTop(this: HTMLDialogElement) {
+      this.setAttribute('open', '');
+    });
+    dialogProto.showModal = showModal;
+    dialogProto.close = function closeTop(this: HTMLDialogElement) {
+      this.removeAttribute('open');
+    };
+    try {
+      const user = userEvent.setup();
+      open();
+      await waitFor(() => expect(listEventDrafts).toHaveBeenCalled());
+      await user.click(screen.getByRole('button', { name: copy.posterAdd }));
+      // showModal, not the open attribute — the top layer is what lifts the confirm button above
+      // the `.route-view` transform and the sticky bar so the tap lands.
+      expect(showModal).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+    } finally {
+      delete dialogProto.showModal;
+      delete dialogProto.close;
+    }
+  });
+
   it('closes on 이 사진으로 정하기 while the upload is still in flight', async () => {
     const user = userEvent.setup();
     open();

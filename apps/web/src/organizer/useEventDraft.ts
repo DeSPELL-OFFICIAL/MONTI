@@ -288,7 +288,10 @@ export function useEventDraft(orgId: string, wantedId?: string): EventDraftState
   // Firestore is still answering already knows which document it is the mirror of.
   const [draftId, setDraftId] = useState<string>(() => opened?.id ?? wantedId ?? newDraftId());
   const [loading, setLoading] = useState(true);
-  const [resumed, setResumed] = useState(false);
+  // The device mirror is known before the first paint, so a resumed draft is one the scene can
+  // ask about *synchronously* — the resume sheet is up before any field can be typed into, rather
+  // than dropping over the top a few seconds later once the Firestore list comes back (계획 §2d).
+  const [resumed, setResumed] = useState(opened !== null);
   const [resumedAt, setResumedAt] = useState(() => opened?.at ?? 0);
   const [status, setStatus] = useState<EventDraftStatus>('saved');
   const [savedAt, setSavedAt] = useState(0);

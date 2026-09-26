@@ -190,9 +190,10 @@ input, select, textarea { scroll-margin-bottom: calc(var(--sticky-bar-h) + var(-
   min-height: 100dvh;
 }
 /* A screen that floats a Fab above the tab bar has to reserve the pill's height as well, or the
-   last card sits under it. `:has(.fab)` scopes it to exactly the screens that render one (Discover,
-   the ticket detail, the organiser home) — the Fab is a child of `.screen` on each. */
-.screen:has(.fab) {
+   last card sits under it. The Fab button itself is portaled to `document.body` (out of the route
+   transform), so it leaves a hidden `.fab-anchor` behind and `:has(.fab-anchor)` scopes this to
+   exactly the screens that render one (Discover, the ticket detail, the organiser home). */
+.screen:has(.fab-anchor) {
   padding-bottom: calc(var(--sab) + var(--tabbar-h) + var(--btn-h) + var(--s-4) + var(--s-4));
 }
 .screen h1 {
@@ -741,13 +742,14 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
    the organiser aims at, not only a picture they glance at. */
 .tier-card__art { position: relative; max-width: 200px; margin: var(--s-3) auto var(--s-1); }
 /* The tap regions cover only the picture. Each is a transparent button over one band of the
-   drawing (see TierCard's TAP_REGION); a tap edits the thing under the thumb. They carry a full
-   tap target as a floor, so on this small preview the thin kind/title bands overlap — the later
-   one in source wins, which keeps the picture region and the badge the two unambiguous targets. */
+   drawing (see TierCard's TAP_REGION); a tap edits the thing under the thumb. No `--tap` floor: on
+   this 200px preview a 44px floor forced the thin kind/title bands to overlap, so the later one in
+   source won and 종류 이름 편집 could never be tapped (friction-log R2). Each band is now exactly its
+   own share of the picture height, so none overlaps; the full-size controls stay in the fields
+   below, which is where accurate editing happens anyway. */
 .tier-preview__taps { position: absolute; inset: 0; }
 .tier-preview__tap {
   position: absolute; left: 0; right: 0;
-  min-height: var(--tap);
   margin: 0; padding: 0; border: 0; background: transparent;
   border-radius: var(--r-sm); cursor: pointer;
   transition: background var(--fast) var(--ease);

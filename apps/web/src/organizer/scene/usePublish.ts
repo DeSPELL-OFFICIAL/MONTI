@@ -4,6 +4,7 @@ import { ticketAbi } from '../../shared/chain/abis';
 import { getStaffAccount } from '../../shared/chain/accounts';
 import { createdEventId } from '../../shared/chain/createdEvent';
 import { OpReverted, resolveSubmittedOp, ticketOp } from '../../shared/chain/ops';
+import { MAX_WAIT_TIMEOUT_MS } from '../../shared/chain/sendSponsoredOp';
 import { revertMatch } from '../../shared/chain/revert';
 import { isUnsponsored } from '../../shared/chain/unsponsored';
 import { api, callableFailure } from '../../shared/api/functions';
@@ -473,6 +474,9 @@ export function usePublish(
         orgId: BigInt(orgId),
         functionName: 'createEvent',
         args: [buildEventMeta(chainDraft, metadataCid), buildTiers(chainDraft)],
+        // Keep polling the receipt to the 45s cap the scene shows, so an op the bundler includes a
+        // little late finishes on its own rather than parking on the decision block (persona R2 P0-1).
+        maxTimeoutMs: MAX_WAIT_TIMEOUT_MS,
       });
       // `createEvent` returns the new id, but a sponsored operation gives back a receipt — so
       // the id comes out of the operation's own `EventCreated` log.

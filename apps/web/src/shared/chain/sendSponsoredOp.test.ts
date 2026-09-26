@@ -128,6 +128,58 @@ describe('sendSponsoredOp', () => {
     }
   });
 
+  it('keeps polling past the soft timeout up to the extended cap before declaring TIMEOUT', async () => {
+    // An op the bundler includes a little late must not park the caller at the 15s mark: given an
+    // extended cap, wait() keeps the same poll running to 45s and only then gives up.
+    vi.useFakeTimers();
+    try {
+      bundlerRequest
+        .mockResolvedValueOnce({ callGasLimit: '0x1', verificationGasLimit: '0x1', preVerificationGas: '0x1' })
+        .mockResolvedValueOnce('0xlate')
+        .mockResolvedValue(null); // every receipt poll: not landed yet
+      const handle = await sendSponsoredOp({ account, orgId: 1n, calls: [{ to: `0x${'33'.repeat(20)}`, data: '0x01' }] });
+      const waited = handle.wait(15_000, 45_000);
+
+      const receiptPolls = () =>
+        bundlerRequest.mock.calls.filter(([method]) => method === 'eth_getUserOperationReceipt').length;
+
+      await vi.advanceTimersByTimeAsync(15_000);
+      const atSoftTimeout = receiptPolls();
+      expect(atSoftTimeout).toBeGreaterThan(0);
+      // Past the first (15s) horizon the poll has NOT stopped.
+      await vi.advanceTimersByTimeAsync(15_000); // 30s total
+      expect(receiptPolls()).toBeGreaterThan(atSoftTimeout);
+      // Only the 45s cap ends it — as a TIMEOUT, never a revert.
+      await vi.advanceTimersByTimeAsync(15_000); // 45s total
+      await expect(waited).resolves.toEqual({
+        success: false, userOpHash: '0xlate', txHash: '0x',
+        blockNumber: 0n, revertReason: 'TIMEOUT', logs: [],
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('returns a receipt that lands after the soft timeout but before the extended cap', async () => {
+    vi.useFakeTimers();
+    try {
+      bundlerRequest
+        .mockResolvedValueOnce({ callGasLimit: '0x1', verificationGasLimit: '0x1', preVerificationGas: '0x1' })
+        .mockResolvedValueOnce('0xlate')
+        .mockResolvedValue(null);
+      const handle = await sendSponsoredOp({ account, orgId: 1n, calls: [{ to: `0x${'33'.repeat(20)}`, data: '0x01' }] });
+      const waited = handle.wait(15_000, 45_000);
+      // Past the soft 15s timeout with still no receipt…
+      await vi.advanceTimersByTimeAsync(20_000);
+      // …then the op finally lands, and the still-running poll returns it.
+      bundlerRequest.mockResolvedValue({ success: true, receipt: { transactionHash: '0xtx', blockNumber: '0x2a' } });
+      await vi.advanceTimersByTimeAsync(1_000);
+      await expect(waited).resolves.toMatchObject({ success: true, userOpHash: '0xlate', blockNumber: 42n });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   /**
    * The floor exists because both accounts this app sends from are WebAuthn owners estimated
    * with viem's stub signature, which fails its challenge comparison before the P-256 precompile

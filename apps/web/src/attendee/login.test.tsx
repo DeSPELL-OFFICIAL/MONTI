@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -54,6 +54,14 @@ function callableError(code: string, reason: string): Error {
 }
 
 beforeEach(() => {
+  // Reset call history and any per-test rejection so counts and "not called" assertions are clean.
+  loginChallenge.mockReset();
+  loginVerify.mockReset();
+  signPasskeyAssertion.mockReset();
+  signInWithCustomToken.mockClear();
+  navigate.mockClear();
+  loginChallenge.mockResolvedValue({ challenge: CHALLENGE, expiresAt: 0 });
+  loginVerify.mockResolvedValue({ token: 'custom-token', personId: PERSON_ID, account: ACCOUNT });
   signPasskeyAssertion.mockResolvedValue(ASSERTION);
 });
 
@@ -111,5 +119,69 @@ describe('passkey-only sign-in', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       '이 계정으로는 들어갈 수 없어요. 고객센터에 문의해 주세요.',
     );
+    // A settled answer is never retried behind the person's back.
+    expect(loginChallenge).toHaveBeenCalledTimes(1);
+    expect(loginVerify).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('cold-start auto-retry', () => {
+  it('absorbs a transient first-call failure and signs in without the person doing anything', async () => {
+    vi.useFakeTimers();
+    try {
+      loginChallenge.mockRejectedValueOnce(callableError('deadline-exceeded', 'UNKNOWN'));
+      renderScreen();
+      fireEvent.click(screen.getByRole('button', { name: '로그인' }));
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      expect(loginChallenge).toHaveBeenCalledTimes(2);
+      expect(signInWithCustomToken).toHaveBeenCalled();
+      expect(navigate).toHaveBeenCalledWith('/tickets');
+      // The person never saw an error — the cold start was absorbed.
+      expect(screen.queryByRole('alert')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('gives up after the retries and offers 다시 시도 on a persistent transient failure', async () => {
+    vi.useFakeTimers();
+    try {
+      loginChallenge.mockRejectedValue(callableError('unavailable', 'UNKNOWN'));
+      renderScreen();
+      fireEvent.click(screen.getByRole('button', { name: '로그인' }));
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      expect(loginChallenge).toHaveBeenCalledTimes(2);
+      expect(screen.getByRole('alert')).toHaveTextContent('로그인하지 못했어요. 다시 시도해 주세요.');
+      expect(screen.getByRole('button', { name: '다시 시도' })).toBeInTheDocument();
+      expect(navigate).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('never retries a user cancel — the passkey is not prompted a second time', async () => {
+    vi.useFakeTimers();
+    try {
+      signPasskeyAssertion.mockRejectedValueOnce(
+        Object.assign(new Error('failed'), { cause: Object.assign(new Error('x'), { name: 'NotAllowedError' }) }),
+      );
+      renderScreen();
+      fireEvent.click(screen.getByRole('button', { name: '로그인' }));
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      expect(signPasskeyAssertion).toHaveBeenCalledTimes(1);
+      expect(loginChallenge).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole('alert')).toHaveTextContent('로그인을 취소했어요.');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

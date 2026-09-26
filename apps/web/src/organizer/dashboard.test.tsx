@@ -234,6 +234,24 @@ describe('publishing and cancelling', () => {
     await user.click(screen.getByRole('button', { name: life.confirm }));
     expect(await screen.findByText(life.notDraft)).toBeInTheDocument();
   });
+
+  /** Plan §2c: a timed-out publish shows determinate progress and resolves itself — no refresh. */
+  it('turns a timed-out publish into progress that auto-resolves when the indexer catches up', async () => {
+    const user = userEvent.setup();
+    const { OpReverted } = await import('../shared/chain/ops');
+    ticketOp.mockRejectedValueOnce(new OpReverted('publishEvent', 'TIMEOUT'));
+    open();
+    await user.click(await screen.findByRole('button', { name: life.publish }));
+    await user.click(screen.getByRole('button', { name: life.confirm }));
+
+    // The determinate wait, not the old "reopen this screen" alert — and nothing to refresh by hand.
+    await waitFor(() => expect(document.querySelector('.op-progress')).not.toBeNull());
+    expect(screen.queryByText(life.confirming)).toBeNull();
+
+    // The indexer catches up; the background poll turns the screen to 발행했어요 on its own.
+    gql.mockResolvedValue({ Event: [{ ...DRAFT_EVENT, status: 'Published' }], Tier: TIERS });
+    expect(await screen.findByText(life.published, {}, { timeout: 5_000 })).toBeInTheDocument();
+  });
 });
 
 describe('an event the indexer has no row for', () => {

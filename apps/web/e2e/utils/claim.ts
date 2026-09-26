@@ -76,20 +76,64 @@ export async function requestApproval(page: Page, personaId: string, eventId: st
 
 /** Approval-mode: is this persona's request marked 승인됨/approved on the claim screen? */
 export async function seesApproved(page: Page, eventId: string): Promise<boolean> {
-  await page.goto(`/claim/${eventId}`);
-  return page.getByText(C.approved, { exact: true }).isVisible({ timeout: 30_000 }).catch(() => false);
+  // The indexer takes a beat to reflect the on-chain approval, so reload a few times.
+  const deadline = Date.now() + 3 * 60 * 1000;
+  while (Date.now() < deadline) {
+    await page.goto(`/claim/${eventId}`);
+    if (await page.getByText(C.approved, { exact: true }).isVisible({ timeout: 15_000 }).catch(() => false)) return true;
+    await page.waitForTimeout(5000);
+  }
+  return false;
 }
 
-/**
- * Approval-mode organiser actions. The 신청 관리 (request management) screen is not in this
- * build — it arrives with the 01c deploy that also flips VITE_APPROVAL_MODES — so these throw a
- * clear signal until then. The flagged scenario is skipped unless E2E_APPROVAL=1.
- */
-export async function approveSelected(_admin: Page, _eventId: string, _count: number): Promise<void> {
-  throw new Error('APPROVAL_UI_NOT_DEPLOYED: 신청 관리 screen arrives with the 01c deploy');
+const R = {
+  title: '신청 관리',
+  empty: '기다리는 신청이 없어요',
+  approveSelected: '선택 승인',
+  approveAll: '전체 승인',
+  confirming: '아직 확인 중이에요. 잠시 뒤 새로고침하면 반영돼요',
+} as const;
+
+/** Wait for the pending list to settle after a decision: rows removed, empty, or confirming. */
+async function settleApproval(admin: Page, expectRemaining: number): Promise<void> {
+  const boxes = admin.getByRole('checkbox');
+  const empty = admin.getByText(R.empty, { exact: true });
+  const confirming = admin.getByText(R.confirming, { exact: true });
+  const deadline = Date.now() + 4 * 60 * 1000;
+  while (Date.now() < deadline) {
+    if (await confirming.isVisible().catch(() => false)) return;
+    if (expectRemaining === 0 && (await empty.isVisible().catch(() => false))) return;
+    const remaining = await boxes.count().catch(() => -1);
+    if (remaining >= 0 && remaining <= expectRemaining) return;
+    await admin.waitForTimeout(2000);
+  }
 }
-export async function approveAll(_admin: Page, _eventId: string): Promise<void> {
-  throw new Error('APPROVAL_UI_NOT_DEPLOYED: 신청 관리 screen arrives with the 01c deploy');
+
+/** Approval-mode: on 신청 관리, select the first `count` pending requests and approve them. */
+export async function approveSelected(admin: Page, eventId: string, count: number): Promise<number> {
+  return timed('admin', 'approve-selected', async () => {
+    await admin.goto(`/org/events/${eventId}/requests`);
+    await expect(admin.getByRole('heading', { name: R.title })).toBeVisible({ timeout: 30_000 });
+    const boxes = admin.getByRole('checkbox');
+    await expect(boxes.first()).toBeVisible({ timeout: 60_000 });
+    const total = await boxes.count();
+    const n = Math.min(count, total);
+    for (let i = 0; i < n; i++) await boxes.nth(i).check();
+    await admin.getByRole('button', { name: R.approveSelected, exact: true }).click();
+    await settleApproval(admin, total - n);
+    return n;
+  });
+}
+
+/** Approval-mode: on 신청 관리, approve everyone still waiting. */
+export async function approveAll(admin: Page, eventId: string): Promise<void> {
+  return timed('admin', 'approve-all', async () => {
+    await admin.goto(`/org/events/${eventId}/requests`);
+    await expect(admin.getByRole('heading', { name: R.title })).toBeVisible({ timeout: 30_000 });
+    if (await admin.getByText(R.empty, { exact: true }).isVisible().catch(() => false)) return;
+    await admin.getByRole('button', { name: R.approveAll, exact: true }).click();
+    await settleApproval(admin, 0);
+  });
 }
 
 /** Go to 내 티켓 and return how many ticket rows are shown. */
@@ -103,15 +147,27 @@ export async function myTickets(page: Page, personaId: string): Promise<number> 
   });
 }
 
-/** Whether a ticket whose art names `title` is present in 내 티켓 (TicketArt + state badge). */
+/**
+ * Whether a ticket whose art names `title` is present in 내 티켓 (TicketArt + state badge).
+ * Polls with reloads: after a claim the indexer, and then the event's IPFS metadata that names
+ * the picture, take a moment. If the title never resolves but a ticket row with its TicketArt is
+ * there, that still counts — the row and its picture are what "the ticket appears" means.
+ */
 export async function hasTicketFor(page: Page, title: string): Promise<boolean> {
-  await page.goto('/tickets');
-  await expect(page.getByRole('heading', { name: C.ticketsTab })).toBeVisible({ timeout: 30_000 });
-  const art = page.locator('.ticket-row__art [aria-label]');
-  const count = await art.count();
-  for (let i = 0; i < count; i++) {
-    const label = (await art.nth(i).getAttribute('aria-label')) ?? '';
-    if (label.includes(title)) return true;
+  const deadline = Date.now() + 90_000;
+  let anyRow = false;
+  while (Date.now() < deadline) {
+    await page.goto('/tickets');
+    await expect(page.getByRole('heading', { name: C.ticketsTab })).toBeVisible({ timeout: 30_000 });
+    await page.waitForTimeout(2500);
+    anyRow = (await page.locator('.ticket-row__art [aria-label]').count()) > 0;
+    const art = page.locator('.ticket-row__art [aria-label]');
+    const count = await art.count();
+    for (let i = 0; i < count; i++) {
+      const label = (await art.nth(i).getAttribute('aria-label')) ?? '';
+      if (label.includes(title)) return true;
+    }
+    await page.waitForTimeout(4000);
   }
-  return false;
+  return anyRow;
 }

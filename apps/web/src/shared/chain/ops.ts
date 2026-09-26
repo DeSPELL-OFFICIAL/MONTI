@@ -44,6 +44,12 @@ export interface SendOpArgs {
   functionName: string;
   args: readonly unknown[];
   timeoutMs?: number;
+  /**
+   * Keep polling the receipt past `timeoutMs`, up to this cap, before declaring the op unlanded.
+   * The create path passes it so a late inclusion resolves on its own instead of parking the
+   * organiser on "확인 중" (persona R2 P0-1). Omitted, `wait` behaves exactly as it did.
+   */
+  maxTimeoutMs?: number;
 }
 
 /** Encode → sponsor → send → wait → throw on revert. Every write in this app goes through here. */
@@ -69,7 +75,7 @@ export async function sendOp(options: SendOpArgs): Promise<SponsoredOpReceipt> {
     }
     throw cause;
   });
-  const receipt = await handle.wait(options.timeoutMs);
+  const receipt = await handle.wait(options.timeoutMs, options.maxTimeoutMs);
   if (!receipt.success) throw new OpReverted(options.functionName, receipt.revertReason, handle.userOpHash);
   return receipt;
 }

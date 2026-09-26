@@ -4,7 +4,6 @@ import {
   AnimatePresence,
   LazyMotion,
   MotionConfig,
-  domMax,
   m,
   useReducedMotion,
   type HTMLMotionProps,
@@ -18,9 +17,11 @@ import {
  * Why `domMax` and not `domAnimation`: the design batch this belongs to needs pan/drag (the
  * ticket sheet's drag-to-dismiss) and shared-layout (`layoutId`) — the tab indicator here, the
  * FAB's shared element later. `domAnimation` ships neither gesture, so it would force a second,
- * larger bundle the moment the next screen lands. `domMax` is that larger bundle, loaded once,
- * lazily, behind `LazyMotion`. `strict` forbids the full `motion.*` component, so every call
- * site must use `m.*` and the lazy chunk stays the only place features are pulled in.
+ * larger bundle the moment the next screen lands. `domMax` is that larger bundle, pulled in once
+ * through a dynamic `import()` (see {@link ./motionFeatures}) so it lands in its own chunk after
+ * the first paint instead of weighing down the main entry. `strict` forbids the full `motion.*`
+ * component, so every call site must use `m.*` and that lazy chunk stays the only place features
+ * are pulled in.
  *
  * Reduced motion is honoured twice, because the two halves of the app hear it differently:
  *   - CSS transitions/animations are neutered by the killswitch `@media` block in `theme.css`.
@@ -28,9 +29,16 @@ import {
  *     transform/layout animations instant when the OS asks, and `useReducedMotion()` lets a
  *     component drop a slide entirely rather than merely run it in 0ms.
  */
+/**
+ * The features, loaded on demand. Until this dynamic import resolves, `m.*` render as plain,
+ * un-animated DOM; the route transition carries `initial={false}` so the first screen appears in
+ * its resting state and there is no flash of hidden content while the chunk is on its way.
+ */
+const loadMotionFeatures = () => import('./motionFeatures').then((mod) => mod.default);
+
 export function MotionProvider({ children }: { children: ReactNode }) {
   return (
-    <LazyMotion features={domMax} strict>
+    <LazyMotion features={loadMotionFeatures} strict>
       <MotionConfig reducedMotion="user">{children}</MotionConfig>
     </LazyMotion>
   );

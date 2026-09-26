@@ -104,7 +104,9 @@ export function CreateEvent() {
    * draft, so the address has already answered this one; an edit draft is never resumed at this
    * entry point at all, and the hook is what makes sure of that.
    */
-  const asking = !decided && !loading && resumed && wanted === undefined && !editing;
+  // Not gated on `!loading` any more: a resumed draft is known from the device mirror on the first
+  // paint, so the question is asked before the scene can be typed into rather than after (계획 §2d).
+  const asking = !decided && resumed && wanted === undefined && !editing;
   // Only when there is nothing to pick from: one organisation is used without asking, and two
   // or more are chosen in `더 설정하기` — neither is a question worth a box on this screen.
   const needsOrg = !editing && !myOrgs.isLoading && myOrgs.orgs.length === 0 && draft.orgId === '';
@@ -264,26 +266,29 @@ export function CreateEvent() {
 
   return (
     <Screen title={copy.title}>
-      <div className="scene">
+      {/* The resume decision sits above the scene and blocks it (계획 §2d): the device mirror shows
+          it on the first paint, so a late sheet can never drop over input, and the scene is `inert`
+          until the question is answered — a decision made before anything can be typed. */}
+      <AnimatePresence>
+        {asking ? (
+          <ResumeSheet
+            key="resume"
+            title={draft.title}
+            at={resumedAt}
+            onResume={() => setDecided(true)}
+            onFresh={() => {
+              setDecided(true);
+              void startNew();
+            }}
+          />
+        ) : null}
+      </AnimatePresence>
+      <div className="scene" inert={asking}>
         <p>
           <Link to={editing ? `/org/events/${draft.editingEventId}` : '/org'}>{copy.leave}</Link>
         </p>
         {/* 만들기 ≠ 발행: 생성 씬은 1단계, done 화면이 2단계다(계획 §2b). 편집 모드에는 해당 없음. */}
         {editing ? null : <Steps labels={[copy.stepCreate, copy.stepPublish]} at={0} />}
-        <AnimatePresence>
-          {asking ? (
-            <ResumeSheet
-              key="resume"
-              title={draft.title}
-              at={resumedAt}
-              onResume={() => setDecided(true)}
-              onFresh={() => {
-                setDecided(true);
-                void startNew();
-              }}
-            />
-          ) : null}
-        </AnimatePresence>
 
         <Card title={copy.poster} id="scene-poster">
           <PosterCard posterCid={draft.posterCid} upload={poster} />
@@ -487,20 +492,28 @@ export function CreateEvent() {
 
         {unsponsored ? <UnsponsoredNotice /> : null}
         {problem !== '' ? <Alert tone="error">{copy.publishProblems[problem]}</Alert> : null}
-        {/* `confirming` covers two things — an operation still in flight, and one that landed
-            without naming its event. The second says so itself, so only one line shows. */}
-        {phase === 'confirming' && problem === '' ? (
-          <Alert tone="info">{editing ? copy.publish.confirmingEdit : copy.publish.confirming}</Alert>
-        ) : null}
         {waiting ? <p className="working"><Spinner />{copy.posterWaiting}</p> : null}
-        {opPhase ? <OpProgress phase={opPhase} onRetry={create} /> : null}
+        {/* One determinate wait, never an info-alert stacked on top of it (계획 §2a). At the 45s cap
+            it turns into the decision block: 다시 시도 (re-checks the op hash — never a second event)
+            and, for a create, 나중에 확인 (leaves to /org, where the home banner resolves it). Both are
+            offered only once `confirming` has recorded the hash, so neither can fire while the first
+            send is still in flight. */}
+        {opPhase ? (
+          <OpProgress
+            phase={opPhase}
+            onRetry={phase === 'confirming' ? create : undefined}
+            onLater={phase === 'confirming' && !editing ? () => navigate('/org') : undefined}
+            laterLabel={copy.publish.checkLater}
+            timeoutMessage={phase === 'confirming' && !editing ? copy.publish.stuck : undefined}
+          />
+        ) : null}
         <p className="muted">{copy.tiers.feeNote}</p>
       </div>
 
       <StickyBar status={<SaveStatus status={status} savedAt={savedAt} />}>
         <div className="sticky-bar__buttons">
-          <Button variant="ghost" onClick={() => void saveDraft()}>{copy.saveDraft}</Button>
-          <Button disabled={blocked || past || working} onClick={create}>
+          <Button variant="ghost" disabled={asking} onClick={() => void saveDraft()}>{copy.saveDraft}</Button>
+          <Button disabled={blocked || past || working || asking} onClick={create}>
             {editing ? copy.tiers.save : copy.tiers.create}
           </Button>
         </div>

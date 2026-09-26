@@ -35,6 +35,7 @@ export interface OrganizerEntry {
  *
  * | state                            | 만들기          | 프로필         |
  * |----------------------------------|-----------------|----------------|
+ * | the session is re-hydrating      | (disabled)      | (a spinner)    |
  * | not signed in                    | `/signup/phone` | `/signup/phone`|
  * | the indexer is loading           | `/org`          | (a spinner)    |
  * | the indexer would not answer     | `/org`          | `/org`         |
@@ -56,11 +57,15 @@ export interface OrganizerEntry {
  * organiser home's way to a second or third organisation.
  */
 export function useOrganizerEntry(): OrganizerEntry {
-  const signedIn = useSession().status === 'signedIn';
+  const status = useSession().status;
   const { orgs, canCreateEvent, isLoading, isError } = useMyOrgs();
 
   const entry = ((): Omit<OrganizerEntry, 'profileTo'> => {
-    if (!signedIn) return { to: '/signup/phone', hasOrg: false, isLoading: false };
+    // A reload re-hydrates the session, and 'loading' is not 'anonymous': treating it as loading is
+    // what stops a signed-in organiser being sent to /signup/phone in the seconds before the
+    // session is known (S5). `useSession` is the one source both entry points read.
+    if (status === 'loading') return { to: '/org', hasOrg: false, isLoading: true };
+    if (status !== 'signedIn') return { to: '/signup/phone', hasOrg: false, isLoading: false };
     if (isLoading) return { to: '/org', hasOrg: false, isLoading: true };
     // Not knowing is not the same as knowing there is nothing: the organiser home is the
     // screen that owns a silent indexer, so it is offered rather than `주최사 만들기`.
