@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
@@ -272,6 +272,60 @@ describe('Discover', () => {
     gql.mockRejectedValue(new Error('boom'));
     renderDiscover();
     expect(await screen.findByRole('alert')).toHaveTextContent('문제가 생겼어요. 잠시 뒤 다시 시도해 주세요.');
+  });
+});
+
+/**
+ * T-UX3-P0-1 · plan §2a. The three states the list used to fold into one spinner and one line:
+ * loading, empty and the indexer being down. Empty splits again by who is looking at it.
+ */
+describe('Discover · loading and empty states', () => {
+  it('shows skeleton cards while the page loads, never a lone spinner', () => {
+    gql.mockReturnValue(new Promise(() => undefined));
+    const { container } = renderDiscover();
+    expect(container.querySelectorAll('.event-card--skeleton')).toHaveLength(3);
+    expect(screen.queryByRole('progressbar')).toBeNull();
+  });
+
+  it('invites a signed-in visitor with no events to make the first one', async () => {
+    gql.mockResolvedValue({ Event: [] });
+    setSession({ status: 'signedIn', account: ME });
+    myOrgs({ orgs: [], canCreateEvent: false });
+    const seen = renderDiscoverTracked();
+    expect(await screen.findByText('첫 행사를 만들어 보세요')).toBeInTheDocument();
+    // The empty-state CTA and the FAB both read 만들기; press the one in the empty state.
+    const cta = within(document.querySelector('.empty-state') as HTMLElement)
+      .getByRole('button', { name: '만들기' });
+    await userEvent.click(cta);
+    expect(seen.at(-1)).toBe('/org/new');
+  });
+
+  it('reassures a signed-out visitor that events are on the way, with no button', async () => {
+    gql.mockResolvedValue({ Event: [] });
+    renderDiscover();
+    expect(await screen.findByText('곧 행사가 올라와요')).toBeInTheDocument();
+    expect(screen.queryByText('첫 행사를 만들어 보세요')).toBeNull();
+    expect(document.querySelector('.empty-state')).toBeNull();
+  });
+
+  it('offers to clear the filters when they hide every event, apart from having none at all', async () => {
+    renderDiscover();
+    expect(await screen.findByText('재즈 나이트')).toBeInTheDocument();
+    await userEvent.type(screen.getByPlaceholderText('행사 이름 검색'), '없는행사');
+    expect(screen.getByText('조건에 맞는 행사가 없어요.')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: '필터 지우기' }));
+    expect(await screen.findByText('재즈 나이트')).toBeInTheDocument();
+  });
+
+  it('sets the indexer being down apart from an empty list', async () => {
+    gql.mockRejectedValue(indexerFailure('http', 'HTTP_500'));
+    renderDiscover();
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('지금 정보를 가져올 수 없어요. 잠시 뒤 다시 시도해 주세요.');
+    expect(screen.getByRole('button', { name: '다시 시도' })).toBeInTheDocument();
+    // A down indexer is not "no events": neither empty-state line appears.
+    expect(screen.queryByText('곧 행사가 올라와요')).toBeNull();
+    expect(screen.queryByText('첫 행사를 만들어 보세요')).toBeNull();
   });
 });
 

@@ -86,7 +86,10 @@ export const en: typeof ko = {
       4: 'Festival', 5: 'Sports', 6: 'Conference', 7: 'Talk or class', 8: 'Party',
       9: 'Film', 10: 'Market', 11: 'Networking', 3: 'Other',
     },
-    empty: 'No events match your filters.', getTicket: 'Get a ticket', requestTicket: 'Request a ticket', share: 'Share',
+    // See the Korean block: the three empty states, plus the clear-filters action.
+    emptyFiltered: 'No events match your filters.', emptyHostCta: 'Create your first event',
+    emptySoon: 'Events are coming soon', clearFilters: 'Clear filters',
+    getTicket: 'Get a ticket', requestTicket: 'Request a ticket', share: 'Share',
     map: 'Open in maps', publicRecord: 'Public record', soldOut: 'Sold out', cancelled: 'This event was cancelled.',
     untitled: 'Title unavailable', remaining: '{{count}} left',
     // How many tags a card could not fit; the detail screen shows every one.
