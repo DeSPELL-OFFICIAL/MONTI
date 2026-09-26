@@ -144,6 +144,10 @@ export function EventArt({ eventId, tiers, title, startsAt = 0 }: EventArtProps)
             {open === index ? (
               <ArtPicker
                 art={artOf(index)}
+                title={title}
+                tierName={tier.name}
+                holder={displayName === '' ? tickets.artGuest : displayName}
+                dateText={dateText}
                 onPreset={(preset) => void change(index, { preset })}
                 onUploaded={(imageCid) => void change(index, { imageCid })}
               />

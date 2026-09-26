@@ -382,16 +382,41 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
   vertical-align: middle;
 }
 .chip-row { display: flex; flex-wrap: wrap; gap: var(--s-2); margin: var(--s-2) 0; }
-/* Twelve pictures plus 직접 올리기 wrap into four rows on a phone and push the kind's own boxes
-   off the screen. The art row scrolls sideways instead, the way a long list of choices does
-   everywhere else on a phone, and each chip keeps its own width rather than being squeezed. */
-.chip-row--art {
-  flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain;
-  scroll-snap-type: x proximity; padding-bottom: var(--s-1);
-  scrollbar-width: none;
+/* Twelve live ticket previews and 직접 올리기 in one sideways-snapping row (plan section C-1).
+   Each tile is a little under two-thirds of the row, so both neighbours peek and the centre one
+   reads as the choice; the row snaps to centres and nothing in it is wider than the phone. */
+.art-carousel {
+  display: flex; gap: var(--s-2); margin: var(--s-2) 0;
+  overflow-x: auto; overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory; scroll-padding: 0 18%;
+  padding-bottom: var(--s-1); scrollbar-width: none;
 }
-.chip-row--art::-webkit-scrollbar { display: none; }
-.chip-row--art > * { flex: 0 0 auto; scroll-snap-align: start; }
+.art-carousel::-webkit-scrollbar { display: none; }
+.art-tile {
+  flex: 0 0 62%; max-width: 220px; scroll-snap-align: center;
+  display: flex; flex-direction: column; gap: var(--s-1);
+  padding: var(--s-1); border: 2px solid transparent; border-radius: var(--r-lg);
+  background: none; color: var(--ink); cursor: pointer;
+  transition: transform var(--fast) var(--ease), border-color var(--fast) var(--ease);
+}
+.art-tile:active { transform: scale(0.98); }
+.art-tile--on { border-color: var(--brand); }
+.art-tile__preview { display: block; border-radius: var(--r-lg); overflow: hidden; }
+.art-tile__caption {
+  text-align: center; font-size: 13px; font-weight: 600; line-height: 1.2; color: var(--ink-2);
+}
+.art-tile--on .art-tile__caption { color: var(--brand-ink); }
+/* The upload tile keeps a preview's footprint, but a dashed drop rather than a drawing. */
+.art-tile--upload {
+  align-items: center; justify-content: center; min-height: 120px;
+  border-style: dashed; border-color: var(--glass-hairline);
+  background: var(--glass-bg-strong); font-size: 14px; font-weight: 600;
+}
+.art-tile--upload.art-tile--on { border-color: var(--brand); border-style: solid; }
+/* The dots track the centre tile the observer reports; decoration, so the group is aria-hidden. */
+.art-dots { display: flex; justify-content: center; gap: 6px; margin: var(--s-1) 0 var(--s-2); }
+.art-dot { width: 6px; height: 6px; border-radius: var(--r-pill); background: var(--glass-hairline); }
+.art-dot--on { background: var(--brand); }
 .chip {
   display: inline-flex; align-items: center; min-height: var(--tap);
   border: 1px solid var(--glass-hairline);

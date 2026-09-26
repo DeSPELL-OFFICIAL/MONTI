@@ -46,6 +46,15 @@ const { TICKET_ART_PRESETS } = await import('./draftRules');
 const { ko: sharedCopy } = await import('../../shared/copy/index');
 const copy = organizerCopy.ko.scene;
 
+/**
+ * The one big preview above the carousel, told apart from the twelve live tiles inside it: these
+ * tests are about the ticket the attendee is handed, which is the big one. The tiles draw the
+ * same strings on purpose (they are real previews too), so a bare `getByText` would find many.
+ */
+function preview(): HTMLElement {
+  return document.querySelector('.tier-card__art') as HTMLElement;
+}
+
 function Probe() {
   return <p>{`landed:${useLocation().pathname}`}</p>;
 }
@@ -298,9 +307,9 @@ describe('the picture', () => {
     open({ ...READY, tiers: [{ ...emptyEventDraftTier, name: '학생' }] });
     await waitFor(() => expect(screen.getByLabelText(copy.tiers.name)).toHaveValue('학생'));
     const day = new Date(READY.startsAt * 1000).toLocaleDateString('ko', { dateStyle: 'medium' });
-    await waitFor(() => expect(screen.getByText('김태완')).toBeInTheDocument());
+    await waitFor(() => expect(within(preview()).getByText('김태완')).toBeInTheDocument());
     for (const text of ['재즈 나이트', '학생', day]) {
-      expect(screen.getByText(text)).toBeInTheDocument();
+      expect(within(preview()).getByText(text)).toBeInTheDocument();
     }
   });
 
@@ -309,15 +318,15 @@ describe('the picture', () => {
     const day = new Date(READY.startsAt * 1000).toLocaleDateString('ko', { dateStyle: 'medium' });
     open({ ...READY, startsAt: 0 });
     await ready();
-    await waitFor(() => expect(screen.getByText('김태완')).toBeInTheDocument());
-    expect(screen.queryByText(day)).toBeNull();
+    await waitFor(() => expect(within(preview()).getByText('김태완')).toBeInTheDocument());
+    expect(within(preview()).queryByText(day)).toBeNull();
   });
 
   it('falls back to the attendee word when the organiser gave no name either', async () => {
     loadMyProfile.mockResolvedValue({ displayName: '' });
     open();
     await ready();
-    await waitFor(() => expect(screen.getByText(sharedCopy.tickets.artGuest)).toBeInTheDocument());
+    await waitFor(() => expect(within(preview()).getByText(sharedCopy.tickets.artGuest)).toBeInTheDocument());
   });
 });
 

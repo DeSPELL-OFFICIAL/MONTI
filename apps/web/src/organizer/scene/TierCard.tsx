@@ -94,6 +94,10 @@ export function TierCard({
       <p className="muted">{copy.art}</p>
       <ArtPicker
         art={art}
+        title={title}
+        tierName={tier.name}
+        holder={holder}
+        dateText={dateText}
         // Picking a design puts the uploaded picture aside rather than deleting the draft's
         // memory of it — the two fields are kept apart until the event is created.
         onPreset={(preset) => onPatch({ design: preset, imageCid: '' })}

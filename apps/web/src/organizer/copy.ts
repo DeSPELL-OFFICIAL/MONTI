@@ -365,6 +365,8 @@ const ko = {
       amount: '금액',
       save: '저장',
       art: '티켓 그림',
+      // The carousel's own name for a screen reader; the tiles inside carry the preset names.
+      artCarousel: '티켓 그림 고르기',
       // One name per preset letter, as a record rather than as flat `artA`..`artD` keys: the
       // `satisfies` below is what makes a locale that forgets a letter fail the build, which is
       // what the flat keys were for before there were twelve of them (plan section E-1).
@@ -837,6 +839,8 @@ const en: typeof ko = {
       amount: 'Amount',
       save: 'Save',
       art: 'Ticket picture',
+      // The carousel's own name for a screen reader; the tiles inside carry the preset names.
+      artCarousel: 'Choose the ticket picture',
       artNames: {
         a: 'Aurora', b: 'Ember', c: 'Teal', d: 'Dusk', e: 'Neon', f: 'Confetti',
         g: 'Wave', h: 'Sunburst', i: 'Haze', j: 'Stripes', k: 'Dots', l: 'Circuit',
