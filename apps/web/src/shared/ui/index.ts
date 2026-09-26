@@ -1,4 +1,5 @@
 export { Screen } from './Screen';
+export { SuccessCheck } from './SuccessCheck';
 export { BottomTabs } from './BottomTabs';
 export { Fab } from './Fab';
 export { Button } from './Button';

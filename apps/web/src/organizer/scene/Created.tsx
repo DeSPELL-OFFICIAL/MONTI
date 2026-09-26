@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import QRCode from 'qrcode';
-import { Alert, Button, Card, Screen, posterUrl } from '../../shared/ui';
+import { Alert, Button, Card, Screen, SuccessCheck, posterUrl } from '../../shared/ui';
 import { useOrganizerCopy } from '../copy';
 import { forgetEventDraft } from '../useEventDraft';
 import { followUpsDone, runFollowUps, type FollowUpResult } from './followUps';
@@ -83,6 +83,7 @@ export function Created() {
   return (
     <Screen title={copy.title}>
       <div className="scene">
+        <SuccessCheck />
         {handed.posterCid ? (
           <div className="poster-card">
             <div className="poster-card__filled">

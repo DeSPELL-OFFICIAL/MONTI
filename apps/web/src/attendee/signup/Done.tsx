@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, Field, Screen } from '../../shared/ui';
+import { Button, Field, Screen, SuccessCheck } from '../../shared/ui';
 import { useCopy } from '../../shared/i18n';
 import { MAX_DISPLAY_NAME_CHARS, saveUserProfile } from '../../shared/api/firestore';
 import { acceptPendingOffers } from '../transfer/offers';
@@ -43,6 +43,7 @@ export function Done() {
 
   return (
     <Screen title={copy.signup.doneTitle}>
+      <SuccessCheck />
       <p>{copy.signup.doneBody}</p>
       <Field label={copy.signup.nameTitle}>
         <input

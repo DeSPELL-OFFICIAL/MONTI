@@ -72,11 +72,15 @@
   --s-6: 32px;
 
   /* ── type ───────────────────────────────────────────────────────────────────────────── */
+  /** The large title on a screen top — Apple's rhythm: one big line, then the body. */
+  --t-large: 28px;
+  --t-large-lh: 34px;
   --t-title: 22px;
   --t-title-lh: 28px;
   --t-head: 17px;
   --t-head-lh: 24px;
-  --t-body: 15px;
+  /** Body sits at 17 now — the reading size the rest of the type scale is built around. */
+  --t-body: 17px;
   --t-body-lh: 22px;
   --t-cap: 13px;
   --t-cap-lh: 18px;
@@ -192,8 +196,8 @@ input, select, textarea { scroll-margin-bottom: calc(var(--sticky-bar-h) + var(-
   padding-bottom: calc(var(--sab) + var(--tabbar-h) + var(--btn-h) + var(--s-4) + var(--s-4));
 }
 .screen h1 {
-  font-size: var(--t-title);
-  line-height: var(--t-title-lh);
+  font-size: var(--t-large);
+  line-height: var(--t-large-lh);
   letter-spacing: -0.02em;
   margin: 0 0 var(--s-4);
 }
@@ -219,9 +223,9 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
   display: grid; grid-template-columns: repeat(4, 1fr);
   gap: var(--s-1);
   background: var(--glass-bg-strong);
-  border: 0; border-top: 1px solid var(--glass-border);
+  border: 0; border-top: 1px solid var(--glass-hairline);
   border-radius: var(--r-xl) var(--r-xl) 0 0;
-  box-shadow: 0 -8px 24px rgba(131, 110, 249, 0.10);
+  box-shadow: 0 -8px 24px rgba(131, 110, 249, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.6);
   padding: var(--s-2) var(--s-2) calc(var(--sab) + var(--s-2));
 }
 .tabbar a {
@@ -250,7 +254,7 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
   box-shadow: 0 10px 28px rgba(91, 63, 217, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.3);
   transition: transform var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
 }
-.fab:active { transform: translateY(1px) scale(0.99); box-shadow: 0 6px 18px rgba(91, 63, 217, 0.3); }
+.fab:active { transform: translateY(1px) scale(0.97); box-shadow: 0 6px 18px rgba(91, 63, 217, 0.3); }
 .fab[disabled] { opacity: 0.45; box-shadow: none; }
 
 /* ── buttons ───────────────────────────────────────────────────────────────────────────── */
@@ -261,7 +265,7 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
   transition: transform var(--fast) var(--ease), background var(--fast) var(--ease),
               box-shadow var(--fast) var(--ease);
 }
-.btn:active:not([disabled]) { transform: translateY(1px) scale(0.995); }
+.btn:active:not([disabled]) { transform: translateY(1px) scale(0.97); }
 .btn--primary {
   background: var(--brand-grad); color: #fff;
   box-shadow: 0 8px 20px rgba(91, 63, 217, 0.26), inset 0 1px 0 rgba(255, 255, 255, 0.28);
@@ -277,7 +281,7 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
 .btn--danger { background: var(--danger); color: #fff; box-shadow: 0 8px 20px rgba(160, 5, 93, 0.24); }
 .btn[disabled] { opacity: 0.45; box-shadow: none; }
 .btn--link { display: grid; place-items: center; text-decoration: none; }
-:where(.btn, .chip, .fab, .tabbar a, input, select, textarea):focus-visible {
+:where(.btn, .chip, .fab, .tabbar a, a, summary, input, select, textarea):focus-visible {
   outline: 2px solid var(--brand-ink);
   outline-offset: 2px;
 }
@@ -366,11 +370,19 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
   display: block; width: 100%; border-radius: var(--r-lg); margin-bottom: var(--s-3);
   box-shadow: var(--glass-shadow);
 }
-.tier-list { list-style: none; margin: var(--s-4) 0; padding: 0; display: grid; gap: var(--s-2); }
+/* A grouped inset list: the enclosing card is the rounded-20 group with the 16px gutter, and the
+   rows inside it are told apart by a hairline rather than by a gap — iOS's own list, with the last
+   row flush to the card's foot and no rule under it. */
+.tier-list { list-style: none; margin: 0; padding: 0; }
 .tier-list li {
   display: flex; justify-content: space-between; gap: var(--s-3);
-  border-bottom: 1px solid var(--glass-hairline); padding-bottom: var(--s-2);
+  min-width: 0;
+  padding: var(--s-3) 0;
+  border-bottom: 1px solid var(--glass-hairline);
 }
+.tier-list li > span { min-width: 0; }
+.tier-list li:first-child { padding-top: 0; }
+.tier-list li:last-child { padding-bottom: 0; border-bottom: 0; }
 .muted { color: var(--ink-2); font-size: var(--t-cap); line-height: var(--t-cap-lh); }
 
 /* ── badges, chips, tags ───────────────────────────────────────────────────────────────── */
@@ -606,9 +618,9 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
   min-height: var(--sticky-bar-h);
   padding: 10px var(--s-4) calc(var(--sab) + 10px);
   background: var(--glass-bg-strong);
-  border: 0; border-top: 1px solid var(--glass-border);
+  border: 0; border-top: 1px solid var(--glass-hairline);
   border-radius: var(--r-xl) var(--r-xl) 0 0;
-  box-shadow: 0 -8px 24px rgba(131, 110, 249, 0.12);
+  box-shadow: 0 -8px 24px rgba(131, 110, 249, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.6);
 }
 .sticky-bar__status { flex: 1; min-width: 0; color: var(--ink-2); font-size: var(--t-cap); line-height: var(--t-cap-lh); }
 .sticky-bar__action { flex: 0 0 auto; min-width: 128px; }
@@ -871,3 +883,29 @@ table { width: 100%; display: block; overflow-x: auto; }
 /* A ticket row is a picture and one line: the number and where the ticket stands. The event's
    own name is printed inside the picture, which is why it is not repeated here. */
 .ticket-row__text { min-width: 0; font-weight: 600; }
+
+/* ── the success mark ─────────────────────────────────────────────────────────────────────────
+   The check on the two "done" screens (SuccessCheck). The ring's scale-in, the tick's draw and
+   the confetti are all framer's — on SPRING.bouncy, dropped to a still check with no confetti
+   when the OS asks (useReducedMotion). So this is only the box they sit in: a fixed square the
+   confetti spends itself inside, centred on the 8-pt rhythm, in the palette's own success green. */
+.success-mark {
+  position: relative;
+  display: grid; place-items: center;
+  width: 96px; height: 96px;
+  margin: var(--s-5) auto var(--s-4);
+}
+.success-mark__ring { display: block; }
+.success-mark__disc { fill: var(--success-tint); stroke: var(--success); stroke-width: 2; }
+.success-mark__tick {
+  fill: none; stroke: var(--success); stroke-width: 4;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+/* The confetti keeps to the mark's own footprint and moves by transform only, so nothing it does
+   reaches the page's width — the body clips the x axis either way. Decoration: it carries no words. */
+.confetti { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
+.confetti__bit {
+  position: absolute; left: 50%; top: 50%;
+  width: 7px; height: 7px; border-radius: 2px;
+  will-change: transform, opacity;
+}

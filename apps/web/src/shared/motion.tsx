@@ -37,13 +37,17 @@ export function MotionProvider({ children }: { children: ReactNode }) {
 }
 
 /**
- * The two springs the app is allowed to use. `snappy` is the tap and the tab indicator — a
- * short, firm settle; `gentle` is for larger travel that should feel unhurried. These numbers
- * are the tokens: a screen picks one, it does not invent stiffness of its own.
+ * The springs the app is allowed to use. `snappy` is the tap and the tab indicator — a short,
+ * firm settle; `gentle` is for larger travel that should feel unhurried; `bouncy` is the one
+ * celebratory overshoot, kept to the success mark. These numbers are the tokens: a screen picks
+ * one, it does not invent stiffness of its own.
  */
 export const SPRING = {
   snappy: { type: 'spring', stiffness: 520, damping: 38 },
   gentle: { type: 'spring', stiffness: 260, damping: 30 },
+  /** The success morph: a looser, springier settle that overshoots once — the check on the two
+      "done" screens, and nothing else. Louder than `snappy` on purpose, so a finish reads as one. */
+  bouncy: { type: 'spring', stiffness: 420, damping: 22 },
 } as const;
 
 /**
