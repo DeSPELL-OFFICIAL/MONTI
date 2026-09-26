@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Alert, Button, Card, Field, Screen, Spinner, StickyBar, Toast, Toggle } from '../../shared/ui';
+import {
+  Alert, Button, Card, Field, OpProgress, Screen, Spinner, Steps, StickyBar, Toast, Toggle, type OpPhase,
+} from '../../shared/ui';
 import { fmt, useCopy, useLocale } from '../../shared/i18n';
 import { AnimatePresence } from '../../shared/motion';
 import { THEME_CODES, themeLabels } from '../../shared/eventThemes';
@@ -193,6 +195,18 @@ export function CreateEvent() {
   const working = waiting
     || phase === 'org' || phase === 'pinning' || phase === 'sending' || phase === 'finishing';
 
+  // The determinate wait shown in place of a bare spinner (plan §2c). It stays mounted from the
+  // first write through `confirming`, so its own timer can reach the 30s timeout and offer 다시
+  // 시도 — safe here because `create` re-checks `submittedOpHash` and never sends a second event.
+  // `noEventId` is not an in-flight wait — the op landed and the number just has to be looked up —
+  // so it keeps its own line rather than a progress that would never finish.
+  const opPhase: OpPhase | null =
+    phase === 'org' || phase === 'pinning' || phase === 'sending'
+      ? 'saving'
+      : phase === 'finishing' || (phase === 'confirming' && problem === '')
+        ? 'confirming'
+        : null;
+
   function scrollTo(section: string): void {
     // jsdom has no `scrollIntoView`, and neither does an older browser; the line under the
     // field is the part that has to work, so the scroll is offered rather than relied on.
@@ -254,6 +268,8 @@ export function CreateEvent() {
         <p>
           <Link to={editing ? `/org/events/${draft.editingEventId}` : '/org'}>{copy.leave}</Link>
         </p>
+        {/* 만들기 ≠ 발행: 생성 씬은 1단계, done 화면이 2단계다(계획 §2b). 편집 모드에는 해당 없음. */}
+        {editing ? null : <Steps labels={[copy.stepCreate, copy.stepPublish]} at={0} />}
         <AnimatePresence>
           {asking ? (
             <ResumeSheet
@@ -477,12 +493,7 @@ export function CreateEvent() {
           <Alert tone="info">{editing ? copy.publish.confirmingEdit : copy.publish.confirming}</Alert>
         ) : null}
         {waiting ? <p className="working"><Spinner />{copy.posterWaiting}</p> : null}
-        {phase === 'org' || phase === 'pinning' || phase === 'sending' || phase === 'finishing' ? (
-          <p className="working">
-            <Spinner />
-            {editing && phase === 'sending' ? copy.publish.updating : copy.publish[phase]}
-          </p>
-        ) : null}
+        {opPhase ? <OpProgress phase={opPhase} onRetry={create} /> : null}
         <p className="muted">{copy.tiers.feeNote}</p>
       </div>
 

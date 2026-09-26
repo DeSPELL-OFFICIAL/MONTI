@@ -80,6 +80,13 @@ const ko = {
     closed: '이미 끝났거나 취소된 행사예요',
     notAllowed: '이 행사를 다룰 권한이 없어요',
     failed: '보내지 못했어요. 잠시 뒤 다시 시도해 주세요',
+    // 발행 전에 무엇을 공개하는지 한눈에 보여주는 요약 시트(계획 §2b).
+    summary: {
+      heading: '이대로 발행할까요?',
+      title: '제목', date: '날짜', place: '장소', tiers: '티켓 종류', kyc: '본인 확인',
+      tiersValue: '{{count}}종', kycOn: '필요', kycOff: '없음',
+      placeRegionOnly: '{{region}} · 자세한 장소는 티켓 소지자에게만',
+    },
   },
 
   gates: {
@@ -208,6 +215,7 @@ const ko = {
     checkedIn: '입장함',
     notCheckedIn: '아직',
     gates: '입구 단말기',
+    requests: '신청 관리',
     // 공개 전에만 열린다 — updateEventMeta 는 Draft 에서만 된다(Ticket.sol:235).
     edit: '행사 정보 고치기',
     notIndexed: '없는 행사 번호이거나 아직 색인 전이에요',
@@ -236,6 +244,22 @@ const ko = {
     },
   },
 
+  requests: {
+    title: '신청 관리',
+    back: '행사 현황으로',
+    empty: '기다리는 신청이 없어요',
+    loadFailed: '신청 목록을 불러오지 못했어요. 잠시 뒤 다시 시도해 주세요',
+    retry: '다시 시도',
+    noPermission: '이 행사의 신청을 처리할 권한이 없어요',
+    approveSelected: '선택 승인',
+    approveAll: '전체 승인',
+    reject: '거절',
+    tier: '{{tier}}번째 종류',
+    working: '처리하고 있어요',
+    confirming: '아직 확인 중이에요. 잠시 뒤 새로고침하면 반영돼요',
+    failed: '처리하지 못했어요. 잠시 뒤 다시 시도해 주세요',
+  },
+
   announce: {
     title: '공지',
     placeholder: '공지 내용 (최대 500자)',
@@ -255,6 +279,9 @@ const ko = {
   scene: {
     title: '행사 만들기',
     leave: '나가기',
+    // 만들기 ≠ 발행. 생성 씬과 done 화면 상단의 2단계 헤더가 발행이 남았음을 처음부터 알린다(계획 §2b).
+    stepCreate: '만들기',
+    stepPublish: '발행',
     // 기본 다섯 칸(포스터·제목·시작·장소·티켓) 밖의 모든 것이 이 안에 접혀 있다(계획 B-2).
     more: '더 설정하기',
 
@@ -418,6 +445,8 @@ const ko = {
       title: '행사를 만들었어요',
       // createEvent 는 Draft 로 만들고(Ticket.sol:196) claim 은 Published 가 아니면 거절한다(:265).
       notYetPublic: '아직은 아무도 볼 수 없어요. 준비가 되면 행사 화면에서 발행해 주세요',
+      // done 화면의 1차 버튼: 발행 시트로 바로 보낸다(계획 §2b). manage 링크는 보조로 내려간다.
+      publishNow: '지금 발행하기',
       manage: '행사 화면 열기',
       link: '행사 주소',
       copy: '주소 복사',
@@ -571,6 +600,13 @@ const en: typeof ko = {
     closed: 'This event is already over or cancelled',
     notAllowed: 'You may not manage this event',
     failed: 'Could not send that. Please try again in a moment',
+    // See the Korean block: the summary sheet shown before publishing.
+    summary: {
+      heading: 'Publish it as it is?',
+      title: 'Title', date: 'When', place: 'Where', tiers: 'Ticket kinds', kyc: 'Identity check',
+      tiersValue: '{{count}}', kycOn: 'Required', kycOff: 'Not needed',
+      placeRegionOnly: '{{region}} · exact place shown to ticket holders only',
+    },
   },
 
   gates: {
@@ -699,6 +735,7 @@ const en: typeof ko = {
     checkedIn: 'In',
     notCheckedIn: 'Not yet',
     gates: 'Entry terminals',
+    requests: 'Requests',
     /** Only before publishing: the chain refuses `updateEventMeta` past Draft. */
     edit: 'Edit this event',
     notIndexed: 'No event has that number, or it has not been indexed yet',
@@ -722,6 +759,22 @@ const en: typeof ko = {
     },
   },
 
+  requests: {
+    title: 'Requests',
+    back: 'Back to event status',
+    empty: 'No requests are waiting',
+    loadFailed: 'Could not load the requests. Please try again in a moment',
+    retry: 'Try again',
+    noPermission: 'You may not handle requests for this event',
+    approveSelected: 'Approve selected',
+    approveAll: 'Approve all',
+    reject: 'Reject',
+    tier: 'Kind {{tier}}',
+    working: 'Working',
+    confirming: 'Still confirming. Refresh in a moment to see the change',
+    failed: 'Could not finish. Please try again in a moment',
+  },
+
   announce: {
     title: 'Notice',
     placeholder: 'Notice (up to 500 characters)',
@@ -741,6 +794,9 @@ const en: typeof ko = {
   scene: {
     title: 'Create an event',
     leave: 'Leave',
+    // See the Korean block: the two-step header that says publishing is still to come.
+    stepCreate: 'Create',
+    stepPublish: 'Publish',
     // See the Korean block: everything but the five fields that make an event is folded here.
     more: 'More settings',
 
@@ -902,6 +958,8 @@ const en: typeof ko = {
       title: 'Your event is made',
       // createEvent makes it a Draft (Ticket.sol:196) and claim refuses anything but Published.
       notYetPublic: 'Nobody can see it yet. Publish it from the event screen when you are ready',
+      // See the Korean block: the primary button that opens the publish sheet.
+      publishNow: 'Publish now',
       manage: 'Open the event screen',
       link: 'Event address',
       copy: 'Copy the address',

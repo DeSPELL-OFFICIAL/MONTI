@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import QRCode from 'qrcode';
-import { Alert, Button, Card, Screen, SuccessCheck, posterUrl } from '../../shared/ui';
+import { Alert, Button, Card, Screen, Steps, SuccessCheck, posterUrl } from '../../shared/ui';
 import { useOrganizerCopy } from '../copy';
 import { forgetEventDraft } from '../useEventDraft';
 import { followUpsDone, runFollowUps, type FollowUpResult } from './followUps';
@@ -23,7 +23,8 @@ type Handover = Partial<Omit<CreatedEvent, 'eventId'>>;
 const ALL_SAVED: FollowUpResult = { artSaved: true, venueSaved: true };
 
 export function Created() {
-  const copy = useOrganizerCopy().scene.done;
+  const scene = useOrganizerCopy().scene;
+  const copy = scene.done;
   const { eventId = '' } = useParams();
   const handed = (useLocation().state ?? {}) as Handover;
   const [dataUrl, setDataUrl] = useState('');
@@ -83,6 +84,8 @@ export function Created() {
   return (
     <Screen title={copy.title}>
       <div className="scene">
+        {/* 2단계 헤더: 발행이 아직 남았음을 처음부터 알린다(계획 §2b). */}
+        <Steps labels={[scene.stepCreate, scene.stepPublish]} at={1} />
         <SuccessCheck />
         {handed.posterCid ? (
           <div className="poster-card">
@@ -115,9 +118,13 @@ export function Created() {
           {dataUrl !== '' ? <img className="event-qr" src={dataUrl} alt={copy.qr} /> : null}
         </Card>
 
-        <Link to={`/events/${eventId}`} className="btn btn--primary btn--link">
-          {copy.view}
+        {/* 1차 버튼은 발행 시트로 곧장 보낸다(계획 §2b). 행사 보기·행사 화면 열기는 보조로 내려간다. */}
+        <Link to={`/org/events/${eventId}?publish=1`} className="btn btn--primary btn--link">
+          {copy.publishNow}
         </Link>
+        <p>
+          <Link to={`/events/${eventId}`}>{copy.view}</Link>
+        </p>
         <p>
           <Link to={`/org/events/${eventId}`}>{copy.manage}</Link>
         </p>

@@ -13,6 +13,7 @@ import { AcceptInvite } from './invites/Accept';
 import { CreateEvent } from './scene/CreateEvent';
 import { Created } from './scene/Created';
 import { EditEvent } from './scene/EditEvent';
+import { Requests } from './requests/Requests';
 
 /** The indexer's own words for an event's state; anything else is shown exactly as it came. */
 function statusLabel(status: string, labels: OrganizerCopy['home']['status']): string {
@@ -191,6 +192,8 @@ export function OrganizerRoutes() {
           and handing over. Only ever offered while the event is a Draft (T-EV-W12). */}
       <Route path="events/:eventId/edit" element={<EditEvent />} />
       <Route path="events/:eventId/gates" element={<Gates />} />
+      {/* 신청 관리 — approve or reject the requests waiting on an approvalRequired event. */}
+      <Route path="events/:eventId/requests" element={<Requests />} />
       <Route path="team" element={<Team />} />
       <Route path="team/:orgId" element={<TeamRoute />} />
       {/* Exactly where `createInvite`'s link points (functions/src/functions/invites.ts). */}

@@ -1,7 +1,7 @@
 import { useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { loadOrgName } from '../shared/api/firestore';
-import { PERM_CREATE_EVENT } from '../shared/chain/permissions';
+import { PERM_APPROVE_CLAIM, PERM_CREATE_EVENT } from '../shared/chain/permissions';
 import { gql } from '../shared/envio/client';
 import {
   MY_ORGS_QUERY,
@@ -28,6 +28,10 @@ export interface MyOrg {
   /** `Admin.bits`; 0 for an owner (the contract gives an owner everything) and for a manager. */
   bits: number;
   canCreateEvent: boolean;
+  /** The 신청 관리 gate: an owner, an admin holding PERM_APPROVE_CLAIM, or a manager with
+   *  `canApprove`. OR-ed across every row this person holds for the organisation, so an admin
+   *  without the bit who also manages with `canApprove` still passes. */
+  canApprove: boolean;
 }
 
 /** One organisation as the chain has it — every field of {@link MyOrg} except its name. */
@@ -91,14 +95,20 @@ function foldOrgs(
   managers: EnvioManager[],
 ): MyOrgBase[] {
   const byOrgId = new Map<string, MyOrgBase>();
-  const put = (orgId: string, role: MyOrg['role'], bits: number): void => {
-    if (byOrgId.has(orgId)) return;
-    byOrgId.set(orgId, { orgId, role, bits, canCreateEvent: canCreate(role, bits) });
+  const put = (orgId: string, role: MyOrg['role'], bits: number, canApprove: boolean): void => {
+    const existing = byOrgId.get(orgId);
+    if (existing) {
+      // The strongest role and its bits win, but approval is any-of: an admin without the bit who
+      // also manages the same organisation with canApprove still passes the 신청 관리 gate.
+      existing.canApprove ||= canApprove;
+      return;
+    }
+    byOrgId.set(orgId, { orgId, role, bits, canCreateEvent: canCreate(role, bits), canApprove });
   };
   // `Organizer.id` is the orgId itself; the other two rows carry it in their own column.
-  for (const organizer of organizers) put(organizer.id, 'owner', 0);
-  for (const admin of admins) put(admin.orgId, 'admin', toBits(admin.bits));
-  for (const manager of managers) put(manager.orgId, 'manager', 0);
+  for (const organizer of organizers) put(organizer.id, 'owner', 0, true);
+  for (const admin of admins) put(admin.orgId, 'admin', toBits(admin.bits), (toBits(admin.bits) & PERM_APPROVE_CLAIM) !== 0);
+  for (const manager of managers) put(manager.orgId, 'manager', 0, manager.canApprove);
   return [...byOrgId.values()].sort((left, right) => Number(left.orgId) - Number(right.orgId));
 }
 

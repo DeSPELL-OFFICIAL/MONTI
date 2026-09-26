@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Alert, Button, Fab, Field, KycBadge, Screen, Skeleton } from '../../shared/ui';
+import { Alert, Button, Fab, Field, KycBadge, Screen } from '../../shared/ui';
 import { isThemeCode, themeLabels } from '../../shared/eventThemes';
 import { fmt, useCopy, useLocale } from '../../shared/i18n';
 import { LIST_STAGGER, m, useReducedMotion } from '../../shared/motion';
@@ -11,6 +11,7 @@ import { useKycLevel } from '../me/useKycLevel';
 import { Filters } from './Filters';
 import {
   applyFilters,
+  DEFAULT_FILTERS,
   formatEventDate,
   formatEventDay,
   loadFilters,
@@ -26,8 +27,6 @@ import {
  */
 const CARD_TAGS = 2;
 
-/** How many placeholder cards the loading state shows before the real ones arrive. */
-const SKELETON_CARDS = 3;
 
 export function Discover() {
   const copy = useCopy();
@@ -70,13 +69,15 @@ export function Discover() {
       <Filters value={filters} onChange={update} />
 
       {isLoading ? (
-        <ul className="event-list" aria-busy="true">
-          {Array.from({ length: SKELETON_CARDS }, (_, row) => (
-            <li key={row} className="event-card">
-              <Skeleton width={64} height={90} radius={8} />
+        // 스켈레톤 카드로 진입 1초 안에 화면이 살아 보이게 한다(계획 §2a) — 스피너 한 개는
+        // '죽은 앱'처럼 읽혔다. 장식이라 스크린리더에서는 감춘다.
+        <ul className="event-list event-list--skeleton" aria-hidden="true">
+          {[0, 1, 2].map((row) => (
+            <li key={row} className="event-card event-card--skeleton">
+              <span className="event-card__art event-card__art--skeleton" />
               <div className="event-card__body">
-                <Skeleton width="70%" height={16} />
-                <Skeleton width="45%" height={12} />
+                <span className="skeleton-bar skeleton-bar--title" />
+                <span className="skeleton-bar" />
               </div>
             </li>
           ))}
@@ -90,7 +91,28 @@ export function Discover() {
         </>
       ) : null}
 
-      {!isLoading && !isError && items.length === 0 ? <p className="muted">{copy.discover.empty}</p> : null}
+      {!isLoading && !isError && items.length === 0 ? (
+        (data ?? []).length === 0 ? (
+          // 데이터 자체가 0건. 로그인한 사람에게는 첫 행사를 만들라 권하고(1차 버튼 → organizer.to),
+          // 비로그인에게는 곧 올라온다고 안심시킨다 — 버튼 없이(계획 §2a).
+          signedIn ? (
+            <div className="empty-state">
+              <p className="muted">{copy.discover.emptyHostCta}</p>
+              <Button onClick={() => navigate(organizer.to)}>{copy.discover.create}</Button>
+            </div>
+          ) : (
+            <p className="muted">{copy.discover.emptySoon}</p>
+          )
+        ) : (
+          // 행사는 있는데 필터가 다 걸러냈다. 필터를 지우면 다시 보인다.
+          <div className="empty-state">
+            <p className="muted">{copy.discover.emptyFiltered}</p>
+            <Button variant="ghost" onClick={() => update(DEFAULT_FILTERS)}>
+              {copy.discover.clearFilters}
+            </Button>
+          </div>
+        )
+      ) : null}
 
       <m.ul className="event-list" {...list}>
         {items.map(({ event, metadata }) => (

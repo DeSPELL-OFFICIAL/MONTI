@@ -94,6 +94,21 @@ describe('the done screen', () => {
     expect(screen.getByRole('link', { name: copy.manage })).toHaveAttribute('href', '/org/events/12');
   });
 
+  /** Plan §2b: the two-step header, at step 2 — publishing is what is still to come. */
+  it('shows the two-step header with 발행 as the step still to come', () => {
+    open();
+    expect(document.querySelector('.steps')).toBeInTheDocument();
+    expect(document.querySelector('.steps__step--current .steps__label')?.textContent)
+      .toBe(organizerCopy.ko.scene.stepPublish);
+  });
+
+  /** Plan §2b: the primary action is 지금 발행하기, sending the organiser into the publish sheet. */
+  it('makes 지금 발행하기 the primary action and points it at the publish sheet', () => {
+    open();
+    expect(screen.getByRole('link', { name: copy.publishNow }))
+      .toHaveAttribute('href', '/org/events/12?publish=1');
+  });
+
   it('offers the event and the organiser home', () => {
     open();
     expect(screen.getByRole('link', { name: copy.view })).toHaveAttribute('href', '/events/12');

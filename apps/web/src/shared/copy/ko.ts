@@ -13,6 +13,12 @@ export const ko = {
     contactHelp: '도움이 필요하면 메일로 연락해 주세요',
     contactEmail: 'info@despell.io',
   },
+  // 온체인 대기 확정형 진행 UI(OpProgress) 공용 카피(계획 §2c). '저장'·'확인'만 쓰고 web3 낱말은 없다.
+  op: {
+    saving: '저장 중', confirming: '확인 중', done: '완료',
+    elapsed: '{{sec}}초째', typical: '보통 3~10초 걸려요',
+    timeout: '시간이 조금 걸리고 있어요. 다시 시도할까요?',
+  },
   signup: {
     phoneTitle: '휴대폰 번호를 입력해 주세요', phoneHint: '문자로 인증번호를 보내드려요',
     phonePlaceholder: '01012345678', sendCode: '인증번호 받기',
@@ -87,7 +93,11 @@ export const ko = {
       4: '페스티벌', 5: '스포츠', 6: '콘퍼런스', 7: '강연·클래스', 8: '파티',
       9: '영화·상영', 10: '마켓', 11: '네트워킹', 3: '기타',
     },
-    empty: '조건에 맞는 행사가 없어요.', getTicket: '티켓 받기', requestTicket: '신청하기', share: '공유',
+    // 탐색 빈상태 3분기(계획 §2a): 데이터 0건+로그인 → emptyHostCta, 0건+비로그인 → emptySoon,
+    // 필터로만 0건 → emptyFiltered + clearFilters. 인덱서 다운은 errors.ts 의 serviceDown 이 맡는다.
+    emptyFiltered: '조건에 맞는 행사가 없어요.', emptyHostCta: '첫 행사를 만들어 보세요',
+    emptySoon: '곧 행사가 올라와요', clearFilters: '필터 지우기',
+    getTicket: '티켓 받기', requestTicket: '신청하기', share: '공유',
     map: '지도로 보기', publicRecord: '공개 기록', soldOut: '마감됨', cancelled: '취소된 행사예요.',
     untitled: '제목을 불러오지 못했어요', remaining: '{{count}}자리 남음',
     // 탐색 카드에 다 못 들어간 태그의 수. 상세 화면은 전부 보여준다(계획 B-2).

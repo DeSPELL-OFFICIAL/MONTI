@@ -5,7 +5,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // table are exercised for real rather than mocked away with `shared/api/auth` itself.
 const clear = vi.fn();
 const recaptchaInstances: Array<{ clear: () => void }> = [];
-const RecaptchaVerifier = vi.fn(() => {
+// Records `appVerificationDisabledForTesting` as it stood the instant each verifier was built, so
+// a test can prove the E2E bypass is applied *before* construction rather than after.
+const verifierDisabledAtConstruction: boolean[] = [];
+const RecaptchaVerifier = vi.fn((auth: { settings?: { appVerificationDisabledForTesting?: boolean } }) => {
+  verifierDisabledAtConstruction.push(auth.settings?.appVerificationDisabledForTesting === true);
   const instance = { clear };
   recaptchaInstances.push(instance);
   return instance;
@@ -21,7 +25,7 @@ vi.mock('firebase/auth', () => ({
   PhoneAuthProvider: { credential },
 }));
 
-const fakeAuth = { name: 'test-auth' };
+const fakeAuth = { name: 'test-auth', settings: { appVerificationDisabledForTesting: false } };
 vi.mock('./firebase', () => ({ getFirebaseAuth: () => fakeAuth }));
 
 const isNativePlatform = vi.fn(() => false);
@@ -74,6 +78,9 @@ beforeEach(() => {
   resetRecaptcha();
   listeners.clear();
   recaptchaInstances.length = 0;
+  verifierDisabledAtConstruction.length = 0;
+  fakeAuth.settings.appVerificationDisabledForTesting = false;
+  window.localStorage.clear();
 });
 
 describe('web phone sign-in', () => {
@@ -102,6 +109,33 @@ describe('web phone sign-in', () => {
     await confirmOtp('web-vid', '123456');
     expect(credential).toHaveBeenCalledWith('web-vid', '123456');
     expect(signInWithCredential).toHaveBeenCalledWith(fakeAuth, { verificationId: 'web-vid', code: '123456' });
+  });
+});
+
+describe('e2e verification bypass', () => {
+  const MESSAGE = '[monti] e2e verification bypass on (test numbers only)';
+
+  it('disables app verification before the verifier is built when the opt-in flag is set', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    window.localStorage.setItem('monti:e2e', '1');
+
+    await sendOtp(PHONE);
+
+    // The flag was already true at the moment `new RecaptchaVerifier(auth, …)` ran, so Firebase
+    // constructs its mock verifier rather than a live reCAPTCHA it would then ignore.
+    expect(verifierDisabledAtConstruction[0]).toBe(true);
+    expect(fakeAuth.settings.appVerificationDisabledForTesting).toBe(true);
+    expect(info).toHaveBeenCalledWith(MESSAGE);
+  });
+
+  it('changes nothing without the flag', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+
+    await sendOtp(PHONE);
+
+    expect(verifierDisabledAtConstruction[0]).toBe(false);
+    expect(fakeAuth.settings.appVerificationDisabledForTesting).toBe(false);
+    expect(info).not.toHaveBeenCalledWith(MESSAGE);
   });
 });
 

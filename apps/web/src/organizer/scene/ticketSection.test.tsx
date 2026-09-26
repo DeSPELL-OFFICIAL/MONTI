@@ -149,7 +149,8 @@ describe('the kinds', () => {
       { ...emptyEventDraftTier, name: '학생' },
     ] });
     await waitFor(() => expect(screen.getAllByRole('heading', { level: 3 })).toHaveLength(2));
-    const cards = screen.getAllByRole('listitem');
+    // Scope to the ticket cards: the scene's two-step header (plan §2b) is a list too.
+    const cards = within(document.querySelector('.tier-list-cards') as HTMLElement).getAllByRole('listitem');
     await user.click(within(cards[0] as HTMLElement).getByRole('button', { name: copy.tiers.remove }));
     expect(mirror().tiers.map((tier) => tier.name)).toEqual(['학생']);
   });

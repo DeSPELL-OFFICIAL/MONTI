@@ -884,6 +884,32 @@ table { width: 100%; display: block; overflow-x: auto; }
    own name is printed inside the picture, which is why it is not repeated here. */
 .ticket-row__text { min-width: 0; font-weight: 600; }
 
+/* ── explore skeleton + empty states (plan §2a) ─────────────────────────────────────────── */
+/* Three grey cards the moment the list starts loading, so 탐색 never opens on a lone spinner
+   that reads as a dead app. The shimmer is neutralised by the reduced-motion rule above. */
+.empty-state { display: grid; gap: var(--s-3); justify-items: start; margin: var(--s-4) 0; }
+.event-card--skeleton { pointer-events: none; }
+.event-card__art--skeleton { box-shadow: none; animation: skeleton-pulse 1.3s ease-in-out infinite; }
+.skeleton-bar {
+  display: block; height: 12px; width: 45%; border-radius: var(--r-sm);
+  background: var(--brand-tint); margin-top: 8px;
+  animation: skeleton-pulse 1.3s ease-in-out infinite;
+}
+.skeleton-bar--title { height: 16px; width: 70%; margin-top: 0; }
+@keyframes skeleton-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+/* ── publish summary sheet (plan §2b) ───────────────────────────────────────────────────── */
+.publish-summary { display: grid; gap: var(--s-2); margin: var(--s-3) 0; }
+.publish-summary > div { display: flex; justify-content: space-between; gap: var(--s-3); }
+.publish-summary dt { color: var(--ink-2); font-size: var(--t-cap); }
+.publish-summary dd { margin: 0; font-weight: 600; text-align: right; }
+
+/* ── on-chain wait progress (plan §2c) ──────────────────────────────────────────────────── */
+/* The determinate wait a sponsored op shows in place of a bare spinner. The Steps' pulse is
+   handled by the reduced-motion rule above; only the seconds counter ticks. */
+.op-progress { margin: var(--s-3) 0; }
+.op-progress__status { display: grid; gap: var(--s-2); justify-items: start; }
+.op-progress__status .muted { margin: 0; }
 /* ── the success mark ─────────────────────────────────────────────────────────────────────────
    The check on the two "done" screens (SuccessCheck). The ring's scale-in, the tick's draw and
    the confetti are all framer's — on SPRING.bouncy, dropped to a still check with no confetti
