@@ -11,7 +11,6 @@
 // The code dies with the gate's code, not with the arm window: a `GateCode` is good for
 // `CODE_WINDOW_SECONDS` from `issuedAt` and `Ticket.checkIn` refuses it after that.
 import { useEffect, useState } from 'react';
-import QRCode from 'qrcode';
 import { CODE_WINDOW_SECONDS, type GateCodeWire, type GateResponseWire } from '@monti/shared';
 import { Alert, Countdown, Spinner } from '../../shared/ui';
 import { useCopy } from '../../shared/i18n';
@@ -39,7 +38,12 @@ export function Qr({
     let live = true;
     const answer = wire ? Promise.resolve(wire) : buildGateResponse(tokenId, gateCode);
     void answer
-      .then((response) => QRCode.toDataURL(gateResponseToQr(response), { width: 320, margin: 1 }))
+      // `qrcode` is loaded on demand so its ~15 kB gz stays out of the main chunk; the Spinner
+      // below is the placeholder until the picture (or an error) is ready.
+      .then(async (response) => {
+        const { default: QRCode } = await import('qrcode');
+        return QRCode.toDataURL(gateResponseToQr(response), { width: 320, margin: 1 });
+      })
       .then((url) => {
         if (live) setDataUrl(url);
       })
