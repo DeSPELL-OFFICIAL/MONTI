@@ -40,6 +40,7 @@ vi.mock('../../shared/config', async (orig) => ({
 }));
 
 const { CreateEvent } = await import('./CreateEvent');
+const { TicketSection } = await import('./TicketSection');
 const { EVENT_DRAFT_KEY, emptyEventDraft, emptyEventDraftTier } = await import('../useEventDraft');
 const { organizerCopy } = await import('../copy');
 const { TICKET_ART_PRESETS } = await import('./draftRules');
@@ -378,5 +379,85 @@ describe('행사 만들기', () => {
     await ready();
     expect(screen.getByLabelText(copy.titleLabel)).toHaveValue(READY.title);
     expect(screen.getByRole('link', { name: copy.leave })).toHaveAttribute('href', '/org');
+  });
+});
+
+describe('the quick-start presets', () => {
+  it('무료 선착순 makes the first kind free, first come, in one tap', async () => {
+    const user = userEvent.setup();
+    open();
+    await ready();
+    await user.click(screen.getByRole('button', { name: copy.tiers.quickFree }));
+    expect(mirror().tiers[0]).toMatchObject({ currency: 'free', maxPerWallet: 1 });
+    expect(mirror().approvalRequired).toBe(false);
+  });
+
+  it('무료 관리자 승인 turns the approval flag on when it is open', async () => {
+    vi.stubEnv('VITE_APPROVAL_MODES', 'on');
+    const user = userEvent.setup();
+    open();
+    await ready();
+    await user.click(screen.getByRole('button', { name: copy.tiers.quickApproval }));
+    expect(mirror().tiers[0]).toMatchObject({ currency: 'free', maxPerWallet: 1 });
+    expect(mirror().approvalRequired).toBe(true);
+  });
+
+  it('holds 무료 관리자 승인 behind the flag when it is off', async () => {
+    vi.stubEnv('VITE_APPROVAL_MODES', 'off');
+    open();
+    await ready();
+    expect(screen.getByRole('button', { name: copy.tiers.quickApproval })).toBeDisabled();
+  });
+
+  it('유료 일반 sets the first kind paid, and the honest block still lands', async () => {
+    const user = userEvent.setup();
+    open();
+    await ready();
+    await user.click(screen.getByRole('button', { name: copy.tiers.quickPaid }));
+    expect(mirror().tiers[0]).toMatchObject({ currency: 'MON', maxPerWallet: 1 });
+    expect(screen.getByText(copy.tiers.paidBlocked)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: copy.tiers.create })).toBeDisabled();
+  });
+});
+
+describe('the preview is the form', () => {
+  it('taps the kind region and the name box takes focus', async () => {
+    const user = userEvent.setup();
+    open();
+    await ready();
+    await user.click(screen.getByRole('button', { name: copy.tiers.editKind }));
+    expect(screen.getByLabelText(copy.tiers.name)).toHaveFocus();
+  });
+
+  it('taps the picture region and a picture tile takes focus', async () => {
+    const user = userEvent.setup();
+    open();
+    await ready();
+    await user.click(screen.getByRole('button', { name: copy.tiers.editArt }));
+    expect(document.activeElement).toHaveClass('art-tile');
+  });
+
+  it('taps the price badge and the 무료 | 유료 chips take focus', async () => {
+    const user = userEvent.setup();
+    open();
+    await ready();
+    await user.click(screen.getByRole('button', { name: copy.tiers.editPrice }));
+    expect(screen.getByRole('button', { name: copy.tiers.free })).toHaveFocus();
+  });
+
+  it('taps the title region and asks the scene to edit the title', async () => {
+    const user = userEvent.setup();
+    const onEditTitle = vi.fn();
+    render(
+      <TicketSection
+        draft={{ ...emptyEventDraft, title: '재즈 나이트', tiers: [{ ...emptyEventDraftTier, name: '일반' }] }}
+        patch={vi.fn()}
+        problems={[]}
+        blocked={false}
+        onEditTitle={onEditTitle}
+      />,
+    );
+    await user.click(screen.getByRole('button', { name: copy.tiers.editTitle }));
+    expect(onEditTitle).toHaveBeenCalledTimes(1);
   });
 });

@@ -398,6 +398,17 @@ const ko = {
       cutoff: '양도 마감 (행사 시작 N시간 전)',
       requireKyc: '본인 확인한 사람만',
       requireKycHelp: '켜면 신분증·얼굴 확인을 마친 사람만 티켓을 받을 수 있어요. 가벼운 모임은 꺼두세요',
+      // 빠른 시작: 첫 종류와 받는 방식을 한 번에 정하는 프리셋 3종. 한 번 눌러 시작하고,
+      // 세부는 아래 카드에서 고친다(계획 A-1). 승인 프리셋은 받는 방식 칩과 같은 조건으로 잠긴다.
+      quickStart: '빠른 시작',
+      quickFree: '무료 선착순',
+      quickApproval: '무료 관리자 승인',
+      quickPaid: '유료 일반',
+      // 미리보기 위에 올리는 투명 버튼의 이름 — 그림·종류·제목·가격을 미리보기에서 바로 고친다.
+      editArt: '티켓 그림 바꾸기',
+      editKind: '종류 이름 편집',
+      editTitle: '행사 제목 편집',
+      editPrice: '가격 설정',
       feeNote: '만드는 비용은 MONTI가 대신 내요',
     },
 
@@ -869,6 +880,19 @@ const en: typeof ko = {
       cutoff: 'Hand-over closes (hours before the event starts)',
       requireKyc: 'Only people who passed the identity check',
       requireKycHelp: 'With this on, only people who finished the ID and face check can get a ticket. Leave it off for casual meetups',
+      // Quick start: three presets that set the first kind and the receiving method in one tap.
+      // Start here, then fine-tune in the cards below (plan section A-1). The approval preset is
+      // held behind the same flag as the receiving-method chip.
+      quickStart: 'Quick start',
+      quickFree: 'Free, first come',
+      quickApproval: 'Free, organiser approves',
+      quickPaid: 'Paid',
+      // Names for the transparent buttons laid over the preview — edit the picture, the kind, the
+      // title and the price straight from the preview.
+      editArt: 'Change the ticket picture',
+      editKind: 'Edit the kind name',
+      editTitle: 'Edit the event title',
+      editPrice: 'Set the price',
       feeNote: 'MONTI covers the cost of creating it',
     },
 

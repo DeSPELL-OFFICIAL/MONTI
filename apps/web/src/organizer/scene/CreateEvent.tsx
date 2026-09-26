@@ -84,6 +84,8 @@ export function CreateEvent() {
    */
   const [orgName, setOrgName] = useState('');
   const orgTyped = useRef(false);
+  // Tapping the title on a ticket preview takes the organiser here, to the one box that owns it.
+  const titleRef = useRef<HTMLInputElement>(null);
   // `더 설정하기`. Closed to begin with — the five fields above it are the whole of an event
   // that works — and opened by hand, or by a problem hiding inside it.
   const [more, setMore] = useState(false);
@@ -199,6 +201,13 @@ export function CreateEvent() {
     });
   }
 
+  // Tapping the title region of a ticket preview: scroll to the title card and put the cursor in
+  // it, so the preview is where the editing starts and the box is where it lands.
+  function editTitle(): void {
+    scrollTo('title');
+    titleRef.current?.focus();
+  }
+
   function create(): void {
     setChecked(true);
     const first = problems[0];
@@ -271,6 +280,7 @@ export function CreateEvent() {
         <Card id="scene-title">
           <Field label={copy.titleLabel}>
             <input
+              ref={titleRef}
               value={draft.title}
               maxLength={MAX_TITLE_CHARS}
               placeholder={copy.titlePlaceholder}
@@ -341,6 +351,7 @@ export function CreateEvent() {
           patch={patch}
           problems={checked ? tiersWrong : []}
           blocked={blocked}
+          onEditTitle={editTitle}
         />
 
         {/* Everything an event can do without. It is closed on arrival: five fields and one

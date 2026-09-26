@@ -1,5 +1,6 @@
-import { Alert, Button, Card, Field, Toggle } from '../../shared/ui';
+import { Alert, Button, Card, Chip, Field, Toggle } from '../../shared/ui';
 import type { EventDraft, EventDraftTier } from '../../shared/api/firestore';
+import { approvalModesEnabled } from '../../shared/config';
 import { useDisplayName } from '../../shared/displayName';
 import { useCopy } from '../../shared/i18n';
 import { useOrganizerCopy } from '../copy';
@@ -14,6 +15,40 @@ export interface TicketSectionProps {
   problems: readonly TierProblem[];
   /** A kind that is not free. It is a choice to undo, so it is an alert and not a line. */
   blocked: boolean;
+  /** Tapping the title on a preview asks the scene to edit the event title; see {@link TierCard}. */
+  onEditTitle?: () => void;
+}
+
+/**
+ * A hand-over icon (two arrows passing) and an identity-check icon (a person with a tick), the
+ * two glyphs the compact rules row carries. They are `currentColor` line art and `aria-hidden`
+ * (Toggle wraps them again), so they add nothing to the checkboxes' accessible names.
+ */
+function TransferIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"
+    >
+      <path d="M4 8h13" />
+      <path d="M14 5l3 3-3 3" />
+      <path d="M20 16H7" />
+      <path d="M10 13l-3 3 3 3" />
+    </svg>
+  );
+}
+
+function KycIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"
+    >
+      <circle cx="11" cy="8" r="4" />
+      <path d="M4 20c0-3.9 3.6-6 7-6 .8 0 1.6.1 2.3.3" />
+      <path d="M15 18l2 2 4-4" />
+    </svg>
+  );
 }
 
 /**
@@ -28,7 +63,7 @@ export interface TicketSectionProps {
  * because `transferable`, `transferCutoffSeconds` and `requireKyc` are fields of `EventMeta`
  * and `Tier` has no room for any of them — a per-kind switch would be a screen that lies.
  */
-export function TicketSection({ draft, patch, problems, blocked }: TicketSectionProps) {
+export function TicketSection({ draft, patch, problems, blocked, onEditTitle }: TicketSectionProps) {
   const copy = useOrganizerCopy().scene;
   // Read once here rather than in each card: a draft may hold eight kinds, and the name is one
   // document. The fallback is the attendee's own word, so the organiser's preview and the
@@ -36,13 +71,54 @@ export function TicketSection({ draft, patch, problems, blocked }: TicketSection
   const tickets = useCopy().tickets;
   const displayName = useDisplayName();
   const holder = displayName === '' ? tickets.artGuest : displayName;
+  // 관리자 승인 후 발급 is still refused by the deployed contract, so the approval preset is
+  // held behind the same flag as the receiving-method chip inside the card.
+  const approvalModes = approvalModesEnabled();
 
   function patchTier(index: number, next: Partial<EventDraftTier>): void {
     patch({ tiers: draft.tiers.map((tier, at) => (at === index ? { ...tier, ...next } : tier)) });
   }
 
+  // The current draft, read back as the chosen preset: a free first kind is 선착순 or 승인 by the
+  // event flag, anything else is 유료. It is the same one-tap choice the receiving-method chips
+  // make, gathered into one row at the top so the whole of an ordinary event is one tap.
+  const firstPaid = draft.tiers[0] !== undefined && draft.tiers[0].currency !== 'free';
+  const quick: 'free' | 'approval' | 'paid' = firstPaid
+    ? 'paid'
+    : draft.approvalRequired ? 'approval' : 'free';
+
   return (
     <Card title={copy.tiers.title} id="scene-tickets">
+      {/* One tap sets the first kind and the receiving method together — free/선착순, free/승인
+          or paid — and the cards below stay the place to fine-tune it. */}
+      <p className="muted">{copy.tiers.quickStart}</p>
+      <div className="chip-row" role="group" aria-label={copy.tiers.quickStart}>
+        <Chip
+          label={copy.tiers.quickFree}
+          selected={quick === 'free'}
+          onClick={() => {
+            patchTier(0, { currency: 'free', maxPerWallet: 1 });
+            patch({ approvalRequired: false });
+          }}
+        />
+        <Chip
+          label={copy.tiers.quickApproval}
+          selected={quick === 'approval'}
+          // The same gate as the receiving-method 관리자 승인 chip: drawn, but off until the flag.
+          disabled={!approvalModes}
+          onClick={() => {
+            patchTier(0, { currency: 'free', maxPerWallet: 1 });
+            patch({ approvalRequired: true });
+          }}
+        />
+        <Chip
+          label={copy.tiers.quickPaid}
+          selected={quick === 'paid'}
+          // The amount is left at its default; the honest paid block still lands in the card.
+          onClick={() => patchTier(0, { currency: 'MON', maxPerWallet: 1 })}
+        />
+      </div>
+
       <ul className="tier-list-cards">
         {draft.tiers.map((tier, index) => (
           <TierCard
@@ -61,6 +137,9 @@ export function TicketSection({ draft, patch, problems, blocked }: TicketSection
             // the draft rather than to its own kind. Only the first card draws the control.
             approvalRequired={draft.approvalRequired}
             onApprovalRequired={(value) => patch({ approvalRequired: value })}
+            // Every card is handed it; the title is one event field, so a tap on any preview's
+            // title takes the organiser to the same box.
+            onEditTitle={onEditTitle}
           />
         ))}
       </ul>
@@ -99,11 +178,33 @@ export function TicketExtras({ draft, patch }: Pick<TicketSectionProps, 'draft' 
 
       <h2>{copy.tiers.rules}</h2>
       <p className="muted">{copy.tiers.rulesHelp}</p>
-      <Toggle
-        label={copy.tiers.transferable}
-        checked={draft.transferable}
-        onChange={(on) => patch({ transferable: on })}
-      />
+      {/* One compact row: the two switches, each with a glyph, side by side. They stay real
+          checkboxes — the icon is `aria-hidden` decoration, so the accessible name is still the
+          label and `getByRole('checkbox', { name })` finds each one. The long 본인 확인 note moves
+          into a (i) tooltip so the row stays a row rather than a wall of sentences. */}
+      <div className="tier-extras-row">
+        <Toggle
+          icon={<TransferIcon />}
+          label={copy.tiers.transferable}
+          checked={draft.transferable}
+          onChange={(on) => patch({ transferable: on })}
+        />
+        <div className="tier-extras-row__kyc">
+          <Toggle
+            icon={<KycIcon />}
+            label={copy.tiers.requireKyc}
+            checked={draft.requireKyc}
+            onChange={(on) => patch({ requireKyc: on })}
+          />
+          <span className="field-tip">
+            <button type="button" className="field-tip__icon" aria-label={copy.tiers.requireKycHelp}>
+              i
+            </button>
+            <span className="field-tip__bubble" role="tooltip">{copy.tiers.requireKycHelp}</span>
+          </span>
+        </div>
+      </div>
+      {/* The deadline is only a question while hand-over is allowed, so it reveals under the row. */}
       {draft.transferable ? (
         <Field label={copy.tiers.cutoff}>
           <input
@@ -116,12 +217,6 @@ export function TicketExtras({ draft, patch }: Pick<TicketSectionProps, 'draft' 
           />
         </Field>
       ) : null}
-      <Toggle
-        label={copy.tiers.requireKyc}
-        checked={draft.requireKyc}
-        onChange={(on) => patch({ requireKyc: on })}
-        help={copy.tiers.requireKycHelp}
-      />
     </section>
   );
 }

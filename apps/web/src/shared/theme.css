@@ -474,6 +474,16 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
 .toggle__row input { width: 22px; height: 22px; accent-color: var(--brand); flex: 0 0 auto; }
 .toggle__row span { font-size: var(--t-body); }
 .toggle__help { margin: 6px 0 0; }
+/* A glyph between the switch and the label — decoration, so it never carries a name of its own. */
+.toggle__icon { display: inline-flex; align-items: center; color: var(--brand-ink); flex: 0 0 auto; }
+/* The event's whole-event rules as one compact row: the two switches side by side, wrapping to a
+   stack when the phone is too narrow for both. Each toggle drops its own vertical margin here. */
+.tier-extras-row {
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: var(--s-2) var(--s-5); margin: var(--s-2) 0;
+}
+.tier-extras-row .toggle { margin: 0; }
+.tier-extras-row__kyc { display: inline-flex; align-items: center; gap: var(--s-2); }
 
 /* ── progress, spinners ────────────────────────────────────────────────────────────────── */
 .countdown { font-size: 44px; font-weight: 700; text-align: center; font-variant-numeric: tabular-nums; color: var(--ink); }
@@ -714,7 +724,38 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
 .tier-card__head h3 { font-size: 14px; margin: 0; color: var(--ink-2); font-weight: 700; }
 .tier-card__head .btn { width: auto; min-height: 0; height: 36px; padding: 0 var(--s-4); font-size: 14px; }
 /* The picture is A4, so at card width it would be taller than the phone. It is a preview. */
-.tier-card__art { max-width: 150px; margin: var(--s-3) auto var(--s-1); }
+/* The preview is the form: it is the positioning context for the transparent tap regions and the
+   price badge laid over it, and it is a little larger than a thumbnail now because it is a control
+   the organiser aims at, not only a picture they glance at. */
+.tier-card__art { position: relative; max-width: 200px; margin: var(--s-3) auto var(--s-1); }
+/* The tap regions cover only the picture. Each is a transparent button over one band of the
+   drawing (see TierCard's TAP_REGION); a tap edits the thing under the thumb. They carry a full
+   tap target as a floor, so on this small preview the thin kind/title bands overlap — the later
+   one in source wins, which keeps the picture region and the badge the two unambiguous targets. */
+.tier-preview__taps { position: absolute; inset: 0; }
+.tier-preview__tap {
+  position: absolute; left: 0; right: 0;
+  min-height: var(--tap);
+  margin: 0; padding: 0; border: 0; background: transparent;
+  border-radius: var(--r-sm); cursor: pointer;
+  transition: background var(--fast) var(--ease);
+}
+.tier-preview__tap:hover { background: rgba(131, 110, 249, 0.16); }
+.tier-preview__tap:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+/* The price the drawing never bakes in, as a corner chip. Its own dark ground keeps white text
+   well past 4.5:1 whatever pixels of the picture sit behind it. */
+.tier-preview__badge {
+  position: absolute; top: var(--s-2); right: var(--s-2); z-index: 2;
+  display: inline-flex; align-items: center; min-height: 32px;
+  padding: 0 12px; border-radius: var(--r-pill);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: var(--brand-deep); color: #fff;
+  font-size: 13px; font-weight: 700; line-height: 1; cursor: pointer;
+  box-shadow: 0 2px 8px rgba(32, 0, 82, 0.35);
+  transition: transform var(--fast) var(--ease);
+}
+.tier-preview__badge:active { transform: scale(0.96); }
+.tier-preview__badge:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .tier-card__pair { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-3); }
 .tier-card .a4-frame { max-width: 200px; margin: var(--s-2) auto; }
 
