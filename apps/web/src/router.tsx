@@ -1,17 +1,48 @@
-import { Navigate, Outlet, type RouteObject, useLocation } from 'react-router-dom';
+import { Navigate, Outlet, type RouteObject, useLocation, useOutlet } from 'react-router-dom';
 import { BottomTabs } from './shared/ui';
 import { useRegistration } from './shared/registration';
 import { useSession } from './shared/session';
 import { Spinner } from './shared/ui';
+import { AnimatePresence, m, useReducedMotion } from './shared/motion';
 
 const TAB_PATHS = ['/', '/tickets', '/chats', '/me'];
 
+/**
+ * The screen slides in from the right and the one it replaces slides out to the left — 240ms of
+ * transform and opacity, nothing that reflows. `mode="wait"` keeps the two from overlapping, so
+ * only one screen is ever laid out; keying on the path is what tells `AnimatePresence` a screen
+ * has actually changed. `body` already has `overflow-x: hidden`, so the 24px the entering screen
+ * starts offset by never becomes a horizontal scrollbar.
+ *
+ * Under reduced motion the whole apparatus is skipped: the outlet is rendered straight, with no
+ * wrapper and no transform, so a person who asked for stillness gets an instant cut. The tab bar
+ * lives outside the animated region on purpose — it is chrome, not a screen, and must not slide
+ * with the content under it (and, being outside the transformed element, keeps its fixed
+ * position anchored to the viewport).
+ */
 function TabShell() {
   const location = useLocation();
+  const outlet = useOutlet();
+  const reduce = useReducedMotion();
   const showTabs = TAB_PATHS.includes(location.pathname);
   return (
     <>
-      <Outlet />
+      {reduce ? (
+        outlet
+      ) : (
+        <AnimatePresence mode="wait" initial={false}>
+          <m.div
+            key={location.pathname}
+            className="route-view"
+            initial={{ opacity: 0, x: 24 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -24 }}
+            transition={{ duration: 0.24, ease: [0.22, 0.61, 0.36, 1] }}
+          >
+            {outlet}
+          </m.div>
+        </AnimatePresence>
+      )}
       {showTabs ? <BottomTabs /> : null}
     </>
   );

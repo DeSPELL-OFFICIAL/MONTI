@@ -748,8 +748,15 @@ table { width: 100%; display: block; overflow-x: auto; }
 
 /* A tab is a glyph over a word. The glyph is what the thumb aims at; the word is what the
    screen reader says — and what a test asks for the link by. */
-.tabbar a { grid-auto-flow: row; gap: 2px; padding: 4px 0; }
+.tabbar a { grid-auto-flow: row; gap: 2px; padding: 4px 0; position: relative; }
 .tabbar__icon { display: block; }
+/* The sliding tab indicator (BottomTabs). A shared `layoutId` element springs it from one tab
+   to the next; the `aria-current` tint above is the cue that shows with reduced motion or no JS,
+   so this line is decoration only. Inset from the edges so it reads as an underline, not a rule. */
+.tabbar__ind {
+  position: absolute; left: 22%; right: 22%; bottom: 2px;
+  height: 3px; border-radius: var(--r-pill); background: var(--brand);
+}
 
 /* What an event asks, and where the person stands, are two different kinds of fact and are
    coloured as such — side by side on a card they read as one phrase otherwise. */

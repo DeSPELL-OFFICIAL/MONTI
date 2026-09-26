@@ -2,9 +2,13 @@ import { Link } from 'react-router-dom';
 import { Alert, Button, Screen, Spinner, TicketArt } from '../../shared/ui';
 import { useCopy } from '../../shared/i18n';
 import { describeFailure } from '../../shared/errors';
+import { m, SPRING, useReducedMotion } from '../../shared/motion';
 import { useTicketArtProps } from './useTicketArt';
 import { useMyTickets } from './useTickets';
 import type { TicketState } from './ticketState';
+
+/** The whole row is the tap target, so the row is what presses — as a link, not a button. */
+const MotionLink = m.create(Link);
 
 /** The one place a derived state turns into a word, shared with the detail screen. */
 export function useStateLabel(): Record<TicketState, string> {
@@ -24,6 +28,8 @@ export function TicketList() {
   const { data, isLoading, isError, error, refetch } = useMyTickets();
   const tickets = data ?? [];
   const artPropsOf = useTicketArtProps(tickets);
+  const reduce = useReducedMotion();
+  const tap = reduce ? undefined : { whileTap: { scale: 0.97 }, transition: SPRING.snappy };
 
   return (
     <Screen title={copy.tickets.title}>
@@ -41,7 +47,7 @@ export function TicketList() {
       <ul className="event-list">
         {tickets.map((ticket) => (
           <li key={ticket.tokenId}>
-            <Link className="ticket-row" to={`/tickets/${ticket.tokenId}`}>
+            <MotionLink className="ticket-row" to={`/tickets/${ticket.tokenId}`} {...tap}>
               {/* Hidden from the accessible name on purpose. Everything the picture says out
                   loud — the event, the kind, and 사용됨 across a spent ticket — is either
                   already the line beside it or is the state word in that line, so leaving it
@@ -56,7 +62,7 @@ export function TicketList() {
               <span className="ticket-row__text">
                 #{ticket.tokenId} · {labels[ticket.state]}
               </span>
-            </Link>
+            </MotionLink>
           </li>
         ))}
       </ul>
