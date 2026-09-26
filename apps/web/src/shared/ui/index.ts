@@ -15,6 +15,7 @@ export { Toggle, type ToggleProps } from './Toggle';
 export { StickyBar } from './StickyBar';
 export { Toast, TOAST_MS, type ToastProps } from './Toast';
 export { Steps, type StepsProps } from './Steps';
+export { OpProgress, OP_TIMEOUT_SECONDS, type OpPhase, type OpProgressProps } from './OpProgress';
 export { A4Cropper, A4Frame, type A4CropperProps, type A4FrameProps } from './A4Cropper';
 export { PosterModal, type PosterModalProps } from './PosterModal';
 export { posterUrl, rememberPoster } from './posterUrl';

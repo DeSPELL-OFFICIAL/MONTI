@@ -119,6 +119,15 @@ beforeEach(() => {
 });
 
 describe('the scene layout', () => {
+  /** Plan §2b: the two-step header, at step 1 — 만들기 now, 발행 still to come on the done screen. */
+  it('shows the two-step header with 만들기 as the current step', async () => {
+    open();
+    await waitFor(() => expect(listEventDrafts).toHaveBeenCalled());
+    expect(document.querySelector('.steps')).toBeInTheDocument();
+    expect(document.querySelector('.steps__step--current .steps__label')?.textContent)
+      .toBe(copy.stepCreate);
+  });
+
   /**
    * Five fields and one button (plan section B-2). The poster, the title, the start, the place
    * and the one ticket kind are what an event needs; everything else waits behind the fold.
