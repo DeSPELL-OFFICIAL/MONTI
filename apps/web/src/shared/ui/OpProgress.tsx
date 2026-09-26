@@ -54,9 +54,14 @@ export interface OpProgressProps {
    * 나중에…" — so the two choices below it read as one decision. Falls back to `copy.op.timeout`.
    */
   timeoutMessage?: string;
+  /**
+   * A short line above the wait while the op is still in flight — the claim path's "잠시 붐벼요. 다시
+   * 보내는 중…" during a send-layer resend. Shown only before the timeout, never in place of a step.
+   */
+  note?: string;
 }
 
-export function OpProgress({ phase, onRetry, onLater, laterLabel, timeoutMessage }: OpProgressProps) {
+export function OpProgress({ phase, onRetry, onLater, laterLabel, timeoutMessage, note }: OpProgressProps) {
   const copy = useCopy();
   const [seconds, setSeconds] = useState(0);
   const done = phase === 'done';
@@ -93,6 +98,7 @@ export function OpProgress({ phase, onRetry, onLater, laterLabel, timeoutMessage
           </>
         ) : done ? null : (
           <>
+            {note ? <p className="muted">{note}</p> : null}
             <p className="muted">{copy.op.typical}</p>
             {seconds > 0 ? <p className="muted">{fmt(copy.op.elapsed, { sec: seconds })}</p> : null}
             {slow ? <p className="muted">{copy.signup.registerSlow}</p> : null}

@@ -4,8 +4,7 @@ import { useRegistration } from './shared/registration';
 import { useSession } from './shared/session';
 import { Spinner } from './shared/ui';
 import { AnimatePresence, m, useReducedMotion } from './shared/motion';
-
-const TAB_PATHS = ['/', '/tickets', '/chats', '/me'];
+import { TAB_PATHS } from './shared/tabRoots';
 
 /**
  * The screen slides in from the right and the one it replaces slides out to the left — 240ms of

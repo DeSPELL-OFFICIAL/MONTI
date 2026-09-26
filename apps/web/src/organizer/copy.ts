@@ -14,20 +14,20 @@ const ko = {
     title: '주최자',
     backToDiscover: '탐색으로',
 
-    orgs: '내 주최사',
-    org: '주최사',
-    orgsEmpty: '아직 속한 주최사가 없어요.',
-    become: '주최사 만들기',
+    orgs: '우리 팀',
+    org: '우리 팀',
+    orgsEmpty: '아직 속한 팀이 없어요.',
+    become: '팀 만들기',
     // 콜러블이 답한 번호가 인덱서에 오르기까지 1~2초가 걸린다. 그 사이에 여기로 오면 목록에 없다.
-    orgPending: '방금 만든 주최사는 잠시 뒤에 목록에 나타나요',
-    noPermission: '행사를 만들 권한이 없어요. 주최사 오너에게 권한을 요청해 주세요',
+    orgPending: '방금 만든 팀은 잠시 뒤에 목록에 나타나요',
+    noPermission: '행사를 만들 권한이 없어요. 팀 오너에게 권한을 요청해 주세요',
 
     events: '내 행사',
     eventsEmpty: '아직 만든 행사가 없어요. 아래 만들기로 시작해 보세요',
     eventsFailed: '내 행사를 가져오지 못했어요. 잠시 뒤 다시 시도해 주세요',
     // 목록은 체인 줄만 읽는다. 제목은 IPFS에 있고, 느린 게이트웨이가 목록을 붙잡으면 안 된다.
     eventFallback: '행사 #{{id}}',
-    status: { Draft: '초안', Published: '발행됨', Cancelled: '취소됨' },
+    status: { Draft: '작성 중', Published: '공개됨', Cancelled: '취소됨' },
 
     create: '만들기',
     retry: '다시 시도',
@@ -42,12 +42,12 @@ const ko = {
     team: '팀',
     orgId: '조직 번호',
     // 체인에는 이름이 없다. orgProfiles 문서가 없는 조직은 번호로 부른다.
-    orgFallback: '주최사 #{{id}}',
+    orgFallback: '팀 #{{id}}',
   },
 
   become: {
-    title: '주최사 만들기',
-    name: '주최사 이름',
+    title: '팀 만들기',
+    name: '팀 이름',
     // 이름은 화면에 보여 주기 위한 것뿐이다. 서버가 orgProfiles 문서에 적고, 목록이 그것을 읽는다.
     nameHelp: '목록과 행사 화면에 보여 줄 이름이에요. 지금은 나중에 고칠 수 없으니 한 번에 정확히 적어 주세요',
     create: '만들기',
@@ -60,24 +60,24 @@ const ko = {
       notActive: '가입을 먼저 마무리해 주세요',
       noSignup: '가입을 먼저 마무리해 주세요',
       // 한 사람이 만들 수 있는 주최사는 3개다. 네 번째는 서버가 보내기 전에 거절한다.
-      limit: '주최사는 3개까지 만들 수 있어요',
+      limit: '팀은 3개까지 만들 수 있어요',
       badName: '이름을 2자에서 40자 사이로 적어 주세요',
     },
   },
 
   lifecycle: {
-    publish: '발행하기',
-    publishConfirm: '발행하면 누구나 이 행사를 보고 신청할 수 있어요. 발행한 뒤에는 내용을 고칠 수 없어요',
+    publish: '공개하기',
+    publishConfirm: '공개하면 누구나 이 행사를 보고 신청할 수 있어요. 공개한 뒤에는 내용을 고칠 수 없어요',
     cancel: '행사 취소하기',
     // 01b 재배포 뒤에는 취소된 행사의 티켓을 남에게 넘길 수 없다. 확인 창에서 미리 말해 둔다.
     cancelConfirm: '취소하면 되돌릴 수 없어요. 신청이 닫히고, 이미 나간 티켓은 다음 업데이트부터 남에게 넘길 수 없게 돼요',
     confirm: '네, 진행할게요',
     back: '아니요',
     working: '보내고 있어요',
-    published: '발행했어요',
+    published: '공개했어요',
     cancelled: '취소했어요',
     confirming: '아직 확인 중이에요. 잠시 뒤 이 화면을 다시 열어 주세요',
-    notDraft: '이미 발행한 행사예요',
+    notDraft: '이미 공개한 행사예요',
     // updateEventMeta 가 낼 수 있는 나머지 두 되돌림(Ticket.sol:208). 발행·취소에서는 안 난다.
     schedule: '행사 시간이 이미 지났어요',
     tiers: '티켓 종류를 확인해 주세요',
@@ -86,7 +86,7 @@ const ko = {
     failed: '보내지 못했어요. 잠시 뒤 다시 시도해 주세요',
     // 발행 전에 무엇을 공개하는지 한눈에 보여주는 요약 시트(계획 §2b).
     summary: {
-      heading: '이대로 발행할까요?',
+      heading: '이대로 공개할까요?',
       title: '제목', date: '날짜', place: '장소', tiers: '티켓 종류', kyc: '본인 확인',
       tiersValue: '{{count}}종', kycOn: '필요', kycOff: '없음',
       placeRegionOnly: '{{region}} · 자세한 장소는 티켓 소지자에게만',
@@ -285,7 +285,7 @@ const ko = {
     leave: '나가기',
     // 만들기 ≠ 발행. 생성 씬과 done 화면 상단의 2단계 헤더가 발행이 남았음을 처음부터 알린다(계획 §2b).
     stepCreate: '만들기',
-    stepPublish: '발행',
+    stepPublish: '공개',
     // 기본 다섯 칸(포스터·제목·시작·장소·티켓) 밖의 모든 것이 이 안에 접혀 있다(계획 B-2).
     more: '더 설정하기',
 
@@ -418,15 +418,15 @@ const ko = {
       // 무료일 때만 나오는 받는 방식 2분기(계획 A-2). approvalRequired 는 이벤트 단위라 첫 카드에만 그린다.
       receiveMethod: '받는 방식',
       receiveAuto: '선착순 자동 승인',
-      receiveApproval: '관리자 승인 후 발급',
+      receiveApproval: '관리자 승인 후 받을 수 있어요',
       // 승인제는 01c 재배포 전까지 컨트랙트가 거절한다 — VITE_APPROVAL_MODES 로 열기 전엔 비활성.
       approvalSoon: '곧 열려요',
       rules: '행사 전체 규칙',
       // transferable·transferCutoffSeconds·requireKyc 는 EventMeta 에 있고 Tier 에는 없다.
       // 종류 카드 안에 두면 화면이 거짓말을 한다.
       rulesHelp: '이 세 가지는 종류마다 다르게 둘 수 없어요. 행사 하나에 하나씩이에요',
-      transferable: '양도 가능',
-      cutoff: '양도 마감 (행사 시작 N시간 전)',
+      transferable: '친구에게 줄 수 있음',
+      cutoff: '친구에게 주기 마감 (행사 시작 N시간 전)',
       requireKyc: '본인 확인한 사람만',
       requireKycHelp: '켜면 신분증·얼굴 확인을 마친 사람만 티켓을 받을 수 있어요. 가벼운 모임은 꺼두세요',
       // 빠른 시작: 첫 종류와 받는 방식을 한 번에 정하는 프리셋 3종. 한 번 눌러 시작하고,
@@ -447,10 +447,12 @@ const ko = {
 
     done: {
       title: '행사를 만들었어요',
-      // createEvent 는 Draft 로 만들고(Ticket.sol:196) claim 은 Published 가 아니면 거절한다(:265).
-      notYetPublic: '아직은 아무도 볼 수 없어요. 준비가 되면 행사 화면에서 발행해 주세요',
-      // done 화면의 1차 버튼: 발행 시트로 바로 보낸다(계획 §2b). manage 링크는 보조로 내려간다.
-      publishNow: '지금 발행하기',
+      // 발행 전에는 공유 링크·QR을 숨기고, 이 사실을 그대로 말한다(T-SIMP-6). 공개는 이 화면에서 바로 한다.
+      notYetPublic: '아직 아무에게도 안 보여요',
+      // 이 화면의 1차 버튼: 다른 화면으로 보내지 않고 여기서 바로 공개한다(T-SIMP-6).
+      publishNow: '지금 공개하기',
+      // 공개에 성공한 뒤, 그 자리서 나타나는 공유 링크·QR 카드 위에 놓는 안내(T-SIMP-6).
+      nowPublic: '공개했어요 · 이제 아래 링크로 초대할 수 있어요',
       manage: '행사 화면 열기',
       link: '행사 주소',
       copy: '주소 복사',
@@ -469,7 +471,7 @@ const ko = {
 
     publish: {
       pinning: '행사 정보를 올리고 있어요',
-      org: '주최사를 만들고 있어요',
+      org: '팀을 만들고 있어요',
       sending: '행사를 만들고 있어요',
       finishing: '마무리하고 있어요',
       updating: '행사 정보를 저장하고 있어요',
@@ -480,9 +482,9 @@ const ko = {
     },
 
     publishProblems: {
-      notYourOrg: '이 주최사에서 행사를 만들 권한이 없어요',
+      notYourOrg: '이 팀에서 행사를 만들 권한이 없어요',
       orgName: '주최자 이름을 2자에서 40자 사이로 적어 주세요',
-      orgLimit: '주최사는 3개까지 만들 수 있어요. 기존 주최사로 만들어 주세요',
+      orgLimit: '팀은 3개까지 만들 수 있어요. 기존 팀으로 만들어 주세요',
       orgNotActive: '가입을 먼저 마무리해 주세요',
       orgFailed: '주최자 정보를 만들지 못했어요. 잠시 뒤 다시 시도해 주세요',
       // 행사는 만들어졌는데 영수증에서 번호를 못 읽은 경우. 초안과 오퍼레이션 해시를 남겨 두고,
@@ -510,7 +512,7 @@ const ko = {
       tierNameTooLong: '종류 이름은 40자 안으로 적어 주세요',
       tierSupply: '수량을 1장 이상으로 적어 주세요',
       tierMaxPerWallet: '1인당 한도를 1장에서 65535장 사이로 적어 주세요',
-      cutoff: '양도 마감 시간을 0시간 이상으로 적어 주세요',
+      cutoff: '친구에게 주기 마감 시간을 0시간 이상으로 적어 주세요',
       paidTier: '무료가 아닌 종류가 있어요. 무료로 바꾸면 만들 수 있어요',
     },
 
@@ -540,13 +542,13 @@ const en: typeof ko = {
     title: 'Organiser',
     backToDiscover: 'Back to explore',
 
-    orgs: 'My organisers',
-    org: 'Organiser',
-    orgsEmpty: 'You do not belong to an organiser yet.',
-    become: 'Create an organiser',
+    orgs: 'Our team',
+    org: 'Our team',
+    orgsEmpty: 'You are not part of a team yet.',
+    become: 'Create a team',
     // The callable answers with the number a second or two before the indexer lists it.
-    orgPending: 'An organiser you just created appears in this list in a moment',
-    noPermission: 'You may not create events. Ask the organiser owner to give you the permission',
+    orgPending: 'A team you just created appears in this list in a moment',
+    noPermission: 'You may not create events. Ask the team owner to give you the permission',
 
     events: 'My events',
     eventsEmpty: 'No events yet. Start one with Create below',
@@ -554,7 +556,7 @@ const en: typeof ko = {
     // The list reads the indexed rows only. Titles live on IPFS, and a slow gateway must not
     // hold up rows that are already in hand.
     eventFallback: 'Event #{{id}}',
-    status: { Draft: 'Draft', Published: 'Published', Cancelled: 'Cancelled' },
+    status: { Draft: 'In progress', Published: 'Public', Cancelled: 'Cancelled' },
 
     create: 'Create',
     retry: 'Try again',
@@ -569,12 +571,12 @@ const en: typeof ko = {
     team: 'Team',
     orgId: 'Organisation number',
     // The chain holds no name. An organisation with no orgProfiles document goes by number.
-    orgFallback: 'Organiser #{{id}}',
+    orgFallback: 'Team #{{id}}',
   },
 
   become: {
-    title: 'Create an organiser',
-    name: 'Organiser name',
+    title: 'Create a team',
+    name: 'Team name',
     // The name is for showing only: the server writes it to orgProfiles and the lists read it.
     nameHelp: 'The name shown in your lists and on your event screens. It cannot be edited afterwards for now, so please get it right the first time',
     create: 'Create',
@@ -587,24 +589,24 @@ const en: typeof ko = {
       notActive: 'Please finish signing up first',
       noSignup: 'Please finish signing up first',
       // Three per person. The fourth is refused before anything is sent.
-      limit: 'You can create up to three organisers',
+      limit: 'You can create up to three teams',
       badName: 'Write a name of 2 to 40 characters',
     },
   },
 
   lifecycle: {
-    publish: 'Publish',
-    publishConfirm: 'Once published, anyone can see this event and sign up. You cannot change the details afterwards',
+    publish: 'Make public',
+    publishConfirm: 'Once it is public, anyone can see this event and sign up. You cannot change the details afterwards',
     cancel: 'Cancel this event',
     // After the 01b redeploy a cancelled event's tickets can no longer be handed over.
     cancelConfirm: 'Cancelling cannot be undone. Sign-ups close, and from the next update on nobody can hand an issued ticket to somebody else',
     confirm: 'Yes, go ahead',
     back: 'No',
     working: 'Sending',
-    published: 'Published',
+    published: 'Made public',
     cancelled: 'Cancelled',
     confirming: 'Still confirming. Please open this screen again in a moment',
-    notDraft: 'This event is already published',
+    notDraft: 'This event is already public',
     /** The other two `updateEventMeta` can revert with; publish and cancel never raise them. */
     schedule: 'This event\'s time has already passed',
     tiers: 'Please check the ticket kinds',
@@ -613,7 +615,7 @@ const en: typeof ko = {
     failed: 'Could not send that. Please try again in a moment',
     // See the Korean block: the summary sheet shown before publishing.
     summary: {
-      heading: 'Publish it as it is?',
+      heading: 'Make it public as it is?',
       title: 'Title', date: 'When', place: 'Where', tiers: 'Ticket kinds', kyc: 'Identity check',
       tiersValue: '{{count}}', kycOn: 'Required', kycOff: 'Not needed',
       placeRegionOnly: '{{region}} · exact place shown to ticket holders only',
@@ -936,15 +938,15 @@ const en: typeof ko = {
       // The two receiving methods, shown only while the event is free (plan section A-2).
       receiveMethod: 'How people receive it',
       receiveAuto: 'First come, issued automatically',
-      receiveApproval: 'Issued after the organiser approves',
+      receiveApproval: 'You get it after the organiser approves',
       // Approval is refused by the deployed contract until the 01c redeploy, so it is off until
       // VITE_APPROVAL_MODES opens it.
       approvalSoon: 'Coming soon',
       rules: 'Rules for the whole event',
       // These three live on EventMeta and not on Tier, so a per-kind switch would be a lie.
       rulesHelp: 'These three cannot differ by kind. There is one of each per event',
-      transferable: 'Can be handed over',
-      cutoff: 'Hand-over closes (hours before the event starts)',
+      transferable: 'Can be given to a friend',
+      cutoff: 'Giving closes (hours before the event starts)',
       requireKyc: 'Only people who passed the identity check',
       requireKycHelp: 'With this on, only people who finished the ID and face check can get a ticket. Leave it off for casual meetups',
       // Quick start: three presets that set the first kind and the receiving method in one tap.
@@ -967,10 +969,12 @@ const en: typeof ko = {
 
     done: {
       title: 'Your event is made',
-      // createEvent makes it a Draft (Ticket.sol:196) and claim refuses anything but Published.
-      notYetPublic: 'Nobody can see it yet. Publish it from the event screen when you are ready',
-      // See the Korean block: the primary button that opens the publish sheet.
-      publishNow: 'Publish now',
+      // See the Korean block: before publishing the share link and QR are hidden; publishing runs here.
+      notYetPublic: 'Nobody can see it yet',
+      // See the Korean block: the primary button that publishes the event right on this screen.
+      publishNow: 'Make it public',
+      // See the Korean block: shown above the share link and QR once the event is public.
+      nowPublic: "It's public now · share the link below to invite people",
       manage: 'Open the event screen',
       link: 'Event address',
       copy: 'Copy the address',
@@ -989,7 +993,7 @@ const en: typeof ko = {
 
     publish: {
       pinning: 'Uploading the event details',
-      org: 'Creating your organiser',
+      org: 'Creating your team',
       sending: 'Creating the event',
       finishing: 'Finishing up',
       updating: 'Saving the event',
@@ -1000,9 +1004,9 @@ const en: typeof ko = {
     },
 
     publishProblems: {
-      notYourOrg: 'You may not create events for this organiser',
+      notYourOrg: 'You may not create events for this team',
       orgName: 'Write an organiser name of 2 to 40 characters',
-      orgLimit: 'You can have up to three organisers. Please use one you already have',
+      orgLimit: 'You can have up to three teams. Please use one you already have',
       orgNotActive: 'Please finish signing up first',
       orgFailed: 'Could not create your organiser. Please try again in a moment',
       // The event was made but the receipt did not name it. The draft and the operation hash
@@ -1031,7 +1035,7 @@ const en: typeof ko = {
       tierNameTooLong: 'Write a kind name of 40 characters or fewer',
       tierSupply: 'Write how many as 1 or more',
       tierMaxPerWallet: 'Write the per-person limit as a number from 1 to 65535',
-      cutoff: 'Write the hand-over cut-off as 0 hours or more',
+      cutoff: 'Write the giving cut-off as 0 hours or more',
       paidTier: 'One of the kinds is not free. Make it free and you can create the event',
     },
 

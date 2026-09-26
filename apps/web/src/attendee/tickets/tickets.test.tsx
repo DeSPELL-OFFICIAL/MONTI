@@ -185,7 +185,7 @@ describe('TicketList', () => {
     expect(await screen.findByRole('link', { name: '#1 · 입장 전' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '#2 · 입장 완료' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '#3 · 보내는 중' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '#5 · 양도됨' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '#5 · 친구에게 줌' })).toBeInTheDocument();
     // A revoked ticket, a ticket on a called-off event and a ticket handed over out of one.
     expect(screen.getAllByRole('link', { name: /취소됨/ })).toHaveLength(3);
   });
@@ -193,7 +193,7 @@ describe('TicketList', () => {
   it('lets a called-off event outrank 양도됨 even when its status arrives a trip later', async () => {
     renderList();
     expect(await screen.findByRole('link', { name: '#10 · 취소됨' })).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: '#10 · 양도됨' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '#10 · 친구에게 줌' })).not.toBeInTheDocument();
   });
 
   it('asks the indexer only for the check-ins, events and handovers its own rows name', async () => {
@@ -231,20 +231,26 @@ describe('TicketList', () => {
 });
 
 describe('TicketDetail', () => {
+  it('titles the screen with the event name rather than the token number', async () => {
+    renderDetail('1');
+    expect(await screen.findByRole('heading', { name: '한여름 밤의 재즈' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '#1' })).not.toBeInTheDocument();
+  });
+
   it('shows the state, the door guide and the entry button before entry', async () => {
     renderDetail('1');
     expect(await screen.findByText('입장 전')).toBeInTheDocument();
     expect(screen.getByText('입구에서 입장하기를 누르고 60초 안에 단말기에 휴대폰을 대세요.')).toBeInTheDocument();
     expect(screen.getByText('보여줄 코드는 없어요.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '입장하기' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '양도' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '친구에게 주기' })).toBeInTheDocument();
   });
 
   it('drops the entry and handover buttons once the ticket is used', async () => {
     renderDetail('2');
     expect(await screen.findByText('입장 완료')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '입장하기' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '양도' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '친구에게 주기' })).not.toBeInTheDocument();
   });
 
   /**
@@ -405,7 +411,7 @@ describe('ticket art', () => {
     renderDetail('2');
     expect(await screen.findByText('입장 완료')).toBeInTheDocument();
     expect(screen.getByText('사용됨')).toBeInTheDocument();
-    expect(screen.getByText('한여름 밤의 재즈')).toBeInTheDocument();
+    expect(screen.getAllByText('한여름 밤의 재즈').length).toBeGreaterThan(0);
     expect(presetIn(document)).toBe('a');
   });
 

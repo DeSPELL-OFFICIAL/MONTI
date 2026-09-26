@@ -93,6 +93,17 @@ export interface SendOpArgs {
    * organiser on "확인 중" (persona R2 P0-1). Omitted, `wait` behaves exactly as it did.
    */
   maxTimeoutMs?: number;
+  /**
+   * Called once the bundler accepts the op and hands back its hash — **before** `wait`. The claim
+   * path records the hash durably here (T-SIMP-1), so a page closed mid-wait can `resolveSubmittedOp`
+   * it on the next visit instead of blind-resending, and drives its progress from 저장 to 확인.
+   */
+  onSubmitted?: (userOpHash: Hex) => void;
+  /**
+   * Called each time a transient precheck rejection is retried at the send layer, so a screen can say
+   * a resend is happening ("잠시 붐벼요…"). See {@link sendSponsoredOp}'s precheck backoff.
+   */
+  onSendRetry?: () => void;
 }
 
 /** Encode → sponsor → send → wait → throw on revert. Every write in this app goes through here. */
@@ -101,6 +112,7 @@ export async function sendOp(options: SendOpArgs): Promise<SponsoredOpReceipt> {
     account: options.account,
     orgId: options.orgId,
     calls: [{ to: options.to, data: encodeFunctionData({ abi: options.abi, functionName: options.functionName, args: options.args }) }],
+    onSendRetry: options.onSendRetry,
   }).catch((cause: unknown) => {
     // A revert the bundler caught while *simulating* never becomes a receipt, so until now it
     // left this layer as viem's `RpcRequestError` and every screen fell through to its most
@@ -118,6 +130,9 @@ export async function sendOp(options: SendOpArgs): Promise<SponsoredOpReceipt> {
     }
     throw cause;
   });
+  // The op is in the mempool now and has a hash. Hand it to the caller before the wait, so a claim
+  // recorded here survives the page being closed while `wait` is still polling.
+  options.onSubmitted?.(handle.userOpHash);
   const receipt = await handle.wait(options.timeoutMs, options.maxTimeoutMs);
   if (!receipt.success) throw new OpReverted(options.functionName, receipt.revertReason, handle.userOpHash);
   return receipt;

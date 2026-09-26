@@ -103,6 +103,9 @@ export interface SendSponsoredOpArgs {
   /** Optional per-call floors. `verificationGasLimit` is floored at {@link MIN_VERIFICATION_GAS}
    *  whether or not this is passed — that one is not a caller's choice. */
   gasFloors?: SponsoredGasFloors;
+  /** Called before each transient-precheck resend (see {@link isTransientPrecheck}), so a screen can
+   *  say a resend is happening. Fired at most {@link PRECHECK_RETRY_DELAYS_MS}`.length` times. */
+  onSendRetry?: () => void;
 }
 
 export const DEFAULT_WAIT_TIMEOUT_MS = 15_000;
@@ -117,6 +120,38 @@ export const DEFAULT_WAIT_TIMEOUT_MS = 15_000;
  */
 export const MAX_WAIT_TIMEOUT_MS = 45_000;
 const RECEIPT_POLL_INTERVAL_MS = 300;
+
+/**
+ * The backoff between resends of a send rejected for a *transient* reason — three tries at 2s, 5s
+ * and 10s. rundler rejects `eth_sendUserOperation` with `-32000 "precheck failed: paymaster deposit
+ * is … but must be at least …"` when the sponsor paymaster's EntryPoint deposit cannot back this op
+ * *right now* — most often because an earlier claim is still holding the headroom in the mempool and
+ * has not mined yet. It clears the instant that earlier op lands, so resending the identical,
+ * already-signed op after a short wait goes through (task-claim-failure report §5a). These waits give
+ * Monad's ~0.3s blocks time to include the earlier op without stranding a person at a door.
+ */
+export const PRECHECK_RETRY_DELAYS_MS: readonly number[] = [2_000, 5_000, 10_000];
+
+/**
+ * True only for the transient precheck rejection above, however deeply viem wrapped it: a `-32000`
+ * code **and** a `precheck failed` message must both appear somewhere in the cause chain. Everything
+ * else — a real revert, an `AA33` paymaster refusal, an offline fetch — is a genuine failure and is
+ * rethrown untouched, so nothing but a busy-deposit is ever retried.
+ */
+export function isTransientPrecheck(cause: unknown): boolean {
+  let hasCode = false;
+  let hasMessage = false;
+  let node: unknown = cause;
+  for (let depth = 0; depth <= 5 && typeof node === 'object' && node !== null; depth += 1) {
+    const error = node as { code?: unknown; message?: unknown; details?: unknown; shortMessage?: unknown; cause?: unknown };
+    if (error.code === -32000) hasCode = true;
+    for (const field of [error.message, error.details, error.shortMessage]) {
+      if (typeof field === 'string' && field.toLowerCase().includes('precheck failed')) hasMessage = true;
+    }
+    node = error.cause;
+  }
+  return hasCode && hasMessage;
+}
 /** Sentinel that wins the poll race when the deadline elapses first. */
 const TIMED_OUT = Symbol('sponsored-op-timeout');
 
@@ -157,7 +192,7 @@ export function readOpLogs(raw: { logs?: unknown } | null | undefined): readonly
   return Array.isArray(raw?.logs) ? (raw.logs as SponsoredOpLog[]) : [];
 }
 
-export async function sendSponsoredOp({ account, calls, orgId, gasFloors }: SendSponsoredOpArgs): Promise<SponsoredOpHandle> {
+export async function sendSponsoredOp({ account, calls, orgId, gasFloors, onSendRetry }: SendSponsoredOpArgs): Promise<SponsoredOpHandle> {
   if (calls.length === 0) throw new Error('sendSponsoredOp needs at least one call');
   const config = getConfig();
 
@@ -222,7 +257,23 @@ export async function sendSponsoredOp({ account, calls, orgId, gasFloors }: Send
   } as never);
 
   const userOp: UserOperationV06 = { ...unsigned, ...limits, signature };
-  const userOpHash = await bundlerRequest<Hex>('eth_sendUserOperation', [userOp, config.entryPoint]);
+  // The send, with a transient-precheck backoff around it (task-claim-failure report §5a). The op is
+  // already signed, so a resend is the *same* op — its hash never changes — and once the earlier op
+  // frees the paymaster's deposit the resend clears. Only `-32000 precheck failed` is retried here;
+  // every other rejection throws straight out to `sendOp`, which promotes real reverts and rethrows
+  // the rest untouched.
+  const send = async (): Promise<Hex> => {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await bundlerRequest<Hex>('eth_sendUserOperation', [userOp, config.entryPoint]);
+      } catch (cause) {
+        if (attempt >= PRECHECK_RETRY_DELAYS_MS.length || !isTransientPrecheck(cause)) throw cause;
+        onSendRetry?.();
+        await sleep(PRECHECK_RETRY_DELAYS_MS[attempt]!);
+      }
+    }
+  };
+  const userOpHash = await send();
 
   return {
     userOpHash,

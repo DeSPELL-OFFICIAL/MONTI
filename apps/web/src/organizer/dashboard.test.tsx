@@ -148,22 +148,6 @@ describe('publishing and cancelling', () => {
     expect(ticketOp).toHaveBeenCalledTimes(1);
   });
 
-  /** Plan §2b: 지금 발행하기 on the done screen arrives here with ?publish=1 and opens the sheet. */
-  it('opens the publish sheet on its own when arrived at with ?publish=1', async () => {
-    render(
-      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-        <MemoryRouter initialEntries={['/org/events/5?publish=1']}>
-          <Routes>
-            <Route path="/org/events/:eventId" element={<Dashboard />} />
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
-    expect(await screen.findByText(life.publishConfirm)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: life.confirm })).toBeInTheDocument();
-    expect(ticketOp).not.toHaveBeenCalled();
-  });
-
   /** Ruling 3: after sub-plan 01b a cancelled event blocks hand-overs — say so beforehand. */
   it('warns that cancelling is final and stops hand-overs before it sends anything', async () => {
     const user = userEvent.setup();

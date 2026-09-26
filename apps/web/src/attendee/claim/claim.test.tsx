@@ -52,6 +52,7 @@ vi.mock('../me/useKycLevel', () => ({
 const { Claim } = await import('./Claim');
 const { OpReverted } = await import('../../shared/chain/ops');
 const { ticketAbi } = await import('../../shared/chain/abis');
+const { MAX_WAIT_TIMEOUT_MS } = await import('../../shared/chain/sendSponsoredOp');
 
 /** `setSearchParams` navigates for real under MemoryRouter, so the address is read back here. */
 function Address() {
@@ -75,6 +76,8 @@ function renderClaim(entry = '/claim/5') {
 }
 
 beforeEach(() => {
+  // The claim draft lives in sessionStorage; a fresh screen must not resume another test's op.
+  sessionStorage.clear();
   kycLevel.value = 1;
   kycLevel.loading = false;
   ownedTickets.rows = [];
@@ -107,8 +110,24 @@ describe('Claim', () => {
     renderClaim();
     await userEvent.click(await screen.findByRole('button', { name: '티켓 받기' }));
     expect(ticketOp).toHaveBeenCalledWith(
-      expect.objectContaining({ orgId: 9n, functionName: 'claim', args: [5n, 0, '0x'] }),
+      expect.objectContaining({ orgId: 9n, functionName: 'claim', args: [5n, 0, '0x'], maxTimeoutMs: MAX_WAIT_TIMEOUT_MS }),
     );
+  });
+
+  it('confirms a landed claim in place with a real 완료 state, not a silent redirect', async () => {
+    renderClaim();
+    await userEvent.click(await screen.findByRole('button', { name: '티켓 받기' }));
+    expect(await screen.findByText('티켓을 받았어요 · 내 티켓에 있어요')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '내 티켓 보기' })).toHaveAttribute('href', '/tickets');
+    // The old path navigated away the moment the op returned; the new one shows success and lets
+    // the person choose when to go.
+    expect(navigate).not.toHaveBeenCalledWith('/tickets');
+  });
+
+  it('reassures near the button that it is free and MONTI handles it', async () => {
+    renderClaim();
+    await screen.findByRole('button', { name: '티켓 받기' });
+    expect(screen.getByText('무료예요 · MONTI가 대신 처리해요')).toBeInTheDocument();
   });
 
   it('reads a timed-out op as still confirming, not as a failure', async () => {
@@ -236,7 +255,7 @@ describe('Claim · resuming after the identity check', () => {
     renderClaim(RESUME);
     await waitFor(() => expect(ticketOp).toHaveBeenCalledTimes(1));
     expect(ticketOp).toHaveBeenCalledWith(
-      expect.objectContaining({ orgId: 9n, functionName: 'claim', args: [5n, 0, '0x'] }),
+      expect.objectContaining({ orgId: 9n, functionName: 'claim', args: [5n, 0, '0x'], maxTimeoutMs: MAX_WAIT_TIMEOUT_MS }),
     );
     // Stripped first, so a refresh in the middle of the claim cannot start a second one.
     expect(screen.getByTestId('address')).toHaveTextContent('/claim/5');
@@ -342,7 +361,7 @@ describe('Claim · approval mode', () => {
     await userEvent.click(await screen.findByRole('button', { name: '신청하기' }));
     await waitFor(() => expect(ticketOp).toHaveBeenCalled());
     expect(ticketOp).toHaveBeenCalledWith(
-      expect.objectContaining({ orgId: 9n, functionName: 'requestClaim', args: [5n, 0] }),
+      expect.objectContaining({ orgId: 9n, functionName: 'requestClaim', args: [5n, 0], maxTimeoutMs: MAX_WAIT_TIMEOUT_MS }),
     );
     // A request is not a claim: approval decides the ticket later, so it never leaves for /tickets.
     expect(navigate).not.toHaveBeenCalledWith('/tickets');
@@ -355,14 +374,14 @@ describe('Claim · approval mode', () => {
     await userEvent.click(screen.getByRole('button', { name: '신청 취소' }));
     await waitFor(() => expect(ticketOp).toHaveBeenCalled());
     expect(ticketOp).toHaveBeenCalledWith(
-      expect.objectContaining({ functionName: 'cancelRequest', args: [5n, 3n] }),
+      expect.objectContaining({ functionName: 'cancelRequest', args: [5n, 3n], maxTimeoutMs: MAX_WAIT_TIMEOUT_MS }),
     );
   });
 
   it('sends the approved attendee to their issued ticket', async () => {
     requests.rows = [{ ...REQUEST, status: 'Approved', tokenId: '77' }];
     renderClaim();
-    expect(await screen.findByText('승인됐어요. 티켓이 발급됐어요')).toBeInTheDocument();
+    expect(await screen.findByText('승인됐어요. 티켓을 받았어요')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '내 티켓 보기' })).toHaveAttribute('href', '/tickets');
     expect(screen.queryByRole('button', { name: '신청하기' })).not.toBeInTheDocument();
   });
@@ -380,7 +399,7 @@ describe('Claim · approval mode', () => {
     );
     renderClaim();
     await userEvent.click(await screen.findByRole('button', { name: '신청하기' }));
-    expect(await screen.findByText('이 행사는 주최자 승인 후 발급돼요.')).toBeInTheDocument();
+    expect(await screen.findByText('이 행사는 주최자 승인 후 받을 수 있어요.')).toBeInTheDocument();
   });
 
   it('opens the verification sheet before requesting when the event needs kyc', async () => {

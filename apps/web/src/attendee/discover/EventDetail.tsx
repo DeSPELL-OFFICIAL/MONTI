@@ -1,6 +1,9 @@
+import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Alert, Button, Card, KycBadge, Screen, Spinner } from '../../shared/ui';
+import { AnimatePresence } from '../../shared/motion';
+import { ClaimFlow } from '../claim/ClaimFlow';
 import { fmt, useCopy, useLocale } from '../../shared/i18n';
 import type { Copy } from '../../shared/copy/index';
 import { gql } from '../../shared/envio/client';
@@ -8,7 +11,6 @@ import { describeFailure } from '../../shared/errors';
 import { EVENT_QUERY, type EnvioEvent, type EnvioTier } from '../../shared/envio/queries';
 import { fetchEventMetadata, type EventMetadata } from '../../shared/envio/ipfs';
 import { api } from '../../shared/api/functions';
-import { getConfig } from '../../shared/config';
 import { useSession } from '../../shared/session';
 import { useKycLevel } from '../me/useKycLevel';
 import { formatEventDate, formatEventDay } from './useEvents';
@@ -68,6 +70,8 @@ export function EventDetail() {
   // This screen is public, so the badge asks whether there is anybody to have a status first.
   const signedIn = useSession().status === 'signedIn';
   const { kycLevel } = useKycLevel();
+  // 상세에 받기 흡수(plan B1): 티켓 받기를 누르면 라우트 홉 없이 이 화면 위 인라인 시트가 열린다.
+  const [claiming, setClaiming] = useState(false);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['event', eventId],
@@ -111,7 +115,6 @@ export function EventDetail() {
 
   const { event, tiers } = data;
   const canShare = canOpenShareSheet();
-  const record = `${getConfig().explorerUrl}/address/${getConfig().addresses.ticket}`;
   const region = metadata ? regionLabel(metadata.region, copy) : '';
   // The venue the organiser hid is not in the pinned document at all; it comes back from the
   // callable or it does not come back.
@@ -179,21 +182,34 @@ export function EventDetail() {
 
       {event.status === CANCELLED ? (
         <Alert tone="warn">{copy.discover.cancelled}</Alert>
+      ) : signedIn ? (
+        // 로그인한 사람은 이 자리에서 시트로 받는다 — 한 탭, 라우트 홉 없음(plan B1·여정 A).
+        <Button onClick={() => setClaiming(true)}>
+          {event.approvalRequired ? copy.discover.requestTicket : copy.discover.getTicket}
+        </Button>
       ) : (
+        // 로그인 전에는 /claim 라우트로 보내 로그인을 먼저 마치게 하고, 그 뒤 라우트가 이어받는다.
         <Link to={`/claim/${event.id}`} className="btn btn--primary btn--link">
           {event.approvalRequired ? copy.discover.requestTicket : copy.discover.getTicket}
         </Link>
       )}
+
+      {/* 같은 화면 위에서 도는 T-SIMP-1 상태머신(진행 → 완료, 내구 해시 재개, 자동 재전송). */}
+      <AnimatePresence>
+        {claiming ? (
+          <ClaimFlow
+            key="claim"
+            eventId={event.id}
+            present={{ kind: 'sheet', onClose: () => setClaiming(false) }}
+          />
+        ) : null}
+      </AnimatePresence>
 
       {canShare ? (
         <Button variant="ghost" onClick={() => void shareThisPage()}>
           {copy.discover.share}
         </Button>
       ) : null}
-
-      <p className="muted">
-        <a href={record}>{copy.discover.publicRecord}</a>
-      </p>
     </Screen>
   );
 }

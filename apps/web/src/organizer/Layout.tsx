@@ -183,8 +183,8 @@ export function OrganizerRoutes() {
   return (
     <Routes>
       <Route index element={<OrganizerHome />} />
-      {/* Where `주최사 만들기` lands — the organiser home's empty state, the explore FAB
-          and the profile section all point here (`useOrganizerEntry`). */}
+      {/* Where the organiser home's `주최사 만들기` lands — the way to a second or third
+          organisation once one exists (`Layout.tsx` links here from the home). */}
       <Route path="become" element={<Become />} />
       {/* The creation scene — the event and its tickets in one scroll. `/org/new` starts one
           (or carries on with the newest draft) and `/org/new/<draftId>` opens a named one. */}

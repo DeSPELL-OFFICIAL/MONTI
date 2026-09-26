@@ -50,6 +50,7 @@ const { TransferInvite } = await import('./Invite');
 const { InviteLanding, INVITE_KEY } = await import('./InviteLanding');
 const { CallableError } = await import('../../shared/api/functions');
 const { OpReverted } = await import('../../shared/chain/ops');
+const { MAX_WAIT_TIMEOUT_MS } = await import('../../shared/chain/sendSponsoredOp');
 
 function Address() {
   return <span data-testid="address">{useLocation().pathname}</span>;
@@ -115,6 +116,7 @@ describe('TransferInvite', () => {
         orgId: 9n,
         functionName: 'createOffer',
         args: [1n, COMMITMENT, BigInt(EXPIRES_AT)],
+        maxTimeoutMs: MAX_WAIT_TIMEOUT_MS,
       }),
     );
     // The commitment can only come from the server's answer, so the order is not optional.
@@ -230,7 +232,7 @@ describe('TransferInvite', () => {
     expect(createTransferInvite).not.toHaveBeenCalled();
     await userEvent.click(cancel);
     expect(ticketOp).toHaveBeenCalledWith(
-      expect.objectContaining({ orgId: 9n, functionName: 'cancelOffer', args: [1n] }),
+      expect.objectContaining({ orgId: 9n, functionName: 'cancelOffer', args: [1n], maxTimeoutMs: MAX_WAIT_TIMEOUT_MS }),
     );
     expect(await screen.findByText('초대를 취소했어요')).toBeInTheDocument();
   });
@@ -240,7 +242,7 @@ describe('TransferInvite', () => {
 const SERVER_REFUSALS: ReadonlyArray<readonly [string, string, string]> = [
   ['failed-precondition', 'OFFER_ALREADY_OPEN', '이 티켓은 이미 다른 분에게 보내는 중이에요.'],
   ['permission-denied', 'NOT_TOKEN_OWNER', '내 티켓이 아니에요.'],
-  ['invalid-argument', 'SELF_TRANSFER', '본인에게는 양도할 수 없어요.'],
+  ['invalid-argument', 'SELF_TRANSFER', '본인에게는 줄 수 없어요.'],
   ['invalid-argument', 'BAD_PHONE', '번호를 다시 확인해 주세요.'],
   ['invalid-argument', 'BAD_TOKEN_ID', '입력한 내용을 다시 확인해 주세요.'],
 ];
@@ -264,9 +266,9 @@ describe('an invite the server refuses', () => {
 const OFFER_REVERTS: ReadonlyArray<readonly [string, string]> = [
   ['Unauthorized()', '내 티켓이 아니에요.'],
   ['OfferExpired()', '초대가 만료됐어요. 다시 보내 달라고 해 주세요.'],
-  ['TransfersDisabled()', '이 행사는 양도할 수 없어요.'],
+  ['TransfersDisabled()', '이 행사는 친구에게 줄 수 없어요.'],
   ['AlreadyCheckedIn()', '이미 입장한 티켓이에요.'],
-  ['TransferLimitReached()', '이 티켓은 더 이상 양도할 수 없어요.'],
+  ['TransferLimitReached()', '이 티켓은 더 이상 친구에게 줄 수 없어요.'],
 ];
 
 describe('an offer the contract refuses', () => {

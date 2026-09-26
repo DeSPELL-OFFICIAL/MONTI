@@ -131,7 +131,7 @@ const ORG_NO_PERMISSION = { ...ORG, role: 'manager', bits: 0, canCreateEvent: fa
 const ME = `0x${'ab'.repeat(20)}` as const;
 
 async function tapCreate(): Promise<void> {
-  await userEvent.click(await screen.findByRole('button', { name: '만들기' }));
+  await userEvent.click(await screen.findByRole('button', { name: '행사 만들기' }));
 }
 
 function renderDetail(eventId = '1') {
@@ -144,6 +144,28 @@ function renderDetail(eventId = '1') {
       </MemoryRouter>
     </QueryClientProvider>,
   );
+}
+
+/** Records every address the router visits, so a route hop (or the absence of one) is read off it. */
+function renderDetailTracked(eventId = '1'): string[] {
+  const seen: string[] = [];
+  function Probe() {
+    seen.push(useLocation().pathname);
+    return null;
+  }
+  render(
+    <QueryClientProvider client={client()}>
+      <MemoryRouter initialEntries={[`/events/${eventId}`]}>
+        <Probe />
+        <Routes>
+          <Route path="/events/:eventId" element={<EventDetail />} />
+          {/* The claim route still exists (plan B1) — a hop here would show up in `seen`. */}
+          <Route path="/claim/:eventId" element={<div>claim route</div>} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  return seen;
 }
 
 beforeEach(() => {
@@ -295,7 +317,7 @@ describe('Discover · loading and empty states', () => {
     expect(await screen.findByText('첫 행사를 만들어 보세요')).toBeInTheDocument();
     // The empty-state CTA and the FAB both read 만들기; press the one in the empty state.
     const cta = within(document.querySelector('.empty-state') as HTMLElement)
-      .getByRole('button', { name: '만들기' });
+      .getByRole('button', { name: '행사 만들기' });
     await userEvent.click(cta);
     expect(seen.at(-1)).toBe('/org/new');
   });
@@ -330,16 +352,17 @@ describe('Discover · loading and empty states', () => {
 });
 
 /**
- * One button, five answers. The whole point of the table is that the person never has to know
- * which of them applies to them — so every row is checked here, through the router, rather
- * than through the hook that decides it.
+ * One button, three answers: make an event for anybody signed in, sign up for anybody who is
+ * not, and nothing at all while the session is still re-hydrating. 만들기 means "make an event",
+ * so it always opens the creation scene — the indexer no longer diverts it to `/org` depending
+ * on which organisations the person runs (the old `to`≠`profileTo` split, now gone).
  */
 describe('Discover · 만들기', () => {
   it('holds the button while the session is still re-hydrating, rather than guessing (S5)', async () => {
     // The beforeEach state is 'loading': a tap here must not read an unresolved session and send a
     // signed-in organiser to /signup/phone.
     const seen = renderDiscoverTracked();
-    expect(await screen.findByRole('button', { name: '만들기' })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: '행사 만들기' })).toBeDisabled();
     await tapCreate();
     expect(seen.at(-1)).toBe('/');
   });
@@ -347,7 +370,7 @@ describe('Discover · 만들기', () => {
   it('shows the button to a visitor who is not signed in, rather than hiding the way in', async () => {
     setSession({ status: 'anonymous' });
     renderDiscoverTracked();
-    const fab = await screen.findByRole('button', { name: '만들기' });
+    const fab = await screen.findByRole('button', { name: '행사 만들기' });
     expect(fab).toBeEnabled();
     // Portaled out of the screen (and so out of the route transform) so it never rides the slide (R1).
     expect(fab.closest('.screen')).toBeNull();
@@ -381,30 +404,32 @@ describe('Discover · 만들기', () => {
     expect(seen.at(-1)).toBe('/org/new');
   });
 
-  it('hands somebody who belongs but may not create to the screen that explains why', async () => {
+  it('opens the creation scene even for somebody who belongs but may not create', async () => {
     setSession({ status: 'signedIn', account: ME });
     myOrgs({ orgs: [ORG_NO_PERMISSION], canCreateEvent: false });
     const seen = renderDiscoverTracked();
     await tapCreate();
-    // `/org` already carries `행사를 만들 권한이 없어요…`; no second sentence is written here.
-    expect(seen.at(-1)).toBe('/org');
+    // 만들기 is not a permission check: it opens the scene, which is where any "행사를 만들 권한이
+    // 없어요…" belongs. Whether this person may create is not asked before the tap.
+    expect(seen.at(-1)).toBe('/org/new');
   });
 
-  it('still leads somewhere while the indexer has not answered', async () => {
+  it('opens the creation scene while the indexer has not answered', async () => {
     setSession({ status: 'signedIn', account: ME });
     myOrgs({ isLoading: true });
     const seen = renderDiscoverTracked();
     await tapCreate();
-    expect(seen.at(-1)).toBe('/org');
+    // The FAB no longer consults the indexer, so a slow one never holds up making an event.
+    expect(seen.at(-1)).toBe('/org/new');
   });
 
-  it('still leads somewhere when the indexer will not answer at all', async () => {
+  it('opens the creation scene when the indexer will not answer at all', async () => {
     setSession({ status: 'signedIn', account: ME });
     myOrgs({ isError: true });
     const seen = renderDiscoverTracked();
     await tapCreate();
-    // The organiser home owns that failure and offers its own retry there.
-    expect(seen.at(-1)).toBe('/org');
+    // A down indexer does not divert the FAB either — it still opens the scene.
+    expect(seen.at(-1)).toBe('/org/new');
   });
 });
 
@@ -536,6 +561,56 @@ describe('EventDetail', () => {
 });
 
 /**
+ * plan B1 / T-SIMP-5 — the claim was absorbed into an inline sheet on the detail screen. A
+ * signed-in visitor gets it in one tap with no route hop; the `/claim/:id` route survives for the
+ * deep-link and identity-check return, so a signed-out visitor is still sent there to sign in.
+ */
+describe('EventDetail · 받기 시트 (B1)', () => {
+  /** Clean answers for the claim engine's own reads, so opening the sheet paints its claimable state. */
+  function claimIndexer() {
+    gql.mockImplementation(async (query: string) => {
+      if (query.includes('OwnedTickets')) return { Ticket: [], Offer: [] };
+      if (query.includes('TicketContext')) return { CheckIn: [], Event: [], Tier: [], Ticket: [] };
+      if (query.includes('MyRequests')) return { ClaimRequest: [] };
+      return { Event: [EVENT_ONE], Tier: TIERS };
+    });
+  }
+
+  it('opens the claim as an inline sheet in one tap, with no hop to /claim', async () => {
+    claimIndexer();
+    setSession({ status: 'signedIn', account: ME });
+    const seen = renderDetailTracked();
+    await userEvent.click(await screen.findByRole('button', { name: '티켓 받기' }));
+    // The claim runs on this same screen: a dialog with the engine's own claim button in it.
+    const sheet = await screen.findByRole('dialog', { name: '티켓 받기' });
+    expect(within(sheet).getByRole('button', { name: '티켓 받기' })).toBeInTheDocument();
+    // The address never left the event page — the tap opened a sheet, it did not navigate.
+    expect(seen).not.toContain('/claim/1');
+    expect(seen.at(-1)).toBe('/events/1');
+  });
+
+  it('reassures in the sheet that it is free, by the claim button', async () => {
+    claimIndexer();
+    setSession({ status: 'signedIn', account: ME });
+    renderDetail();
+    await userEvent.click(await screen.findByRole('button', { name: '티켓 받기' }));
+    const sheet = await screen.findByRole('dialog', { name: '티켓 받기' });
+    expect(within(sheet).getByText('무료예요 · 돈 안 들어요')).toBeInTheDocument();
+  });
+
+  it('keeps the /claim route as the entry for a visitor who is not signed in yet', async () => {
+    gql.mockResolvedValue({ Event: [EVENT_ONE], Tier: TIERS });
+    setSession({ status: 'anonymous' });
+    renderDetail();
+    await screen.findByRole('heading', { name: '재즈 나이트' });
+    // No inline sheet before sign-in: the link sends them to /claim, where the session guard and
+    // then the surviving route take over (deep-link / resume path, plan B1).
+    expect(screen.getByRole('link', { name: '티켓 받기' })).toHaveAttribute('href', '/claim/1');
+    expect(screen.queryByRole('button', { name: '티켓 받기' })).toBeNull();
+  });
+});
+
+/**
  * T-EV-W8 — what an event's own organiser chose to tell only the people who hold a ticket.
  *
  * There is one authorisation for both halves and it is the callable: it asks the chain on
@@ -629,8 +704,9 @@ describe('EventDetail · what only ticket holders see', () => {
     getEventPrivate.mockReturnValue(new Promise(() => undefined));
     setSession({ status: 'signedIn', account: ME });
     renderDetail();
-    // The tiers and the call to action are already there; only the venue line is waiting.
-    expect(await screen.findByRole('link', { name: '티켓 받기' })).toBeInTheDocument();
+    // The tiers and the call to action are already there; only the venue line is waiting. For a
+    // signed-in visitor the claim is the inline-sheet opener (a button), not the /claim link (B1).
+    expect(await screen.findByRole('button', { name: '티켓 받기' })).toBeInTheDocument();
     expect(screen.getByText(/서울 · 확인하고 있어요/)).toBeInTheDocument();
   });
 
