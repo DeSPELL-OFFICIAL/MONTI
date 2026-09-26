@@ -66,6 +66,7 @@ export const emptyEventDraft: EventDraft = {
   regionCode: DEFAULT_REGION, venue: '', venueHidden: false,
   startsAt: 0, endsAt: 0, timeHidden: false,
   transferable: true, transferCutoffHours: 2, requireKyc: false,
+  approvalRequired: false,
   tiers: [emptyEventDraftTier],
   submittedOpHash: '', createdEventId: '', editingEventId: '', orgPendingName: '',
 };
@@ -137,6 +138,7 @@ export function normalizeEventDraft(raw: unknown): EventDraft {
     transferable: flag(saved.transferable, emptyEventDraft.transferable),
     transferCutoffHours: count(saved.transferCutoffHours, emptyEventDraft.transferCutoffHours),
     requireKyc: flag(saved.requireKyc, emptyEventDraft.requireKyc),
+    approvalRequired: flag(saved.approvalRequired, emptyEventDraft.approvalRequired),
     tiers: tiers.length > 0 ? tiers : emptyEventDraft.tiers,
     submittedOpHash: text(saved.submittedOpHash, emptyEventDraft.submittedOpHash),
     createdEventId: text(saved.createdEventId, emptyEventDraft.createdEventId),

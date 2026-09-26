@@ -92,8 +92,8 @@ function mirror(): EventDraft {
 }
 
 /**
- * The scene's own `더 설정하기`, which is the last of the two that carry that word — the other
- * belongs to a ticket kind's card.
+ * The scene's own `더 설정하기`. It is the only fold that carries that word now: the ticket
+ * kind's card lost its own to the always-visible 무료 | 유료 segment (plan section A-1).
  */
 function fold(): HTMLDetailsElement {
   const summaries = screen.getAllByText(copy.more);
@@ -126,10 +126,10 @@ describe('the scene layout', () => {
   it('shows five fields and folds the rest away', async () => {
     open();
     await waitFor(() => expect(listEventDrafts).toHaveBeenCalled());
-    // Two folds carry the same word: the kind card's own, and the scene's — this is the
-    // scene's, which comes last.
+    // One fold carries the word now: the scene's. The kind card lost its own fold to the
+    // always-visible 무료 | 유료 segment (plan section A-1).
     const folds = screen.getAllByText(copy.more);
-    expect(folds).toHaveLength(2);
+    expect(folds).toHaveLength(1);
     expect(folds.every((summary) => (summary.closest('details') as HTMLDetailsElement).open)).toBe(false);
 
     for (const field of [copy.titleLabel, copy.startsAt, copy.regionLabel, copy.placeLabel, copy.tiers.name]) {
@@ -140,7 +140,7 @@ describe('the scene layout', () => {
     expect(screen.getByLabelText(copy.tiers.supply).closest('details')).toBeNull();
 
     // And everything the founder never has to see again.
-    for (const folded of [copy.bodyLabel, copy.themeLabel, copy.tagAdd, copy.endsAt, copy.tiers.maxPerWallet]) {
+    for (const folded of [copy.bodyLabel, copy.themeLabel, copy.tagAdd, copy.endsAt]) {
       expect(screen.getByLabelText(folded).closest('details')).not.toBeNull();
     }
   });

@@ -41,6 +41,17 @@ export function resetConfig(): void {
   cached = null;
 }
 
+/**
+ * Whether the organiser scene may offer `관리자 승인 후 발급` (approvalRequired). It is off
+ * unless `VITE_APPROVAL_MODES` is exactly `on`, because the deployed contract still reverts on a
+ * `claim` for an approval-required event until the 01c redeploy — so the option is drawn but
+ * disabled until this flag opens it. Read at call time, so a build (or a test's `vi.stubEnv`)
+ * decides it the same way every other `VITE_*` variable is decided.
+ */
+export function approvalModesEnabled(): boolean {
+  return optionalEnv('VITE_APPROVAL_MODES') === 'on';
+}
+
 export function getConfig(): AppConfig {
   if (cached) return cached;
   const rawChainId = optionalEnv('VITE_CHAIN_ID');

@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EventDraft, StoredEventDraft } from '../../shared/api/firestore';
 
 let store: StoredEventDraft[] = [];
@@ -95,6 +95,10 @@ beforeEach(() => {
   pinEventImage.mockResolvedValue({ cid: 'bafkart' });
 });
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe('the kinds', () => {
   it('starts with one, which cannot be removed, and adds up to eight', async () => {
     const user = userEvent.setup();
@@ -141,31 +145,97 @@ describe('the kinds', () => {
   });
 });
 
-describe('the price', () => {
-  it('blocks the card the moment a currency other than free is chosen, and locks 만들기', async () => {
+describe('the 무료 | 유료 segment', () => {
+  it('blocks the card the moment 유료 is chosen, and locks 만들기', async () => {
     const user = userEvent.setup();
     open();
     await ready();
     expect(screen.getByRole('button', { name: copy.tiers.create })).toBeEnabled();
 
-    await user.click(screen.getByRole('button', { name: 'USDC' }));
+    // 유료 is the segment's paid half; choosing it defaults the currency to MON, which the
+    // deployed contract still refuses — so the card blocks on the spot, as it did before.
+    await user.click(screen.getByRole('button', { name: copy.tiers.paid }));
+    expect(mirror().tiers[0]?.currency).toBe('MON');
     expect(screen.getByText(copy.tiers.paidBlocked)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: copy.tiers.create })).toBeDisabled();
     expect(screen.getByText(copy.tierProblems.paidTier)).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: copy.tiers.free }));
+    expect(mirror().tiers[0]?.currency).toBe('free');
     expect(screen.queryByText(copy.tiers.paidBlocked)).toBeNull();
     expect(screen.getByRole('button', { name: copy.tiers.create })).toBeEnabled();
   });
 
-  it('keeps the amount out of anything but the draft', async () => {
+  it('shows the price, the currencies, the limit and its tooltip only for 유료', async () => {
     const user = userEvent.setup();
     open();
     await ready();
-    await user.click(screen.getByRole('button', { name: 'MON' }));
+    // 무료 to begin with: none of the paid-only boxes, and no currency chips.
+    expect(screen.queryByLabelText(copy.tiers.amount)).toBeNull();
+    expect(screen.queryByLabelText(copy.tiers.maxPerWallet)).toBeNull();
+    expect(screen.queryByText(copy.tiers.limitTip)).toBeNull();
+    for (const currency of ['MON', 'USDT', 'USDC']) {
+      expect(screen.queryByRole('button', { name: currency })).toBeNull();
+    }
+
+    await user.click(screen.getByRole('button', { name: copy.tiers.paid }));
+    expect(screen.getByLabelText(copy.tiers.amount)).toBeInTheDocument();
+    expect(screen.getByLabelText(copy.tiers.maxPerWallet)).toBeInTheDocument();
+    // The (i) tooltip beside the limit, in the exact words the founder asked for.
+    expect(screen.getByText(copy.tiers.limitTip)).toBeInTheDocument();
+    for (const currency of ['MON', 'USDT', 'USDC']) {
+      expect(screen.getByRole('button', { name: currency })).toBeInTheDocument();
+    }
+    // The receiving method belongs to a free event, so it is gone once the kind is paid.
+    expect(screen.queryByText(copy.tiers.receiveMethod)).toBeNull();
+  });
+
+  it('keeps the amount and the currency out of anything but the draft', async () => {
+    const user = userEvent.setup();
+    open();
+    await ready();
+    await user.click(screen.getByRole('button', { name: copy.tiers.paid }));
+    await user.click(screen.getByRole('button', { name: 'USDC' }));
     await user.clear(screen.getByLabelText(copy.tiers.amount));
     await user.type(screen.getByLabelText(copy.tiers.amount), '25');
-    expect(mirror().tiers[0]).toMatchObject({ currency: 'MON', amount: 25 });
+    expect(mirror().tiers[0]).toMatchObject({ currency: 'USDC', amount: 25 });
+  });
+});
+
+describe('받는 방식 — how a free event issues tickets', () => {
+  it('picks 선착순 by default and holds 관리자 승인 behind the flag when it is off', async () => {
+    vi.stubEnv('VITE_APPROVAL_MODES', 'off');
+    open();
+    await ready();
+    // 선착순 자동 승인 is the default, so approvalRequired stays false.
+    expect(screen.getByRole('button', { name: copy.tiers.receiveAuto }))
+      .toHaveAttribute('aria-pressed', 'true');
+    // The deployed contract still rejects approvalRequired:true, so the option is not offered yet.
+    const approval = screen.getByRole('button', { name: copy.tiers.receiveApproval });
+    expect(approval).toBeDisabled();
+    expect(screen.getByText(copy.tiers.approvalSoon)).toBeInTheDocument();
+    expect(mirror().approvalRequired).toBe(false);
+  });
+
+  it('lets 관리자 승인 be chosen when the flag is on, and writes it to the draft', async () => {
+    vi.stubEnv('VITE_APPROVAL_MODES', 'on');
+    const user = userEvent.setup();
+    open();
+    await ready();
+    const approval = screen.getByRole('button', { name: copy.tiers.receiveApproval });
+    expect(approval).toBeEnabled();
+    expect(screen.queryByText(copy.tiers.approvalSoon)).toBeNull();
+    await user.click(approval);
+    expect(mirror().approvalRequired).toBe(true);
+  });
+
+  it('draws the receiving method once, on the first kind only', async () => {
+    const user = userEvent.setup();
+    open();
+    await ready();
+    await user.click(screen.getByRole('button', { name: copy.tiers.add }));
+    // Two kinds, one receiving-method control: approvalRequired is one per event.
+    expect(screen.getAllByText(copy.tiers.receiveMethod)).toHaveLength(1);
   });
 });
 

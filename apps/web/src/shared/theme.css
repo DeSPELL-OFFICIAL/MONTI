@@ -410,6 +410,27 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
   box-shadow: 0 2px 10px rgba(131, 110, 249, 0.18);
 }
 .chip[disabled] { opacity: 0.45; }
+/* The (i) beside the per-person limit. The sentence is always in the DOM — screen readers reach
+   it through the button's label — and the bubble is revealed on hover or keyboard focus. */
+.field-tip { position: relative; display: inline-flex; margin: 0 0 var(--s-2); }
+.field-tip__icon {
+  width: 20px; height: 20px; border-radius: var(--r-pill);
+  border: 1px solid var(--glass-hairline); background: var(--glass-bg-strong);
+  color: var(--ink-2); font-size: 12px; font-weight: 700; line-height: 1; cursor: help;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.field-tip__bubble {
+  position: absolute; left: 0; bottom: calc(100% + 6px); z-index: 5;
+  width: max-content; max-width: min(280px, 80vw);
+  padding: var(--s-2) var(--s-3); border-radius: var(--r-md);
+  background: var(--ink); color: #fff;
+  font-size: var(--t-cap); line-height: var(--t-cap-lh); font-weight: 500;
+  opacity: 0; visibility: hidden; pointer-events: none;
+  transition: opacity var(--fast) var(--ease);
+}
+.field-tip:hover .field-tip__bubble,
+.field-tip:focus-within .field-tip__bubble { opacity: 1; visibility: visible; }
+.receive-method { margin-top: var(--s-3); }
 /* An event's own tags, on the detail screen. Reading only: nothing filters on them. */
 .tag-row { list-style: none; display: flex; flex-wrap: wrap; gap: 6px; margin: var(--s-3) 0; padding: 0; }
 /* The same chips on an explore card, where they are the smallest line rather than a heading:

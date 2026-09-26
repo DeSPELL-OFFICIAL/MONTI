@@ -227,7 +227,7 @@ describe('event drafts', () => {
     orgId: '9', title: '재즈 나이트', description: '', posterCid: 'bafk1',
     category: 0, tags: ['재즈'], regionCode: 'KR-11', venue: '한남동', venueHidden: true,
     startsAt: 0, endsAt: 0, timeHidden: false,
-    transferable: true, transferCutoffHours: 2, requireKyc: false,
+    transferable: true, transferCutoffHours: 2, requireKyc: false, approvalRequired: false,
     tiers: [], submittedOpHash: '', createdEventId: '', editingEventId: '', orgPendingName: '',
   };
 

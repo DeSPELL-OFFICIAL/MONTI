@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { emptyEventDraft, emptyEventDraftTier } from '../useEventDraft';
+import { emptyEventDraft, emptyEventDraftTier, normalizeEventDraft } from '../useEventDraft';
 import type { EventDraft } from '../../shared/api/firestore';
 import { TICKET_BACKDROPS } from '../../shared/ui/ticketArt/presets';
 import {
@@ -236,6 +236,21 @@ describe('the preset alphabet', () => {
     }
     // A thirteenth is not a letter anything downstream would accept, so it folds back.
     expect(tierArt({ ...tier, design: 'm', imageCid: '' })).toEqual({ preset: 'a' });
+  });
+});
+
+describe('approvalRequired', () => {
+  /**
+   * The one event-wide switch the tier card's 받는 방식 control writes. It defaults off — every
+   * event issues on a first-come basis until an organiser chooses otherwise — and it is read
+   * back at its own type, so a hand-broken value falls back rather than reaching the chain as a
+   * string (plan section A-5).
+   */
+  it('defaults to false and round-trips through the draft normaliser', () => {
+    expect(emptyEventDraft.approvalRequired).toBe(false);
+    expect(normalizeEventDraft({ approvalRequired: true }).approvalRequired).toBe(true);
+    expect(normalizeEventDraft({ approvalRequired: 'yes' }).approvalRequired).toBe(false);
+    expect(normalizeEventDraft({}).approvalRequired).toBe(false);
   });
 });
 

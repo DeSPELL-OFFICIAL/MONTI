@@ -336,6 +336,12 @@ export interface EventDraft {
   transferable: boolean;
   transferCutoffHours: number;
   requireKyc: boolean;
+  /**
+   * Whether tickets are issued only after the organiser approves each request, rather than on a
+   * first-come basis. One switch per event (it lives on `EventMeta`, not on a kind), written by
+   * the first tier card's 받는 방식 control and read by `buildEventMeta`. Off by default.
+   */
+  approvalRequired: boolean;
   tiers: EventDraftTier[];
   /**
    * The `userOpHash` of a `createEvent` whose `wait` gave up before it landed, or `''`. The

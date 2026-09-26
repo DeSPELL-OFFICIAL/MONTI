@@ -377,6 +377,16 @@ const ko = {
       artWorking: '그림을 올리고 있어요',
       // 유료 종류를 고른 그 자리에서 막는다 — 마지막에 거절당하는 게 제일 나쁘다(계획 B-3).
       paidBlocked: '유료 티켓은 곧 열려요. 지금은 무료로만 만들 수 있어요',
+      // 무료 | 유료 세그먼트: 통화 칩 4개와 접힘을 대체하고 카드 상단에 항상 노출된다(계획 A-1).
+      paid: '유료',
+      // (i) 툴팁 — 창업자가 요청한 정확한 문구(계획 A-3).
+      limitTip: '예매하는 본인도 1명으로 포함돼요. 가족·동행 표를 함께 사게 하려면 2 이상, 1인 1매로 막으려면 1로 두세요.',
+      // 무료일 때만 나오는 받는 방식 2분기(계획 A-2). approvalRequired 는 이벤트 단위라 첫 카드에만 그린다.
+      receiveMethod: '받는 방식',
+      receiveAuto: '선착순 자동 승인',
+      receiveApproval: '관리자 승인 후 발급',
+      // 승인제는 01c 재배포 전까지 컨트랙트가 거절한다 — VITE_APPROVAL_MODES 로 열기 전엔 비활성.
+      approvalSoon: '곧 열려요',
       rules: '행사 전체 규칙',
       // transferable·transferCutoffSeconds·requireKyc 는 EventMeta 에 있고 Tier 에는 없다.
       // 종류 카드 안에 두면 화면이 거짓말을 한다.
@@ -834,6 +844,18 @@ const en: typeof ko = {
       artWorking: 'Uploading the picture',
       // Blocked where the choice was made, not at the end (plan section B-3).
       paidBlocked: 'Paid tickets are coming soon. For now an event can only be free',
+      // The 무료 | 유료 segment, always at the top of the card, replacing the fold and the four
+      // currency chips (plan section A-1).
+      paid: 'Paid',
+      // The (i) tooltip in the exact words the founder asked for (plan section A-3).
+      limitTip: 'You are counted as one of the buyers. Set it to 2 or more to let one person buy for family or a guest, or leave it at 1 to hold everyone to a single ticket.',
+      // The two receiving methods, shown only while the event is free (plan section A-2).
+      receiveMethod: 'How people receive it',
+      receiveAuto: 'First come, issued automatically',
+      receiveApproval: 'Issued after the organiser approves',
+      // Approval is refused by the deployed contract until the 01c redeploy, so it is off until
+      // VITE_APPROVAL_MODES opens it.
+      approvalSoon: 'Coming soon',
       rules: 'Rules for the whole event',
       // These three live on EventMeta and not on Tier, so a per-kind switch would be a lie.
       rulesHelp: 'These three cannot differ by kind. There is one of each per event',

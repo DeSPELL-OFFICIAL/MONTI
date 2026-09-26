@@ -69,9 +69,8 @@ class OrgRefused extends Error {
   }
 }
 
-/** Three values the scene does not ask for, because there is one right answer for each. */
+/** Two values the scene does not ask for, because there is one right answer for each. */
 const MAX_TRANSFERS = 3;
-const APPROVAL_REQUIRED = false;
 const SEATED = false;
 
 export type PublishPhase = 'idle' | 'org' | 'pinning' | 'sending' | 'finishing' | 'confirming';
@@ -117,10 +116,11 @@ export interface PublishState {
  * this file, so the create path and the update path can never disagree by a byte:
  * `titleHash`, `descHash` and `venueHash` are written once and can never be repaired.
  *
- * Three values are constants here rather than switches on the scene. `approvalRequired` must
- * be false — `Ticket.claim` reverts `ApprovalRequiredNotSupported` on a true one, so the
- * switch the deleted wizard offered built events nobody could ever get a ticket for. `seated` has
- * no screen behind it, and `maxTransfers` has no question worth asking yet.
+ * Two values are constants here rather than switches on the scene: `seated` has no screen
+ * behind it, and `maxTransfers` has no question worth asking yet. `approvalRequired` is no
+ * longer among them — the tier card's 받는 방식 control writes it onto the draft, and the
+ * option that would set it true is held behind `VITE_APPROVAL_MODES` until the contract that
+ * reverts `ApprovalRequiredNotSupported` on a true one is redeployed (plan section A-2).
  *
  * Every readable field is trimmed *here*, so the string that is hashed onto the chain is the
  * same one that is pinned to IPFS. The poster is not among them: its CID travels in the pinned
@@ -143,7 +143,7 @@ function toChainDraft(draft: EventDraft, now: number): ChainDraft {
     transferable: draft.transferable,
     transferCutoffHours: draft.transferCutoffHours,
     maxTransfers: MAX_TRANSFERS,
-    approvalRequired: APPROVAL_REQUIRED,
+    approvalRequired: draft.approvalRequired,
     requireKyc: draft.requireKyc,
     tiers: draft.tiers.map((tier) => ({
       name: tier.name.trim(),

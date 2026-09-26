@@ -57,6 +57,10 @@ export function TicketSection({ draft, patch, problems, blocked }: TicketSection
             removable={draft.tiers.length > 1}
             onPatch={(next) => patchTier(index, next)}
             onRemove={() => patch({ tiers: draft.tiers.filter((_, at) => at !== index) })}
+            // Event-wide, so the card is handed the draft's answer and writes straight back to
+            // the draft rather than to its own kind. Only the first card draws the control.
+            approvalRequired={draft.approvalRequired}
+            onApprovalRequired={(value) => patch({ approvalRequired: value })}
           />
         ))}
       </ul>
