@@ -75,6 +75,15 @@ contract Ticket is ERC721, EIP712, ITicket {
         uint64 expiresAt;
     }
 
+    /// @notice 승인제(01c) 신청 레코드. `eventId` 는 바깥 매핑의 키이므로 구조체에 두지 않는다.
+    ///         status: 0 대기(pending) · 1 승인(approved) · 2 거절/취소(rejected). 세 필드가 한
+    ///         슬롯에 들어간다(address 20B + uint8 + uint8).
+    struct ClaimRequest {
+        address requester;
+        uint8 tier;
+        uint8 status;
+    }
+
     enum EventStatus {
         Draft,
         Published,
@@ -108,6 +117,12 @@ contract Ticket is ERC721, EIP712, ITicket {
     uint32 private constant PERM_CREATE_EVENT = 1;
     uint32 private constant PERM_MANAGE_GATES = 2;
     uint32 private constant PERM_APPROVE_OVERRIDE = 4;
+    /// @notice 승인제(01c)에서 approveClaims/rejectClaims 를 부를 수 있는 관리자 권한 비트.
+    ///         권한 비트는 Organizers 의 `_adminBits` 한 네임스페이스를 Ticket 과 Organizers 가
+    ///         함께 쓴다: 1·2·4 는 여기, 8(PERM_MANAGE_MANAGERS)·16(PERM_MANAGE_BUDGET)은
+    ///         Organizers 가 이미 잡고 있으므로 다음 빈 비트는 32 다. 소유자는 언제나 전 비트를
+    ///         가지므로(Organizers.hasPermission) 소유자용 분기는 따로 두지 않는다.
+    uint32 private constant PERM_APPROVE_CLAIM = 32;
 
     IIdentity public immutable identity;
     IOrganizers public immutable organizers;
@@ -127,10 +142,29 @@ contract Ticket is ERC721, EIP712, ITicket {
     mapping(uint256 => Offer) private _offers;
     mapping(address => mapping(uint256 => uint256)) private _balanceOfEvent;
 
+    /// @notice 승인제(01c): eventId => requestId => 신청. requestId 는 이벤트마다 1부터 증가한다.
+    mapping(uint256 => mapping(uint256 => ClaimRequest)) private _claimRequests;
+    /// @notice eventId => 마지막으로 발급한 requestId. 다음 신청은 여기에 +1 한 값을 받는다.
+    mapping(uint256 => uint256) private _lastRequestId;
+    /// @notice eventId => 아직 대기(status 0)인 신청 수. 주최자 화면의 뱃지·목록 크기에 쓴다.
+    mapping(uint256 => uint256) private _pendingCount;
+    /// @notice eventId => requester => 그 사람의 대기 신청 수. 지갑당 한도가 발급분(balanceOfEvent)
+    ///         과 대기분을 함께 세도록 requestClaim 에서 둘을 더해 비교한다.
+    mapping(uint256 => mapping(address => uint256)) private _pendingOf;
+
     event EventCreated(uint256 indexed eventId, uint256 indexed orgId, address indexed creator);
     event EventStatusChanged(uint256 indexed eventId, uint8 status);
     event EventMetaUpdated(uint256 indexed eventId);
     event Claimed(uint256 indexed tokenId, uint256 indexed eventId, address indexed to, uint8 tier);
+    /// @notice 승인제(01c). 신청이 접수됐다. 아직 민팅은 없다. eventId·requestId·requester 셋을
+    ///         인덱싱해 인덱서가 이벤트·요청·신청자별로 거를 수 있게 한다.
+    event ClaimRequested(uint256 indexed eventId, uint256 indexed requestId, address indexed requester, uint8 tier);
+    /// @notice 승인제(01c). 신청이 승인돼 tokenId 가 민팅됐다. 같은 트랜잭션에서 Claimed 도 나가므로
+    ///         인덱서의 Ticket 행은 직접 claim 과 동일하게 만들어진다.
+    event ClaimApproved(uint256 indexed eventId, uint256 indexed requestId, uint256 tokenId);
+    /// @notice 승인제(01c). 신청이 거절되거나 신청자가 취소했다. 어느 쪽이든 예약한 공급·지갑 한도가
+    ///         풀린다(취소도 같은 종료 이벤트를 써서 인덱서가 이벤트 하나만 보면 되게 한다).
+    event ClaimRejected(uint256 indexed eventId, uint256 indexed requestId);
     event CheckedIn(
         uint256 indexed tokenId, uint256 indexed eventId, uint256 indexed gateId, bytes32 nonceHash, uint64 ts
     );
@@ -161,7 +195,9 @@ contract Ticket is ERC721, EIP712, ITicket {
     error SaleClosed();
     error SoldOut();
     error MaxPerWalletExceeded();
-    error ApprovalRequiredNotSupported();
+    error ApprovalRequired();
+    error ApprovalNotRequired();
+    error RequestNotPending();
     error KycRequired();
     error PaidTiersNotEnabled();
     error NotMember();
@@ -265,7 +301,8 @@ contract Ticket is ERC721, EIP712, ITicket {
         if (!identity.isMember(msg.sender)) revert NotMember();
 
         EventMeta storage m = _events[eventId];
-        if (m.approvalRequired) revert ApprovalRequiredNotSupported();
+        // 승인제 이벤트는 직접 claim 이 막힌다 — requestClaim -> approveClaims 경로만 발급한다(01c).
+        if (m.approvalRequired) revert ApprovalRequired();
         if (m.requireKyc && identity.kycLevelOf(msg.sender) < 1) revert KycRequired();
         if (block.timestamp < m.saleStart || block.timestamp > m.saleEnd) revert SaleClosed();
         if (tier >= _tiers[eventId].length) revert UnknownTier();
@@ -282,6 +319,100 @@ contract Ticket is ERC721, EIP712, ITicket {
         _safeMint(msg.sender, tokenId);
 
         emit Claimed(tokenId, eventId, msg.sender, tier);
+    }
+
+    /// @notice 승인제(01c). approvalRequired 이벤트는 직접 claim 이 막혀 있으므로, 관객은 여기서
+    ///         신청만 하고 실제 민팅은 주최자의 approveClaims 가 한다. 자격 검사는 claim 과 같다
+    ///         (발행·판매창·멤버·KYC·티어 존재·무료 전용·품절·지갑 한도). claim 과 다른 점은 둘뿐이다:
+    ///         (1) 공급을 신청 시점에 예약해(`t.minted += 1`) 승인 단계에서 초과 발행이 날 수 없게
+    ///         하고, (2) 지갑 한도를 발급분 + 대기분 합으로 센다. 거절·취소가 그 예약을 되돌린다.
+    function requestClaim(uint256 eventId, uint8 tier) external returns (uint256 requestId) {
+        EventStatus s = eventStatus(eventId);
+        if (s == EventStatus.Ended) revert EventEnded();
+        if (s != EventStatus.Published) revert EventNotPublished();
+        if (!identity.isMember(msg.sender)) revert NotMember();
+
+        EventMeta storage m = _events[eventId];
+        if (!m.approvalRequired) revert ApprovalNotRequired();
+        if (m.requireKyc && identity.kycLevelOf(msg.sender) < 1) revert KycRequired();
+        if (block.timestamp < m.saleStart || block.timestamp > m.saleEnd) revert SaleClosed();
+        if (tier >= _tiers[eventId].length) revert UnknownTier();
+
+        Tier storage t = _tiers[eventId][tier];
+        if (t.priceUsdCents != 0) revert PaidTiersNotEnabled();
+        if (t.minted >= t.supply) revert SoldOut();
+        if (_balanceOfEvent[msg.sender][eventId] + _pendingOf[eventId][msg.sender] >= t.maxPerWallet) {
+            revert MaxPerWalletExceeded();
+        }
+
+        t.minted += 1; // 공급 예약: 대기 + 발급이 supply 를 넘지 못한다(초과 발행 방지).
+        _pendingOf[eventId][msg.sender] += 1;
+        _pendingCount[eventId] += 1;
+        requestId = ++_lastRequestId[eventId];
+        _claimRequests[eventId][requestId] = ClaimRequest({requester: msg.sender, tier: tier, status: 0});
+
+        emit ClaimRequested(eventId, requestId, msg.sender, tier);
+    }
+
+    /// @notice 승인제(01c). 소유자, PERM_APPROVE_CLAIM 을 가진 admin, canApprove 매니저가 부른다.
+    ///         각 대기 신청을 claim 과 같은 내부 경로(281-284)로 민팅한다 — 공급은 신청 때 예약됐으
+    ///         므로 여기서 다시 세지 않는다. 이미 대기가 아닌 요청(승인·거절·취소·미존재)은 배치를
+    ///         되돌리지 않고 건너뛴다 — 부분 승인·중복 제출·경합에 강하다. Claimed 도 함께 내보내
+    ///         인덱서의 Ticket 행이 정상 생성되게 한다.
+    function approveClaims(uint256 eventId, uint256[] calldata requestIds) external {
+        _requireApprovalPermission(eventId);
+        for (uint256 i; i < requestIds.length; ++i) {
+            uint256 rid = requestIds[i];
+            ClaimRequest storage r = _claimRequests[eventId][rid];
+            if (r.status != 0 || r.requester == address(0)) continue;
+
+            address to = r.requester;
+            uint8 tier = r.tier;
+            r.status = 1;
+            _pendingCount[eventId] -= 1;
+            _pendingOf[eventId][to] -= 1;
+
+            uint256 tokenId = _nextTokenId++;
+            _eventOf[tokenId] = eventId;
+            _tierOf[tokenId] = tier;
+            _safeMint(to, tokenId);
+
+            emit Claimed(tokenId, eventId, to, tier);
+            emit ClaimApproved(eventId, rid, tokenId);
+        }
+    }
+
+    /// @notice 승인제(01c). 거절은 신청이 잡아둔 예약(공급·대기·지갑 한도)을 되돌리고 요청을 거절
+    ///         상태로 만든다. approveClaims 와 같은 권한, 같은 skip 규약이다.
+    function rejectClaims(uint256 eventId, uint256[] calldata requestIds) external {
+        _requireApprovalPermission(eventId);
+        for (uint256 i; i < requestIds.length; ++i) {
+            uint256 rid = requestIds[i];
+            ClaimRequest storage r = _claimRequests[eventId][rid];
+            if (r.status != 0 || r.requester == address(0)) continue;
+            r.status = 2;
+            _releaseReservation(eventId, r);
+            emit ClaimRejected(eventId, rid);
+        }
+    }
+
+    /// @notice 승인제(01c). 신청자 본인이 대기 중인 자기 요청을 거둔다. 예약을 되돌리고 거절과 같은
+    ///         종료 이벤트(ClaimRejected)를 낸다. 대기 상태가 아니면(이미 승인·거절) 되돌릴 것이 없다.
+    function cancelRequest(uint256 eventId, uint256 requestId) external {
+        ClaimRequest storage r = _claimRequests[eventId][requestId];
+        if (r.requester != msg.sender) revert Unauthorized();
+        if (r.status != 0) revert RequestNotPending();
+        r.status = 2;
+        _releaseReservation(eventId, r);
+        emit ClaimRejected(eventId, requestId);
+    }
+
+    function claimRequest(uint256 eventId, uint256 requestId) external view returns (ClaimRequest memory) {
+        return _claimRequests[eventId][requestId];
+    }
+
+    function pendingCount(uint256 eventId) external view returns (uint256) {
+        return _pendingCount[eventId];
     }
 
     function eventOf(uint256 tokenId) external view returns (uint256) {
@@ -652,6 +783,25 @@ contract Ticket is ERC721, EIP712, ITicket {
         uint256 orgId = _events[eventId].orgId;
         if (orgId == 0) revert UnknownEvent();
         if (!organizers.hasPermission(orgId, msg.sender, bit)) revert Unauthorized();
+    }
+
+    /// @notice approveClaims/rejectClaims 의 권한 게이트(01c). 소유자와 PERM_APPROVE_CLAIM 를 가진
+    ///         admin 은 hasPermission 이 함께 참으로 잡고(소유자는 전 비트 보유), 그 밖에는
+    ///         canApprove 매니저만 통과한다 — manualOverride 의 ROLE_APPROVER/ROLE_MANAGER 와 같은 축.
+    function _requireApprovalPermission(uint256 eventId) private view {
+        uint256 orgId = _events[eventId].orgId;
+        if (orgId == 0) revert UnknownEvent();
+        if (organizers.hasPermission(orgId, msg.sender, PERM_APPROVE_CLAIM)) return;
+        (bool exists, bool canApprove) = organizers.managerOf(orgId, msg.sender);
+        if (exists && canApprove) return;
+        revert Unauthorized();
+    }
+
+    /// @notice 거절·취소 공통(01c): 신청이 잡아둔 공급 예약·대기 카운트·지갑 한도 몫을 한 번에 푼다.
+    function _releaseReservation(uint256 eventId, ClaimRequest storage r) private {
+        _tiers[eventId][r.tier].minted -= 1;
+        _pendingCount[eventId] -= 1;
+        _pendingOf[eventId][r.requester] -= 1;
     }
 
     function eventOrg(uint256 eventId) external view returns (uint256) {
