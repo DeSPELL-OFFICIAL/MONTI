@@ -55,7 +55,7 @@ contracts:
       - event: OfferAccepted(uint256 indexed tokenId, address indexed from, address indexed to)
 networks:
   - id: 10143
-    start_block: 64921775
+    start_block: 65856800
     contracts:
       - name: Identity
         address:
@@ -65,4 +65,4 @@ networks:
           - "0xa88C8D110Ca8f0c925A781AB8042bA012d7281F0"
       - name: Ticket
         address:
-          - "0x4B8353C9F3503Cdbd011E8f35da0a955D95b1367"
+          - "0x40D90AF3a3B22542AEeF0ec3E6a66F1EAb6f7AFA"
