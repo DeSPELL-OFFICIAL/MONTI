@@ -103,6 +103,9 @@ export async function login(page: Page, persona: Persona): Promise<boolean> {
     // Success routes to 내 티켓; failure keeps us on /login with an error.
     try {
       await expect(page).toHaveURL(/\/tickets/, { timeout: 45_000 });
+      // signInWithCustomToken persists the session to IndexedDB asynchronously; give that write
+      // time to land before the next full reload, or the reload comes up anonymous.
+      await page.waitForTimeout(4000);
       return true;
     } catch {
       return false;

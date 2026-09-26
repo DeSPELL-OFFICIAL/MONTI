@@ -86,9 +86,31 @@ export async function openPersona(browser: Browser, persona: Persona): Promise<P
 /** Sign the persona in: reuse a persisted passkey if there is one, otherwise sign up fresh. */
 export async function ensureAccount(session: PersonaSession): Promise<void> {
   const canReuse = session.hasState && existsSync(credsPath(session.persona));
-  if (canReuse && (await login(session.page, session.persona))) return;
+  if (canReuse) {
+    // Passkey login is intermittently refused right after a cold function, and can reach 내 티켓
+    // before signInWithCustomToken has persisted the session (a later reload then comes up
+    // anonymous). Retry generously — each attempt remounts and mints a fresh challenge — and only
+    // accept an attempt whose session is durable.
+    for (let attempt = 0; attempt < 6; attempt++) {
+      if ((await login(session.page, session.persona)) && (await isSignedIn(session.page))) {
+        // Re-persist so the credential counter and storage stay fresh for the next run.
+        await persist(session).catch(() => undefined);
+        return;
+      }
+      await session.page.waitForTimeout(3000);
+    }
+    // The account is already registered on chain, so a fresh signup would only bounce to /login.
+    throw new Error(`login reuse failed for ${session.persona.id}: passkey session did not hold`);
+  }
   await signUp(session.page, session.persona);
   await persist(session);
+}
+
+/** Whether the session is durable: a guarded route stays put instead of bouncing to /login. */
+async function isSignedIn(page: Page): Promise<boolean> {
+  await page.goto('/tickets');
+  await page.waitForTimeout(3000);
+  return /\/tickets(\/|$)/.test(page.url());
 }
 
 /** Persist storage state (incl. localStorage `monti.passkey`) and the authenticator credentials. */
