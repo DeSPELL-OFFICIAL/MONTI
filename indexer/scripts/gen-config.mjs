@@ -215,6 +215,14 @@ const rpcBlock = rpcUrl
 `
   : '';
 
+// Identity/Organizers 는 재배포 없이 유지될 수 있다(01c: Ticket·paymaster 만 교체). 그 계약들의
+// 과거 이벤트(주최사 생성, 게이트 등록, 사람 등록)는 이전 배포 블록부터 있으므로 start_block 은
+// 현재 블록과 `previous[].block` 중 가장 이른 값이다. 옛 Ticket 주소는 config 에 없어 스캔되지 않는다.
+const startBlock = Math.min(
+  deployment.block,
+  ...(deployment.previous ?? []).map((p) => p.block).filter((b) => Number.isFinite(b)),
+);
+
 const config = `# 생성 파일. 직접 고치지 말고 scripts/gen-config.mjs 를 고치세요.
 # 주소·start_block 은 contracts/deployments/${chainId}.json, 이벤트 시그니처는
 # packages/shared/src/abi/*.json 에서 나온다. 갱신은 \`pnpm indexer:config\`.
@@ -232,7 +240,7 @@ contracts:
 ${contractBlocks.join('\n')}
 networks:
   - id: ${deployment.chainId}
-    start_block: ${deployment.block}
+    start_block: ${startBlock}
 ${rpcBlock}    contracts:
 ${networkBlocks.join('\n')}
 `;
@@ -240,7 +248,7 @@ ${networkBlocks.join('\n')}
 await mkdir(outRoot, { recursive: true });
 await writeFile(join(outRoot, 'config.yaml'), config, 'utf8');
 console.log(
-  `[gen-config] chain ${deployment.chainId}, start_block ${deployment.block}, ` +
+  `[gen-config] chain ${deployment.chainId}, start_block ${startBlock}, ` +
     `source ${rpcUrl ? `rpc ${rpcUrl}` : 'hypersync'}`,
 );
 if (pending.length > 0) {

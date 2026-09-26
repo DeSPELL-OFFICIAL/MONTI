@@ -55,7 +55,7 @@ contracts:
       - event: OfferAccepted(uint256 indexed tokenId, address indexed from, address indexed to)
 networks:
   - id: 10143
-    start_block: 65856800
+    start_block: 64921775
     contracts:
       - name: Identity
         address:
