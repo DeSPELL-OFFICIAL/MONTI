@@ -131,7 +131,7 @@ const ORG_NO_PERMISSION = { ...ORG, role: 'manager', bits: 0, canCreateEvent: fa
 const ME = `0x${'ab'.repeat(20)}` as const;
 
 async function tapCreate(): Promise<void> {
-  await userEvent.click(await screen.findByRole('button', { name: '만들기' }));
+  await userEvent.click(await screen.findByRole('button', { name: '행사 만들기' }));
 }
 
 function renderDetail(eventId = '1') {
@@ -317,7 +317,7 @@ describe('Discover · loading and empty states', () => {
     expect(await screen.findByText('첫 행사를 만들어 보세요')).toBeInTheDocument();
     // The empty-state CTA and the FAB both read 만들기; press the one in the empty state.
     const cta = within(document.querySelector('.empty-state') as HTMLElement)
-      .getByRole('button', { name: '만들기' });
+      .getByRole('button', { name: '행사 만들기' });
     await userEvent.click(cta);
     expect(seen.at(-1)).toBe('/org/new');
   });
@@ -362,7 +362,7 @@ describe('Discover · 만들기', () => {
     // The beforeEach state is 'loading': a tap here must not read an unresolved session and send a
     // signed-in organiser to /signup/phone.
     const seen = renderDiscoverTracked();
-    expect(await screen.findByRole('button', { name: '만들기' })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: '행사 만들기' })).toBeDisabled();
     await tapCreate();
     expect(seen.at(-1)).toBe('/');
   });
@@ -370,7 +370,7 @@ describe('Discover · 만들기', () => {
   it('shows the button to a visitor who is not signed in, rather than hiding the way in', async () => {
     setSession({ status: 'anonymous' });
     renderDiscoverTracked();
-    const fab = await screen.findByRole('button', { name: '만들기' });
+    const fab = await screen.findByRole('button', { name: '행사 만들기' });
     expect(fab).toBeEnabled();
     // Portaled out of the screen (and so out of the route transform) so it never rides the slide (R1).
     expect(fab.closest('.screen')).toBeNull();

@@ -240,7 +240,7 @@ describe('TransferInvite', () => {
 const SERVER_REFUSALS: ReadonlyArray<readonly [string, string, string]> = [
   ['failed-precondition', 'OFFER_ALREADY_OPEN', '이 티켓은 이미 다른 분에게 보내는 중이에요.'],
   ['permission-denied', 'NOT_TOKEN_OWNER', '내 티켓이 아니에요.'],
-  ['invalid-argument', 'SELF_TRANSFER', '본인에게는 양도할 수 없어요.'],
+  ['invalid-argument', 'SELF_TRANSFER', '본인에게는 줄 수 없어요.'],
   ['invalid-argument', 'BAD_PHONE', '번호를 다시 확인해 주세요.'],
   ['invalid-argument', 'BAD_TOKEN_ID', '입력한 내용을 다시 확인해 주세요.'],
 ];
@@ -264,9 +264,9 @@ describe('an invite the server refuses', () => {
 const OFFER_REVERTS: ReadonlyArray<readonly [string, string]> = [
   ['Unauthorized()', '내 티켓이 아니에요.'],
   ['OfferExpired()', '초대가 만료됐어요. 다시 보내 달라고 해 주세요.'],
-  ['TransfersDisabled()', '이 행사는 양도할 수 없어요.'],
+  ['TransfersDisabled()', '이 행사는 친구에게 줄 수 없어요.'],
   ['AlreadyCheckedIn()', '이미 입장한 티켓이에요.'],
-  ['TransferLimitReached()', '이 티켓은 더 이상 양도할 수 없어요.'],
+  ['TransferLimitReached()', '이 티켓은 더 이상 친구에게 줄 수 없어요.'],
 ];
 
 describe('an offer the contract refuses', () => {

@@ -54,7 +54,7 @@ export function TicketDetail() {
   }
 
   return (
-    <Screen title={`#${ticket.tokenId}`}>
+    <Screen title={ticket.title === '' ? copy.tickets.artNoTitle : ticket.title}>
       <div className="ticket-detail-art">
         <TicketArt {...artPropsOf(ticket)} animated />
       </div>

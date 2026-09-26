@@ -380,7 +380,7 @@ describe('Claim · approval mode', () => {
   it('sends the approved attendee to their issued ticket', async () => {
     requests.rows = [{ ...REQUEST, status: 'Approved', tokenId: '77' }];
     renderClaim();
-    expect(await screen.findByText('승인됐어요. 티켓이 발급됐어요')).toBeInTheDocument();
+    expect(await screen.findByText('승인됐어요. 티켓을 받았어요')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '내 티켓 보기' })).toHaveAttribute('href', '/tickets');
     expect(screen.queryByRole('button', { name: '신청하기' })).not.toBeInTheDocument();
   });
@@ -398,7 +398,7 @@ describe('Claim · approval mode', () => {
     );
     renderClaim();
     await userEvent.click(await screen.findByRole('button', { name: '신청하기' }));
-    expect(await screen.findByText('이 행사는 주최자 승인 후 발급돼요.')).toBeInTheDocument();
+    expect(await screen.findByText('이 행사는 주최자 승인 후 받을 수 있어요.')).toBeInTheDocument();
   });
 
   it('opens the verification sheet before requesting when the event needs kyc', async () => {

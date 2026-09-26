@@ -11,7 +11,6 @@ import { describeFailure } from '../../shared/errors';
 import { EVENT_QUERY, type EnvioEvent, type EnvioTier } from '../../shared/envio/queries';
 import { fetchEventMetadata, type EventMetadata } from '../../shared/envio/ipfs';
 import { api } from '../../shared/api/functions';
-import { getConfig } from '../../shared/config';
 import { useSession } from '../../shared/session';
 import { useKycLevel } from '../me/useKycLevel';
 import { formatEventDate, formatEventDay } from './useEvents';
@@ -116,7 +115,6 @@ export function EventDetail() {
 
   const { event, tiers } = data;
   const canShare = canOpenShareSheet();
-  const record = `${getConfig().explorerUrl}/address/${getConfig().addresses.ticket}`;
   const region = metadata ? regionLabel(metadata.region, copy) : '';
   // The venue the organiser hid is not in the pinned document at all; it comes back from the
   // callable or it does not come back.
@@ -212,10 +210,6 @@ export function EventDetail() {
           {copy.discover.share}
         </Button>
       ) : null}
-
-      <p className="muted">
-        <a href={record}>{copy.discover.publicRecord}</a>
-      </p>
     </Screen>
   );
 }
