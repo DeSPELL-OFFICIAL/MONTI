@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import type { Hex } from 'viem';
-import { Alert, Button, Field, KycBadge, Screen, Spinner } from '../../shared/ui';
+import { Alert, Button, Field, KycBadge, OpProgress, Screen, Spinner } from '../../shared/ui';
 import { useCopy } from '../../shared/i18n';
 import { gql } from '../../shared/envio/client';
 import { describeFailure } from '../../shared/errors';
@@ -254,6 +254,9 @@ export function Claim() {
           <Alert tone="info">{copy.claim.pending}</Alert>
           {phase === 'confirming' ? <Alert tone="info">{copy.claim.confirming}</Alert> : null}
           {error ? <Alert tone="error">{error}</Alert> : null}
+          {/* The determinate wait, in place of a bare spinner (plan §2c). No retry here: cancelling
+              is the op, and its confirming line already says to check back. */}
+          {phase === 'working' ? <OpProgress phase="saving" /> : null}
           {/* A cancel is the only op here, so busy is enough to keep a second tap from firing it. */}
           <Button variant="ghost" onClick={() => void cancel()} disabled={phase !== 'idle'}>
             {phase === 'working' ? copy.claim.cancelling : copy.claim.cancel}
@@ -282,6 +285,8 @@ export function Claim() {
           {needsKyc ? (
             <KycRequiredSheet eventId={eventId} tier={tier} level={kycLevel} onClose={() => setNeedsKyc(false)} />
           ) : null}
+          {/* The determinate wait for claim/requestClaim, in place of a bare spinner (plan §2c). */}
+          {phase === 'working' ? <OpProgress phase="saving" /> : null}
           {/* Still confirming counts as busy: the op is already on its way and a second tap would
               claim twice — `held` cannot have caught up yet to stop it. */}
           <Button onClick={() => void run()} disabled={phase !== 'idle' || blocked}>

@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Alert, Button, Card, Screen, Spinner } from '../../shared/ui';
+import { Alert, Button, Card, OpProgress, Screen, Spinner } from '../../shared/ui';
 import { fmt } from '../../shared/i18n';
 import { gql } from '../../shared/envio/client';
 import {
@@ -171,7 +171,8 @@ export function Requests() {
       ) : null}
       {confirming ? <Alert tone="info">{copy.confirming}</Alert> : null}
       {error ? <Alert tone="error">{error}</Alert> : null}
-      {busy ? <Alert tone="info">{copy.working}</Alert> : null}
+      {/* The determinate wait for approve/reject, in place of a bare "처리하고 있어요" (plan §2c). */}
+      {busy ? <OpProgress phase="saving" /> : null}
 
       {isLoading ? <Spinner /> : null}
       {!isLoading && visible.length === 0 ? <p className="muted">{copy.empty}</p> : null}

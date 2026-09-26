@@ -13,6 +13,12 @@ export const ko = {
     contactHelp: '도움이 필요하면 메일로 연락해 주세요',
     contactEmail: 'info@despell.io',
   },
+  // 온체인 대기 확정형 진행 UI(OpProgress) 공용 카피(계획 §2c). '저장'·'확인'만 쓰고 web3 낱말은 없다.
+  op: {
+    saving: '저장 중', confirming: '확인 중', done: '완료',
+    elapsed: '{{sec}}초째', typical: '보통 3~10초 걸려요',
+    timeout: '시간이 조금 걸리고 있어요. 다시 시도할까요?',
+  },
   signup: {
     phoneTitle: '휴대폰 번호를 입력해 주세요', phoneHint: '문자로 인증번호를 보내드려요',
     phonePlaceholder: '01012345678', sendCode: '인증번호 받기',

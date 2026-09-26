@@ -15,6 +15,12 @@ export const en: typeof ko = {
     contactHelp: 'Need a hand? Email us.',
     contactEmail: 'info@despell.io',
   },
+  // See the Korean block: the shared on-chain wait progress copy (plan §2c).
+  op: {
+    saving: 'Saving', confirming: 'Confirming', done: 'Done',
+    elapsed: '{{sec}}s', typical: 'Usually 3–10 seconds',
+    timeout: 'This is taking a little longer than usual. Try again?',
+  },
   signup: {
     phoneTitle: 'Enter your phone number', phoneHint: 'We will text you a code',
     phonePlaceholder: '+821012345678', sendCode: 'Send code',

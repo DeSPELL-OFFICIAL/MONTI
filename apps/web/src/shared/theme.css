@@ -818,3 +818,10 @@ table { width: 100%; display: block; overflow-x: auto; }
 .publish-summary > div { display: flex; justify-content: space-between; gap: var(--s-3); }
 .publish-summary dt { color: var(--ink-2); font-size: var(--t-cap); }
 .publish-summary dd { margin: 0; font-weight: 600; text-align: right; }
+
+/* ── on-chain wait progress (plan §2c) ──────────────────────────────────────────────────── */
+/* The determinate wait a sponsored op shows in place of a bare spinner. The Steps' pulse is
+   handled by the reduced-motion rule above; only the seconds counter ticks. */
+.op-progress { margin: var(--s-3) 0; }
+.op-progress__status { display: grid; gap: var(--s-2); justify-items: start; }
+.op-progress__status .muted { margin: 0; }
