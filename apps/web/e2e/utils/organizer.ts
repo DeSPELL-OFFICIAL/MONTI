@@ -229,10 +229,21 @@ async function gotoCreate(page: Page): Promise<void> {
 export async function publishEvent(page: Page, personaId: string, eventId: string): Promise<'published' | 'confirming'> {
   return timed(personaId, 'publish-event', async () => {
     const publishBtn = page.getByRole('button', { name: C.publish, exact: true });
-    await page.goto(`/org/events/${eventId}`);
-    await page.waitForTimeout(2500);
-    // 발행하기 shows only for a Draft. If it is not here, the event is already Published.
-    if (!(await publishBtn.isVisible().catch(() => false))) return 'published';
+    // A just-created event is a Draft, and its 발행하기 button appears only once the organizer page
+    // has loaded the newly-indexed event. Right after createEvent the indexer lags a few seconds, so
+    // the page briefly shows neither the button nor the event — and the old shortcut ("button not
+    // visible ⇒ already Published") misread that empty window as published, left the event a Draft
+    // forever, and made every downstream claim fail. Poll the page until the Draft's button appears
+    // before deciding; only conclude "already published" after a generous wait with no button.
+    let draftReady = false;
+    const loadDeadline = Date.now() + 120_000;
+    while (Date.now() < loadDeadline) {
+      await page.goto(`/org/events/${eventId}`);
+      await page.waitForTimeout(2000);
+      if (await publishBtn.isVisible().catch(() => false)) { draftReady = true; break; }
+      await page.waitForTimeout(3000);
+    }
+    if (!draftReady) return 'published';
     await publishBtn.evaluate((el) => (el as HTMLButtonElement).click());
     await page.getByRole('button', { name: C.publishConfirm, exact: true }).click();
     // The op's wait can time out; the truth is whether the event left Draft. 발행하기 shows only
