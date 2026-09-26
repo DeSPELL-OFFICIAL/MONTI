@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import QRCode from 'qrcode';
 
 import { fmt } from '../../shared/i18n';
 import { Alert, Button, Field, Screen, Spinner } from '../../shared/ui';
@@ -48,8 +47,11 @@ function PayloadQr({ text, alt }: { text: string; alt: string }) {
   const [svg, setSvg] = useState('');
   useEffect(() => {
     let alive = true;
-    // `type: 'svg'` keeps this off canvas, which a WebView kiosk may not give us.
-    void QRCode.toString(text, { type: 'svg', margin: 1 })
+    // `type: 'svg'` keeps this off canvas, which a WebView kiosk may not give us. `qrcode` is
+    // loaded on demand — the staff console shares the attendee bundle, so a static import would
+    // pin its ~15 kB gz into the main chunk; nothing renders until the markup is ready.
+    void import('qrcode')
+      .then(({ default: QRCode }) => QRCode.toString(text, { type: 'svg', margin: 1 }))
       .then((markup) => {
         if (alive) setSvg(markup);
       })

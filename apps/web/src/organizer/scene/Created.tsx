@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
-import QRCode from 'qrcode';
 import { Alert, Button, Card, Screen, Steps, SuccessCheck, posterUrl } from '../../shared/ui';
 import { useOrganizerCopy } from '../copy';
 import { forgetEventDraft } from '../useEventDraft';
@@ -41,7 +40,10 @@ export function Created() {
 
   useEffect(() => {
     let live = true;
-    void QRCode.toDataURL(link, { width: QR_WIDTH, margin: 1 })
+    // `qrcode` is loaded on demand so it is not part of the main chunk; the QR image simply
+    // appears once the module and the drawing are ready, and the link is on screen meanwhile.
+    void import('qrcode')
+      .then(({ default: QRCode }) => QRCode.toDataURL(link, { width: QR_WIDTH, margin: 1 }))
       .then((url) => {
         if (live) setDataUrl(url);
       })
