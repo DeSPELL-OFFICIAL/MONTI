@@ -1,5 +1,6 @@
 import { expect, type Page } from '@playwright/test';
 import { timed } from '../fixtures/timings';
+import { attachBundlerCapture } from './bundler-capture';
 
 const C = {
   claimCta: '티켓 받기',
@@ -24,35 +25,47 @@ export type ClaimOutcome = 'claimed' | 'confirming' | 'limit' | 'soldout' | 'fai
  * on-chain revert the indexer had not yet reflected shows the generic failure.
  */
 export async function claimFree(page: Page, personaId: string, eventId: string): Promise<ClaimOutcome> {
-  return timed(personaId, 'claim', async () => {
-    await page.goto(`/claim/${eventId}`);
-    const claim = page.getByRole('button', { name: C.claimCta, exact: true });
-    await expect(claim).toBeVisible({ timeout: 30_000 });
+  const capture = attachBundlerCapture(page, { persona: personaId, eventId });
+  try {
+    const outcome = await timed(personaId, 'claim', async (): Promise<ClaimOutcome> => {
+      await page.goto(`/claim/${eventId}`);
+      const claim = page.getByRole('button', { name: C.claimCta, exact: true });
+      await expect(claim).toBeVisible({ timeout: 30_000 });
 
-    // Blocked before the tap: the button is disabled and the reason is on screen.
-    if (await page.getByText(C.limit, { exact: true }).isVisible().catch(() => false)) return 'limit';
-    if (await page.getByText(C.soldOut, { exact: true }).isVisible().catch(() => false)) return 'soldout';
+      // Blocked before the tap: the button is disabled and the reason is on screen.
+      if (await page.getByText(C.limit, { exact: true }).isVisible().catch(() => false)) return 'limit';
+      if (await page.getByText(C.soldOut, { exact: true }).isVisible().catch(() => false)) return 'soldout';
 
-    await claim.click();
-    const confirming = page.getByText(C.confirming, { exact: true });
-    const failed = page.getByText(C.failed, { exact: true });
-    const soldOut = page.getByText(C.soldOut, { exact: true });
-    const limit = page.getByText(C.limit, { exact: true });
+      await claim.click();
+      const confirming = page.getByText(C.confirming, { exact: true });
+      const failed = page.getByText(C.failed, { exact: true });
+      const soldOut = page.getByText(C.soldOut, { exact: true });
+      const limit = page.getByText(C.limit, { exact: true });
 
-    const deadline = Date.now() + 3 * 60 * 1000;
-    while (Date.now() < deadline) {
-      if (/\/tickets(\/|$)/.test(page.url())) return 'claimed';
-      if (await confirming.isVisible().catch(() => false)) {
-        await page.getByRole('button', { name: C.ticketsTab, exact: true }).click().catch(() => undefined);
-        return 'confirming';
+      const deadline = Date.now() + 3 * 60 * 1000;
+      while (Date.now() < deadline) {
+        if (/\/tickets(\/|$)/.test(page.url())) return 'claimed';
+        if (await confirming.isVisible().catch(() => false)) {
+          await page.getByRole('button', { name: C.ticketsTab, exact: true }).click().catch(() => undefined);
+          return 'confirming';
+        }
+        if (await soldOut.isVisible().catch(() => false)) return 'soldout';
+        if (await limit.isVisible().catch(() => false)) return 'limit';
+        if (await failed.isVisible().catch(() => false)) return 'failed';
+        await page.waitForTimeout(1000);
       }
-      if (await soldOut.isVisible().catch(() => false)) return 'soldout';
-      if (await limit.isVisible().catch(() => false)) return 'limit';
-      if (await failed.isVisible().catch(() => false)) return 'failed';
-      await page.waitForTimeout(1000);
+      return 'failed';
+    });
+    // A real failure: pull the bundler's eth_sendUserOperation error out of the page's network
+    // log into the artifacts and the friction log. Let the async response handler drain first.
+    if (outcome === 'failed') {
+      await page.waitForTimeout(500).catch(() => undefined);
+      capture.flushFailure();
     }
-    return 'failed';
-  });
+    return outcome;
+  } finally {
+    capture.detach();
+  }
 }
 
 export type RequestOutcome = 'pending' | 'approved' | 'confirming' | 'failed';
