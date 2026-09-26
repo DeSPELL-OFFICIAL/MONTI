@@ -167,4 +167,18 @@ describe('theme tokens', () => {
     expect(TOKENS.get('--glass-border')).toBe('rgba(255, 255, 255, 0.60)');
     expect(TOKENS.get('--glass-shadow')).toBe('0 8px 24px rgba(131, 110, 249, 0.12)');
   });
+
+  /**
+   * A list row is a flat card, not glass. Discover, the tickets list and the organiser home each
+   * stack 20+ `.event-list > li`, and one `backdrop-filter` per row is 20+ live blur layers over
+   * the page — so the row is off the recipe and takes the opaque `--glass-solid` instead.
+   */
+  it('keeps list rows off the blur recipe, so a long list is not a stack of blur layers', () => {
+    // The glass recipe is the one rule that sets the pane background and the blur together.
+    const recipe = /([^{}]*)\{\s*background:\s*var\(--glass-bg\);\s*-webkit-backdrop-filter:\s*var\(--glass-blur\)/.exec(CSS);
+    expect(recipe, 'the glass recipe rule is still in theme.css').not.toBeNull();
+    expect(recipe?.[1]).not.toMatch(/\.event-list\s*>\s*li/);
+    // The row is still a card: the flat opaque surface the fallback gives every pane.
+    expect(CSS).toMatch(/\.event-list\s*>\s*li\s*\{[^}]*background:\s*var\(--glass-solid\)/);
+  });
 });

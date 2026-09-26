@@ -145,7 +145,6 @@ input, select, textarea { scroll-margin-bottom: calc(var(--sticky-bar-h) + var(-
 .toast,
 .more,
 .tier-card,
-.event-list > li,
 .event-link,
 .a4-frame,
 .ticket-art,
@@ -168,7 +167,6 @@ input, select, textarea { scroll-margin-bottom: calc(var(--sticky-bar-h) + var(-
   .toast,
   .more,
   .tier-card,
-  .event-list > li,
   .event-link,
   .a4-frame,
   .ticket-art,
@@ -186,6 +184,12 @@ input, select, textarea { scroll-margin-bottom: calc(var(--sticky-bar-h) + var(-
            calc(var(--sab) + var(--tabbar-h) + var(--s-4));
   min-height: 100vh;
   min-height: 100dvh;
+}
+/* A screen that floats a Fab above the tab bar has to reserve the pill's height as well, or the
+   last card sits under it. `:has(.fab)` scopes it to exactly the screens that render one (Discover,
+   the ticket detail, the organiser home) — the Fab is a child of `.screen` on each. */
+.screen:has(.fab) {
+  padding-bottom: calc(var(--sab) + var(--tabbar-h) + var(--btn-h) + var(--s-4) + var(--s-4));
 }
 .screen h1 {
   font-size: var(--t-title);
@@ -345,7 +349,17 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
 
 /* ── lists and cards ───────────────────────────────────────────────────────────────────── */
 .event-list { list-style: none; margin: var(--s-4) 0 0; padding: 0; display: grid; gap: var(--s-3); }
-.event-list > li { border-radius: var(--r-lg); padding: var(--s-4); }
+/* A list row is a flat card, not glass. Discover, the tickets list and the organiser home each
+   stack 20+ of these, and one `backdrop-filter` per row is 20+ live blur layers over the page
+   gradient — a real scroll-jank cost for a pane whose blur is mostly hidden under the poster
+   anyway. So the row takes the opaque `--glass-solid` with the recipe's own border and shadow;
+   blur is kept for the chrome (tab bar, sheets, sticky bars) that there is only ever one of. */
+.event-list > li {
+  border-radius: var(--r-lg); padding: var(--s-4);
+  background: var(--glass-solid);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
 .event-list a { color: var(--ink); text-decoration: none; font-weight: 700; letter-spacing: -0.01em; }
 .event-list p { margin: 6px 0 0; }
 .event-hero {
