@@ -19,17 +19,26 @@ service cloud.firestore {
         && changedOnly(['pushToken']);
     }
 
-    // 사용자가 직접 쓸 수 있는 유일한 세 필드.
+    // 사용자가 직접 쓸 수 있는 유일한 네 필드.
     match /users/{uid} {
       allow read: if signedIn() && request.auth.uid == uid;
       allow create, delete: if false;
       allow update: if signedIn()
         && request.auth.uid == uid
-        && changedOnly(['nickname', 'locale', 'chatOrder'])
+        && changedOnly(['nickname', 'locale', 'chatOrder', 'displayName'])
         && (!('locale' in request.resource.data.diff(resource.data).affectedKeys())
             || request.resource.data.locale in ['en', 'ko'])
         && (!('nickname' in request.resource.data.diff(resource.data).affectedKeys())
             || (request.resource.data.nickname is string && request.resource.data.nickname.size() <= 24))
+        // 티켓에 찍히는 표시 이름. 체인 닉네임(`^[a-z0-9_]{3,20}$`)과는 다른 칸이라 한글이
+        // 들어온다 — 글자 종류는 재지 않고 **길이와 제어문자만** 본다. 앞뒤 공백을 지운 뒤
+        // 1~24 자여야 한다: 공백만 남은 이름은 티켓에 빈칸을 그리고, 24 자는 티켓 도안이
+        // 한 줄에 담을 수 있는 폭이다. 제어문자(개행·NUL)는 SVG 한 줄을 깨뜨리므로 막는다.
+        && (!('displayName' in request.resource.data.diff(resource.data).affectedKeys())
+            || (request.resource.data.displayName is string
+                && request.resource.data.displayName.trim().size() >= 1
+                && request.resource.data.displayName.trim().size() <= 24
+                && request.resource.data.displayName.matches('^[^\\x00-\\x1f\\x7f]*$')))
         && (!('chatOrder' in request.resource.data.diff(resource.data).affectedKeys())
             || (request.resource.data.chatOrder is list && request.resource.data.chatOrder.size() <= 200));
     }
@@ -142,13 +151,20 @@ service cloud.firestore {
                   || request.resource.data.submittedOpHash.matches('^0x[0-9a-fA-F]{64}$')));
       }
 
-      // 티켓 그림은 번들된 프리셋 글자(a~d) 하나이거나 올린 그림의 CID 하나다. 둘 중 무엇이
+      // 티켓 그림은 번들된 프리셋 글자(a~l) 하나이거나 올린 그림의 CID 하나다. 둘 중 무엇이
       // 들어와도 되지만 **그 두 칸 말고는 못 들어온다** — 여기가 잠기지 않으면 그림 칸이
       // base64 바이트를 담는 자리가 된다. 빠진 칸은 통과하는 기본값으로 읽는다.
+      //
+      // 글자 목록의 원본은 `functions/src/functions/eventArt.ts` 의 `ART_PRESETS` 다. 규칙
+      // 파일은 TS 를 읽지 못하므로 두 벌이 존재하고, 어긋나면 `eventArt.test.ts` 가 깨진다.
+      //
+      // **목록이 아니라 정규식인 이유는 아래 예산이다.** `in ['a',...,'l']` 은 칸마다 글자
+      // 수만큼 값을 치러 여덟 칸 × 열두 글자로 1,000개를 넘긴다(넷일 때는 들어갔다). 범위
+      // 하나면 칸마다 1이다. 문자열이 아닌 값은 `matches` 가 오류를 내고, 오류는 거부다.
       function artOk(art) {
         let cid = art.get('imageCid', '');
         return art.keys().hasOnly(['preset', 'imageCid'])
-          && art.get('preset', 'a') in ['a', 'b', 'c', 'd']
+          && art.get('preset', 'a').matches('^[a-l]$')
           && cid is string
           && cid.size() <= 80;
       }

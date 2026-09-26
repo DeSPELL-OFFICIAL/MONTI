@@ -40,6 +40,9 @@ contracts:
       - event: EventStatusChanged(uint256 indexed eventId, uint8 status)
       - event: EventMetaUpdated(uint256 indexed eventId)
       - event: Claimed(uint256 indexed tokenId, uint256 indexed eventId, address indexed to, uint8 tier)
+      - event: ClaimRequested(uint256 indexed eventId, uint256 indexed requestId, address indexed requester, uint8 tier)
+      - event: ClaimApproved(uint256 indexed eventId, uint256 indexed requestId, uint256 tokenId)
+      - event: ClaimRejected(uint256 indexed eventId, uint256 indexed requestId)
       - event: Transfer(address indexed from, address indexed to, uint256 indexed tokenId)
       - event: CheckedIn(uint256 indexed tokenId, uint256 indexed eventId, uint256 indexed gateId, bytes32 nonceHash, uint64 ts)
       - event: CheckedInLate(uint256 indexed tokenId, uint256 indexed gateId, uint64 issuedAt, uint64 ts)
@@ -62,4 +65,4 @@ networks:
           - "0xa88C8D110Ca8f0c925A781AB8042bA012d7281F0"
       - name: Ticket
         address:
-          - "0x4B8353C9F3503Cdbd011E8f35da0a955D95b1367"
+          - "0x40D90AF3a3B22542AEeF0ec3E6a66F1EAb6f7AFA"

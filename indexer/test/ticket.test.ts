@@ -179,6 +179,7 @@ describe('Ticket handlers — events and tiers', () => {
       regionCode: REGION,
       requireKyc: true,
       status: 'Draft',
+      pendingRequests: 0,
     });
     expect(after.entities.Tier.get('11-0')).toEqual({
       id: '11-0',
@@ -651,5 +652,119 @@ describe('Ticket handlers — offers', () => {
       mockDb: MockDb.createMockDb(),
     });
     expect(unknown.entities.Offer.get('404')).toBeUndefined();
+  });
+});
+
+describe('Ticket handlers — approval claims', () => {
+  const REQ = 1n;
+  // decidedAt 이 requestedAt(T0) 과 구별되도록 결정 이벤트는 더 늦은 타임스탬프로 온다.
+  const T1 = T0 + 3600;
+
+  /** created 공연 위에 requestClaim 한 건: ClaimRequested 로 Pending 요청을 연다. */
+  async function requested(): Promise<MockDbT> {
+    return Ticket.ClaimRequested.processEvent({
+      event: Ticket.ClaimRequested.createMockEvent({
+        eventId: EVENT_ID,
+        requestId: REQ,
+        requester: ALICE,
+        tier: 0n,
+        ...at(TX),
+      }),
+      mockDb: await created(),
+    });
+  }
+
+  it('opens a Pending ClaimRequest, bumps pendingRequests, and stores the requester lowercase', async () => {
+    const after = await requested();
+
+    expect(after.entities.ClaimRequest.get('11-1')).toEqual({
+      id: '11-1',
+      eventId: EVENT_ID,
+      requestId: REQ,
+      // 체크섬 섞인 ALICE 가 소문자 alice 로 저장돼야 한다.
+      requester: alice,
+      tier: 0,
+      status: 'Pending',
+      tokenId: undefined,
+      requestedAt: BigInt(T0),
+      decidedAt: undefined,
+      txHash: TX,
+    });
+    expect(after.entities.Event.get('11')?.pendingRequests).toBe(1);
+  });
+
+  it('closes the request Approved with the minted tokenId and drops pendingRequests back to 0', async () => {
+    const after = await Ticket.ClaimApproved.processEvent({
+      event: Ticket.ClaimApproved.createMockEvent({
+        eventId: EVENT_ID,
+        requestId: REQ,
+        tokenId: TOKEN,
+        ...at(OTHER_TX, 0, T1),
+      }),
+      mockDb: await requested(),
+    });
+
+    expect(after.entities.ClaimRequest.get('11-1')).toMatchObject({
+      status: 'Approved',
+      tokenId: TOKEN,
+      decidedAt: BigInt(T1),
+    });
+    expect(after.entities.Event.get('11')?.pendingRequests).toBe(0);
+  });
+
+  // rejectClaims 와 cancelRequest 는 같은 ClaimRejected 를 낸다 — 요청자 본인 취소도
+  // 이 경로로 와서 주최자 거절과 구분되지 않고 Rejected 로 떨어진다.
+  it('closes the request Rejected and drops pendingRequests (also the requester self-cancel path)', async () => {
+    const after = await Ticket.ClaimRejected.processEvent({
+      event: Ticket.ClaimRejected.createMockEvent({
+        eventId: EVENT_ID,
+        requestId: REQ,
+        ...at(OTHER_TX, 0, T1),
+      }),
+      mockDb: await requested(),
+    });
+
+    expect(after.entities.ClaimRequest.get('11-1')).toMatchObject({
+      status: 'Rejected',
+      decidedAt: BigInt(T1),
+    });
+    expect(after.entities.Event.get('11')?.pendingRequests).toBe(0);
+  });
+
+  it('never drives pendingRequests below zero on an already-decided request, and no-ops on an unknown one', async () => {
+    // 먼저 Rejected 로 닫아 카운터를 0 으로 내린다.
+    let mockDb = await Ticket.ClaimRejected.processEvent({
+      event: Ticket.ClaimRejected.createMockEvent({
+        eventId: EVENT_ID,
+        requestId: REQ,
+        ...at(OTHER_TX, 0, T1),
+      }),
+      mockDb: await requested(),
+    });
+    expect(mockDb.entities.Event.get('11')?.pendingRequests).toBe(0);
+
+    // 이미 결정된 요청에 종결 이벤트가 다시 와도 카운터는 0 아래로 가지 않고 그대로다.
+    mockDb = await Ticket.ClaimApproved.processEvent({
+      event: Ticket.ClaimApproved.createMockEvent({
+        eventId: EVENT_ID,
+        requestId: REQ,
+        tokenId: TOKEN,
+        ...at(TX, 7, T1 + 1),
+      }),
+      mockDb,
+    });
+    expect(mockDb.entities.Event.get('11')?.pendingRequests).toBe(0);
+
+    // 모르는 requestId 의 종결 이벤트는 던지지 않고 조용히 지나간다.
+    const unknown = await Ticket.ClaimRejected.processEvent({
+      event: Ticket.ClaimRejected.createMockEvent({
+        eventId: EVENT_ID,
+        requestId: 404n,
+        ...at(TX, 8),
+      }),
+      mockDb,
+    });
+    expect(unknown.entities.ClaimRequest.get('11-404')).toBeUndefined();
+    expect(unknown.entities.Event.get('11')?.pendingRequests).toBe(0);
   });
 });

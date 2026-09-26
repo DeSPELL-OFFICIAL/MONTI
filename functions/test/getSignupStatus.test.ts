@@ -181,6 +181,53 @@ describe('getSignupStatus', () => {
     expect(writeCount).toBe(0);
   });
 
+  /**
+   * 티켓에 찍히는 표시 이름. 가입 직후 화면은 이미 이 호출을 폴링하고 있으므로,
+   * 이름 하나 때문에 `users/{uid}` 를 한 번 더 읽을 이유가 없다.
+   */
+  it('hands back the displayName the user wrote, without a second read', async () => {
+    signedUp();
+    docs.set(`${USERS}/uid-1`, { ...docs.get(`${USERS}/uid-1`), displayName: '김태완' });
+    expect(await call()).toMatchObject({ status: 'pending', displayName: '김태완' });
+    expect(writeCount).toBe(0);
+  });
+
+  // 가입을 아직 시작하지 않아도 이름은 나간다 — 같은 문서를 이미 읽었고, 가입 재개
+  // 화면이 "이어서 하실래요, 김태완 님?" 을 그리려면 그 한 줄이 필요하다.
+  it('carries the displayName even when there is no signup to resume', async () => {
+    docs.set(`${USERS}/uid-1`, { locale: 'ko', displayName: '김태완' });
+    expect(await call()).toEqual({
+      status: 'none',
+      hasPasskey: false,
+      hasAccount: false,
+      displayName: '김태완',
+    });
+  });
+
+  // 규칙과 같은 자로 좁힌다(`firestore.rules` 의 users 검사). 없거나 자를 넘는 값은
+  // 칸 자체가 나가지 않는다 — 티켓에 `이름 없음` 을 그리지 않기 위해서다.
+  it('omits a displayName that is missing, blank, oversize or not a string', async () => {
+    signedUp();
+    expect(await call()).not.toHaveProperty('displayName');
+
+    for (const displayName of ['', '   ', '김'.repeat(25), 7, null, ['김태완']]) {
+      signedUp();
+      docs.set(`${USERS}/uid-1`, { ...docs.get(`${USERS}/uid-1`), displayName });
+      expect(await call()).not.toHaveProperty('displayName');
+    }
+
+    // 자 안쪽의 한글 24 자는 그대로 나간다 — 바이트가 아니라 글자로 잰다.
+    signedUp();
+    docs.set(`${USERS}/uid-1`, { ...docs.get(`${USERS}/uid-1`), displayName: '김'.repeat(24) });
+    expect((await call()).displayName).toBe('김'.repeat(24));
+  });
+
+  it('trims the displayName it hands back', async () => {
+    signedUp();
+    docs.set(`${USERS}/uid-1`, { ...docs.get(`${USERS}/uid-1`), displayName: '  김태완  ' });
+    expect((await call()).displayName).toBe('김태완');
+  });
+
   it('hands the web the decline reason it has no other way to read', async () => {
     signedUp({
       status: 'rejected',

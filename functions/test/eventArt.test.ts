@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 
@@ -109,12 +110,41 @@ describe('saveEventArt', () => {
     expect(stored()?.tiers).toEqual([{ imageCid: ART_CID }, { preset: 'b' }]);
   });
 
-  it('takes all four bundled presets', async () => {
-    await save({
-      data: { eventId: '11', tiers: ART_PRESETS.map((preset) => ({ preset })) },
-      auth,
-    } as never);
-    expect(stored()?.tiers).toEqual([{ preset: 'a' }, { preset: 'b' }, { preset: 'c' }, { preset: 'd' }]);
+  /**
+   * 프리셋은 열둘인데 한 공연의 종류는 여덟이 상한이다 — 목록을 그대로 한 번에 보내면
+   * `BAD_TIERS` 가 먼저 난다. 여덟씩 끊어 보내 **모든 글자**가 통과하는 것을 본다.
+   */
+  it('takes every bundled preset letter', async () => {
+    for (let i = 0; i < ART_PRESETS.length; i += MAX_ART_TIERS) {
+      const chunk = ART_PRESETS.slice(i, i + MAX_ART_TIERS).map((preset) => ({ preset }));
+      await expect(save({ data: { eventId: '11', tiers: chunk }, auth } as never)).resolves.toEqual({
+        ok: true,
+      });
+      expect(stored()?.tiers).toEqual(chunk);
+    }
+  });
+
+  it("takes the last bundled letter 'l'", async () => {
+    await expect(save({ data: { eventId: '11', tiers: [{ preset: 'l' }] }, auth } as never)).resolves.toEqual(
+      { ok: true },
+    );
+    expect(stored()?.tiers).toEqual([{ preset: 'l' }]);
+  });
+
+  /**
+   * 규칙 파일은 TS 를 읽지 못해 프리셋 글자가 두 벌로 존재한다. 여기서 맞대어, 서버만
+   * 넓히고 `firestore.rules` 를 빠뜨리는 회귀를 배포 전에 잡는다 — 그 회귀의 증상은
+   * 검증 메시지가 아니라 초안 자동저장의 문서 단위 권한 오류다.
+   */
+  it('keeps the preset range in firestore.rules in step with ART_PRESETS', () => {
+    const rules = readFileSync(new URL('../../firestore.rules', import.meta.url), 'utf8');
+    const range = /art\.get\('preset', 'a'\)\.matches\('\^\[a-([a-z])\]\$'\)/.exec(rules);
+    expect(range, 'firestore.rules 에서 artOk 의 프리셋 범위를 찾지 못했다').not.toBeNull();
+    const last = range![1]!.charCodeAt(0);
+    const letters = Array.from({ length: last - 'a'.charCodeAt(0) + 1 }, (_, i) =>
+      String.fromCharCode('a'.charCodeAt(0) + i),
+    );
+    expect(letters).toEqual([...ART_PRESETS]);
   });
 
   it('takes eight tiers — the same ceiling the contract enforces — and refuses a ninth', async () => {
@@ -143,8 +173,8 @@ describe('saveEventArt', () => {
     expect(writes).toEqual([]);
   });
 
-  it('refuses a preset that is not one of the four the web bundles', async () => {
-    for (const preset of ['e', 'A', 'aurora', '', 1, null]) {
+  it('refuses a preset that is not one of the twelve the web bundles', async () => {
+    for (const preset of ['m', 'z', 'A', 'aurora', '', 1, null]) {
       await expect(save({ data: { eventId: '11', tiers: [{ preset }] }, auth } as never)).rejects.toThrow(
         preset === undefined ? 'BAD_TIERS' : 'BAD_PRESET',
       );

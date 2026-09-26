@@ -26,22 +26,34 @@ describe('indexer/ is self-contained', () => {
 /**
  * 생성물이 **어느 배포**를 가리키는지 못 박는다. 드리프트 검사(위)는 커밋된 것과 다시
  * 뽑은 것이 같은지만 보므로, 배포 파일이 통째로 옛것이면 둘 다 옛것이라 통과한다.
- * 2026-09-23 Monad testnet 재배포(01b, `contracts/docs/abi-delta-01b.md` §10)의 숫자를
+ * 01c 재배포(commit c97887a: 새 Ticket·paymaster, Identity/Organizers 는 유지)의 숫자를
  * 여기 적어 두고, 다음 재배포 때 이 한 줄을 같이 고치게 한다.
  *
  * `start_block` 은 특히 되돌릴 수 없다 — 호스티드 인덱서는 이어받지 말고 **처음부터
  * 다시** 돌려야 새 컨트랙트의 로그를 본다.
  */
-describe('config.yaml pins the 2026-09-23 redeploy', () => {
-  it('starts at the new block and watches the new contracts', async () => {
+describe('config.yaml pins the current deployment', () => {
+  it('starts at the earliest block and watches the 01c contracts', async () => {
     const config = await readFile(join(process.cwd(), 'config.yaml'), 'utf8');
     expect(config).toContain('start_block: 64921775');
-    expect(config).toContain('"0x4B8353C9F3503Cdbd011E8f35da0a955D95b1367"'); // Ticket
-    expect(config).toContain('"0x961a895b47Cf200C14acf38F5689979FF5bd8133"'); // Identity
-    expect(config).toContain('"0xa88C8D110Ca8f0c925A781AB8042bA012d7281F0"'); // Organizers
-    // 은퇴한 배포의 주소가 하나라도 남아 있으면 인덱서는 조용히 0건을 낸다. 문자열을
-    // 금지 목록으로 적는 대신 "배포 파일에 있는 셋 말고는 없다"로 못 박는다 —
-    // 다음 재배포 때 이 테스트가 저절로 따라온다.
+    expect(config).toContain('"0x40D90AF3a3B22542AEeF0ec3E6a66F1EAb6f7AFA"'); // Ticket (01c)
+    expect(config).toContain('"0x961a895b47Cf200C14acf38F5689979FF5bd8133"'); // Identity (유지)
+    expect(config).toContain('"0xa88C8D110Ca8f0c925A781AB8042bA012d7281F0"'); // Organizers (유지)
+    // 은퇴한 01b Ticket 주소가 어디든 남아 있으면 인덱서는 그 계약을 스캔하다 조용히
+    // 0건을 낸다. 그 주소가 config 어디에도 없어야 한다.
+    expect(config).not.toContain('0x4B8353C9F3503Cdbd011E8f35da0a955D95b1367');
+
+    // start_block 은 손으로 적은 상수가 아니라 규칙의 산물이다: 현재 블록과 previous[].block
+    // 중 **가장 이른** 값(scripts/gen-config.mjs). Identity/Organizers 를 유지하는 01c 는
+    // 옛 배포 블록부터 그 계약들의 과거 이벤트를 다시 봐야 하므로 previous[0].block 이 이긴다.
+    const previousBlocks = deployment.previous.map((p) => p.block);
+    const earliest = Math.min(deployment.block, ...previousBlocks);
+    expect(earliest).toBe(64921775);
+    expect(earliest).toBeLessThan(deployment.block); // 현재 블록이 아니라 이전 블록이 이긴다
+    expect(config).toContain(`start_block: ${earliest}`);
+
+    // 배포 파일에 있는 셋 말고는 아무 주소도 감시하지 않는다 — 다음 재배포 때 이 테스트가
+    // 저절로 따라온다.
     const watched = [...config.matchAll(/^ {10}- "(0x[0-9a-fA-F]{40})"$/gm)].map((m) => m[1]);
     expect(watched).toEqual([deployment.identity, deployment.organizers, deployment.ticket]);
   });

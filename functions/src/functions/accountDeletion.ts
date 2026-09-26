@@ -2,20 +2,10 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { error, info } from 'firebase-functions/logger';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
-import type { Hex, PersonStatus } from '@monti/shared';
+import type { Hex } from '@monti/shared';
 import { DIDIT_API_KEY } from '../config.js';
-import {
-  DELETION_REQUESTS,
-  DEVICES,
-  PASSKEYS,
-  PERSONS,
-  PHONE_INDEX,
-  USERS,
-  assertStatusTransition,
-  authAdmin,
-  db,
-} from '../lib/db.js';
-import { deleteDiditSession } from '../lib/didit.js';
+import { DELETION_REQUESTS, USERS, authAdmin, db } from '../lib/db.js';
+import { DiditErasureFailed, erasePerson } from '../lib/erasePerson.js';
 
 /** 유예 기간. 웹이 "7일 안에는 되돌릴 수 있습니다" 라고 적는 바로 그 숫자다. */
 export const DELETION_GRACE_SECONDS = 7 * 24 * 60 * 60;
@@ -24,8 +14,6 @@ export const DELETION_GRACE_SECONDS = 7 * 24 * 60 * 60;
  * 넘친 요청은 다음 날 실행이 가져간다 — 기한이 지난 뒤에는 순서가 중요하지 않다.
  */
 const MAX_PER_RUN = 50;
-/** Didit 파기 시도 횟수(같은 실행 안에서). 그래도 안 되면 요청을 그대로 두고 다음 날 다시 한다. */
-const DIDIT_ATTEMPTS = 2;
 /**
  * 며칠째 Didit 파기가 막혔을 때 사람을 부르는 선. 하루 한 번 도는 일정이라 연속 실행이 곧
  * 연속 일수다. 사흘이면 일시적인 장애가 아니라 설정이 틀렸다는 뜻이고(대개 `DIDIT_API_KEY`),
@@ -36,19 +24,6 @@ const DIDIT_STALL_RUNS = 3;
 const SCHEDULE = '0 4 * * *';
 
 type Doc = FirebaseFirestore.QueryDocumentSnapshot;
-
-/**
- * Didit 파기 실패에만 붙이는 표시. 연속 실패 카운터는 이것만 센다 — Auth 나 Firestore 가
- * 흔들린 날까지 같이 세면 "Didit 이 막혔다" 는 신호가 잡음에 묻힌다.
- *
- * `cause` 를 **받아서 넘긴다**. 메시지만 베껴 오면 스택이 여기서 끊겨, 막힌 것이 HTTP 인지
- * JSON 인지 키인지 로그만 보고는 끝내 알 수 없다.
- */
-class DiditErasureFailed extends Error {
-  constructor(message: string, options?: ErrorOptions) {
-    super(message, options);
-  }
-}
 
 /**
  * 계정 파기 요청(개인정보 보호법 제36조 파기 요구).
@@ -104,106 +79,27 @@ export const requestAccountDeletion = onCall(
 );
 
 /**
- * Auth 사용자 삭제. **이미 없으면 성공이다.**
+ * 요청 하나를 끝까지 지운다. 지우는 일 자체는 `lib/erasePerson.ts` 한 곳에 있다 —
+ * 운영 스크립트(`scripts/reset-persons.ts`)도 같은 함수를 부르므로 여기에 사본이 없어야 한다.
  *
- * `deleteUser` 는 없는 uid 에 `auth/user-not-found` 를 던진다. 이 줄 뒤에서 한 번이라도
- * 실패하면(또는 누가 콘솔에서 먼저 지웠으면) 요청은 `pending` 으로 남고, 다음 날 실행은
- * 같은 자리에서 또 던진다 — 그 요청은 영원히 `done` 이 되지 못한다. 파기의 모든 단계는
- * 멱등이어야 하고, 여기가 유일하게 그렇지 않았다.
- */
-async function eraseAuthUser(uid: string): Promise<void> {
-  try {
-    await authAdmin.deleteUser(uid);
-  } catch (cause) {
-    if ((cause as { code?: string }).code !== 'auth/user-not-found') throw cause;
-  }
-}
-
-/**
- * Didit 세션 파기. 실패하면 **던진다** — 부르는 쪽이 우리 DB 를 지우기 전에 멈춰야 한다.
- * 여기서 삼키면 Didit 에 얼굴 템플릿이 남은 채로 "파기 완료" 도장이 찍히고, 그때는
- * `sessionId` 를 들고 있던 사람 문서가 이미 없어 다시 시도할 방법도 사라진다.
- */
-async function eraseDiditSession(sessionId: string): Promise<void> {
-  for (let attempt = 1; attempt <= DIDIT_ATTEMPTS; attempt += 1) {
-    try {
-      await deleteDiditSession(sessionId, DIDIT_API_KEY.value());
-      return;
-    } catch (cause) {
-      // 메시지는 그대로 두고(운영이 `deletion.failed` 에서 보던 줄이다) 원인만 실어 보낸다.
-      if (attempt === DIDIT_ATTEMPTS) throw new DiditErasureFailed((cause as Error).message, { cause });
-      error('deletion.didit.retry', { attempt, reason: (cause as Error).message });
-    }
-  }
-}
-
-/**
- * 한 사람의 개인정보를 실제로 지운다. 순서에 뜻이 있다.
- *
- *  1. **Didit 이 먼저다.** 우리 문서를 먼저 지우면 `kyc.sessionId` 가 사라져 남의 서버에 남은
- *     얼굴 자료를 영영 못 지운다. 여기서 실패하면 아무것도 지우지 않은 채로 던지고, 요청은
- *     `pending` 그대로라 다음 날 실행이 같은 자리에서 다시 시도한다.
- *  2. 전화 색인 → 사용자 → 자격증명 → 기기. 색인을 먼저 지워야 같은 번호로 새로 가입할 수 있다.
- *  3. 사람 문서는 **남기고** 개인정보 필드만 턴다. 체인이 이 personId 를 가리키고 있다.
- *  4. Auth 사용자 삭제 → 요청에 완료 도장. 도장이 마지막이라 중간에 죽으면 통째로 다시 돈다
- *     (삭제는 전부 멱등이다).
+ * 완료 도장이 마지막이라 중간에 죽으면 통째로 다시 돈다(삭제는 전부 멱등이다).
  */
 async function erase(request: Doc): Promise<void> {
   const uid = request.id;
-  const personId = request.get('personId') as Hex;
 
-  const personRef = db.collection(PERSONS).doc(personId);
-  const person = await personRef.get();
-  const account = person.get('account') as Hex | undefined;
+  await erasePerson({
+    uid,
+    personId: request.get('personId') as Hex,
+    diditApiKey: DIDIT_API_KEY.value(),
+    // Didit 을 넘겼다. 며칠째 막혀 있었다면 그 기록은 여기서 지운다 — 다음에 또 막히면 그때부터
+    // 다시 센다. 남겨 두면 지난 장애의 횟수가 새 장애에 더해져 경보가 하루 일찍 운다.
+    afterDidit: async () => {
+      if (request.get('diditFailures') !== undefined) {
+        await request.ref.update({ diditFailures: FieldValue.delete() });
+      }
+    },
+  });
 
-  // **연 적 있는 세션을 전부** 지운다. 열린 세션 하나만 지우면, 복귀 주소가 달라 새로 연
-  // 세션에 밀려난 옛 세션의 얼굴 템플릿이 Didit 서버에 영원히 남는다(`kycSession.ts`).
-  const sessions = new Set<string>((person.get('kycSessionIds') as string[] | undefined) ?? []);
-  const current = person.get('kyc.sessionId') as string | undefined;
-  if (current) sessions.add(current);
-  for (const sessionId of sessions) await eraseDiditSession(sessionId);
-  // Didit 을 넘겼다. 며칠째 막혀 있었다면 그 기록은 여기서 지운다 — 다음에 또 막히면 그때부터
-  // 다시 센다. 남겨 두면 지난 장애의 횟수가 새 장애에 더해져 경보가 하루 일찍 운다.
-  if (request.get('diditFailures') !== undefined) {
-    await request.ref.update({ diditFailures: FieldValue.delete() });
-  }
-
-  const user = await db.collection(USERS).doc(uid).get();
-  const phoneHmac = user.get('phoneHmac') as string | undefined;
-  if (phoneHmac) await db.collection(PHONE_INDEX).doc(phoneHmac).delete();
-  if (user.exists) await user.ref.delete();
-
-  const passkeys = await db.collection(PASSKEYS).where('personId', '==', personId).get();
-  for (const passkey of passkeys.docs) await passkey.ref.delete();
-
-  if (account) await db.collection(DEVICES).doc(account).delete();
-
-  if (person.exists) {
-    // 얼굴 사진은 `persons.photoEnc` 안의 KMS 봉투 하나뿐이라 이 문서를 털면 같이 사라진다.
-    // `functions/src` 에서 Cloud Storage 에 쓰는 곳은 `dailyExport.ts`(`EXPORT_BUCKET`) 하나뿐이고
-    // `persons/{personId}/` 에는 아무도 쓰지 않으므로, 지금은 지울 스토리지 객체가 없다.
-    // C4: storage sweep when photos land in Storage
-    //
-    // 지금은 어떤 상태에서도 `deleted` 로 갈 수 있으므로 이 줄은 던지지 않는다.
-    // 그래도 남겨 둔다 — 전이표가 언젠가 좁아지면 조용히 어긋나는 대신 여기서 크게 깨진다.
-    assertStatusTransition((person.get('status') as PersonStatus | undefined) ?? 'pending', 'deleted');
-    await personRef.set(
-      {
-        status: 'deleted',
-        // 개인정보 봉투는 전부 없앤다. 남는 것은 personId·계정 주소·체인 기록뿐이고,
-        // 그 셋은 체인에도 같은 값이 있어 여기서 지운다고 사라지지 않는다.
-        enc: FieldValue.delete(),
-        photoEnc: FieldValue.delete(),
-        kyc: FieldValue.delete(),
-        kycSessionIds: FieldValue.delete(),
-        deletedAt: FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    );
-  }
-
-  await eraseAuthUser(uid);
   await request.ref.update({ status: 'done', completedAt: FieldValue.serverTimestamp() });
   info('deletion.done', { uid });
 }

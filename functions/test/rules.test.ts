@@ -106,6 +106,51 @@ describe('users/{uid}', () => {
   it('blocks an unsupported locale', async () => {
     await assertFails(owner().doc('users/uid-1').update({ locale: 'fr' }));
   });
+
+  /**
+   * 티켓에 찍히는 표시 이름. 체인 닉네임과 다른 칸이라 **한글이 들어온다** — 24 자는
+   * 한글로 세어 24 자여야 한다(바이트로 재면 여덟 자에서 막힌다). 여기서 막히면 증상은
+   * 화면의 검증 메시지가 아니라 권한 오류이고, 사용자는 왜 안 되는지 볼 수단이 없다.
+   */
+  it('lets the owner set a Korean displayName of exactly 24 characters', async () => {
+    await assertSucceeds(owner().doc('users/uid-1').update({ displayName: '김'.repeat(24) }));
+    await assertSucceeds(owner().doc('users/uid-1').update({ displayName: '김태완' }));
+    await assertSucceeds(owner().doc('users/uid-1').update({ displayName: ' 김태완 ' }));
+  });
+
+  it('blocks a displayName of 25 characters', async () => {
+    await assertFails(owner().doc('users/uid-1').update({ displayName: '김'.repeat(25) }));
+    await assertFails(owner().doc('users/uid-1').update({ displayName: 'x'.repeat(25) }));
+  });
+
+  // 앞뒤 공백을 지우고 재므로, 공백 24 칸은 24 자가 아니라 0 자다. 빈 이름은 티켓에
+  // 아무것도 그리지 않는 것이 규칙이지 공백을 그리는 것이 아니다.
+  it('blocks an empty, blank or non-string displayName', async () => {
+    const db = owner();
+    await assertFails(db.doc('users/uid-1').update({ displayName: '' }));
+    await assertFails(db.doc('users/uid-1').update({ displayName: '   ' }));
+    await assertFails(db.doc('users/uid-1').update({ displayName: 7 }));
+    await assertFails(db.doc('users/uid-1').update({ displayName: ['김태완'] }));
+  });
+
+  // 제어문자는 티켓 SVG 의 한 줄을 깨뜨린다.
+  it('blocks a displayName carrying a control character', async () => {
+    const db = owner();
+    await assertFails(db.doc('users/uid-1').update({ displayName: '김\n태완' }));
+    await assertFails(db.doc('users/uid-1').update({ displayName: '김\u0000태완' }));
+  });
+
+  it('blocks a stranger from setting the displayName', async () => {
+    const other = env.authenticatedContext('uid-2', { account: '0x02' }).firestore();
+    await assertFails(other.doc('users/uid-1').update({ displayName: '가로채기' }));
+  });
+
+  // 허용 목록에 한 칸이 늘었다고 그 옆에 다른 칸을 실어 보낼 수 있으면 안 된다.
+  it('blocks a protected field smuggled in alongside the displayName', async () => {
+    const db = owner();
+    await assertFails(db.doc('users/uid-1').update({ displayName: '김태완', personId: '0xbb' }));
+    await assertFails(db.doc('users/uid-1').update({ displayName: '김태완', phoneHmac: 'hmac-2' }));
+  });
 });
 
 describe('eventChats messages', () => {
@@ -510,10 +555,20 @@ describe('eventDrafts/{uid}/drafts/{draftId}', () => {
     );
   });
 
+  // 번들된 글자는 열둘이다(`eventArt.ts` 의 `ART_PRESETS`). 마지막 글자가 여기서 막히면
+  // 그 그림을 고른 순간부터 초안 자동저장이 통째로 권한 오류가 된다.
+  it('takes every bundled preset letter, first to last', async () => {
+    const db = owner();
+    for (const preset of ['a', 'e', 'h', 'l']) {
+      await assertSucceeds(db.doc(MINE).update({ tiers: [{ ...tier, art: { preset } }] }));
+    }
+  });
+
   // 그림 칸이 잠겨 있지 않으면 거기가 base64 바이트를 담는 자리가 된다.
   it('blocks ticket art that is neither a preset letter nor a CID', async () => {
     const db = owner();
-    await assertFails(db.doc(MINE).update({ tiers: [{ ...tier, art: { preset: 'e' } }] }));
+    await assertFails(db.doc(MINE).update({ tiers: [{ ...tier, art: { preset: 'm' } }] }));
+    await assertFails(db.doc(MINE).update({ tiers: [{ ...tier, art: { preset: 'A' } }] }));
     await assertFails(db.doc(MINE).update({ tiers: [{ ...tier, art: { preset: 'aurora' } }] }));
     await assertFails(db.doc(MINE).update({ tiers: [{ ...tier, art: { base64: 'x'.repeat(40) } }] }));
     await assertFails(db.doc(MINE).update({ tiers: [{ ...tier, art: { imageCid: 'x'.repeat(81) } }] }));

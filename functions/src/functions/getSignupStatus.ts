@@ -29,6 +29,15 @@ export interface SignupStatusResult {
    * 이 창구로 내보낸다. 개인정보가 아니다(닫힌 네 값 중 하나).
    */
   kycReason?: KycDeclineReason;
+  /**
+   * 티켓에 찍히는 표시 이름(`users/{uid}.displayName`). 없으면 **칸 자체가 없다** —
+   * `이름 없음` 같은 자리표시자를 만들지 않는다(티켓에는 아무것도 그리지 않는다).
+   *
+   * 여기에 실어 보내는 이유는 하나다: 가입 직후 화면이 이미 이 호출을 폴링하고 있어서,
+   * 이름 하나 때문에 `users/{uid}` 를 한 번 더 읽지 않게 하려는 것이다. 개인정보가 아니다 —
+   * 사용자가 직접 적어 티켓에 인쇄되는 값이다(체인 닉네임과는 다른 칸이다).
+   */
+  displayName?: string;
   personId?: Hex;
 }
 
@@ -46,6 +55,17 @@ function narrowStatus(value: unknown): PersonStatus {
 /** 본인인증 통과 여부의 원본은 `kycLevel`(0/1)이다. 0 도 1 도 아닌 값은 통과로 읽지 않는다. */
 function narrowKycLevel(value: unknown): 0 | 1 {
   return value === 1 ? 1 : 0;
+}
+
+/**
+ * 표시 이름의 자는 `firestore.rules` 의 `users` 검사와 같다: 앞뒤 공백을 지우고 1~24 자.
+ * 규칙이 이미 그 자로 막지만, 규칙보다 먼저 쓰인 문서나 서버가 넣은 값이 섞일 수 있어
+ * 나가는 쪽에서도 한 번 더 좁힌다 — 웹은 이 값을 그대로 티켓에 그린다.
+ */
+function narrowDisplayName(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed.length >= 1 && trimmed.length <= 24 ? trimmed : undefined;
 }
 
 /** 표에 없는 값은 내보내지 않는다 — 웹이 모르는 코드를 받으면 그릴 화면이 없다. */
@@ -70,11 +90,16 @@ export const getSignupStatus = onCall(async (request): Promise<SignupStatusResul
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'AUTH_REQUIRED');
 
-  const personId = (await db.collection(USERS).doc(uid).get()).get('personId') as Hex | undefined;
-  if (!personId) return { ...NOT_STARTED };
+  // 사용자 문서는 한 번만 읽는다 — `personId` 와 표시 이름이 같은 문서에 있다.
+  const user = await db.collection(USERS).doc(uid).get();
+  const personId = user.get('personId') as Hex | undefined;
+  const displayName = narrowDisplayName(user.get('displayName'));
+  const named = displayName ? { displayName } : {};
+
+  if (!personId) return { ...NOT_STARTED, ...named };
 
   const person = await db.collection(PERSONS).doc(personId).get();
-  if (!person.exists) return { ...NOT_STARTED };
+  if (!person.exists) return { ...NOT_STARTED, ...named };
 
   // 패스키는 사람 문서가 아니라 `passkeys` 에 있다. `account` 와 따로 읽는 이유는,
   // 둘이 어긋난 상태(계정 주소만 남고 자격증명이 지워진 기기 교체 도중)가 실제로 있기 때문이다.
@@ -89,6 +114,7 @@ export const getSignupStatus = onCall(async (request): Promise<SignupStatusResul
     hasAccount: typeof account === 'string' && account.length > 0,
     kycLevel,
     ...(kycReason ? { kycReason } : {}),
+    ...named,
     personId,
   };
 });
