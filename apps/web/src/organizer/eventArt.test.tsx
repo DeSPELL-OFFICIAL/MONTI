@@ -5,7 +5,9 @@ import type { TicketArtSource } from '../shared/ui';
 
 let stored: TicketArtSource[] = [];
 const loadEventArt = vi.fn(async () => stored);
-vi.mock('../shared/api/firestore', () => ({ loadEventArt }));
+/** The ticket preview prints whose ticket it is, so this screen reads the profile too. */
+const loadMyProfile = vi.fn(async () => ({ displayName: '박주최' }));
+vi.mock('../shared/api/firestore', () => ({ loadEventArt, loadMyProfile }));
 
 const saveEventArt = vi.fn(async (_args: { eventId: string; tiers: TicketArtSource[] }) => ({ ok: true as const }));
 const pinEventImage = vi.fn(async (_args: { bytesBase64: string; kind: string }) => ({ cid: 'bafkmine' }));
@@ -61,7 +63,7 @@ describe('the ticket pictures of an event that already exists', () => {
     expect(await screen.findByRole('img', { name: /재즈 나이트 · 일반/ })).toBeInTheDocument();
     expect(screen.getByRole('img', { name: /재즈 나이트 · 학생/ })).toBeInTheDocument();
     // The picker is closed until 바꾸기 is pressed.
-    expect(screen.queryByRole('button', { name: tierCopy.artC })).toBeNull();
+    expect(screen.queryByRole('button', { name: tierCopy.artNames.c })).toBeNull();
   });
 
   /** Controller ruling 1: the founder's "이미지는 나중에 수정 가능". */
@@ -72,7 +74,7 @@ describe('the ticket pictures of an event that already exists', () => {
     await waitFor(() => expect(loadEventArt).toHaveBeenCalled());
 
     await user.click(within(card('일반')).getByRole('button', { name: copy.change }));
-    await user.click(await screen.findByRole('button', { name: tierCopy.artC }));
+    await user.click(await screen.findByRole('button', { name: tierCopy.artNames.c }));
 
     await waitFor(() =>
       expect(saveEventArt).toHaveBeenCalledWith({
@@ -81,7 +83,7 @@ describe('the ticket pictures of an event that already exists', () => {
       }));
     expect(await screen.findByText(copy.saved)).toBeInTheDocument();
     // The picker closes on a save that landed, and the new picture is on screen.
-    expect(screen.queryByRole('button', { name: tierCopy.artC })).toBeNull();
+    expect(screen.queryByRole('button', { name: tierCopy.artNames.c })).toBeNull();
   });
 
   it('uploads a picture of their own through the same cropper and sends the whole list', async () => {
@@ -112,7 +114,7 @@ describe('the ticket pictures of an event that already exists', () => {
     await waitFor(() => expect(loadEventArt).toHaveBeenCalled());
 
     await user.click(within(card('학생')).getByRole('button', { name: copy.change }));
-    await user.click(await screen.findByRole('button', { name: tierCopy.artD }));
+    await user.click(await screen.findByRole('button', { name: tierCopy.artNames.d }));
 
     await waitFor(() =>
       expect(saveEventArt).toHaveBeenCalledWith({
@@ -128,10 +130,10 @@ describe('the ticket pictures of an event that already exists', () => {
     await waitFor(() => expect(loadEventArt).toHaveBeenCalled());
 
     await user.click(within(card('일반')).getByRole('button', { name: copy.change }));
-    await user.click(await screen.findByRole('button', { name: tierCopy.artB }));
+    await user.click(await screen.findByRole('button', { name: tierCopy.artNames.b }));
 
     expect(await screen.findByText(copy.notAllowed)).toBeInTheDocument();
     // Still open, so pressing again is the retry — the call replaces the document either way.
-    expect(screen.getByRole('button', { name: tierCopy.artB })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: tierCopy.artNames.b })).toHaveAttribute('aria-pressed', 'true');
   });
 });

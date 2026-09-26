@@ -2,8 +2,9 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import {
   A4Cropper, A4_HEIGHT, A4_MAX_BYTES, A4_QUALITY, A4_QUALITY_RESCUE, A4_WIDTH, cropToA4,
-  type CropSource,
+  sourceRect, turnedSize, type CropSource,
 } from './index';
+import { ko } from '../copy/index';
 
 /**
  * jsdom has neither `createImageBitmap` nor a canvas that encodes, so both are handed in —
@@ -91,6 +92,58 @@ describe('cropToA4', () => {
     vi.unstubAllGlobals();
   });
 
+  /**
+   * The turn is the one thing panning cannot repair: a photo somebody was sent arrives a
+   * quarter out and EXIF says nothing about it. What is checked here is that the frame was
+   * measured on the *turned* picture and handed back in the bitmap's own coordinates — a
+   * portrait photo turned upright is cropped out of a landscape rectangle.
+   */
+  it('reads a turned picture out of the swapped dimensions', async () => {
+    const encode = vi.fn(async (_b: ImageBitmap, _r: CropSource, _q: number, _t: number) => readable);
+    await cropToA4(file, { load: async () => bitmapOf(2000, 3000), quarter: 1, encode });
+
+    const [, rect, , quarter] = encode.mock.calls[0] ?? [];
+    expect(quarter).toBe(1);
+    // Turned, the picture is 3000 x 2000, whose largest A4 slice is 1414 x 2000. Back in the
+    // bitmap it is that slice on its side: 2000 wide and 1414 tall.
+    expect(rect?.sw).toBeCloseTo(2000, 3);
+    expect(rect?.sh).toBeCloseTo((2000 * A4_WIDTH) / A4_HEIGHT, 3);
+    expect(rect?.sx).toBeCloseTo(0, 3);
+    expect(rect?.sy).toBeCloseTo((3000 - (2000 * A4_WIDTH) / A4_HEIGHT) / 2, 3);
+  });
+
+  /** An upright picture pays nothing for a feature it is not using. */
+  it('leaves the rectangle and the quarter alone when nothing was turned', async () => {
+    const encode = vi.fn(async (_b: ImageBitmap, _r: CropSource, _q: number, _t: number) => readable);
+    await cropToA4(file, { load: async () => bitmapOf(2000, 3000), encode });
+    const [, rect, , quarter] = encode.mock.calls[0] ?? [];
+    expect(quarter).toBe(0);
+    // Upright, the 2000-wide picture gives a 2000 x 2829 slice — the whole width of it.
+    expect(rect?.sw).toBeCloseTo(2000, 3);
+    expect(rect?.sh).toBeCloseTo((2000 * A4_HEIGHT) / A4_WIDTH, 3);
+    expect(sourceRect(rect as CropSource, 0, 2000, 3000)).toEqual(rect);
+  });
+
+  it('swaps the sides for the odd quarters and only those', () => {
+    expect(turnedSize(2000, 3000, 0)).toEqual({ width: 2000, height: 3000 });
+    expect(turnedSize(2000, 3000, 1)).toEqual({ width: 3000, height: 2000 });
+    expect(turnedSize(2000, 3000, 2)).toEqual({ width: 2000, height: 3000 });
+    expect(turnedSize(2000, 3000, 3)).toEqual({ width: 3000, height: 2000 });
+  });
+
+  /** Four turns is where it started, whichever way the arithmetic went. */
+  it('comes back to the same rectangle after four quarters', () => {
+    const rect = { sx: 100, sy: 200, sw: 400, sh: 500 };
+    const once = sourceRect(rect, 1, 2000, 3000);
+    const twice = sourceRect(once, 1, 3000, 2000);
+    const thrice = sourceRect(twice, 1, 2000, 3000);
+    const round = sourceRect(thrice, 1, 3000, 2000);
+    expect(round.sx).toBeCloseTo(rect.sx, 6);
+    expect(round.sy).toBeCloseTo(rect.sy, 6);
+    expect(round.sw).toBeCloseTo(rect.sw, 6);
+    expect(round.sh).toBeCloseTo(rect.sh, 6);
+  });
+
   it('gives up rather than handing back a poster nothing encoded', async () => {
     await expect(
       cropToA4(file, { load: async () => bitmapOf(2000, 3000), encode: async () => null }),
@@ -101,8 +154,8 @@ describe('cropToA4', () => {
 describe('A4Cropper', () => {
   it('starts as a file input and shows no frame until a picture is picked', () => {
     const { container } = render(<A4Cropper onCropped={vi.fn()} />);
-    expect(screen.getByLabelText('포스터 올리기')).toHaveAttribute('type', 'file');
-    expect(screen.getByLabelText('포스터 올리기')).toHaveAttribute('accept', 'image/jpeg,image/png,image/webp');
+    expect(screen.getByLabelText(ko.poster.pick)).toHaveAttribute('type', 'file');
+    expect(screen.getByLabelText(ko.poster.pick)).toHaveAttribute('accept', 'image/jpeg,image/png,image/webp');
     expect(container.querySelector('.a4-frame')).toBeNull();
   });
 });

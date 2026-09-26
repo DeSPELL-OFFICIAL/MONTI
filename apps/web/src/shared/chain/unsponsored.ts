@@ -1,6 +1,6 @@
 import { encodeErrorResult } from 'viem';
 import { montiPaymasterAbi } from '@monti/shared';
-import { OpReverted } from './ops';
+import { OpReverted } from './opReverted';
 
 /**
  * How the paymaster refuses to pay. Until sub-plan 01b's `setAllowed`, no organiser selector is

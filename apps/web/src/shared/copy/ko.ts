@@ -23,15 +23,23 @@ export const ko = {
     codeWrong: '인증번호가 맞지 않아요.', codeExpired: '인증번호가 만료됐어요. 다시 받아 주세요.',
     codeSentTo: '{{phone}} 으로 인증번호를 보냈어요', codeResendWait: '초 뒤에 다시 보낼 수 있어요',
     alreadyRegistered: '이미 가입된 번호예요. 로그인해 주세요.',
-    passkeyTitle: '얼굴이나 지문으로 잠그기', passkeyBody: '얼굴이나 지문으로만 열리는 잠금을 겁니다. 외울 비밀번호는 없어요.',
-    passkeyCta: '잠금 설정하기', passkeyFailed: '잠금을 설정하지 못했어요. 다시 시도해 주세요.',
+    // 잠금과 휴대폰 등록은 한 화면 한 번 누르기다(계획 C). 단계 제목·버튼은 이 화면 하나만 갖고,
+    // 단계별 실패 문장은 아래 것들을 그대로 쓴다.
+    registerTitle: '계정 만들기',
+    registerBody: '얼굴·지문 잠금을 걸고 이 휴대폰을 등록할게요. 한 번만 누르면 끝나요.',
+    registerCta: '시작하기',
+    registerRetry: '다시 시도하기',
+    // 30초까지 걸릴 수 있다. 퍼센트 막대는 거짓말이 되므로 10초에 이 한 줄만 더한다.
+    registerSlow: '거의 다 됐어요. 조금만 기다려 주세요',
+    stepPasskey: '잠금', stepDevice: '휴대폰 등록', stepDone: '완료',
+    passkeyFailed: '잠금을 설정하지 못했어요. 다시 시도해 주세요.',
     passkeyCancelled: '잠금 설정을 취소했어요. 다시 시도해 주세요.',
     passkeyUnsupported: '이 휴대폰에서는 얼굴·지문 잠금을 쓸 수 없어요.',
-    passkeyWorking: '잠금을 설정하고 있어요',
-    deviceTitle: '입장은 이 휴대폰으로만',
-    deviceBody: '표를 다른 사람이 대신 쓸 수 없게, 이 휴대폰만 입구에서 인정돼요.',
-    deviceCta: '등록하기', deviceFailed: '등록하지 못했어요. 다시 시도해 주세요.',
-    deviceWorking: '등록하고 있어요. 30초쯤 걸릴 수 있어요.',
+    passkeyWorking: '잠금을 만들고 있어요',
+    // 챌린지가 아직 안 왔을 때만 보인다. 도착하면 알아서 이어지므로 다시 누를 일은 없다.
+    challengeWaiting: '준비 중이에요…',
+    deviceFailed: '등록하지 못했어요. 다시 시도해 주세요.',
+    deviceWorking: '휴대폰을 등록하고 있어요',
     deviceBusy: '지금 처리가 밀려 있어요. 잠시 뒤 다시 눌러 주세요.',
     deviceSlow: '등록이 오래 걸리고 있어요. 잠시 뒤 다시 눌러 주세요.',
     deviceSkip: '이대로 계속하기',
@@ -40,7 +48,11 @@ export const ko = {
     restart: '가입을 처음부터 다시 해 주세요.',
     retryStep: '시간이 조금 지났어요. 다시 눌러 주세요.',
     doneTitle: '준비가 끝났어요', doneBody: '이제 행사를 둘러보고 티켓을 받을 수 있어요.',
-    doneCta: '행사 둘러보기',
+    // 티켓에 찍히는 이름. 체인 닉네임과 다른 칸이고 비워 두면 그냥 넘어간다(계획 C-3).
+    nameTitle: '어떻게 불러 드릴까요?',
+    nameHelp: '티켓에 이 이름이 보여요. 나중에 프로필에서 바꿀 수 있어요.',
+    namePlaceholder: '예: 김태완',
+    doneCta: '시작하기',
   },
   login: {
     title: '다시 오셨네요', body: '얼굴이나 지문으로 바로 들어갈 수 있어요.', cta: '로그인',
@@ -67,8 +79,15 @@ export const ko = {
     title: '탐색', searchPlaceholder: '행사 이름 검색', create: '만들기',
     filterDate: '날짜', filterRegion: '지역', filterCategory: '테마',
     dateToday: '오늘', dateWeek: '이번 주', dateMonth: '이번 달', datePick: '직접 선택',
-    categoryAll: '전체', category0: '공연', category1: '모임', category2: '전시', category3: '기타',
-    empty: '조건에 맞는 행사가 없어요.', getTicket: '티켓 받기', share: '공유',
+    categoryAll: '전체',
+    // 테마 = 행사 카테고리. 목록과 순서는 shared/eventThemes.ts 가 갖고, 이름만 여기 있다.
+    // 0~3 은 이미 체인에 박힌 뜻 그대로다(기타는 3 인 채로 맨 아래에 보인다).
+    themes: {
+      0: '공연', 1: '모임', 2: '전시',
+      4: '페스티벌', 5: '스포츠', 6: '콘퍼런스', 7: '강연·클래스', 8: '파티',
+      9: '영화·상영', 10: '마켓', 11: '네트워킹', 3: '기타',
+    },
+    empty: '조건에 맞는 행사가 없어요.', getTicket: '티켓 받기', requestTicket: '신청하기', share: '공유',
     map: '지도로 보기', publicRecord: '공개 기록', soldOut: '마감됨', cancelled: '취소된 행사예요.',
     untitled: '제목을 불러오지 못했어요', remaining: '{{count}}자리 남음',
     // 탐색 카드에 다 못 들어간 태그의 수. 상세 화면은 전부 보여준다(계획 B-2).
@@ -98,6 +117,8 @@ export const ko = {
     artLabel: '{{title}} · {{tier}} 티켓 그림',
     artLabelUsed: '{{title}} · {{tier}} 티켓 그림 · 사용됨',
     artNoTitle: '이름 없는 행사', artNoTier: '티켓',
+    // 표시 이름을 비워 둔 사람의 티켓에 찍히는 말. 빈 줄보다 낫고, '이름 없음'보다 낫다.
+    artGuest: '게스트',
   },
   claim: {
     cta: '티켓 받기', working: '받는 중이에요', done: '티켓을 받았어요', tierLabel: '티켓 종류',
@@ -105,6 +126,13 @@ export const ko = {
     confirming: '아직 확인 중이에요. 잠시 뒤 내 티켓에서 확인해 주세요.',
     limitReached: '이 행사에서 받을 수 있는 티켓을 이미 다 받았어요.',
     soldOut: '이 종류는 마감됐어요. 다른 종류를 골라 주세요.',
+    requestCta: '신청하기', requesting: '신청하는 중이에요',
+    approvalOnly: '이 행사는 주최자 승인 후 발급돼요.',
+    pending: '신청 완료 · 승인을 기다리고 있어요',
+    approved: '승인됐어요. 티켓이 발급됐어요',
+    approvedCta: '내 티켓 보기',
+    rejected: '이번엔 승인되지 않았어요',
+    cancel: '신청 취소', cancelling: '취소하는 중이에요',
   },
   transfer: {
     title: '양도', byNickname: '별명', byAddress: '주소', byPhone: '전화번호',
@@ -189,7 +217,16 @@ export const ko = {
     sendFailed: '메시지를 보내지 못했어요. 다시 시도해 주세요.',
   },
   me: {
-    title: '프로필', nickname: '별명', nicknameHint: '영문 소문자, 숫자, 밑줄 3~20자',
+    title: '프로필',
+    // 티켓에 찍히는 이름. 가입 마지막 화면에서 한 번만 묻고(T-UX2-4) 여기서 고친다 —
+    // 아래 별명과는 저장되는 곳도, 쓰이는 데도, 드는 비용도 다르다(계획 결정 6).
+    displayName: '표시 이름',
+    displayNamePlaceholder: '예: 김태완',
+    displayNameHelp: '티켓에 찍히는 이름이에요. 한글로 써도 되고, 언제든 바꿀 수 있어요.',
+    displayNameVsNickname: '아래 별명과는 달라요. 별명은 티켓을 주고받거나 대화방에서 나를 가리키는 하나뿐인 이름이라, 영문 소문자·숫자·밑줄만 쓸 수 있어요.',
+    displayNameSaved: '표시 이름을 저장했어요',
+    displayNameFailed: '표시 이름을 저장하지 못했어요. 잠시 뒤 다시 시도해 주세요.',
+    nickname: '별명', nicknameHint: '영문 소문자, 숫자, 밑줄 3~20자',
     nicknameTaken: '이미 쓰는 별명이에요.', nicknameSaved: '별명을 저장했어요',
     nicknameInvalid: '영문 소문자, 숫자, 밑줄만 3~20자로 써 주세요.',
     nicknameMine: '이미 쓰고 있는 별명이에요',
@@ -234,10 +271,12 @@ export const ko = {
     deleteFailed: '삭제 요청을 받지 못했어요. 잠시 뒤 다시 시도해 주세요.',
   },
   poster: {
-    pick: '포스터 올리기',
+    title: '포스터',
+    pick: '사진 고르기',
     frame: '포스터 미리보기',
     adjust: '끌어서 옮기고, 두 손가락으로 크기를 맞춰요',
-    crop: '자르기', again: '다시 고르기', working: '자르고 있어요',
+    rotate: '회전', close: '닫기',
+    crop: '이 사진으로 정하기', again: '다른 사진 고르기', working: '자르고 있어요',
     failed: '사진을 자르지 못했어요. 다시 시도해 주세요.',
   },
 };

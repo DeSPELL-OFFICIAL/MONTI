@@ -5,26 +5,10 @@ import { api, callableFailure } from '../shared/api/functions';
 import { describeFailure } from '../shared/errors';
 import { useCopy } from '../shared/i18n';
 import { useOrganizerCopy, type OrganizerCopy } from './copy';
+import { isGoodOrgName } from './orgName';
 
 /** The four refusals the server named, each with a sentence of its own. */
 type BecomeProblem = keyof OrganizerCopy['become']['problems'];
-
-/**
- * The server's own name rule (functions/src/functions/createOrganizer.ts), kept here so a
- * doomed request never leaves the phone. Counted in **code points**, the way the server counts
- * them: one emoji is one character on both sides, so forty emoji are a name of forty and not
- * of eighty. `BAD_NAME` is still mapped below, for the day the two rules disagree.
- */
-const NAME_MIN = 2;
-const NAME_MAX = 40;
-
-/** C0 and C1 controls — exactly the set the server refuses. */
-const CONTROL_RE = /[\u0000-\u001f\u007f-\u009f]/;
-
-function isGoodName(trimmed: string): boolean {
-  const points = [...trimmed].length;
-  return points >= NAME_MIN && points <= NAME_MAX && !CONTROL_RE.test(trimmed);
-}
 
 /** The four refusals worth a sentence of their own. `describeFailure` answers the rest. */
 const REASONS: Readonly<Record<string, BecomeProblem>> = {
@@ -40,7 +24,7 @@ const REASONS: Readonly<Record<string, BecomeProblem>> = {
  * is somebody with a person record whose phone is not registered yet.
  */
 const RESUME: Readonly<Partial<Record<BecomeProblem, string>>> = {
-  notActive: '/signup/device',
+  notActive: '/signup/register',
   noSignup: '/signup/phone',
 };
 
@@ -77,7 +61,7 @@ export function Become() {
   const [failure, setFailure] = useState('');
 
   const trimmed = name.trim();
-  const ready = isGoodName(trimmed);
+  const ready = isGoodOrgName(trimmed);
 
   const create = async (): Promise<void> => {
     if (busy || !ready) return;

@@ -1,6 +1,8 @@
 import { useQueries } from '@tanstack/react-query';
 import { loadEventArt } from '../../shared/api/firestore';
-import { useCopy } from '../../shared/i18n';
+import { useDisplayName } from '../../shared/displayName';
+import { useCopy, useLocale } from '../../shared/i18n';
+import { formatTicketDate } from '../../shared/ui';
 import type { TicketArtProps, TicketArtSource } from '../../shared/ui';
 import type { MyTicket } from './useTickets';
 
@@ -35,19 +37,36 @@ function useEventArt(eventIds: readonly string[]): (eventId: string, tier: numbe
 
 /**
  * Everything {@link TicketArt} needs for one ticket, in one place because both ticket screens
- * need exactly the same four values and disagreeing about any of them would show as two
+ * need exactly the same six values and disagreeing about any of them would show as two
  * different pictures for one ticket.
  *
- * The two fallbacks are words rather than blanks: a title the gateway would not hand over and
- * a kind the index did not name are both things the person can still be shown a ticket for.
+ * **The name is read here and nowhere else.** `users/{uid}.displayName` is one document for the
+ * whole session, so reading it in the list and again in the detail screen would be two reads
+ * that can answer differently while one of them is still in flight — a ticket that says 게스트
+ * in the list and a name when you open it. One hook, one answer, both screens.
+ *
+ * It is the profile field and deliberately not the chain nickname: that one is
+ * `^[a-z0-9_]{3,20}$`, cannot hold a Korean name, and costs a sponsored write to set. Nor is it
+ * `getSignupStatus` — the typed callable does not return a display name, and this reads the
+ * same Firestore field with no round trip to ask for one (plan section E-3).
+ *
+ * The three fallbacks are words rather than blanks: a title the gateway would not hand over, a
+ * kind the index did not name and a person who left their name empty are all things somebody
+ * can still be shown a ticket for. A missing *date* is the exception and draws nothing at all,
+ * because a placeholder date would look like a date.
  */
 export function useTicketArtProps(tickets: readonly MyTicket[]): (ticket: MyTicket) => TicketArtProps {
   const copy = useCopy().tickets;
+  const locale = useLocale();
+  const displayName = useDisplayName();
   const artOf = useEventArt(tickets.map((ticket) => ticket.eventId));
+  const holder = displayName === '' ? copy.artGuest : displayName;
   return (ticket) => ({
     art: artOf(ticket.eventId, ticket.tier),
     title: ticket.title === '' ? copy.artNoTitle : ticket.title,
     tierName: ticket.tierName === '' ? copy.artNoTier : ticket.tierName,
+    holder,
+    dateText: formatTicketDate(ticket.startsAt, locale),
     used: ticket.used,
   });
 }

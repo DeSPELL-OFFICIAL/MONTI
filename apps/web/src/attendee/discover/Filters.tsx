@@ -1,6 +1,7 @@
 import { Field } from '../../shared/ui';
 import { useCopy } from '../../shared/i18n';
-import { CATEGORY_CODES, REGION_CODES, type DateRange, type DiscoverFilters } from './useEvents';
+import { THEME_CODES, themeLabels } from '../../shared/eventThemes';
+import { REGION_CODES, type DateRange, type DiscoverFilters } from './useEvents';
 
 const RANGES: DateRange[] = ['all', 'today', 'week', 'month'];
 
@@ -18,12 +19,9 @@ export function Filters({
     week: copy.discover.dateWeek,
     month: copy.discover.dateMonth,
   };
-  const categoryLabels: Record<number, string> = {
-    0: copy.discover.category0,
-    1: copy.discover.category1,
-    2: copy.discover.category2,
-    3: copy.discover.category3,
-  };
+  // The organiser's list and this one are the same list, read from the same module: a theme
+  // somebody can pick has to be a theme somebody else can filter by (shared/eventThemes.ts).
+  const themes = themeLabels(copy);
 
   return (
     <div className="filters">
@@ -62,9 +60,9 @@ export function Filters({
           }
         >
           <option value="all">{copy.discover.categoryAll}</option>
-          {CATEGORY_CODES.map((category) => (
+          {THEME_CODES.map((category) => (
             <option key={category} value={String(category)}>
-              {categoryLabels[category]}
+              {themes[category]}
             </option>
           ))}
         </select>

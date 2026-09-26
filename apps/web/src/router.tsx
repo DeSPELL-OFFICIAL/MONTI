@@ -38,7 +38,17 @@ function FinishSignupFirst() {
   const location = useLocation();
   if (registration !== 'pending') return <Outlet />;
   const returnTo = encodeURIComponent(`${location.pathname}${location.search}`);
-  return <Navigate to={`/signup/device?returnTo=${returnTo}`} replace />;
+  return <Navigate to={`/signup/register?returnTo=${returnTo}`} replace />;
+}
+
+/**
+ * The two screens `/signup/register` replaced. Links to them are already in the wild — an old
+ * tab, a text somebody sent themselves — and the query travels with them, because `returnTo` is
+ * what tells the register screen this is an account being finished rather than a fresh signup.
+ */
+function ToRegister() {
+  const { search } = useLocation();
+  return <Navigate to={`/signup/register${search}`} replace />;
 }
 
 // 각 화면은 뒤 태스크에서 실제 구현으로 교체된다. 여기서는 라우트 표를 확정한다.
@@ -49,8 +59,7 @@ import { Phone } from './attendee/signup/Phone';
 import { Verify } from './attendee/signup/Verify';
 import { VerifyIdentity } from './attendee/me/VerifyIdentity';
 import { KycCallback } from './attendee/me/KycCallback';
-import { PasskeyStep } from './attendee/signup/Passkey';
-import { DeviceStep } from './attendee/signup/Device';
+import { Register } from './attendee/signup/Register';
 import { Done } from './attendee/signup/Done';
 import { Claim } from './attendee/claim/Claim';
 import { TicketList } from './attendee/tickets/List';
@@ -76,8 +85,9 @@ export const routes: RouteObject[] = [
       { path: '/login', element: <Login /> },
       { path: '/signup/phone', element: <Phone /> },
       { path: '/signup/verify', element: <Verify /> },
-      { path: '/signup/passkey', element: <PasskeyStep /> },
-      { path: '/signup/device', element: <DeviceStep /> },
+      { path: '/signup/register', element: <Register /> },
+      { path: '/signup/passkey', element: <ToRegister /> },
+      { path: '/signup/device', element: <ToRegister /> },
       { path: '/signup/done', element: <Done /> },
       // Where the link in an invite text lands. Public on purpose: the person it was sent to
       // is usually not signed in yet, and this screen is what starts their signup.

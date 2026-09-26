@@ -9,10 +9,14 @@ export const PERM_MANAGE_GATES = 2;
 export const PERM_APPROVE_OVERRIDE = 4;
 export const PERM_MANAGE_MANAGERS = 8;
 export const PERM_MANAGE_BUDGET = 16;
+/** 01c approval mode. 32 is the next free bit — 1·2·4·8·16 are taken — so a manager-manage admin
+ *  does not also inherit claim approval (contracts task-ux3-1 report). Approval is owner, this bit,
+ *  or a manager's `canApprove`. */
+export const PERM_APPROVE_CLAIM = 32;
 
 /** The sum of every bit the contract declares. `createInvite` refuses anything wider. */
 export const ALL_PERMISSION_BITS =
-  PERM_CREATE_EVENT | PERM_MANAGE_GATES | PERM_APPROVE_OVERRIDE | PERM_MANAGE_MANAGERS | PERM_MANAGE_BUDGET;
+  PERM_CREATE_EVENT | PERM_MANAGE_GATES | PERM_APPROVE_OVERRIDE | PERM_MANAGE_MANAGERS | PERM_MANAGE_BUDGET | PERM_APPROVE_CLAIM;
 
 /** The admin bits an organiser screen offers, in the order they are shown. */
 export const PERMISSION_BITS = [

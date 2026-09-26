@@ -1,4 +1,5 @@
 import { useLocale } from '../shared/i18n';
+import type { TicketArtPreset } from '../shared/ui';
 
 /**
  * The organiser's own copy, in both locales. It is kept out of `shared/copy` because the
@@ -207,6 +208,7 @@ const ko = {
     checkedIn: '입장함',
     notCheckedIn: '아직',
     gates: '입구 단말기',
+    requests: '신청 관리',
     // 공개 전에만 열린다 — updateEventMeta 는 Draft 에서만 된다(Ticket.sol:235).
     edit: '행사 정보 고치기',
     notIndexed: '없는 행사 번호이거나 아직 색인 전이에요',
@@ -235,6 +237,22 @@ const ko = {
     },
   },
 
+  requests: {
+    title: '신청 관리',
+    back: '행사 현황으로',
+    empty: '기다리는 신청이 없어요',
+    loadFailed: '신청 목록을 불러오지 못했어요. 잠시 뒤 다시 시도해 주세요',
+    retry: '다시 시도',
+    noPermission: '이 행사의 신청을 처리할 권한이 없어요',
+    approveSelected: '선택 승인',
+    approveAll: '전체 승인',
+    reject: '거절',
+    tier: '{{tier}}번째 종류',
+    working: '처리하고 있어요',
+    confirming: '아직 확인 중이에요. 잠시 뒤 새로고침하면 반영돼요',
+    failed: '처리하지 못했어요. 잠시 뒤 다시 시도해 주세요',
+  },
+
   announce: {
     title: '공지',
     placeholder: '공지 내용 (최대 500자)',
@@ -254,10 +272,8 @@ const ko = {
   scene: {
     title: '행사 만들기',
     leave: '나가기',
-    resumed: '이어서 쓰는 중',
-    startOver: '처음부터',
-    next: '다음',
-    back: '행사 정보로',
+    // 기본 다섯 칸(포스터·제목·시작·장소·티켓) 밖의 모든 것이 이 안에 접혀 있다(계획 B-2).
+    more: '더 설정하기',
 
     /** 이미 만들어진 행사를 같은 씬에서 고친다(T-EV-W12). 공개 전에만 열린다. */
     edit: {
@@ -270,21 +286,37 @@ const ko = {
     saveAuto: '적는 대로 저장돼요',
     saving: '저장 중…',
     saveFailed: '저장 안 됨 · 다시 시도',
-    savedNow: '저장됨 · 방금',
     savedAgo: '저장됨 · {{ago}}',
+    agoNow: '방금',
     agoMinutes: '{{count}}분 전',
     agoHours: '{{count}}시간 전',
+    // 자동저장은 처음부터 다 돌고 있었고 화면에 흔적이 없었다(계획 F-2). 이 버튼이 그 증거다.
+    saveDraft: '임시 저장',
+    saved: '저장됨',
+
+    /** 초안을 두고 나갔던 사람이 다시 들어올 때 묻는 바텀 시트(계획 F-3). */
+    resume: {
+      title: '이어서 작성할까요?',
+      body: '{{title}} · 마지막 저장 {{when}}',
+      untitled: '제목 없는 행사',
+      keep: '이어서 작성하기',
+      // 옛 초안을 지우지 않는다 — 5개까지 남고 오래된 것부터 밀린다(계획 F-4).
+      fresh: '새로 만들기',
+    },
 
     poster: '포스터',
     posterEmpty: '포스터를 올리면 여기에 보여요',
+    posterAdd: '포스터 올리기',
     posterChange: '포스터 바꾸기',
     posterWorking: '포스터를 올리고 있어요',
+    posterRetry: '다시 올리기',
+    // 업로드가 아직 돌고 있을 때 만들기를 누른 경우. 막지 않고 기다린다(계획 D-3).
+    posterWaiting: '포스터를 올리는 중이에요. 곧 끝나요',
     posterAlt: '포스터 미리보기',
 
     titleLabel: '제목',
     titlePlaceholder: '무슨 행사인가요?',
     themeLabel: '테마',
-    theme0: '공연', theme1: '모임', theme2: '전시', theme3: '기타',
     tagsLabel: '태그',
     tagsHelp: '5개까지, 하나에 12자까지 적을 수 있어요. 탭하면 빼요',
     tagPlaceholder: '예: 재즈',
@@ -300,6 +332,7 @@ const ko = {
     timeLabel: '시간',
     startsAt: '시작',
     endsAt: '종료',
+    endsAtHelp: '비워 두면 시작 2시간 뒤로 잡아요',
     holdersOnly: '티켓 소지자에게만 공개',
     // 백엔드 T-EV-B 보고 9.3: 숨김 → 공개는 언제든 되지만 그 반대는 안 된다.
     venueHiddenHelp: '탐색 화면에는 지역만 보여요. 자세한 장소는 티켓을 받은 사람에게만 알려줘요',
@@ -307,17 +340,28 @@ const ko = {
     timeHiddenHelp: '탐색 화면에는 날짜만 보여요. 시작 시각은 티켓을 받은 사람에게만 알려줘요',
     saleHelp: '신청은 행사를 만든 순간 열리고 행사가 끝날 때 닫혀요',
 
+    // 주최사가 하나도 없을 때만 만들기 버튼 위에 뜨는 한 줄. 이름은 서버가 orgProfiles 에
+    // 적고 고칠 방법이 없으므로(계획 B-4), 그렇게 말해 둔다.
+    org: {
+      label: '주최자 이름',
+      help: '행사 화면에 이 이름이 보여요. 나중에 바꿀 수 없어요.',
+      placeholder: '예: 몬티 크루',
+    },
+
     problems: {
       poster: '포스터를 올려 주세요',
       title: '제목을 2자에서 60자 사이로 적어 주세요',
       tags: '태그는 5개까지, 하나에 12자까지예요',
       body: '소개를 2000자 안으로 적어 주세요',
+      bodyTooShort: '소개를 10자 이상 적어 주세요',
       region: '지역을 골라 주세요',
       venue: '장소를 적어 주세요',
       venueTooLong: '장소는 200자 안으로 적어 주세요',
       startsAt: '시작 시각을 골라 주세요',
       endsAt: '종료 시각을 골라 주세요',
       schedule: '종료 시각이 시작 시각보다 뒤여야 해요',
+      // 며칠 전에 써 둔 초안을 오늘 발행할 때. 신청 기간이 지금~종료라 거꾸로가 된다.
+      eventPast: '종료 시각이 이미 지났어요. 앞으로의 시각으로 고쳐 주세요',
     },
 
 
@@ -327,8 +371,10 @@ const ko = {
       add: '종류 추가',
       remove: '빼기',
       kind: '{{index}}번째 종류',
-      name: '이름',
-      namePlaceholder: '예: 일반',
+      // 창업자가 "이름이 뭔지 모르겠다"고 한 그 칸이다. 무엇의 이름인지 라벨이 말한다(계획 E-5).
+      name: '티켓 종류 (예: 일반, VIP)',
+      nameHelp: '티켓에 찍히는 이름이에요',
+      namePlaceholder: '일반',
       supply: '수량',
       maxPerWallet: '1인당 한도',
       price: '가격',
@@ -336,13 +382,31 @@ const ko = {
       amount: '금액',
       save: '저장',
       art: '티켓 그림',
+      // The carousel's own name for a screen reader; the tiles inside carry the preset names.
+      artCarousel: '티켓 그림 고르기',
+      // One name per preset letter, as a record rather than as flat `artA`..`artD` keys: the
+      // `satisfies` below is what makes a locale that forgets a letter fail the build, which is
+      // what the flat keys were for before there were twelve of them (plan section E-1).
       // 'Mint' 는 관객 금지어(`mint`)에 걸린다 — 색 이름은 '청록'/'Teal' 로 둔다.
-      artA: '오로라', artB: '잉걸', artC: '청록', artD: '어스름',
+      artNames: {
+        a: '오로라', b: '잉걸', c: '청록', d: '어스름', e: '네온', f: '색종이',
+        g: '물결', h: '햇살', i: '안개', j: '줄무늬', k: '점묘', l: '회로',
+      } satisfies Record<TicketArtPreset, string>,
       artUpload: '직접 올리기',
       artUploadClose: '그만두기',
       artWorking: '그림을 올리고 있어요',
       // 유료 종류를 고른 그 자리에서 막는다 — 마지막에 거절당하는 게 제일 나쁘다(계획 B-3).
       paidBlocked: '유료 티켓은 곧 열려요. 지금은 무료로만 만들 수 있어요',
+      // 무료 | 유료 세그먼트: 통화 칩 4개와 접힘을 대체하고 카드 상단에 항상 노출된다(계획 A-1).
+      paid: '유료',
+      // (i) 툴팁 — 창업자가 요청한 정확한 문구(계획 A-3).
+      limitTip: '예매하는 본인도 1명으로 포함돼요. 가족·동행 표를 함께 사게 하려면 2 이상, 1인 1매로 막으려면 1로 두세요.',
+      // 무료일 때만 나오는 받는 방식 2분기(계획 A-2). approvalRequired 는 이벤트 단위라 첫 카드에만 그린다.
+      receiveMethod: '받는 방식',
+      receiveAuto: '선착순 자동 승인',
+      receiveApproval: '관리자 승인 후 발급',
+      // 승인제는 01c 재배포 전까지 컨트랙트가 거절한다 — VITE_APPROVAL_MODES 로 열기 전엔 비활성.
+      approvalSoon: '곧 열려요',
       rules: '행사 전체 규칙',
       // transferable·transferCutoffSeconds·requireKyc 는 EventMeta 에 있고 Tier 에는 없다.
       // 종류 카드 안에 두면 화면이 거짓말을 한다.
@@ -378,6 +442,7 @@ const ko = {
 
     publish: {
       pinning: '행사 정보를 올리고 있어요',
+      org: '주최사를 만들고 있어요',
       sending: '행사를 만들고 있어요',
       finishing: '마무리하고 있어요',
       updating: '행사 정보를 저장하고 있어요',
@@ -388,6 +453,10 @@ const ko = {
 
     publishProblems: {
       notYourOrg: '이 주최사에서 행사를 만들 권한이 없어요',
+      orgName: '주최자 이름을 2자에서 40자 사이로 적어 주세요',
+      orgLimit: '주최사는 3개까지 만들 수 있어요. 기존 주최사로 만들어 주세요',
+      orgNotActive: '가입을 먼저 마무리해 주세요',
+      orgFailed: '주최자 정보를 만들지 못했어요. 잠시 뒤 다시 시도해 주세요',
       // 행사는 만들어졌는데 영수증에서 번호를 못 읽은 경우. 초안과 오퍼레이션 해시를 남겨 두고,
       // 버튼을 다시 누르면 그 해시로 번호를 찾아온다 — 새 행사를 만들지 않는다.
       noEventId: '행사는 만들어졌어요. 번호만 아직 못 읽었으니 아래 \'행사 만들기\'를 한 번 더 눌러 번호를 찾아 주세요. 행사가 두 개로 만들어지지는 않아요',
@@ -406,7 +475,6 @@ const ko = {
     },
 
     tierProblems: {
-      eventIncomplete: '행사 정보에 아직 빠진 칸이 있어요',
       tiersTooMany: '종류는 8개까지예요',
       tierName: '모든 종류에 이름을 적어 주세요',
       tierNameTooLong: '종류 이름은 40자 안으로 적어 주세요',
@@ -637,6 +705,7 @@ const en: typeof ko = {
     checkedIn: 'In',
     notCheckedIn: 'Not yet',
     gates: 'Entry terminals',
+    requests: 'Requests',
     /** Only before publishing: the chain refuses `updateEventMeta` past Draft. */
     edit: 'Edit this event',
     notIndexed: 'No event has that number, or it has not been indexed yet',
@@ -660,6 +729,22 @@ const en: typeof ko = {
     },
   },
 
+  requests: {
+    title: 'Requests',
+    back: 'Back to event status',
+    empty: 'No requests are waiting',
+    loadFailed: 'Could not load the requests. Please try again in a moment',
+    retry: 'Try again',
+    noPermission: 'You may not handle requests for this event',
+    approveSelected: 'Approve selected',
+    approveAll: 'Approve all',
+    reject: 'Reject',
+    tier: 'Kind {{tier}}',
+    working: 'Working',
+    confirming: 'Still confirming. Refresh in a moment to see the change',
+    failed: 'Could not finish. Please try again in a moment',
+  },
+
   announce: {
     title: 'Notice',
     placeholder: 'Notice (up to 500 characters)',
@@ -679,10 +764,8 @@ const en: typeof ko = {
   scene: {
     title: 'Create an event',
     leave: 'Leave',
-    resumed: 'Carrying on where you left off',
-    startOver: 'Start over',
-    next: 'Next',
-    back: 'Back to the event',
+    // See the Korean block: everything but the five fields that make an event is folded here.
+    more: 'More settings',
 
     /** See the Korean block: the same scene, opened on an event that already exists. */
     edit: {
@@ -695,21 +778,37 @@ const en: typeof ko = {
     saveAuto: 'Saved as you write',
     saving: 'Saving…',
     saveFailed: 'Not saved · try again',
-    savedNow: 'Saved · just now',
     savedAgo: 'Saved · {{ago}}',
+    agoNow: 'just now',
     agoMinutes: '{{count}} min ago',
     agoHours: '{{count}} h ago',
+    // See the Korean block: the autosave was already doing all of this and none of it showed.
+    saveDraft: 'Save draft',
+    saved: 'Saved',
+
+    /** See the Korean block: what a draft left behind asks on the way back in. */
+    resume: {
+      title: 'Carry on where you left off?',
+      body: '{{title}} · last saved {{when}}',
+      untitled: 'Untitled event',
+      keep: 'Carry on',
+      // See the Korean block: this keeps the old draft rather than throwing it away.
+      fresh: 'Start a new one',
+    },
 
     poster: 'Poster',
     posterEmpty: 'Your poster appears here',
+    posterAdd: 'Add a poster',
     posterChange: 'Change the poster',
     posterWorking: 'Uploading the poster',
+    posterRetry: 'Try again',
+    // See the Korean block: 만들기 pressed while the upload is still going waits for it.
+    posterWaiting: 'The poster is still going up. Nearly there',
     posterAlt: 'Poster preview',
 
     titleLabel: 'Title',
     titlePlaceholder: 'What is the event?',
     themeLabel: 'Theme',
-    theme0: 'Concert', theme1: 'Meetup', theme2: 'Exhibition', theme3: 'Other',
     tagsLabel: 'Tags',
     tagsHelp: 'Up to five, each up to 12 characters. Tap one to remove it',
     tagPlaceholder: 'e.g. jazz',
@@ -725,6 +824,7 @@ const en: typeof ko = {
     timeLabel: 'When',
     startsAt: 'Starts',
     endsAt: 'Ends',
+    endsAtHelp: 'Left alone, it ends two hours after it starts',
     holdersOnly: 'Only people with a ticket',
     // Backend report 9.3: hidden can be opened up at any time, open can never be hidden again.
     venueHiddenHelp: 'Explore screens show the region only. People who got a ticket are told the exact place',
@@ -732,17 +832,27 @@ const en: typeof ko = {
     timeHiddenHelp: 'Explore screens show the date only. People who got a ticket are told the start time',
     saleHelp: 'Sign-ups open the moment you create the event and close when it ends',
 
+    // See the Korean block: one line above the button, and only for somebody with no
+    // organiser yet. The server writes the name and nothing can change it afterwards.
+    org: {
+      label: 'Organiser name',
+      help: 'This name appears on the event. It cannot be changed later.',
+      placeholder: 'e.g. Monti Crew',
+    },
+
     problems: {
       poster: 'Please upload a poster',
       title: 'Write a title of 2 to 60 characters',
       tags: 'Up to five tags, each up to 12 characters',
       body: 'Write the description in 2000 characters or fewer',
+      bodyTooShort: 'Write a description of at least 10 characters',
       region: 'Please pick a region',
       venue: 'Please write the venue',
       venueTooLong: 'Write the venue in 200 characters or fewer',
       startsAt: 'Please pick a start time',
       endsAt: 'Please pick an end time',
       schedule: 'The end has to come after the start',
+      eventPast: 'The end time has already passed. Please pick a time in the future',
     },
 
 
@@ -752,8 +862,10 @@ const en: typeof ko = {
       add: 'Add a kind',
       remove: 'Remove',
       kind: 'Kind {{index}}',
-      name: 'Name',
-      namePlaceholder: 'e.g. General',
+      // The box the founder could not name. The label says what it is the name of.
+      name: 'Ticket kind (e.g. General, VIP)',
+      nameHelp: 'This is the name printed on the ticket',
+      namePlaceholder: 'General',
       supply: 'How many',
       maxPerWallet: 'Most one person may hold',
       price: 'Price',
@@ -761,12 +873,29 @@ const en: typeof ko = {
       amount: 'Amount',
       save: 'Save',
       art: 'Ticket picture',
-      artA: 'Aurora', artB: 'Ember', artC: 'Teal', artD: 'Dusk',
+      // The carousel's own name for a screen reader; the tiles inside carry the preset names.
+      artCarousel: 'Choose the ticket picture',
+      artNames: {
+        a: 'Aurora', b: 'Ember', c: 'Teal', d: 'Dusk', e: 'Neon', f: 'Confetti',
+        g: 'Wave', h: 'Sunburst', i: 'Haze', j: 'Stripes', k: 'Dots', l: 'Circuit',
+      } satisfies Record<TicketArtPreset, string>,
       artUpload: 'Upload your own',
       artUploadClose: 'Never mind',
       artWorking: 'Uploading the picture',
       // Blocked where the choice was made, not at the end (plan section B-3).
       paidBlocked: 'Paid tickets are coming soon. For now an event can only be free',
+      // The 무료 | 유료 segment, always at the top of the card, replacing the fold and the four
+      // currency chips (plan section A-1).
+      paid: 'Paid',
+      // The (i) tooltip in the exact words the founder asked for (plan section A-3).
+      limitTip: 'You are counted as one of the buyers. Set it to 2 or more to let one person buy for family or a guest, or leave it at 1 to hold everyone to a single ticket.',
+      // The two receiving methods, shown only while the event is free (plan section A-2).
+      receiveMethod: 'How people receive it',
+      receiveAuto: 'First come, issued automatically',
+      receiveApproval: 'Issued after the organiser approves',
+      // Approval is refused by the deployed contract until the 01c redeploy, so it is off until
+      // VITE_APPROVAL_MODES opens it.
+      approvalSoon: 'Coming soon',
       rules: 'Rules for the whole event',
       // These three live on EventMeta and not on Tier, so a per-kind switch would be a lie.
       rulesHelp: 'These three cannot differ by kind. There is one of each per event',
@@ -801,6 +930,7 @@ const en: typeof ko = {
 
     publish: {
       pinning: 'Uploading the event details',
+      org: 'Creating your organiser',
       sending: 'Creating the event',
       finishing: 'Finishing up',
       updating: 'Saving the event',
@@ -811,6 +941,10 @@ const en: typeof ko = {
 
     publishProblems: {
       notYourOrg: 'You may not create events for this organiser',
+      orgName: 'Write an organiser name of 2 to 40 characters',
+      orgLimit: 'You can have up to three organisers. Please use one you already have',
+      orgNotActive: 'Please finish signing up first',
+      orgFailed: 'Could not create your organiser. Please try again in a moment',
       // The event was made but the receipt did not name it. The draft and the operation hash
       // are kept, and pressing again looks the number up by that hash — it makes no new event.
       noEventId: 'Your event was created. Only its number has not come back yet — press "Create the event" once more to look it up. It will not create a second event',
@@ -829,7 +963,6 @@ const en: typeof ko = {
     },
 
     tierProblems: {
-      eventIncomplete: 'Some of the event details are still missing',
       tiersTooMany: 'Up to eight kinds',
       tierName: 'Give every kind a name',
       tierNameTooLong: 'Write a kind name of 40 characters or fewer',

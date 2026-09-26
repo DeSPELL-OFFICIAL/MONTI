@@ -8,10 +8,11 @@ import { revertMatch } from '../../shared/chain/revert';
 import { isUnsponsored } from '../../shared/chain/unsponsored';
 import { api, callableFailure } from '../../shared/api/functions';
 import type { EventDraft } from '../../shared/api/firestore';
+import type { MyOrg } from '../useMyOrgs';
 import { buildEventMeta, buildTiers, type ChainDraft } from './buildEventMeta';
 import type { OrganizerCopy } from '../copy';
 import { saveDraft, type LifecycleProblem } from '../lifecycle';
-import { eventProblems, normalizeTags, saleWindow, tierProblems } from './draftRules';
+import { endsAtOf, eventProblems, normalizeTags, saleWindow, tierProblems } from './draftRules';
 import {
   followUpPlan, followUpsDone, runFollowUps, type FollowUpPlan, type FollowUpResult,
 } from './followUps';
@@ -57,12 +58,30 @@ const UPDATE_PROBLEMS: Readonly<Record<LifecycleProblem, PublishProblem>> = {
   failed: 'failed',
 };
 
-/** Three values the scene does not ask for, because there is one right answer for each. */
+/**
+ * A refusal from the organisation step, carried out of it with the sentence it earned. It is a
+ * class rather than a state write so that one `catch` at the end of `publish` owns every
+ * failure the path can have, in the order they can happen.
+ */
+class OrgRefused extends Error {
+  constructor(readonly problem: PublishProblem) {
+    super('ORG_REFUSED');
+  }
+}
+
+/** Two values the scene does not ask for, because there is one right answer for each. */
 const MAX_TRANSFERS = 3;
-const APPROVAL_REQUIRED = false;
 const SEATED = false;
 
-export type PublishPhase = 'idle' | 'pinning' | 'sending' | 'finishing' | 'confirming';
+export type PublishPhase = 'idle' | 'org' | 'pinning' | 'sending' | 'finishing' | 'confirming';
+
+/** What `createOrganizerForMe` refuses for, against the sentence each deserves. */
+const ORG_PROBLEMS: Readonly<Record<string, PublishProblem>> = {
+  BAD_NAME: 'orgName',
+  ORG_LIMIT: 'orgLimit',
+  NOT_ACTIVE: 'orgNotActive',
+  NO_SIGNUP: 'orgNotActive',
+};
 
 /**
  * What the done screen needs, carried across rather than read back: by then the indexer has
@@ -97,10 +116,11 @@ export interface PublishState {
  * this file, so the create path and the update path can never disagree by a byte:
  * `titleHash`, `descHash` and `venueHash` are written once and can never be repaired.
  *
- * Three values are constants here rather than switches on the scene. `approvalRequired` must
- * be false — `Ticket.claim` reverts `ApprovalRequiredNotSupported` on a true one, so the
- * switch the deleted wizard offered built events nobody could ever get a ticket for. `seated` has
- * no screen behind it, and `maxTransfers` has no question worth asking yet.
+ * Two values are constants here rather than switches on the scene: `seated` has no screen
+ * behind it, and `maxTransfers` has no question worth asking yet. `approvalRequired` is no
+ * longer among them — the tier card's 받는 방식 control writes it onto the draft, and the
+ * option that would set it true is held behind `VITE_APPROVAL_MODES` until the contract that
+ * reverts `ApprovalRequiredNotSupported` on a true one is redeployed (plan section A-2).
  *
  * Every readable field is trimmed *here*, so the string that is hashed onto the chain is the
  * same one that is pinned to IPFS. The poster is not among them: its CID travels in the pinned
@@ -116,13 +136,14 @@ function toChainDraft(draft: EventDraft, now: number): ChainDraft {
     regionCode: draft.regionCode,
     category: draft.category,
     startsAt: draft.startsAt,
-    endsAt: draft.endsAt,
+    // The derived end when the organiser never opened `더 설정하기`; theirs when they did.
+    endsAt: endsAtOf(draft),
     saleStart,
     saleEnd,
     transferable: draft.transferable,
     transferCutoffHours: draft.transferCutoffHours,
     maxTransfers: MAX_TRANSFERS,
-    approvalRequired: APPROVAL_REQUIRED,
+    approvalRequired: draft.approvalRequired,
     requireKyc: draft.requireKyc,
     tiers: draft.tiers.map((tier) => ({
       name: tier.name.trim(),
@@ -157,6 +178,14 @@ function toPinnedMeta(draft: EventDraft) {
 export interface PublishOptions {
   draft: EventDraft;
   draftId: string;
+  /**
+   * The organisations the indexer listed for this person, and a way to ask it again. The
+   * publish path needs both: the first is usually the whole answer, and the second is the
+   * only way to find out what a previous attempt left behind (plan section B-5).
+   */
+  myOrgs: { orgs: readonly MyOrg[]; refetch: () => Promise<MyOrg[]> };
+  /** What to call a new organisation — the one line the scene shows somebody with none. */
+  orgName: string;
   patch: (next: Partial<EventDraft>) => void;
   /** Forces the pending write out now, so a fact recorded here is durable before anything else runs. */
   save: () => Promise<void>;
@@ -180,11 +209,69 @@ export interface PublishOptions {
  * `createEvent` if they pressed the button again.
  */
 export function usePublish(
-  { draft, draftId, patch, save, discard, onCreated }: PublishOptions,
+  { draft, draftId, myOrgs, orgName, patch, save, discard, onCreated }: PublishOptions,
 ): PublishState {
   const [phase, setPhase] = useState<PublishPhase>('idle');
   const [problem, setProblem] = useState<PublishProblem | ''>('');
   const [unsponsored, setUnsponsored] = useState(false);
+
+  /**
+   * Which organisation this event belongs to, making one if this person has none — four steps,
+   * in this order, because `createOrganizerForMe` is **not idempotent** and takes two to five
+   * seconds (rarely past ten) to answer (plan section B-5):
+   *
+   *   1. the draft already names one;
+   *   2. the indexer already listed one this person may create events for;
+   *   3. a previous attempt got as far as writing the name down — so the indexer is asked
+   *      again before anything is sent, because the organisation may well exist by now;
+   *   4. otherwise one is made, with the name recorded on the draft **before** the call.
+   *
+   * Step 3 is what keeps the damage at one stray organisation: a run that dies between the
+   * write and the answer leaves a name behind, and the next attempt picks up what it made
+   * rather than making a second. The chain's own cap of three is the backstop.
+   *
+   * The phase is claimed on the **first line**, before anything is awaited, because 만들기 is
+   * pressable for exactly as long as it says `idle`. Step 3 awaits the indexer, so a phase
+   * claimed any later than this left the button live across that round trip: two fast presses
+   * on a re-entered draft both came back empty-handed and both called `createOrganizerForMe`
+   * — two organisations out of one draft, against a cap of three.
+   */
+  const resolveOrg = useCallback(async (): Promise<string> => {
+    setPhase('org');
+    const known = draft.orgId.trim();
+    if (known !== '') return known;
+
+    const listed = myOrgs.orgs.find((org) => org.canCreateEvent);
+    if (listed !== undefined) {
+      patch({ orgId: listed.orgId });
+      await save().catch(() => undefined);
+      return listed.orgId;
+    }
+
+    if (draft.orgPendingName !== '') {
+      const fresh = await myOrgs.refetch().catch(() => [] as MyOrg[]);
+      const made = fresh.find((org) => org.canCreateEvent);
+      if (made !== undefined) {
+        patch({ orgId: made.orgId, orgPendingName: '' });
+        await save().catch(() => undefined);
+        return made.orgId;
+      }
+    }
+
+    const name = (draft.orgPendingName || orgName).trim();
+    // The scene refuses to send without one; this is the guard for a draft that changed
+    // underneath it, and it answers `''` rather than creating an organisation called nothing.
+    if (name === '') return '';
+    // Written first, and forced out: from here on a run that dies is a run the step above
+    // can pick up. `save()` swallows its own failures, so the callable still goes either way
+    // — a name that did not persist is a smaller loss than an event that never got made.
+    patch({ orgPendingName: name });
+    await save().catch(() => undefined);
+    const { orgId } = await api.createOrganizerForMe({ name });
+    patch({ orgId, orgPendingName: '' });
+    await save().catch(() => undefined);
+    return orgId;
+  }, [draft.orgId, draft.orgPendingName, myOrgs, orgName, patch, save]);
 
   const finish = useCallback(
     async (eventId: string): Promise<void> => {
@@ -364,12 +451,23 @@ export function usePublish(
 
     setProblem('');
     setUnsponsored(false);
-    setPhase('pinning');
     try {
-      const orgId = draft.orgId.trim();
+      // Before the pin, because `pinEventMetadata` checks on chain that this person organises
+      // for the organisation it is given (`functions/src/lib/auth.ts`) — and the callable
+      // waits for finality, so there is no indexer lag to retry around.
+      const orgId = await resolveOrg().catch((cause) => {
+        const { reason } = callableFailure(cause);
+        throw new OrgRefused(ORG_PROBLEMS[reason] ?? 'orgFailed');
+      });
+      if (orgId === '') {
+        setPhase('idle');
+        setProblem('orgName');
+        return;
+      }
+      setPhase('pinning');
       const { metadataCid } = await api.pinEventMetadata({ orgId, meta: toPinnedMeta(draft) });
       setPhase('sending');
-      const chainDraft = toChainDraft(draft, Math.floor(Date.now() / 1_000));
+      const chainDraft = toChainDraft({ ...draft, orgId }, Math.floor(Date.now() / 1_000));
       const receipt = await ticketOp({
         account: await getStaffAccount(),
         orgId: BigInt(orgId),
@@ -392,6 +490,11 @@ export function usePublish(
       await save().catch(() => undefined);
       await finish(eventId);
     } catch (cause) {
+      if (cause instanceof OrgRefused) {
+        setPhase('idle');
+        setProblem(cause.problem);
+        return;
+      }
       // The operation is still on its way; it did not fail. Same rule as the hand-over screen.
       if (cause instanceof OpReverted && cause.revertReason === 'TIMEOUT') {
         // Remember which one, so the next press asks after it instead of sending another.
@@ -417,7 +520,7 @@ export function usePublish(
       else if (code !== '') setProblem('pinFailed');
       else setProblem('failed');
     }
-  }, [draft, finish, patch, save, update]);
+  }, [draft, finish, patch, resolveOrg, save, update]);
 
   // Sentences are the scene's business: this hook hands back the *name* of the rule, so the
   // same failure reads the same whichever screen ends up showing it.

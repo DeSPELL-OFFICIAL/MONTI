@@ -3,24 +3,13 @@ import type { SmartAccount } from 'viem/account-abstraction';
 import { getConfig } from '../config';
 import { identityAbi, organizersAbi, ticketAbi, type UsedContract, type UsedFunction } from './abis';
 import { bundlerRequest } from './bundler';
-import { readOpLogs, sendSponsoredOp, type SponsoredOpLog, type SponsoredOpReceipt } from './sendSponsoredOp';
+import {
+  readOpLogs, revertDataOf, sendSponsoredOp, type SponsoredOpLog, type SponsoredOpReceipt,
+} from './sendSponsoredOp';
+import { OpReverted } from './opReverted';
+import { isUnsponsored } from './unsponsored';
 
-/** The operation did not succeed — the contract reverted, or `wait` timed out before it
- * landed (`revertReason` is then the `'TIMEOUT'` sentinel). Either way, user-facing failure.
- *
- * `userOpHash` is carried so a caller that saw the sentinel can come back to the same
- * operation later instead of sending a second one: the first may still be in flight, and two
- * `createEvent` operations are two events. */
-export class OpReverted extends Error {
-  constructor(
-    readonly functionName: string,
-    readonly revertReason?: Hex | 'TIMEOUT',
-    readonly userOpHash?: Hex,
-  ) {
-    super(`OpReverted: ${functionName}${revertReason ? ` (${revertReason})` : ''}`);
-    this.name = 'OpReverted';
-  }
-}
+export { OpReverted } from './opReverted';
 
 /** Where an operation this app already sent has got to. */
 export type SubmittedOpState = 'pending' | 'landed' | 'failed';
@@ -63,6 +52,22 @@ export async function sendOp(options: SendOpArgs): Promise<SponsoredOpReceipt> {
     account: options.account,
     orgId: options.orgId,
     calls: [{ to: options.to, data: encodeFunctionData({ abi: options.abi, functionName: options.functionName, args: options.args }) }],
+  }).catch((cause: unknown) => {
+    // A revert the bundler caught while *simulating* never becomes a receipt, so until now it
+    // left this layer as viem's `RpcRequestError` and every screen fell through to its most
+    // generic sentence. That is how a draft whose end time had passed said only "행사를 만들지
+    // 못했어요" instead of naming the end time (task-create-failure-2 report §0). The four
+    // bytes are right there in the rejection, so the failure is promoted to the same
+    // `OpReverted` a landed revert produces and every `revertMatch` table works on it.
+    //
+    // A paymaster refusal is deliberately left alone: it also reverts during simulation, but
+    // it is a sponsorship problem rather than a rule the organiser broke, and `isUnsponsored`
+    // answers false for anything that is already an `OpReverted`.
+    const revertData = revertDataOf(cause);
+    if (revertData !== undefined && !isUnsponsored(cause)) {
+      throw new OpReverted(options.functionName, revertData);
+    }
+    throw cause;
   });
   const receipt = await handle.wait(options.timeoutMs);
   if (!receipt.success) throw new OpReverted(options.functionName, receipt.revertReason, handle.userOpHash);

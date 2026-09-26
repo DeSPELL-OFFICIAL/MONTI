@@ -1,6 +1,6 @@
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Alert, Button, KycBadge, Screen, Spinner } from '../../shared/ui';
+import { Alert, Button, Card, KycBadge, Screen, Spinner } from '../../shared/ui';
 import { fmt, useCopy, useLocale } from '../../shared/i18n';
 import type { Copy } from '../../shared/copy/index';
 import { gql } from '../../shared/envio/client';
@@ -123,59 +123,65 @@ export function EventDetail() {
   return (
     <Screen title={metadata?.title || copy.discover.untitled}>
       {metadata?.image ? <img className="event-hero" src={metadata.image} alt="" /> : null}
-      <KycBadge required={event.requireKyc} level={kycLevel} signedIn={signedIn} />
-      {metadata && metadata.tags.length > 0 ? (
-        <ul className="tag-row">
-          {metadata.tags.map((tag) => (
-            <li key={tag}>{tag}</li>
-          ))}
-        </ul>
-      ) : null}
-      {metadata?.description ? <p>{metadata.description}</p> : null}
-
-      <p className="muted">
-        {timeHidden
-          ? `${formatEventDay(event.startsAt, locale)} · ${copy.discover.timeHidden}`
-          : formatEventDate(event.startsAt, locale)}
-        {metadata?.timeHidden && maySeePrivate ? (
-          <span className="badge">{copy.discover.privateOnly}</span>
+      <Card>
+        <KycBadge required={event.requireKyc} level={kycLevel} signedIn={signedIn} />
+        {metadata && metadata.tags.length > 0 ? (
+          <ul className="tag-row">
+            {metadata.tags.map((tag) => (
+              <li key={tag}>{tag}</li>
+            ))}
+          </ul>
         ) : null}
-      </p>
+        {metadata?.description ? <p>{metadata.description}</p> : null}
 
-      {venue !== '' ? (
-        <p>
-          <a href={`https://maps.google.com/?q=${encodeURIComponent(venue)}`}>
-            {venue} · {copy.discover.map}
-          </a>
-          {metadata?.venueHidden ? <span className="badge">{copy.discover.privateOnly}</span> : null}
-        </p>
-      ) : null}
-      {metadata?.venueHidden && venue === '' ? (
         <p className="muted">
-          {region === '' ? '' : `${region} · `}
-          {venueWaiting ? copy.discover.privateLoading : copy.discover.venueHidden}
+          {timeHidden
+            ? `${formatEventDay(event.startsAt, locale)} · ${copy.discover.timeHidden}`
+            : formatEventDate(event.startsAt, locale)}
+          {metadata?.timeHidden && maySeePrivate ? (
+            <span className="badge">{copy.discover.privateOnly}</span>
+          ) : null}
         </p>
-      ) : null}
 
-      <ul className="tier-list">
-        {tiers.map((tier) => {
-          const left = Number(tier.supply) - Number(tier.minted);
-          return (
-            <li key={tier.id}>
-              <span>{tier.name}</span>
-              <span className="muted">
-                {left > 0 ? fmt(copy.discover.remaining, { count: left }) : copy.discover.soldOut}
-              </span>
-            </li>
-          );
-        })}
-      </ul>
+        {venue !== '' ? (
+          <p>
+            <a href={`https://maps.google.com/?q=${encodeURIComponent(venue)}`}>
+              {venue} · {copy.discover.map}
+            </a>
+            {metadata?.venueHidden ? <span className="badge">{copy.discover.privateOnly}</span> : null}
+          </p>
+        ) : null}
+        {metadata?.venueHidden && venue === '' ? (
+          <p className="muted">
+            {region === '' ? '' : `${region} · `}
+            {venueWaiting ? copy.discover.privateLoading : copy.discover.venueHidden}
+          </p>
+        ) : null}
+      </Card>
+
+      {/* What is left, and at what price. Its own pane because it is the one part of this
+          screen that changes while somebody is looking at it. */}
+      <Card>
+        <ul className="tier-list">
+          {tiers.map((tier) => {
+            const left = Number(tier.supply) - Number(tier.minted);
+            return (
+              <li key={tier.id}>
+                <span>{tier.name}</span>
+                <span className="muted">
+                  {left > 0 ? fmt(copy.discover.remaining, { count: left }) : copy.discover.soldOut}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      </Card>
 
       {event.status === CANCELLED ? (
         <Alert tone="warn">{copy.discover.cancelled}</Alert>
       ) : (
         <Link to={`/claim/${event.id}`} className="btn btn--primary btn--link">
-          {copy.discover.getTicket}
+          {event.approvalRequired ? copy.discover.requestTicket : copy.discover.getTicket}
         </Link>
       )}
 

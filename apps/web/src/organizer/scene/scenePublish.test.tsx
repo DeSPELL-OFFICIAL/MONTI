@@ -12,7 +12,20 @@ const saveEventDraft = vi.fn(async (_id: string, _draft: EventDraft) => undefine
 const deleteEventDraft = vi.fn(async (id: string) => {
   store = store.filter((row) => row.id !== id);
 });
-vi.mock('../../shared/api/firestore', () => ({ listEventDrafts, saveEventDraft, deleteEventDraft }));
+const loadMyProfile = vi.fn(async () => ({ displayName: '김태완' }));
+vi.mock('../../shared/api/firestore', () => ({
+  listEventDrafts, saveEventDraft, deleteEventDraft, loadMyProfile,
+}));
+/** The indexer's answer about this person as an organiser, which the scene now reads too. */
+const orgRefetch = vi.fn(async () => [] as { orgId: string; canCreateEvent: boolean }[]);
+const orgsListed = vi.fn(() => [] as { orgId: string; canCreateEvent: boolean }[]);
+vi.mock('../useMyOrgs', () => ({
+  useMyOrgs: () => ({
+    orgs: orgsListed(), canCreateEvent: false, isLoading: false, isError: false,
+    error: null, refetch: orgRefetch,
+  }),
+}));
+
 
 interface PinCall {
   orgId: string;
@@ -69,7 +82,7 @@ vi.mock('../../shared/config', async (orig) => ({
 }));
 
 const { OpReverted } = await import('../../shared/chain/ops');
-const { TicketSettings } = await import('./TicketSettings');
+const { CreateEvent } = await import('./CreateEvent');
 const { emptyEventDraft, emptyEventDraftTier } = await import('../useEventDraft');
 const { organizerCopy } = await import('../copy');
 const copy = organizerCopy.ko.scene;
@@ -91,7 +104,7 @@ const READY: EventDraft = {
   ...emptyEventDraft,
   orgId: '9',
   title: '  재즈 나이트  ',
-  description: '한남동 라이브',
+  description: '한남동 재즈 라이브 공연',
   posterCid: 'bafkposter',
   category: 2,
   tags: [' #재즈 ', '라이브', '재즈'],
@@ -111,9 +124,9 @@ const READY: EventDraft = {
 function open(draft: EventDraft = READY, id = 'd-42'): void {
   store = [{ id, updatedAt: 1_000, data: draft }];
   render(
-    <MemoryRouter initialEntries={[`/org/new/${id}/tickets`]}>
+    <MemoryRouter initialEntries={[`/org/new/${id}`]}>
       <Routes>
-        <Route path="/org/new/:draftId/tickets" element={<TicketSettings />} />
+        <Route path="/org/new/:draftId" element={<CreateEvent />} />
         <Route path="*" element={<Probe />} />
       </Routes>
     </MemoryRouter>,
@@ -152,7 +165,7 @@ describe('the publish path', () => {
       orgId: '9',
       meta: {
         name: '재즈 나이트',
-        description: '한남동 라이브',
+        description: '한남동 재즈 라이브 공연',
         imageCid: 'bafkposter',
         category: 2,
         region: 'KR-11',
@@ -201,6 +214,30 @@ describe('the publish path', () => {
 
     // 5. the draft is gone — one that outlived its event is a second event waiting to happen.
     expect(deleteEventDraft).toHaveBeenCalledWith('d-42');
+  });
+
+  /**
+   * The end time is behind `더 설정하기` and most organisers never open it (plan section B-3),
+   * so the number that reaches `Ticket.EventMeta` is almost always the derived one. `EventMeta`
+   * is written once and `updateEventMeta` closes at publish: an `endsAt` of 0 here would be an
+   * event that ended in 1970, with sign-ups closed before they opened, and nothing could repair
+   * it. Every reader goes through `endsAtOf`, and this is the one that proves the chain does.
+   */
+  it('sends the derived end, and closes sign-ups on it, when nobody opened the fold', async () => {
+    open({ ...READY, endsAt: 0 });
+    await create();
+    await waitFor(() => expect(screen.getByText('landed:/org/new/done/12')).toBeInTheDocument());
+
+    const derived = BigInt(READY.startsAt + 7_200);
+    const meta = ticketOp.mock.calls[0]?.[0].args[0] as {
+      startsAt: bigint; endsAt: bigint; saleStart: bigint; saleEnd: bigint;
+    };
+    expect(meta.endsAt).toBe(derived);
+    // `Ticket.createEvent` only asks that `saleStart < saleEnd`; the derived end is what makes
+    // that true without a second date field ever being shown.
+    expect(meta.saleEnd).toBe(derived);
+    expect(meta.saleStart).toBeLessThan(meta.saleEnd);
+    expect(meta.startsAt).toBeLessThan(meta.endsAt);
   });
 
   it('keeps a hidden venue out of the pin and puts it behind the callable instead', async () => {

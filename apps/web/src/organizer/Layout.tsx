@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
-import { Link, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Alert, Button, Fab, Field, Screen, Spinner } from '../shared/ui';
+import { Link, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Alert, Button, Card, Fab, Field, Screen, Spinner } from '../shared/ui';
 import { fmt, useLocale } from '../shared/i18n';
 import { formatEventDate } from '../attendee/discover/useEvents';
 import { useOrganizerCopy, type OrganizerCopy } from './copy';
@@ -11,9 +11,9 @@ import { Team } from './Team';
 import { Gates } from './gates/Gates';
 import { AcceptInvite } from './invites/Accept';
 import { CreateEvent } from './scene/CreateEvent';
-import { TicketSettings } from './scene/TicketSettings';
 import { Created } from './scene/Created';
 import { EditEvent } from './scene/EditEvent';
+import { Requests } from './requests/Requests';
 
 /** The indexer's own words for an event's state; anything else is shown exactly as it came. */
 function statusLabel(status: string, labels: OrganizerCopy['home']['status']): string {
@@ -58,8 +58,7 @@ function OrganizerHome() {
         <Link to="/">{copy.home.backToDiscover}</Link>
       </p>
 
-      <section>
-        <h2>{copy.home.orgs}</h2>
+      <Card title={copy.home.orgs}>
         {orgsLoading ? <Spinner /> : null}
 
         {pending ? (
@@ -102,10 +101,9 @@ function OrganizerHome() {
             {!selected.canCreateEvent ? <Alert tone="warn">{copy.home.noPermission}</Alert> : null}
           </>
         ) : null}
-      </section>
+      </Card>
 
-      <section>
-        <h2>{copy.home.events}</h2>
+      <Card title={copy.home.events}>
         {eventsLoading ? <Spinner /> : null}
 
         {eventsError ? (
@@ -130,10 +128,10 @@ function OrganizerHome() {
             </li>
           ))}
         </ul>
-      </section>
+      </Card>
 
       {/* Folded, not deleted: the indexer being down is exactly when this is needed. */}
-      <details>
+      <details className="more">
         <summary>{copy.home.manual}</summary>
         <Field label={copy.home.eventId}>
           <input value={eventId} inputMode="numeric" onChange={(event) => setEventId(event.target.value)} />
@@ -159,6 +157,12 @@ function OrganizerHome() {
   );
 }
 
+/** Where `/org/new/:draftId/tickets` goes now that the kinds are a section of the scene. */
+function TicketsMoved() {
+  const { draftId = '' } = useParams();
+  return <Navigate to={`/org/new/${draftId}`} replace />;
+}
+
 /** `Team` takes its organisation from the path so a link can carry it; typed in otherwise. */
 function TeamRoute() {
   const { orgId } = useParams();
@@ -172,19 +176,24 @@ export function OrganizerRoutes() {
       {/* Where `주최사 만들기` lands — the organiser home's empty state, the explore FAB
           and the profile section all point here (`useOrganizerEntry`). */}
       <Route path="become" element={<Become />} />
-      {/* The creation scene. `/org/new` starts one (or carries on with the newest draft) and
-          `/org/new/<draftId>` opens a named one — which is what SCENE 2's back link uses. */}
+      {/* The creation scene — the event and its tickets in one scroll. `/org/new` starts one
+          (or carries on with the newest draft) and `/org/new/<draftId>` opens a named one. */}
       <Route path="new" element={<CreateEvent />} />
       {/* Where `행사 만들기` lands. Static beats dynamic in the router's ranking, so this is
           not read as a draft id. */}
       <Route path="new/done/:eventId" element={<Created />} />
       <Route path="new/:draftId" element={<CreateEvent />} />
-      <Route path="new/:draftId/tickets" element={<TicketSettings />} />
+      {/* The ticket screen the scene absorbed (plan section B-1). Addresses to it are already
+          out there — an organiser's own back button, a draft resumed from another tab — and
+          they land where those tickets are now: in the scene itself. */}
+      <Route path="new/:draftId/tickets" element={<TicketsMoved />} />
       <Route path="events/:eventId" element={<Dashboard />} />
       {/* Reopens the same scene on an event that already exists, by writing a draft from it
           and handing over. Only ever offered while the event is a Draft (T-EV-W12). */}
       <Route path="events/:eventId/edit" element={<EditEvent />} />
       <Route path="events/:eventId/gates" element={<Gates />} />
+      {/* 신청 관리 — approve or reject the requests waiting on an approvalRequired event. */}
+      <Route path="events/:eventId/requests" element={<Requests />} />
       <Route path="team" element={<Team />} />
       <Route path="team/:orgId" element={<TeamRoute />} />
       {/* Exactly where `createInvite`'s link points (functions/src/functions/invites.ts). */}

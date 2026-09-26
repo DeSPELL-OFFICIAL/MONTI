@@ -37,9 +37,10 @@ vi.mock('./firebase', () => ({
 }));
 
 const {
-  deleteEventDraft, listEventDrafts, loadChatMembers, loadChatRoom, saveEventDraft,
+  deleteEventDraft, listEventDrafts, loadChatMembers, loadChatRoom, loadEventArt, saveEventDraft,
   saveUserProfile, savePushToken, sendChatMessage, watchChatMessages, watchChatRoom,
 } = await import('./firestore');
+const { TICKET_ART_PRESETS } = await import('../../organizer/scene/draftRules');
 
 /** A Firestore document snapshot, as thin as the helpers actually touch it. */
 function docOf(id: string, data: Record<string, unknown>): { id: string; data: () => unknown } {
@@ -167,6 +168,38 @@ describe('loadChatMembers', () => {
   });
 });
 
+describe('loadEventArt', () => {
+  /**
+   * The read side's own copy of the preset alphabet. It is the fourth place the twelve letters
+   * are written down — after the union `TicketArtPreset`, the scene's `TICKET_ART_PRESETS` and
+   * `saveEventArt`'s argument — and it is the one that fails **silently**: a letter this
+   * validator has never heard of is folded back to `'a'`, so an organiser who picked the
+   * twelfth drawing would see the first one on every ticket and nothing anywhere would say so.
+   */
+  it('reads every letter the scene can store back as itself', async () => {
+    getDoc.mockResolvedValue({
+      data: () => ({ tiers: TICKET_ART_PRESETS.map((design) => ({ design })) }),
+    });
+    expect(await loadEventArt('12')).toEqual(TICKET_ART_PRESETS.map((preset) => ({ preset })));
+  });
+
+  /** A hand edit, or a document an older build wrote, costs its ticket a drawing — not a render. */
+  it('folds a letter nothing draws, and a name, back to the first drawing', async () => {
+    getDoc.mockResolvedValue({ data: () => ({ tiers: [{ design: 'm' }, { design: 'aurora' }, {}] }) });
+    expect(await loadEventArt('12')).toEqual([{ preset: 'a' }, { preset: 'a' }, { preset: 'a' }]);
+  });
+
+  /** An uploaded picture is the more deliberate of the two acts, so it wins over a letter. */
+  it('lets an uploaded picture win, and calls a missing document an empty list', async () => {
+    getDoc.mockResolvedValue({ data: () => ({ tiers: [{ design: 'c', imageCid: 'bafkart' }] }) });
+    expect(await loadEventArt('12')).toEqual([{ imageCid: 'bafkart' }]);
+
+    // Most events have never been through `saveEventArt`; that is not a refusal.
+    getDoc.mockResolvedValue({ data: () => undefined });
+    expect(await loadEventArt('12')).toEqual([]);
+  });
+});
+
 describe('profile and push token writes', () => {
   it('merges the profile patch into the signed-in user document', async () => {
     await saveUserProfile({ nickname: 'moomi', locale: 'ko' });
@@ -194,8 +227,8 @@ describe('event drafts', () => {
     orgId: '9', title: '재즈 나이트', description: '', posterCid: 'bafk1',
     category: 0, tags: ['재즈'], regionCode: 'KR-11', venue: '한남동', venueHidden: true,
     startsAt: 0, endsAt: 0, timeHidden: false,
-    transferable: true, transferCutoffHours: 2, requireKyc: false,
-    tiers: [], submittedOpHash: '', createdEventId: '', editingEventId: '',
+    transferable: true, transferCutoffHours: 2, requireKyc: false, approvalRequired: false,
+    tiers: [], submittedOpHash: '', createdEventId: '', editingEventId: '', orgPendingName: '',
   };
 
   it('lists this account own drafts newest first', async () => {

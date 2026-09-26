@@ -4,6 +4,7 @@ import { StrictMode } from 'react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { encodeErrorResult } from 'viem';
 import { clearSession, setSession } from '../../shared/session';
 
 // The op layer is mocked, but its real OpReverted class is kept: the screen tells a revert from
@@ -31,12 +32,14 @@ const RESUME = '/claim/5?intent=claim&tier=0';
 const ownedTickets: { rows: Array<Record<string, unknown>> } = { rows: [] };
 const tiers: { rows: Array<Record<string, unknown>> } = { rows: [TIER] };
 const event: { row: Record<string, unknown> } = { row: EVENT };
+const requests: { rows: Array<Record<string, unknown>> } = { rows: [] };
 async function answerIndexer(query: string) {
   if (query.includes('OwnedTickets')) return { Ticket: ownedTickets.rows, Offer: [] };
   // The 내 티켓 documents select tiers too, so an answer without the key is one no indexer
   // would ever give — and the ticket list reads it as an empty answer, not as a missing one.
   if (query.includes('TicketContext')) return { CheckIn: [], Event: [], Tier: [], Ticket: [] };
   if (query.includes('EventStates')) return { Event: [], Tier: [] };
+  if (query.includes('MyRequests')) return { ClaimRequest: requests.rows };
   return { Event: [event.row], Tier: tiers.rows };
 }
 const gql = vi.fn(answerIndexer);
@@ -48,6 +51,7 @@ vi.mock('../me/useKycLevel', () => ({
 
 const { Claim } = await import('./Claim');
 const { OpReverted } = await import('../../shared/chain/ops');
+const { ticketAbi } = await import('../../shared/chain/abis');
 
 /** `setSearchParams` navigates for real under MemoryRouter, so the address is read back here. */
 function Address() {
@@ -76,6 +80,7 @@ beforeEach(() => {
   ownedTickets.rows = [];
   tiers.rows = [TIER];
   event.row = EVENT;
+  requests.rows = [];
   navigate.mockReset();
   gql.mockImplementation(answerIndexer);
   ticketOp.mockReset();
@@ -315,6 +320,75 @@ describe('Claim · resuming after the identity check', () => {
     renderClaim(RESUME);
     expect(await screen.findByText('취소된 행사예요.')).toBeInTheDocument();
     await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(ticketOp).not.toHaveBeenCalled();
+  });
+});
+
+describe('Claim · approval mode', () => {
+  const ME = `0x${'cd'.repeat(20)}` as `0x${string}`;
+  const REQUEST = {
+    id: '5-3', eventId: '5', requestId: '3', requester: ME.toLowerCase(),
+    tier: 0, status: 'Pending', tokenId: null, requestedAt: '1', decidedAt: null, txHash: '0x1',
+  };
+
+  beforeEach(() => {
+    // useMyRequest asks the indexer for the signed-in address; approval mode is the event's flag.
+    setSession({ status: 'signedIn', account: ME });
+    event.row = { ...EVENT, requireKyc: false, approvalRequired: true };
+  });
+
+  it('asks with requestClaim instead of claiming, and stays to show the request', async () => {
+    renderClaim();
+    await userEvent.click(await screen.findByRole('button', { name: '신청하기' }));
+    await waitFor(() => expect(ticketOp).toHaveBeenCalled());
+    expect(ticketOp).toHaveBeenCalledWith(
+      expect.objectContaining({ orgId: 9n, functionName: 'requestClaim', args: [5n, 0] }),
+    );
+    // A request is not a claim: approval decides the ticket later, so it never leaves for /tickets.
+    expect(navigate).not.toHaveBeenCalledWith('/tickets');
+  });
+
+  it('shows the pending state and takes it back with the request id', async () => {
+    requests.rows = [REQUEST];
+    renderClaim();
+    expect(await screen.findByText('신청 완료 · 승인을 기다리고 있어요')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: '신청 취소' }));
+    await waitFor(() => expect(ticketOp).toHaveBeenCalled());
+    expect(ticketOp).toHaveBeenCalledWith(
+      expect.objectContaining({ functionName: 'cancelRequest', args: [5n, 3n] }),
+    );
+  });
+
+  it('sends the approved attendee to their issued ticket', async () => {
+    requests.rows = [{ ...REQUEST, status: 'Approved', tokenId: '77' }];
+    renderClaim();
+    expect(await screen.findByText('승인됐어요. 티켓이 발급됐어요')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '내 티켓 보기' })).toHaveAttribute('href', '/tickets');
+    expect(screen.queryByRole('button', { name: '신청하기' })).not.toBeInTheDocument();
+  });
+
+  it('lets a rejected or self-cancelled attendee ask again', async () => {
+    requests.rows = [{ ...REQUEST, status: 'Rejected' }];
+    renderClaim();
+    expect(await screen.findByText('이번엔 승인되지 않았어요')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '신청하기' })).toBeInTheDocument();
+  });
+
+  it('names the approval-only revert rather than the generic sentence', async () => {
+    ticketOp.mockRejectedValueOnce(
+      new OpReverted('requestClaim', encodeErrorResult({ abi: ticketAbi, errorName: 'ApprovalRequired' })),
+    );
+    renderClaim();
+    await userEvent.click(await screen.findByRole('button', { name: '신청하기' }));
+    expect(await screen.findByText('이 행사는 주최자 승인 후 발급돼요.')).toBeInTheDocument();
+  });
+
+  it('opens the verification sheet before requesting when the event needs kyc', async () => {
+    event.row = { ...EVENT, requireKyc: true, approvalRequired: true };
+    kycLevel.value = 0;
+    renderClaim();
+    await userEvent.click(await screen.findByRole('button', { name: '신청하기' }));
+    expect(await screen.findByText('이 행사는 본인인증이 필요해요')).toBeInTheDocument();
     expect(ticketOp).not.toHaveBeenCalled();
   });
 });

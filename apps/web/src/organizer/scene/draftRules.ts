@@ -18,24 +18,22 @@ import { REGION_CODES } from './regions';
  */
 export const MIN_TITLE_CHARS = 2;
 export const MAX_TITLE_CHARS = 60;
+export const MIN_BODY_CHARS = 10;
 export const MAX_BODY_CHARS = 2_000;
 export const MAX_VENUE_CHARS = 200;
 export const MAX_TAGS = 5;
 export const MAX_TAG_CHARS = 12;
 
-/** The four themes the discover filter offers (`attendee/discover/useEvents.ts`). */
-export const THEME_CODES = [0, 1, 2, 3] as const;
-
 /** One named rule; `organizer/copy.ts` owns a sentence for each, and each names a section. */
 export type EventProblem =
-  | 'poster' | 'title' | 'tags' | 'body' | 'region' | 'venue' | 'venueTooLong'
-  | 'startsAt' | 'endsAt' | 'schedule';
+  | 'poster' | 'title' | 'tags' | 'bodyTooShort' | 'body' | 'region' | 'venue' | 'venueTooLong'
+  | 'startsAt' | 'endsAt' | 'schedule' | 'eventPast';
 
 /** Which section of SCENE 1 a problem belongs to, so `다음` can scroll to the first one. */
 export const PROBLEM_SECTION: Readonly<Record<EventProblem, string>> = {
-  poster: 'poster', title: 'title', tags: 'tags', body: 'body',
+  poster: 'poster', title: 'title', tags: 'tags', bodyTooShort: 'body', body: 'body',
   region: 'venue', venue: 'venue', venueTooLong: 'venue',
-  startsAt: 'time', endsAt: 'time', schedule: 'time',
+  startsAt: 'time', endsAt: 'time', schedule: 'time', eventPast: 'time',
 };
 
 /**
@@ -71,10 +69,31 @@ function isTimestamp(value: number): boolean {
 }
 
 /**
+ * How long an event runs when nobody says otherwise. The end time is one of the three fields
+ * the founder's phone test put behind `더 설정하기` (plan section B-3): most events last an
+ * evening, and asking for a second `datetime-local` before anybody has typed a title is how a
+ * creation screen loses the person filling it in.
+ */
+export const DEFAULT_EVENT_SECONDS = 2 * 60 * 60;
+
+/**
+ * The end of the event — the one the organiser set, or two hours after it starts. Every reader
+ * goes through here (the rules, the sign-up window, the scene's own field and the chain draft)
+ * so a derived end can never disagree with the one being checked.
+ */
+export function endsAtOf(draft: EventDraft): number {
+  if (isTimestamp(draft.endsAt)) return draft.endsAt;
+  return isTimestamp(draft.startsAt) ? draft.startsAt + DEFAULT_EVENT_SECONDS : 0;
+}
+
+/**
  * Everything SCENE 1 refuses, in the order the sections ask for it — so the first entry is
  * both the sentence to show and the section to scroll to.
  */
-export function eventProblems(draft: EventDraft): EventProblem[] {
+export function eventProblems(
+  draft: EventDraft,
+  now: number = Math.floor(Date.now() / 1_000),
+): EventProblem[] {
   const problems: EventProblem[] = [];
 
   if (draft.posterCid.trim() === '') problems.push('poster');
@@ -88,8 +107,13 @@ export function eventProblems(draft: EventDraft): EventProblem[] {
     problems.push('tags');
   }
 
-  const body = draft.description.trim();
-  if (body === '' || charCount(body) > MAX_BODY_CHARS) problems.push('body');
+  // Required, at least ten code points. The server still allows an empty description
+  // (`functions/src/functions/organizer.ts:206-212`), but the founder's phone test asked for a
+  // 소개 that says something (plan section A-4), so the scene is the stricter of the two — and
+  // `pinEventMetadata` refuses one over 2,000 with `BAD_META` at publish.
+  const body = charCount(draft.description.trim());
+  if (body < MIN_BODY_CHARS) problems.push('bodyTooShort');
+  else if (body > MAX_BODY_CHARS) problems.push('body');
 
   if (!REGION_CODES.has(draft.regionCode)) problems.push('region');
   const venue = draft.venue.trim();
@@ -97,8 +121,16 @@ export function eventProblems(draft: EventDraft): EventProblem[] {
   else if (charCount(venue) > MAX_VENUE_CHARS) problems.push('venueTooLong');
 
   if (!isTimestamp(draft.startsAt)) problems.push('startsAt');
-  if (!isTimestamp(draft.endsAt)) problems.push('endsAt');
-  else if (isTimestamp(draft.startsAt) && draft.startsAt >= draft.endsAt) problems.push('schedule');
+  const endsAt = endsAtOf(draft);
+  if (!isTimestamp(endsAt)) problems.push('endsAt');
+  else if (isTimestamp(draft.startsAt) && draft.startsAt >= endsAt) problems.push('schedule');
+  // A draft written days ago and published today. Nothing on the screen is wrong and nothing
+  // the organiser typed has changed, but `saleWindow` derives 지금 -> `endsAt`, so the window
+  // runs backwards and `Ticket.createEvent` reverts `InvalidSchedule()` — during the *estimate*,
+  // where there is no receipt and no `OpReverted` to name it. That is exactly the failure the
+  // founder hit (task-create-failure-2 report §0): a correct-looking screen and the most
+  // generic sentence the app has. It is a rule now, said before anything is sent.
+  else if (endsAt <= now) problems.push('eventPast');
 
   return problems;
 }
@@ -111,7 +143,7 @@ export function eventProblems(draft: EventDraft): EventProblem[] {
  * deleted wizard asked for are gone.
  */
 export function saleWindow(draft: EventDraft, now: number): { saleStart: number; saleEnd: number } {
-  return { saleStart: now, saleEnd: draft.endsAt };
+  return { saleStart: now, saleEnd: endsAtOf(draft) };
 }
 
 /** `Ticket.createEvent` refuses more than eight kinds with `InvalidTiers` (`Ticket.sol:193`). */
@@ -182,5 +214,11 @@ export function tierArt(tier: EventDraftTier): TicketArtSource {
   return { preset: preset ?? 'a' };
 }
 
-/** The alphabet, in the order the picker offers it. */
-export const TICKET_ART_PRESETS: readonly TicketArtPreset[] = ['a', 'b', 'c', 'd'];
+/**
+ * The alphabet, in the order the picker offers it. Twelve letters, matching the server's
+ * `ART_PRESETS` and the draft rule's `^[a-l]$`: a letter this list has and the rule does not
+ * would fail autosave for the whole document the moment somebody picked it.
+ */
+export const TICKET_ART_PRESETS: readonly TicketArtPreset[] = [
+  'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l',
+];

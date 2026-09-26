@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+import type { Hex } from 'viem';
 import { Alert, Button, Field, KycBadge, Screen, Spinner } from '../../shared/ui';
 import { useCopy } from '../../shared/i18n';
 import { gql } from '../../shared/envio/client';
 import { describeFailure } from '../../shared/errors';
 import { EVENT_QUERY, type EnvioEvent, type EnvioTier } from '../../shared/envio/queries';
+import { useMyRequest } from '../../shared/envio/claimRequests';
 import { ticketOp, OpReverted } from '../../shared/chain/ops';
+import { ticketAbi } from '../../shared/chain/abis';
+import { revertMatch } from '../../shared/chain/revert';
 import { getAttendeeAccount } from '../../shared/chain/accounts';
 import { useKycLevel } from '../me/useKycLevel';
 import { useMyTickets } from '../tickets/useTickets';
@@ -84,6 +88,9 @@ export function Claim() {
     queryFn: () => gql<{ Event: EnvioEvent[]; Tier: EnvioTier[] }>(EVENT_QUERY, { id: eventId, eventId }),
   });
   const { data: myTickets } = useMyTickets();
+  // The attendee's own request, for an event that takes requests. Refetched after a request or a
+  // cancel lands, since the indexer needs a moment to catch up to the transaction.
+  const { request: myRequest, refetch: refetchRequest } = useMyRequest(eventId);
 
   const event = data?.Event[0];
   const tiers = data?.Tier ?? [];
@@ -99,6 +106,34 @@ export function Claim() {
   const cancelled = event?.status === CANCELLED;
   const blocked = limitReached || soldOut || cancelled;
 
+  // Approval mode: the event takes requests rather than direct claims, so this screen mirrors the
+  // request's state from the indexer. A self-cancel and an organiser's rejection both land on
+  // `Rejected` — the contract emits one event for both — so `Rejected` reads "not this time" and
+  // still lets the person ask again.
+  const approval = event?.approvalRequired === true;
+  const status = approval ? myRequest?.status : undefined;
+  const pending = status === 'Pending';
+  const approved = status === 'Approved';
+  // A request already waiting or already granted: nothing new is sent from here, and no auto-resume.
+  const hasLiveRequest = pending || approved;
+
+  // The ApprovalRequired revert is the one an attendee can hit from either call — `claim` on an
+  // event that turned on approval after the page loaded — so it is named first, off the Ticket ABI.
+  // Everything else goes through describeFailure (offline, indexer, generic); a plain claim keeps
+  // its own short sentence, which its tests pin.
+  const opFailure = useCallback(
+    (cause: unknown): string => {
+      if (cause instanceof OpReverted && cause.revertReason && cause.revertReason !== STILL_CONFIRMING) {
+        const named = revertMatch(ticketAbi, cause.revertReason as Hex, [
+          ['ApprovalRequired', copy.claim.approvalOnly],
+        ]);
+        if (named !== undefined) return named;
+      }
+      return approval ? describeFailure(cause, copy) : copy.claim.failed;
+    },
+    [approval, copy],
+  );
+
   const run = useCallback(async () => {
     if (!event) return;
     // The contract checks this again, so the sheet is here to save a doomed signature, not to secure.
@@ -109,22 +144,60 @@ export function Claim() {
     setPhase('working');
     setError('');
     try {
-      await ticketOp({
-        account: await getAttendeeAccount(),
-        orgId: BigInt(event.orgId),
-        functionName: 'claim',
-        args: [BigInt(eventId), tier, NO_VOUCHER],
-      });
-      navigate('/tickets');
+      if (event.approvalRequired === true) {
+        // No mint here — the request reserves supply and waits for the organiser. The screen stays
+        // put and refetches, so the button becomes the pending state rather than jumping away.
+        await ticketOp({
+          account: await getAttendeeAccount(),
+          orgId: BigInt(event.orgId),
+          functionName: 'requestClaim',
+          args: [BigInt(eventId), tier],
+        });
+        await refetchRequest();
+        setPhase('idle');
+      } else {
+        await ticketOp({
+          account: await getAttendeeAccount(),
+          orgId: BigInt(event.orgId),
+          functionName: 'claim',
+          args: [BigInt(eventId), tier, NO_VOUCHER],
+        });
+        navigate('/tickets');
+      }
     } catch (cause) {
       if (cause instanceof OpReverted && cause.revertReason === STILL_CONFIRMING) {
         setPhase('confirming');
         return;
       }
-      setError(copy.claim.failed);
+      setError(opFailure(cause));
       setPhase('idle');
     }
-  }, [event, kycLevel, eventId, tier, navigate, copy.claim.failed]);
+  }, [event, kycLevel, eventId, tier, navigate, refetchRequest, opFailure]);
+
+  // Takes back a pending request. `cancelRequest` emits the same `ClaimRejected` an organiser's
+  // reject does, so after it lands the row reads `Rejected` and the screen offers 신청하기 again.
+  const cancel = useCallback(async () => {
+    if (!event || myRequest === null) return;
+    setPhase('working');
+    setError('');
+    try {
+      await ticketOp({
+        account: await getAttendeeAccount(),
+        orgId: BigInt(event.orgId),
+        functionName: 'cancelRequest',
+        args: [BigInt(eventId), BigInt(myRequest.requestId)],
+      });
+      await refetchRequest();
+      setPhase('idle');
+    } catch (cause) {
+      if (cause instanceof OpReverted && cause.revertReason === STILL_CONFIRMING) {
+        setPhase('confirming');
+        return;
+      }
+      setError(opFailure(cause));
+      setPhase('idle');
+    }
+  }, [event, myRequest, eventId, refetchRequest, opFailure]);
 
   /**
    * Coming back from the identity check with `intent=claim` finishes the claim the sheet
@@ -143,14 +216,15 @@ export function Claim() {
     if (resumed.current) return;
     if (params.get('intent') !== CLAIM_INTENT) return;
     if (!event || selected === undefined || kycLoading || kycLevel < VERIFIED_LEVEL) return;
-    if (phase !== 'idle' || blocked) return;
+    // A live request already covers an approval event, so a resume there would only revert.
+    if (phase !== 'idle' || blocked || hasLiveRequest) return;
     resumed.current = true;
     const next = new URLSearchParams(params);
     next.delete('intent');
     next.delete('tier');
     setSearchParams(next, { replace: true });
     void run();
-  }, [params, setSearchParams, event, selected, kycLoading, kycLevel, phase, blocked, run]);
+  }, [params, setSearchParams, event, selected, kycLoading, kycLevel, phase, blocked, hasLiveRequest, run]);
 
   if (isLoading) {
     return (
@@ -169,32 +243,58 @@ export function Claim() {
   }
 
   return (
-    <Screen title={copy.claim.cta}>
-      <Field label={copy.claim.tierLabel}>
-        <select value={tier} onChange={(changed) => setTier(Number(changed.target.value))}>
-          {tiers.map((entry, index) => (
-            <option key={entry.id} value={index}>{entry.name}</option>
-          ))}
-        </select>
-      </Field>
-      {limitReached ? <Alert tone="warn">{copy.claim.limitReached}</Alert> : null}
-      {soldOut ? <Alert tone="warn">{copy.claim.soldOut}</Alert> : null}
-      {cancelled ? <Alert tone="warn">{copy.discover.cancelled}</Alert> : null}
-      {phase === 'confirming' ? (
+    <Screen title={approval ? copy.claim.requestCta : copy.claim.cta}>
+      {approved ? (
         <>
-          <Alert tone="info">{copy.claim.confirming}</Alert>
-          <Button variant="ghost" onClick={() => navigate('/tickets')}>{copy.tabs.tickets}</Button>
+          <Alert tone="info">{copy.claim.approved}</Alert>
+          <Link to="/tickets" className="btn btn--primary btn--link">{copy.claim.approvedCta}</Link>
         </>
-      ) : null}
-      {error ? <Alert tone="error">{error}</Alert> : null}
-      {needsKyc ? (
-        <KycRequiredSheet eventId={eventId} tier={tier} level={kycLevel} onClose={() => setNeedsKyc(false)} />
-      ) : null}
-      {/* Still confirming counts as busy: the op is already on its way and a second tap would
-          claim twice — `held` cannot have caught up yet to stop it. */}
-      <Button onClick={() => void run()} disabled={phase !== 'idle' || blocked}>
-        {phase === 'working' ? copy.claim.working : copy.claim.cta}
-      </Button>
+      ) : pending ? (
+        <>
+          <Alert tone="info">{copy.claim.pending}</Alert>
+          {phase === 'confirming' ? <Alert tone="info">{copy.claim.confirming}</Alert> : null}
+          {error ? <Alert tone="error">{error}</Alert> : null}
+          {/* A cancel is the only op here, so busy is enough to keep a second tap from firing it. */}
+          <Button variant="ghost" onClick={() => void cancel()} disabled={phase !== 'idle'}>
+            {phase === 'working' ? copy.claim.cancelling : copy.claim.cancel}
+          </Button>
+        </>
+      ) : (
+        <>
+          <Field label={copy.claim.tierLabel}>
+            <select value={tier} onChange={(changed) => setTier(Number(changed.target.value))}>
+              {tiers.map((entry, index) => (
+                <option key={entry.id} value={index}>{entry.name}</option>
+              ))}
+            </select>
+          </Field>
+          {status === 'Rejected' ? <Alert tone="warn">{copy.claim.rejected}</Alert> : null}
+          {limitReached ? <Alert tone="warn">{copy.claim.limitReached}</Alert> : null}
+          {soldOut ? <Alert tone="warn">{copy.claim.soldOut}</Alert> : null}
+          {cancelled ? <Alert tone="warn">{copy.discover.cancelled}</Alert> : null}
+          {phase === 'confirming' ? (
+            <>
+              <Alert tone="info">{copy.claim.confirming}</Alert>
+              <Button variant="ghost" onClick={() => navigate('/tickets')}>{copy.tabs.tickets}</Button>
+            </>
+          ) : null}
+          {error ? <Alert tone="error">{error}</Alert> : null}
+          {needsKyc ? (
+            <KycRequiredSheet eventId={eventId} tier={tier} level={kycLevel} onClose={() => setNeedsKyc(false)} />
+          ) : null}
+          {/* Still confirming counts as busy: the op is already on its way and a second tap would
+              claim twice — `held` cannot have caught up yet to stop it. */}
+          <Button onClick={() => void run()} disabled={phase !== 'idle' || blocked}>
+            {approval
+              ? phase === 'working'
+                ? copy.claim.requesting
+                : copy.claim.requestCta
+              : phase === 'working'
+                ? copy.claim.working
+                : copy.claim.cta}
+          </Button>
+        </>
+      )}
     </Screen>
   );
 }

@@ -1,12 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
-import { Alert, Button, ContactLink, Field, Screen, Spinner } from '../../shared/ui';
+import { Alert, Button, Card, ContactLink, Field, Screen, Spinner } from '../../shared/ui';
 import { fmt, setLocale, useCopy, useLocale } from '../../shared/i18n';
 import type { Locale } from '../../shared/copy/index';
 import { api } from '../../shared/api/functions';
 import { getFirebaseAuth } from '../../shared/api/firebase';
-import { saveUserProfile } from '../../shared/api/firestore';
+import { MAX_DISPLAY_NAME_CHARS, saveUserProfile } from '../../shared/api/firestore';
+import { useDisplayName } from '../../shared/displayName';
 import { getConfig } from '../../shared/config';
 import { useSession } from '../../shared/session';
 import { useOrganizerEntry } from '../../organizer/useOrganizerEntry';
@@ -24,13 +25,82 @@ export function KycStatus() {
   const { kycLevel } = useKycLevel();
   const verified = kycLevel >= VERIFIED_LEVEL;
   return (
-    <section>
-      <h2>{copy.kyc.status}</h2>
+    <Card title={copy.kyc.status}>
       <p>{verified ? copy.kyc.mineVerified : copy.kyc.mineUnverified}</p>
       {verified ? null : (
         <Button onClick={() => navigate('/me/verify?returnTo=/me')}>{copy.kyc.cta}</Button>
       )}
-    </section>
+    </Card>
+  );
+}
+
+/**
+ * The name printed on a ticket — `users/{uid}.displayName`. It is asked for once, on the last
+ * screen of signing up, and never asked for again (T-UX2-4); what was missing until now was any
+ * way to change it afterwards, which is the whole of this part.
+ *
+ * It sits directly above the chain nickname on purpose, with one line telling them apart. They
+ * look like the same question and are not: 표시 이름 is a Firestore field, holds 김태완, and is
+ * free to change, while 별명 is `^[a-z0-9_]{3,20}$`, is unique across everybody, and costs a
+ * sponsored write to set (plan decision 6). Nothing here touches the nickname.
+ *
+ * The patch carries `displayName` and nothing else, deliberately: the security rule admits a
+ * write to this document only when the keys that changed are within the list it names, so a
+ * patch that swept anything else along would come back as a permission error rather than as a
+ * message anybody could act on.
+ *
+ * A refusal leaves the box exactly as it was typed. Emptying it would throw away the only copy
+ * of what somebody just wrote in order to tell them something the sentence beneath already says.
+ */
+function DisplayName() {
+  const copy = useCopy();
+  const stored = useDisplayName();
+  const [value, setValue] = useState('');
+  const [message, setMessage] = useState('');
+  const [tone, setTone] = useState<'info' | 'error'>('info');
+  const [busy, setBusy] = useState(false);
+  /** Typing outranks the stored name: a read that answered late must not overwrite it. */
+  const typed = useRef(false);
+
+  useEffect(() => {
+    if (typed.current || stored === '') return;
+    setValue(stored);
+  }, [stored]);
+
+  async function save(): Promise<void> {
+    setBusy(true);
+    setMessage('');
+    try {
+      // Trimmed, because a name that is one space is a ticket with a gap drawn on it.
+      await saveUserProfile({ displayName: value.trim() });
+      setTone('info');
+      setMessage(copy.me.displayNameSaved);
+    } catch {
+      setTone('error');
+      setMessage(copy.me.displayNameFailed);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card>
+      <Field label={copy.me.displayName}>
+        <input
+          value={value}
+          maxLength={MAX_DISPLAY_NAME_CHARS}
+          placeholder={copy.me.displayNamePlaceholder}
+          onChange={(event) => {
+            typed.current = true;
+            setValue(event.target.value);
+          }}
+        />
+      </Field>
+      <p className="muted">{copy.me.displayNameHelp}</p>
+      <p className="muted">{copy.me.displayNameVsNickname}</p>
+      {message ? <Alert tone={tone}>{message}</Alert> : null}
+      <Button onClick={() => void save()} disabled={busy}>{copy.common.save}</Button>
+    </Card>
   );
 }
 
@@ -51,8 +121,7 @@ function OrganizerSection() {
   const { profileTo, hasOrg, isLoading } = useOrganizerEntry();
 
   return (
-    <section>
-      <h2>{copy.me.organizer}</h2>
+    <Card title={copy.me.organizer}>
       {isLoading ? <Spinner /> : null}
       {isLoading ? null : (
         <>
@@ -62,7 +131,7 @@ function OrganizerSection() {
           </Button>
         </>
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -111,8 +180,7 @@ function DeleteAccount() {
   }
 
   return (
-    <section>
-      <h2>{copy.me.deleteAccount}</h2>
+    <Card title={copy.me.deleteAccount}>
       {scheduled ? <Alert tone="info">{scheduled}</Alert> : null}
       {error ? <Alert tone="error">{error}</Alert> : null}
       {asking ? (
@@ -134,7 +202,7 @@ function DeleteAccount() {
       {asking || scheduled ? null : (
         <Button variant="ghost" onClick={() => setAsking(true)}>{copy.me.deleteCta}</Button>
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -154,6 +222,7 @@ export function Profile() {
   return (
     <Screen title={copy.me.title}>
       <KycStatus />
+      <DisplayName />
       <Nickname />
       <Field label={copy.me.language}>
         <select value={locale} onChange={(event) => void chooseLocale(event.target.value as Locale)}>

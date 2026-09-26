@@ -36,7 +36,10 @@ vi.mock('../../shared/api/functions', async (orig) => ({
 const { setSession } = await import('../../shared/session');
 const { Discover } = await import('./Discover');
 const { EventDetail } = await import('./EventDetail');
-const { METADATA_CONCURRENCY, mapWithPool } = await import('./useEvents');
+const { DEFAULT_FILTERS, METADATA_CONCURRENCY, loadFilters, mapWithPool, saveFilters } =
+  await import('./useEvents');
+const { THEME_CODES, themeLabels } = await import('../../shared/eventThemes');
+const { ko } = await import('../../shared/copy/index');
 
 const NOW_SECONDS = Math.floor(Date.now() / 1000);
 const IN_TWO_DAYS = String(NOW_SECONDS + 2 * 86_400);
@@ -193,6 +196,39 @@ describe('Discover', () => {
     expect(screen.queryByText('개발자 모임')).toBeNull();
   });
 
+  /**
+   * The organiser's dropdown and this one read `shared/eventThemes.ts`. They held their own
+   * copies of `[0, 1, 2, 3]` until the list grew to twelve, and widening one alone would have
+   * hidden every 페스티벌 from the only screen that can find one (plan section A-4).
+   */
+  it('offers every theme an organiser can pick, plus 전체', async () => {
+    renderDiscover();
+    expect(await screen.findByText('재즈 나이트')).toBeInTheDocument();
+    const theme = screen.getByLabelText('테마') as HTMLSelectElement;
+    expect([...theme.options].map((option) => option.value))
+      .toEqual(['all', ...THEME_CODES.map(String)]);
+    expect([...theme.options].map((option) => option.textContent))
+      .toEqual(['전체', ...THEME_CODES.map((code) => themeLabels(ko)[code])]);
+  });
+
+  /**
+   * The stored filter is the one place a theme number arrives from outside the twelve: a
+   * device that kept a filter from a build with a different list, or a hand-edited
+   * `localStorage`. A number nothing matches would open 탐색 on an empty screen with a theme
+   * box showing nothing selected, and no way to tell that the filter — not the city — is why.
+   */
+  it('keeps a stored theme only while it is one of the twelve', () => {
+    for (const category of THEME_CODES) {
+      saveFilters({ ...DEFAULT_FILTERS, category });
+      expect(loadFilters().category, String(category)).toBe(category);
+    }
+    // 12 is the first number past the list, and a negative one is what a bad edit looks like.
+    for (const bad of [12, -1, 99]) {
+      saveFilters({ ...DEFAULT_FILTERS, category: bad });
+      expect(loadFilters().category, String(bad)).toBe('all');
+    }
+  });
+
   it('remembers the last filter across mounts', async () => {
     const first = renderDiscover();
     expect(await screen.findByText('재즈 나이트')).toBeInTheDocument();
@@ -264,12 +300,17 @@ describe('Discover · 만들기', () => {
     expect(seen.at(-1)).toBe('/org/new');
   });
 
-  it('offers 주최사 만들기 to somebody who belongs to no organisation', async () => {
+  /**
+   * The founder's second tap (plan section B-4). Somebody with no organisation is not sent to a
+   * screen about organisations first: `만들기` means "make an event", and the scene asks for the
+   * organiser name inline on the way.
+   */
+  it('goes straight to creating for somebody who belongs to no organisation', async () => {
     setSession({ status: 'signedIn', account: ME });
     myOrgs({ orgs: [], canCreateEvent: false });
     const seen = renderDiscoverTracked();
     await tapCreate();
-    expect(seen.at(-1)).toBe('/org/become');
+    expect(seen.at(-1)).toBe('/org/new');
   });
 
   it('hands somebody who belongs but may not create to the screen that explains why', async () => {

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { RouterProvider, createMemoryRouter } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { describe, expect, it, vi } from 'vitest';
@@ -10,9 +10,23 @@ vi.mock('./organizer/useMyOrgs', () => ({
   useOrgEvents: () => ({ events: [], isLoading: false, isError: false, error: null, refetch: () => undefined }),
 }));
 
-import { routes } from './router';
-import { queryClient } from './shared/query';
-import { bootSession, getSession, registerSessionHydrator, setSession } from './shared/session';
+/**
+ * The register screen mints its passkey challenge the moment it is drawn, so the two redirect
+ * tests below would otherwise open a real callable. Nothing here asserts on it — what is under
+ * test is the address, not the ceremony.
+ */
+const loginChallenge = vi.fn(async () => ({ challenge: 'c'.repeat(43), expiresAt: 0 }));
+const getSignupStatus = vi.fn(async () => ({ status: 'active', kycLevel: 0 }));
+vi.mock('./shared/api/functions', async (orig) => ({
+  ...(await orig<typeof import('./shared/api/functions')>()),
+  api: { loginChallenge, getSignupStatus },
+}));
+
+// Imported after the mocks rather than above them: `vi.mock` is hoisted, and a factory that
+// closes over the stubs above cannot run before they exist.
+const { routes } = await import('./router');
+const { queryClient } = await import('./shared/query');
+const { bootSession, getSession, registerSessionHydrator, setSession } = await import('./shared/session');
 
 function routerAt(path: string) {
   const router = createMemoryRouter(routes, { initialEntries: [path] });
@@ -87,6 +101,37 @@ describe('router', () => {
     const router = routerAt('/kyc/callback');
     await screen.findByRole('main');
     expect(router.state.location.pathname).toBe('/me');
+  });
+
+  /**
+   * `/signup/passkey` and `/signup/device` were the two screens `/signup/register` replaced.
+   * Addresses to them are already in the wild — an old tab, a text somebody sent themselves —
+   * and a dead route would drop them on the explore tab with their signup half finished.
+   */
+  it('forwards both of the signup screens that were merged away', async () => {
+    setSession({ status: 'anonymous' });
+    for (const gone of ['/signup/passkey', '/signup/device']) {
+      const router = routerAt(gone);
+      await screen.findAllByRole('main');
+      expect(router.state.location.pathname, gone).toBe('/signup/register');
+      expect(router.state.historyAction, gone).toBe('REPLACE');
+      cleanup();
+    }
+  });
+
+  /**
+   * The query has to travel with them. `returnTo` is what tells the register screen this is an
+   * account being finished rather than a signup running its last step — the router's own guard
+   * sets it (`FinishSignupFirst`), and without it that person lands on the explore tab instead
+   * of the screen they were refused from.
+   */
+  it('carries returnTo across the redirect, which is what the guard puts there', async () => {
+    setSession({ status: 'anonymous' });
+    const router = routerAt('/signup/device?returnTo=%2Fme%2Fverify%3FreturnTo%3D%2Fclaim%2F1');
+    await screen.findAllByRole('main');
+    expect(router.state.location.pathname).toBe('/signup/register');
+    expect(new URLSearchParams(router.state.location.search).get('returnTo'))
+      .toBe('/me/verify?returnTo=/claim/1');
   });
 
   it('uses a registered hydrator when one exists', async () => {

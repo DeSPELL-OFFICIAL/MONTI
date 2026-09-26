@@ -9,9 +9,9 @@ export interface OrganizerEntry {
    */
   to: string;
   /**
-   * Where the 주최자 section on 프로필 goes. It is a "manage" button, not a "make" one, so it
-   * never lands in the creation scene: somebody who belongs anywhere gets the organiser home, and
-   * everybody else gets the same door {@link to} would have given them.
+   * Where the 주최자 section on 프로필 goes. Somebody who belongs anywhere gets the organiser
+   * home — it is a "manage" button, not a "make" one — and everybody else gets the same door
+   * {@link to} would have given them, which is the creation scene itself.
    */
   profileTo: string;
   /**
@@ -39,7 +39,7 @@ export interface OrganizerEntry {
  * | the indexer is loading           | `/org`          | (a spinner)    |
  * | the indexer would not answer     | `/org`          | `/org`         |
  * | may create an event somewhere    | `/org/new`      | `/org`         |
- * | belongs to no organisation       | `/org/become`   | `/org/become`  |
+ * | belongs to no organisation       | `/org/new`      | `/org/new`     |
  * | belongs, but may not create      | `/org`          | `/org`         |
  *
  * A visitor who is not signed in is routed to signing up rather than refused the button: a
@@ -48,6 +48,12 @@ export interface OrganizerEntry {
  * for a signed-in session, so a signed-out tap asks the indexer nothing at all.
  *
  * The last row needs no sentence of its own: `/org` already says `행사를 만들 권한이 없어요…`.
+ *
+ * The fifth row used to lead to `/org/become`, and that extra screen is exactly the second tap
+ * the founder's phone test named (plan section B-4): making an organisation is not a thing
+ * anybody sets out to do, it is a field on the way to an event. The creation scene asks for the
+ * name inline and creates the organisation inside `만들기`, so `/org/become` is now only the
+ * organiser home's way to a second or third organisation.
  */
 export function useOrganizerEntry(): OrganizerEntry {
   const signedIn = useSession().status === 'signedIn';
@@ -60,7 +66,7 @@ export function useOrganizerEntry(): OrganizerEntry {
     // screen that owns a silent indexer, so it is offered rather than `주최사 만들기`.
     if (isError) return { to: '/org', hasOrg: true, isLoading: false };
     if (canCreateEvent) return { to: '/org/new', hasOrg: true, isLoading: false };
-    if (orgs.length === 0) return { to: '/org/become', hasOrg: false, isLoading: false };
+    if (orgs.length === 0) return { to: '/org/new', hasOrg: false, isLoading: false };
     return { to: '/org', hasOrg: true, isLoading: false };
   })();
 

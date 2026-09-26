@@ -7,6 +7,7 @@ import { readTicket } from '../shared/chain/reads';
 import { gql } from '../shared/envio/client';
 import { EVENT_QUERY, type EnvioEvent, type EnvioTier } from '../shared/envio/queries';
 import { fetchEventMetadata } from '../shared/envio/ipfs';
+import { useEventRequests } from '../shared/envio/claimRequests';
 import { Announce } from './Announce';
 import { useOrganizerCopy } from './copy';
 import { EventArt } from './EventArt';
@@ -38,6 +39,9 @@ export function Dashboard() {
   const copy = useOrganizerCopy();
   const dash = copy.dashboard;
   const life = copy.lifecycle;
+  // The pending count beside the 신청 관리 link. Only an approvalRequired event has any, so an
+  // ordinary event's empty answer (or an indexer that has not caught up) simply hides the count.
+  const { requests: pendingRequests } = useEventRequests(eventId, 'Pending');
 
   const [event, setEvent] = useState<EnvioEvent | null>(null);
   const [tiers, setTiers] = useState<EnvioTier[]>([]);
@@ -202,13 +206,28 @@ export function Dashboard() {
 
       {/* Shown whatever the status is: the picture is the one part of a ticket that stays
           editable once the event is public, which is exactly why it is not on the chain. */}
-      <EventArt eventId={eventId} tiers={tiers} title={title === '' ? dash.art.untitled : title} />
+      <EventArt
+        eventId={eventId}
+        tiers={tiers}
+        title={title === '' ? dash.art.untitled : title}
+        startsAt={Number(event?.startsAt ?? 0)}
+      />
 
       <Announce eventId={eventId} />
 
       <p>
         <Link to={`/org/events/${eventId}/gates`}>{dash.gates}</Link>
       </p>
+
+      {/* Only an approvalRequired event has a request queue; the count rides along when there is one. */}
+      {event?.approvalRequired ? (
+        <p>
+          <Link to={`/org/events/${eventId}/requests`}>
+            {dash.requests}
+            {pendingRequests.length > 0 ? ` (${pendingRequests.length})` : ''}
+          </Link>
+        </p>
+      ) : null}
     </Screen>
   );
 }
