@@ -58,6 +58,11 @@ export const USED_ABI = {
     // terminal is a device rather than a person who can stand behind letting somebody in.
     requestOverride: 3, manualOverride: 3,
     claim: 3, safeTransferFrom: 3,
+    // 01c approval mode. On an `approvalRequired` event `claim` reverts, so the attendee asks with
+    // `requestClaim` (no mint) and can take it back with `cancelRequest`; the organiser's
+    // `approveClaims`/`rejectClaims` share this manifest, added by the 신청 관리 screen. All four
+    // put `eventId` in the first word, which is what the paymaster reads to pick the sponsor slot.
+    requestClaim: 2, cancelRequest: 2,
     createOffer: 3, cancelOffer: 1, acceptOffer: 2,
     createEvent: 2,
     // The event lifecycle. `updateEventMeta` reverts `NotDraft` once the event is published,

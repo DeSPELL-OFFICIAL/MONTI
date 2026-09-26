@@ -30,6 +30,10 @@ export interface EnvioEvent {
   regionCode: string;
   status: string;
   requireKyc: boolean;
+  /** 01c approval mode. Optional only because a document pinned before the column existed would
+   *  not carry it; the deployed indexer holds it as `Boolean!`, so real rows always answer. A
+   *  reader defaults it to `false` — the ordinary 선착순 event. */
+  approvalRequired?: boolean;
 }
 
 export interface EnvioTier {
@@ -115,7 +119,7 @@ export interface EnvioManager {
 /** Every column the discovery list and the detail screen read, in one place. */
 const EVENT_FIELDS = `
       id orgId imageCid startsAt endsAt saleStart saleEnd transferable
-      transferCutoffSeconds maxTransfers category regionCode status requireKyc`;
+      transferCutoffSeconds maxTransfers category regionCode status requireKyc approvalRequired`;
 
 export const EVENTS_QUERY = `
   query Events($limit: Int!) {

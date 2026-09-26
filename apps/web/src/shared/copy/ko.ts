@@ -87,7 +87,7 @@ export const ko = {
       4: '페스티벌', 5: '스포츠', 6: '콘퍼런스', 7: '강연·클래스', 8: '파티',
       9: '영화·상영', 10: '마켓', 11: '네트워킹', 3: '기타',
     },
-    empty: '조건에 맞는 행사가 없어요.', getTicket: '티켓 받기', share: '공유',
+    empty: '조건에 맞는 행사가 없어요.', getTicket: '티켓 받기', requestTicket: '신청하기', share: '공유',
     map: '지도로 보기', publicRecord: '공개 기록', soldOut: '마감됨', cancelled: '취소된 행사예요.',
     untitled: '제목을 불러오지 못했어요', remaining: '{{count}}자리 남음',
     // 탐색 카드에 다 못 들어간 태그의 수. 상세 화면은 전부 보여준다(계획 B-2).
@@ -126,6 +126,13 @@ export const ko = {
     confirming: '아직 확인 중이에요. 잠시 뒤 내 티켓에서 확인해 주세요.',
     limitReached: '이 행사에서 받을 수 있는 티켓을 이미 다 받았어요.',
     soldOut: '이 종류는 마감됐어요. 다른 종류를 골라 주세요.',
+    requestCta: '신청하기', requesting: '신청하는 중이에요',
+    approvalOnly: '이 행사는 주최자 승인 후 발급돼요.',
+    pending: '신청 완료 · 승인을 기다리고 있어요',
+    approved: '승인됐어요. 티켓이 발급됐어요',
+    approvedCta: '내 티켓 보기',
+    rejected: '이번엔 승인되지 않았어요',
+    cancel: '신청 취소', cancelling: '취소하는 중이에요',
   },
   transfer: {
     title: '양도', byNickname: '별명', byAddress: '주소', byPhone: '전화번호',

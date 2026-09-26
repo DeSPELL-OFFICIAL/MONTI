@@ -86,7 +86,7 @@ export const en: typeof ko = {
       4: 'Festival', 5: 'Sports', 6: 'Conference', 7: 'Talk or class', 8: 'Party',
       9: 'Film', 10: 'Market', 11: 'Networking', 3: 'Other',
     },
-    empty: 'No events match your filters.', getTicket: 'Get a ticket', share: 'Share',
+    empty: 'No events match your filters.', getTicket: 'Get a ticket', requestTicket: 'Request a ticket', share: 'Share',
     map: 'Open in maps', publicRecord: 'Public record', soldOut: 'Sold out', cancelled: 'This event was cancelled.',
     untitled: 'Title unavailable', remaining: '{{count}} left',
     // How many tags a card could not fit; the detail screen shows every one.
@@ -124,6 +124,13 @@ export const en: typeof ko = {
     confirming: 'Still confirming. Your ticket will show up under My tickets shortly.',
     limitReached: 'You already have every ticket this event allows.',
     soldOut: 'This type is sold out. Please pick another one.',
+    requestCta: 'Request a ticket', requesting: 'Sending your request',
+    approvalOnly: 'This event issues tickets after the organiser approves.',
+    pending: 'Request sent · waiting for approval',
+    approved: 'Approved. Your ticket has been issued',
+    approvedCta: 'View my ticket',
+    rejected: 'Not approved this time',
+    cancel: 'Cancel request', cancelling: 'Cancelling',
   },
   transfer: {
     title: 'Hand over', byNickname: 'Nickname', byAddress: 'Address', byPhone: 'Phone',

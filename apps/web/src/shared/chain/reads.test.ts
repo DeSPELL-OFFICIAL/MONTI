@@ -121,6 +121,8 @@ describe('reads', () => {
       // flush target and takes `checkIn`'s three arguments; both go out through `checkInOp`.
       'checkIn', 'checkInLate', 'requestOverride', 'manualOverride',
       'claim', 'safeTransferFrom', 'createOffer', 'cancelOffer', 'acceptOffer',
+      // 01c approval mode. The attendee's request/cancel go out through `ticketOp`.
+      'requestClaim', 'cancelRequest',
       'createEvent', 'publishEvent', 'cancelEvent', 'updateEventMeta',
       'setAdmin', 'setManager', 'registerGate', 'openGate', 'closeGate', 'revokeGate',
     ];

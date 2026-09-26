@@ -181,7 +181,7 @@ export function EventDetail() {
         <Alert tone="warn">{copy.discover.cancelled}</Alert>
       ) : (
         <Link to={`/claim/${event.id}`} className="btn btn--primary btn--link">
-          {copy.discover.getTicket}
+          {event.approvalRequired ? copy.discover.requestTicket : copy.discover.getTicket}
         </Link>
       )}
 
