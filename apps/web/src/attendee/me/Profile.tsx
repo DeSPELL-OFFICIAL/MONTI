@@ -105,10 +105,10 @@ function DisplayName() {
 }
 
 /**
- * The way from 프로필 into the organiser side, and the second half of the answer to "there is
- * no link to `/org` anywhere" — the other half is the floating 만들기 on 탐색. Both ask
- * {@link useOrganizerEntry}, so neither can decide this person is an organiser while the other
- * decides they are not.
+ * The way from 프로필 into the organiser side, and where somebody manages what they already run:
+ * `내 행사` for an organiser, `주최자 되기` for everybody else. 탐색's floating 만들기 is the
+ * other way in, but it is a "make an event" button that always opens the creation scene — so this
+ * section is the one place that reads {@link useOrganizerEntry} and decides who is an organiser.
  *
  * It sits above 계정 삭제 rather than beside it because it is a capability, not something
  * irreversible. While the indexer has not answered, the heading stands alone over a spinner:
@@ -118,7 +118,7 @@ function DisplayName() {
 function OrganizerSection() {
   const copy = useCopy();
   const navigate = useNavigate();
-  const { profileTo, hasOrg, isLoading } = useOrganizerEntry();
+  const { to, hasOrg, isLoading } = useOrganizerEntry();
 
   return (
     <Card title={copy.me.organizer}>
@@ -126,7 +126,7 @@ function OrganizerSection() {
       {isLoading ? null : (
         <>
           {hasOrg ? null : <p className="muted">{copy.me.organizerHint}</p>}
-          <Button variant="ghost" onClick={() => navigate(profileTo)}>
+          <Button variant="ghost" onClick={() => navigate(to)}>
             {hasOrg ? copy.me.organizerOpen : copy.me.organizerBecome}
           </Button>
         </>

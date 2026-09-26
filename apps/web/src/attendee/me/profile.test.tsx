@@ -512,9 +512,10 @@ describe('Profile', () => {
   });
 
   /**
-   * The profile is the other half of the answer to "there is no way into `/org`" — the first
-   * half being 탐색's floating 만들기. Both read `useOrganizerEntry`, and this is the file that
-   * drives it through the real indexer rows rather than through a stubbed hook.
+   * The profile is the way into `/org` — 탐색's floating 만들기 is the other way in, but it only
+   * ever opens the creation scene. So the profile is the one place that reads `useOrganizerEntry`
+   * to decide who is an organiser, and this file drives it through the real indexer rows rather
+   * than through a stubbed hook.
    */
   it('opens the organiser screens for somebody who organises for an organisation', async () => {
     gql.mockResolvedValue({

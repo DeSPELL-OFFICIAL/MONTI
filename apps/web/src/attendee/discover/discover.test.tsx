@@ -330,9 +330,10 @@ describe('Discover · loading and empty states', () => {
 });
 
 /**
- * One button, five answers. The whole point of the table is that the person never has to know
- * which of them applies to them — so every row is checked here, through the router, rather
- * than through the hook that decides it.
+ * One button, three answers: make an event for anybody signed in, sign up for anybody who is
+ * not, and nothing at all while the session is still re-hydrating. 만들기 means "make an event",
+ * so it always opens the creation scene — the indexer no longer diverts it to `/org` depending
+ * on which organisations the person runs (the old `to`≠`profileTo` split, now gone).
  */
 describe('Discover · 만들기', () => {
   it('holds the button while the session is still re-hydrating, rather than guessing (S5)', async () => {
@@ -381,30 +382,32 @@ describe('Discover · 만들기', () => {
     expect(seen.at(-1)).toBe('/org/new');
   });
 
-  it('hands somebody who belongs but may not create to the screen that explains why', async () => {
+  it('opens the creation scene even for somebody who belongs but may not create', async () => {
     setSession({ status: 'signedIn', account: ME });
     myOrgs({ orgs: [ORG_NO_PERMISSION], canCreateEvent: false });
     const seen = renderDiscoverTracked();
     await tapCreate();
-    // `/org` already carries `행사를 만들 권한이 없어요…`; no second sentence is written here.
-    expect(seen.at(-1)).toBe('/org');
+    // 만들기 is not a permission check: it opens the scene, which is where any "행사를 만들 권한이
+    // 없어요…" belongs. Whether this person may create is not asked before the tap.
+    expect(seen.at(-1)).toBe('/org/new');
   });
 
-  it('still leads somewhere while the indexer has not answered', async () => {
+  it('opens the creation scene while the indexer has not answered', async () => {
     setSession({ status: 'signedIn', account: ME });
     myOrgs({ isLoading: true });
     const seen = renderDiscoverTracked();
     await tapCreate();
-    expect(seen.at(-1)).toBe('/org');
+    // The FAB no longer consults the indexer, so a slow one never holds up making an event.
+    expect(seen.at(-1)).toBe('/org/new');
   });
 
-  it('still leads somewhere when the indexer will not answer at all', async () => {
+  it('opens the creation scene when the indexer will not answer at all', async () => {
     setSession({ status: 'signedIn', account: ME });
     myOrgs({ isError: true });
     const seen = renderDiscoverTracked();
     await tapCreate();
-    // The organiser home owns that failure and offers its own retry there.
-    expect(seen.at(-1)).toBe('/org');
+    // A down indexer does not divert the FAB either — it still opens the scene.
+    expect(seen.at(-1)).toBe('/org/new');
   });
 });
 

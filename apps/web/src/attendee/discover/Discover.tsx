@@ -6,7 +6,6 @@ import { fmt, useCopy, useLocale } from '../../shared/i18n';
 import { LIST_STAGGER, m, useReducedMotion } from '../../shared/motion';
 import { describeFailure } from '../../shared/errors';
 import { useSession } from '../../shared/session';
-import { useOrganizerEntry } from '../../organizer/useOrganizerEntry';
 import { useKycLevel } from '../me/useKycLevel';
 import { Filters } from './Filters';
 import {
@@ -39,10 +38,6 @@ export function Discover() {
   const signedIn = useSession().status === 'signedIn';
   const { kycLevel } = useKycLevel();
   const navigate = useNavigate();
-  // Shown to everybody, signed out included. The one decision about where it goes is
-  // `useOrganizerEntry`'s, and it sends a visitor to signing up rather than refusing them:
-  // hiding the button is exactly how a founder with a fresh account finds nothing at all.
-  const organizer = useOrganizerEntry();
   // Held until the session is known: a tap mid-refresh would read an unresolved session and send a
   // signed-in organiser to /signup/phone (S5). It clears the moment the session resolves.
   const sessionLoading = useSession().status === 'loading';
@@ -96,12 +91,12 @@ export function Discover() {
 
       {!isLoading && !isError && items.length === 0 ? (
         (data ?? []).length === 0 ? (
-          // 데이터 자체가 0건. 로그인한 사람에게는 첫 행사를 만들라 권하고(1차 버튼 → organizer.to),
+          // 데이터 자체가 0건. 로그인한 사람에게는 첫 행사를 만들라 권하고(만들기 씬으로 직행),
           // 비로그인에게는 곧 올라온다고 안심시킨다 — 버튼 없이(계획 §2a).
           signedIn ? (
             <div className="empty-state">
               <p className="muted">{copy.discover.emptyHostCta}</p>
-              <Button onClick={() => navigate(organizer.to)}>{copy.discover.create}</Button>
+              <Button onClick={() => navigate('/org/new')}>{copy.discover.create}</Button>
             </div>
           ) : (
             <p className="muted">{copy.discover.emptySoon}</p>
@@ -164,7 +159,15 @@ export function Discover() {
         ))}
       </m.ul>
 
-      <Fab label={copy.discover.create} disabled={sessionLoading} onClick={() => navigate(organizer.to)} />
+      {/* Shown to everybody, signed out included: 만들기 always means "make an event", so it
+          opens the creation scene straight away, and a visitor who is not signed in is sent to
+          signing up rather than refused the button — hiding it is how a founder with a fresh
+          account finds nothing at all. Held disabled until the session is known (S5). */}
+      <Fab
+        label={copy.discover.create}
+        disabled={sessionLoading}
+        onClick={() => navigate(signedIn ? '/org/new' : '/signup/phone')}
+      />
     </Screen>
   );
 }
