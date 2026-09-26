@@ -21,3 +21,9 @@ functions/.env.*
 indexer/generated
 *-debug.log
 .vercel
+
+# Secrets — never in any repo (the real files live in ../.secrets outside the worktrees)
+.secrets/
+*.pem
+*-deployer.json
+*service-account*.json
