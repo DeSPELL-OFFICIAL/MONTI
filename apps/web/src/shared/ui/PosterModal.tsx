@@ -85,13 +85,18 @@ export function PosterModal({ onConfirm, onClose }: PosterModalProps) {
             </div>
             <p className="muted">{copy.adjust}</p>
             {failed ? <Alert tone="error">{copy.failed}</Alert> : null}
+            {/* The two adjustments share a row and the one decision spans the foot: on a
+                phone the bottom edge is where the thumb already is, and the button that
+                closes this screen should be the one it reaches without a stretch. */}
             <div className="poster-modal__bar">
+              <div className="poster-modal__tools">
+                <Button variant="ghost" onClick={turn} disabled={working}>{copy.rotate}</Button>
+                <Button variant="ghost" onClick={() => setFile(null)} disabled={working}>
+                  {copy.again}
+                </Button>
+              </div>
               <Button onClick={() => void confirm()} disabled={working}>
                 {working ? copy.working : copy.crop}
-              </Button>
-              <Button variant="ghost" onClick={turn} disabled={working}>{copy.rotate}</Button>
-              <Button variant="ghost" onClick={() => setFile(null)} disabled={working}>
-                {copy.again}
               </Button>
             </div>
           </>

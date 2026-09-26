@@ -1,4 +1,4 @@
-import { Alert, Button, Field, Toggle } from '../../shared/ui';
+import { Alert, Button, Card, Field, Toggle } from '../../shared/ui';
 import type { EventDraft, EventDraftTier } from '../../shared/api/firestore';
 import { useDisplayName } from '../../shared/displayName';
 import { useCopy } from '../../shared/i18n';
@@ -42,9 +42,7 @@ export function TicketSection({ draft, patch, problems, blocked }: TicketSection
   }
 
   return (
-    <section id="scene-tickets">
-      <h2>{copy.tiers.title}</h2>
-
+    <Card title={copy.tiers.title} id="scene-tickets">
       <ul className="tier-list-cards">
         {draft.tiers.map((tier, index) => (
           <TierCard
@@ -71,7 +69,7 @@ export function TicketSection({ draft, patch, problems, blocked }: TicketSection
           </p>
         ))}
       {blocked ? <Alert tone="warn">{copy.tierProblems.paidTier}</Alert> : null}
-    </section>
+    </Card>
   );
 }
 

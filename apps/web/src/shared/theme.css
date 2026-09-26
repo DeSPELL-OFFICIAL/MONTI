@@ -696,3 +696,18 @@ table { width: 100%; display: block; overflow-x: auto; }
 .badge--ask { background: var(--brand-tint); border-color: var(--glass-hairline); color: var(--brand-ink); }
 .badge--ok { background: var(--success-tint); border-color: rgba(15, 122, 90, 0.24); color: var(--success); }
 .badge--todo { background: var(--warn-tint); border-color: rgba(138, 82, 0, 0.24); color: var(--warn); }
+
+/* ── the creation scene on a phone ─────────────────────────────────────────────────────── */
+/* A pane inside a pane is two shadows for one edge. The inner one keeps the light line and
+   drops the drop shadow, so a card full of ticket kinds reads as one object with parts. */
+.card .tier-card, .card .more, .more .tier-card {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.5);
+}
+/* Three `<select>`s across a 360px phone leave 54px of readable text each. Two and one is the
+   same three answers with room to read them. */
+.filters { grid-template-columns: 1fr 1fr; }
+.filters .field:last-child { grid-column: 1 / -1; }
+/* The one decision spans the foot of the poster screen; the adjustments share the row above. */
+.poster-modal__tools { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-2); }
+.poster-modal__bar .btn { height: var(--btn-h); }

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Alert, Button, Field, Screen, Spinner, StickyBar, Toast, Toggle } from '../../shared/ui';
+import { Alert, Button, Card, Field, Screen, Spinner, StickyBar, Toast, Toggle } from '../../shared/ui';
 import { fmt, useCopy, useLocale } from '../../shared/i18n';
 import { THEME_CODES, themeLabels } from '../../shared/eventThemes';
 import { useDisplayName } from '../../shared/displayName';
@@ -256,15 +256,15 @@ export function CreateEvent() {
           />
         ) : null}
 
-        <section id="scene-poster">
-          <h2>{copy.poster}</h2>
+        <Card title={copy.poster} id="scene-poster">
           <PosterCard posterCid={draft.posterCid} upload={poster} />
           {draft.posterCid === '' && poster.localUrl === ''
             ? <p className="muted">{copy.posterEmpty}</p> : null}
           {wrong('poster')}
-        </section>
+        </Card>
 
-        <section id="scene-title">
+        {/* No heading: the box's own label is the only word this pane needs. */}
+        <Card id="scene-title">
           <Field label={copy.titleLabel}>
             <input
               value={draft.title}
@@ -274,10 +274,9 @@ export function CreateEvent() {
             />
           </Field>
           {wrong('title')}
-        </section>
+        </Card>
 
-        <section id="scene-time">
-          <h2>{copy.timeLabel}</h2>
+        <Card title={copy.timeLabel} id="scene-time">
           <Field label={copy.startsAt}>
             <input
               type="datetime-local"
@@ -287,10 +286,9 @@ export function CreateEvent() {
           </Field>
           {wrong('startsAt')}
           {past ? <p className="problem">{copy.problems.eventPast}</p> : null}
-        </section>
+        </Card>
 
-        <section id="scene-venue">
-          <h2>{copy.placeLabel}</h2>
+        <Card title={copy.placeLabel} id="scene-venue">
           <div className="field-pair">
             <Field label={copy.regionLabel}>
               <select value={draft.regionCode} onChange={(event) => patch({ regionCode: event.target.value })}>
@@ -313,7 +311,7 @@ export function CreateEvent() {
           {wrong('region')}
           {wrong('venue')}
           {wrong('venueTooLong')}
-        </section>
+        </Card>
 
         <TicketSection
           draft={draft}
@@ -436,7 +434,7 @@ export function CreateEvent() {
         </details>
 
         {needsOrg ? (
-          <section id="scene-org">
+          <Card id="scene-org">
             <Field label={copy.org.label}>
               <input
                 value={orgName}
@@ -450,7 +448,7 @@ export function CreateEvent() {
             </Field>
             <p className="muted">{copy.org.help}</p>
             {checked && orgNameWrong ? <p className="problem">{copy.publishProblems.orgName}</p> : null}
-          </section>
+          </Card>
         ) : null}
 
         {unsponsored ? <UnsponsoredNotice /> : null}

@@ -53,6 +53,7 @@ const { toLocalInput } = await import('./datetime');
 const { ko: sharedCopy } = await import('../../shared/copy/index');
 const { EVENT_DRAFT_KEY, emptyEventDraft } = await import('../useEventDraft');
 const { organizerCopy } = await import('../copy');
+const { PROBLEM_SECTION } = await import('./draftRules');
 const copy = organizerCopy.ko.scene;
 
 /** Where a navigation landed, so the route SCENE 1 hands over to is checked and not guessed. */
@@ -195,6 +196,24 @@ describe('the one button', () => {
     await waitFor(() => expect(screen.getByLabelText(copy.titleLabel)).toHaveValue(READY.title));
     expect(screen.getByRole('button', { name: copy.tiers.create })).toBeEnabled();
     expect(screen.queryByText('landed:/org/new/d-42/tickets')).toBeNull();
+  });
+
+  /**
+   * The scroll targets are the one part of the layout other code depends on: `create()` jumps
+   * to `scene-<section>` and `PROBLEM_SECTION` names them. A restyle that renamed or dropped
+   * one would leave 만들기 scrolling nowhere at all, and nothing else would notice.
+   */
+  it('keeps every scroll target the problem table names, each as a pane of its own', async () => {
+    open();
+    await waitFor(() => expect(listEventDrafts).toHaveBeenCalled());
+    for (const section of new Set(Object.values(PROBLEM_SECTION))) {
+      const target = document.getElementById(`scene-${section}`);
+      expect(target, section).not.toBeNull();
+      // Inside the fold the sections stay plain: a pane drawn inside a pane is two edges
+      // for one boundary. Everything above it is a card.
+      if (!['body', 'tags'].includes(section)) expect(target, section).toHaveClass('card');
+    }
+    expect(document.getElementById('scene-tickets')).toHaveClass('card');
   });
 
   /**
