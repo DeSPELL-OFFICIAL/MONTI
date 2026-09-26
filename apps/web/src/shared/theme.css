@@ -212,6 +212,29 @@ input, select, textarea { scroll-margin-bottom: calc(var(--sticky-bar-h) + var(-
 .screen section { margin: 0 0 var(--s-5); }
 a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offset: 2px; }
 
+/* ── the back bar ──────────────────────────────────────────────────────────────────────── */
+/* Every screen that is not a tab root draws this one control at the top (see `Screen.tsx`), so a
+   stack screen inside a PWA or webview — which has no browser back button — is never a dead end.
+   It rides in the normal flow above the title; the safe-area top padding is already on `.screen`.
+   The negative left margin lets the 44px tap target keep its size while the chevron itself lines
+   up with the screen's left content edge. */
+.app-bar {
+  display: flex;
+  align-items: center;
+  margin: 0 0 var(--s-3);
+  margin-left: calc(-1 * var(--s-2));
+}
+.app-bar__back {
+  display: grid; place-items: center;
+  min-width: var(--tap); min-height: var(--tap);
+  padding: 0 var(--s-2);
+  border: 0; border-radius: var(--r-md);
+  background: transparent; color: var(--brand-ink);
+  font-size: 30px; line-height: 1;
+  transition: background var(--fast) var(--ease), transform var(--fast) var(--ease);
+}
+.app-bar__back:active { transform: translateY(1px) scale(0.96); background: var(--brand-tint); }
+
 /* A glass panel with a title — what a section of a long form looks like once it is a card. */
 .card, .scene-section { border-radius: var(--r-lg); padding: var(--s-4); }
 .card > :first-child, .scene-section > :first-child { margin-top: 0; }
@@ -282,7 +305,7 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
 .btn--danger { background: var(--danger); color: #fff; box-shadow: 0 8px 20px rgba(160, 5, 93, 0.24); }
 .btn[disabled] { opacity: 0.45; box-shadow: none; }
 .btn--link { display: grid; place-items: center; text-decoration: none; }
-:where(.btn, .chip, .fab, .tabbar a, a, summary, input, select, textarea):focus-visible {
+:where(.btn, .chip, .fab, .tabbar a, .app-bar__back, a, summary, input, select, textarea):focus-visible {
   outline: 2px solid var(--brand-ink);
   outline-offset: 2px;
 }
