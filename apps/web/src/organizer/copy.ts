@@ -494,6 +494,9 @@ const ko = {
       // 기록해 둔 옵이 문턱 미달이거나 너무 오래돼(만료) 새 수수료로 다시 보낼 때 뜨는 진행 안내. 고칠 문제가 아니다.
       opExpired: '이전 요청이 만료되어 다시 보내요',
       pinFailed: '지금은 저장할 수 없어요. 잠시 뒤 다시 시도해 주세요',
+      // pinEventImage·pinEventMetadata 가 하루 핀 한도(resource-exhausted·PIN_QUOTA)에 걸렸을 때.
+      // 고칠 문제가 아니라 내일이면 풀리는 한도이므로 그 한 가지를 분명히 말한다.
+      imageQuota: '오늘 올릴 수 있는 이미지 개수를 다 썼어요 · 내일 다시 시도해 주세요',
       badMeta: '제목이나 소개가 너무 길어요. 줄이고 다시 시도해 주세요',
       badTags: '태그를 다시 확인해 주세요',
       badPoster: '포스터를 다시 올려 주세요',
@@ -1017,6 +1020,8 @@ const en: typeof ko = {
       // fee — progress, not a problem the organiser has to fix.
       opExpired: 'The earlier request expired — sending again',
       pinFailed: 'Cannot save that right now. Please try again in a moment',
+      /** The daily pin quota (resource-exhausted · PIN_QUOTA) — not a mistake to fix, it lifts tomorrow. */
+      imageQuota: 'You\'ve hit today\'s image upload limit — try again tomorrow',
       badMeta: 'The title or the description is too long. Please shorten it and try again',
       badTags: 'Please check the tags again',
       badPoster: 'Please upload the poster again',
