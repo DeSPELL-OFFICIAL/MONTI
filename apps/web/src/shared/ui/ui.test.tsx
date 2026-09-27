@@ -22,14 +22,16 @@ describe('ui primitives', () => {
   });
 
   /**
-   * Non-modal on purpose: `showModal()` takes focus, which on a phone closes the keyboard of
-   * whatever was being typed behind it.
+   * Modal now (expert-4 D7): every sheet in this app carries a decision, not a text field, so a
+   * scrim can turn the scene behind it inert without a keyboard to lose. `showModal()`'s focus
+   * theft is still avoided, so it stays a plain motion panel rather than a native modal dialog.
    */
-  it('Sheet is a named, non-modal dialog', () => {
-    render(<Sheet label="이어서 쓸까요?"><p>본문</p></Sheet>);
+  it('Sheet is a named, modal dialog behind a scrim', () => {
+    const { container } = render(<Sheet label="이어서 쓸까요?"><p>본문</p></Sheet>);
     const sheet = screen.getByRole('dialog', { name: '이어서 쓸까요?' });
     expect(sheet).toHaveClass('sheet');
-    expect(sheet).not.toHaveAttribute('aria-modal', 'true');
+    expect(sheet).toHaveAttribute('aria-modal', 'true');
+    expect(container.querySelector('.sheet-scrim')).not.toBeNull();
   });
 
   it('BottomTabs marks the active route', () => {

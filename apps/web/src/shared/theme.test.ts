@@ -213,3 +213,19 @@ describe('tap targets on a phone (expert-4 D1/D6)', () => {
     expect(edit).not.toMatch(/36px/);
   });
 });
+
+/** Sheet scroll + scrim (expert-4 D3/D7), read out of the stylesheet like the rest of this file. */
+describe('sheets scroll inside a capped body and sit behind a scrim', () => {
+  it('caps the sheet body and scrolls inside it, so the title and grab bar stay reachable', () => {
+    const body = /\.sheet__body\s*\{([^}]*)\}/.exec(CSS)?.[1] ?? '';
+    expect(body).toMatch(/max-height:\s*calc\(100dvh/);
+    expect(body).toMatch(/overflow-y:\s*auto/);
+    expect(body).toMatch(/overscroll-behavior:\s*contain/);
+  });
+
+  it('lays a full-viewport scrim under the sheet to turn the scene behind it inert', () => {
+    const scrim = /\.sheet-scrim\s*\{([^}]*)\}/.exec(CSS)?.[1] ?? '';
+    expect(scrim).toMatch(/position:\s*fixed/);
+    expect(scrim).toMatch(/inset:\s*0/);
+  });
+});

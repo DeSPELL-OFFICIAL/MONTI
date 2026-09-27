@@ -674,6 +674,10 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
 /* The question a draft left behind asks on the way back in (plan section F-3). A sheet rather
    than a screen: it is one decision with both answers on it, and a route would put it in the
    back button's history. */
+/* The light scrim behind a decision sheet (expert-4 D7): it dims the scene a little and, being
+   a full-viewport layer under the sheet and over everything else, swallows every tap meant for
+   the page behind — the sheet was non-modal before this and the scene stayed live under it. */
+.sheet-scrim { position: fixed; inset: 0; z-index: 60; background: rgba(20, 8, 48, 0.28); }
 .sheet {
   position: fixed; inset: auto 0 0 0; z-index: 61;
   width: 100%; max-width: var(--screen-w); max-height: none;
@@ -693,6 +697,11 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
 .sheet__body {
   display: grid; gap: 10px;
   padding: var(--s-3) var(--s-4) calc(var(--sab) + var(--s-5));
+  /* Long or enlarged content (a publish summary of title + rows + paragraph + buttons) used to
+     push the title and the grab bar above the top of the viewport, out of reach (expert-4 D3).
+     The body caps at the viewport height and scrolls inside itself instead; overscroll stays in. */
+  max-height: calc(100dvh - var(--sat) - var(--s-5));
+  overflow-y: auto; overscroll-behavior: contain;
 }
 .sheet__body h2 { margin: 0; font-size: var(--t-head); line-height: var(--t-head-lh); }
 .sheet__body p { margin: 0; }
