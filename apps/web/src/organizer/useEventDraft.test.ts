@@ -11,7 +11,7 @@ vi.mock('../shared/api/firestore', () => ({ listEventDrafts, saveEventDraft, del
 
 const {
   DRAFT_DEBOUNCE_MS, DRAFT_INTERVAL_MS, EVENT_DRAFT_KEY, MAX_EVENT_DRAFTS,
-  emptyEventDraft, normalizeEventDraft, useEventDraft,
+  emptyEventDraft, freshEventDraft, normalizeEventDraft, useEventDraft,
 } = await import('./useEventDraft');
 
 /**
@@ -235,7 +235,8 @@ describe('opening the scene', () => {
 
   it('starts empty when this account has no draft', async () => {
     const view = await openDraft();
-    expect(view.result.current.draft).toEqual({ ...emptyEventDraft, orgId: '9' });
+    // A brand-new draft carries the next-Saturday start default (T-SIMP-8); everything else is empty.
+    expect(view.result.current.draft).toEqual({ ...freshEventDraft(), orgId: '9' });
     expect(view.result.current.resumed).toBe(false);
     expect(view.result.current.draftId).not.toBe('');
   });
@@ -327,7 +328,8 @@ describe('starting another draft', () => {
     await act(async () => { await view.result.current.startNew(); });
 
     expect(view.result.current.draftId).not.toBe('kept');
-    expect(view.result.current.draft).toEqual({ ...emptyEventDraft, orgId: '9' });
+    // A brand-new draft carries the next-Saturday start default (T-SIMP-8); everything else is empty.
+    expect(view.result.current.draft).toEqual({ ...freshEventDraft(), orgId: '9' });
     expect(view.result.current.resumed).toBe(false);
     expect(deleteEventDraft).not.toHaveBeenCalled();
     expect(ids()).toEqual(['kept']);
@@ -377,7 +379,8 @@ describe('throwing a draft away', () => {
     expect(deleteEventDraft).toHaveBeenCalledWith('newest');
     expect(store).toHaveLength(0);
     expect(localStorage.getItem(EVENT_DRAFT_KEY)).toBeNull();
-    expect(view.result.current.draft).toEqual({ ...emptyEventDraft, orgId: '9' });
+    // A brand-new draft carries the next-Saturday start default (T-SIMP-8); everything else is empty.
+    expect(view.result.current.draft).toEqual({ ...freshEventDraft(), orgId: '9' });
     expect(view.result.current.draftId).not.toBe('newest');
     expect(view.result.current.resumed).toBe(false);
   });
