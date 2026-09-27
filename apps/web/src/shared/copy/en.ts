@@ -137,6 +137,7 @@ export const en: typeof ko = {
     failed: 'Could not get the ticket. Please try again shortly.',
     confirming: 'Still confirming. Your ticket will show up under My tickets shortly.',
     limitReached: 'You already have every ticket this event allows.',
+    alreadyHave: 'You already have your tickets for this event. Check My tickets.',
     soldOut: 'This type is sold out. Please pick another one.',
     requestCta: 'Request a ticket', requesting: 'Sending your request',
     approvalOnly: 'You can get a ticket after the organiser approves.',

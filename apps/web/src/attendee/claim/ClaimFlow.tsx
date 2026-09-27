@@ -161,17 +161,6 @@ export function ClaimFlow({ eventId, present }: ClaimFlowProps) {
   const event = data?.Event[0];
   const tiers = data?.Tier ?? [];
   const selected = tiers[tier];
-  // maxPerWallet is counted per event, not per tier, and a ticket I still hold counts even when
-  // it is spent or voided — this mirrors Ticket.balanceOfEvent, which only a transfer decrements.
-  const held = (myTickets ?? []).filter((mine) => mine.eventId === eventId && mine.state !== 'transferred').length;
-  // Unguarded on purpose: the chain compares the same way, so a tier with maxPerWallet 0 lets
-  // nobody claim rather than everybody.
-  const perWallet = Number(selected?.maxPerWallet ?? 0);
-  const limitReached = selected !== undefined && held >= perWallet;
-  const soldOut = selected !== undefined && Number(selected.supply) - Number(selected.minted) <= 0;
-  const cancelled = event?.status === CANCELLED;
-  const blocked = limitReached || soldOut || cancelled;
-
   // Approval mode: the event takes requests rather than direct claims, so this screen mirrors the
   // request's state from the indexer. A self-cancel and an organiser's rejection both land on
   // `Rejected` — the contract emits one event for both — so `Rejected` reads "not this time" and
@@ -182,6 +171,20 @@ export function ClaimFlow({ eventId, present }: ClaimFlowProps) {
   const approved = status === 'Approved';
   // A request already waiting or already granted: nothing new is sent from here, and no auto-resume.
   const hasLiveRequest = pending || approved;
+
+  // maxPerWallet is counted per event, not per tier, and a ticket I still hold counts even when
+  // it is spent or voided — this mirrors Ticket.balanceOfEvent, which only a transfer decrements.
+  // Counting the held tickets (and a live pending request) is what makes the pre-block below fire
+  // before a 받기 the chain would only revert — the count this pre-block had lost (live-run 6 / D5).
+  const held = (myTickets ?? []).filter((mine) => mine.eventId === eventId && mine.state !== 'transferred').length;
+  const pendingSlot = pending ? 1 : 0;
+  // Unguarded on purpose: the chain compares the same way, so a tier with maxPerWallet 0 lets
+  // nobody claim rather than everybody.
+  const perWallet = Number(selected?.maxPerWallet ?? 0);
+  const limitReached = selected !== undefined && held + pendingSlot >= perWallet;
+  const soldOut = selected !== undefined && Number(selected.supply) - Number(selected.minted) <= 0;
+  const cancelled = event?.status === CANCELLED;
+  const blocked = limitReached || soldOut || cancelled;
 
   // The button is down for every state but the two the person acts from.
   const busy = phase === 'saving' || phase === 'sent';
@@ -546,7 +549,19 @@ export function ClaimFlow({ eventId, present }: ClaimFlowProps) {
           </select>
         </Field>
         {status === 'Rejected' ? <Alert tone="warn">{copy.claim.rejected}</Alert> : null}
-        {limitReached ? <Alert tone="warn">{copy.claim.limitReached}</Alert> : null}
+        {limitReached ? (
+          held > 0 ? (
+            <>
+              {/* Already holds this event's allotment: say so and point at 내 티켓. The 받기 button
+                  below stays disabled (blocked) — a tap here only ever hits the chain's revert. */}
+              <Alert tone="warn">{copy.claim.alreadyHave}</Alert>
+              <Link to="/tickets" className="btn btn--primary btn--link">{copy.claim.approvedCta}</Link>
+            </>
+          ) : (
+            // maxPerWallet 0: a tier nobody may hold — they have received nothing, so no 내 티켓 link.
+            <Alert tone="warn">{copy.claim.limitReached}</Alert>
+          )
+        ) : null}
         {soldOut ? <Alert tone="warn">{copy.claim.soldOut}</Alert> : null}
         {cancelled ? <Alert tone="warn">{copy.discover.cancelled}</Alert> : null}
         {phase === 'stuck' ? (
