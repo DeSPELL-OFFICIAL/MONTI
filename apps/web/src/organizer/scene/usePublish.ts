@@ -41,6 +41,10 @@ const PIN_PROBLEMS: Readonly<Record<string, PublishProblem>> = {
   NOT_ORGANIZER: 'notYourOrg',
   PINATA_UPLOAD_FAILED: 'pinFailed',
   BAD_PINATA_CID: 'pinFailed',
+  // `pinEventImage`/`pinEventMetadata` refuse the day's 21st pin with `resource-exhausted`
+  // (functions/src/functions/organizer.ts). It is not a draft the organiser can fix — the
+  // cap lifts tomorrow — so it earns its own sentence rather than the generic failure.
+  PIN_QUOTA: 'imageQuota',
 };
 
 /**
@@ -391,6 +395,7 @@ export function usePublish(
         setPhase('idle');
         const { code, reason } = callableFailure(cause);
         if (PIN_PROBLEMS[reason]) setProblem(PIN_PROBLEMS[reason]);
+        else if (code === 'resource-exhausted') setProblem('imageQuota');
         else if (code === 'permission-denied') setProblem('notYourOrg');
         else if (code !== '') setProblem('pinFailed');
         else setProblem('failed');
@@ -544,6 +549,10 @@ export function usePublish(
       }
       const { code, reason } = callableFailure(cause);
       if (PIN_PROBLEMS[reason]) setProblem(PIN_PROBLEMS[reason]);
+      // The daily pin quota. `ORG_LIMIT` is `resource-exhausted` too, but it is raised inside
+      // `resolveOrg` and thrown as `OrgRefused` above — so anything reaching here with this code
+      // came from `pinEventImage` or `pinEventMetadata`, which is the image quota.
+      else if (code === 'resource-exhausted') setProblem('imageQuota');
       else if (code === 'permission-denied') setProblem('notYourOrg');
       else if (code !== '') setProblem('pinFailed');
       else setProblem('failed');

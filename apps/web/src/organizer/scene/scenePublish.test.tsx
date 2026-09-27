@@ -474,6 +474,34 @@ describe('when it does not land', () => {
     expect(await screen.findByText(copy.publishProblems.badTags)).toBeInTheDocument();
     expect(ticketOp).not.toHaveBeenCalled();
   });
+
+  /**
+   * The day's pin cap: `pinEventImage`/`pinEventMetadata` answer `resource-exhausted` with a
+   * `PIN_QUOTA` reason past the twentieth picture (functions/src/functions/organizer.ts). It is
+   * not a draft the organiser can fix — the cap lifts tomorrow — so it earns its own inline
+   * sentence rather than the generic "행사를 만들지 못했어요".
+   */
+  it('names the daily image quota rather than the generic failure', async () => {
+    pinEventMetadata.mockRejectedValue({ code: 'resource-exhausted', message: 'PIN_QUOTA' });
+    open();
+    await create();
+    expect(await screen.findByText(copy.publishProblems.imageQuota)).toBeInTheDocument();
+    expect(screen.queryByText(copy.publishProblems.failed)).toBeNull();
+    expect(ticketOp).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The same cap, hit while the default poster is being pinned, and recognised by the
+   * `resource-exhausted` code alone — so a reason that is not literally `PIN_QUOTA` still maps.
+   */
+  it('names the quota when the auto-poster pin is the one that hits it', async () => {
+    pinEventImage.mockRejectedValueOnce({ code: 'resource-exhausted', message: '' });
+    open({ ...READY, posterCid: '' });
+    await create();
+    expect(await screen.findByText(copy.publishProblems.imageQuota)).toBeInTheDocument();
+    expect(pinEventMetadata).not.toHaveBeenCalled();
+    expect(ticketOp).not.toHaveBeenCalled();
+  });
 });
 
 /**
