@@ -255,10 +255,10 @@ describe('the picture', () => {
     const user = userEvent.setup();
     open();
     await ready();
-    await user.click(screen.getByRole('button', { name: copy.tiers.artNames.c }));
+    await user.click(screen.getByRole('radio', { name: copy.tiers.artNames.c }));
     expect(mirror().tiers[0]?.design).toBe('c');
     expect(JSON.stringify(mirror())).not.toContain('aurora');
-    expect(screen.getByRole('button', { name: copy.tiers.artNames.c })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('radio', { name: copy.tiers.artNames.c })).toHaveAttribute('aria-checked', 'true');
   });
 
   /**
@@ -272,20 +272,20 @@ describe('the picture', () => {
     await ready();
     for (const preset of TICKET_ART_PRESETS) {
       expect(
-        screen.getByRole('button', { name: copy.tiers.artNames[preset] }),
+        screen.getByRole('radio', { name: copy.tiers.artNames[preset] }),
         preset,
       ).toBeInTheDocument();
     }
     // The upload chip sits at the end of the same row and is not one of the twelve.
     expect(new Set(TICKET_ART_PRESETS).size).toBe(12);
-    expect(screen.getByRole('button', { name: copy.tiers.artUpload })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: copy.tiers.artUpload })).toBeInTheDocument();
   });
 
   it('uploads one of their own through the same cropper, as a ticket and not a poster', async () => {
     const user = userEvent.setup();
     open();
     await ready();
-    await user.click(screen.getByRole('button', { name: copy.tiers.artUpload }));
+    await user.click(screen.getByRole('radio', { name: copy.tiers.artUpload }));
     const file = new File([new Uint8Array([1, 2, 3])], 'art.jpg', { type: 'image/jpeg' });
     await user.upload(screen.getByLabelText(sharedCopy.poster.pick), file);
     await user.click(await screen.findByRole('button', { name: sharedCopy.poster.crop }));

@@ -80,9 +80,9 @@ describe('the ticket art carousel', () => {
     const { container } = setup();
     for (const preset of TICKET_ART_PRESETS) {
       // The tile's accessible name is the preset — never the fifteen words of the drawing inside.
-      expect(screen.getByRole('button', { name: copy.artNames[preset] })).toBeInTheDocument();
+      expect(screen.getByRole('radio', { name: copy.artNames[preset] })).toBeInTheDocument();
     }
-    expect(screen.getByRole('button', { name: copy.artUpload })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: copy.artUpload })).toBeInTheDocument();
     expect(container.querySelectorAll('.art-tile__preview .ticket-art')).toHaveLength(12);
     expect(container.querySelectorAll('.art-dot')).toHaveLength(12);
   });
@@ -90,44 +90,52 @@ describe('the ticket art carousel', () => {
   it('selects the preset on a click and hands the caller the letter, never the name', async () => {
     const user = userEvent.setup();
     const { onPreset } = setup();
-    await user.click(screen.getByRole('button', { name: copy.artNames.c }));
+    await user.click(screen.getByRole('radio', { name: copy.artNames.c }));
     expect(onPreset).toHaveBeenCalledWith('c');
   });
 
   it('moves and selects with the arrow keys (roving tabindex)', async () => {
     const user = userEvent.setup();
     const { onPreset } = setup();
-    screen.getByRole('button', { name: copy.artNames.a }).focus();
+    screen.getByRole('radio', { name: copy.artNames.a }).focus();
     await user.keyboard('{ArrowRight}');
     expect(onPreset).toHaveBeenLastCalledWith('b');
     await user.keyboard('{End}');
     expect(onPreset).toHaveBeenLastCalledWith('l');
   });
 
-  it('lights the dot of the centre tile and selects it on a scroll-snap', () => {
+  it('lights the dot of the centre tile on a scroll-snap but never selects it (expert-4 D5)', () => {
     vi.stubGlobal('IntersectionObserver', IOStub);
     const { container, onPreset } = setup();
-    // A real scroll first: the observer's opening callback on mount must not pick for them.
+    // Even after a real scroll, centring a tile only lights its dot — a browse must not pick.
     fireEvent.scroll(container.querySelector('.art-carousel') as HTMLElement);
     fireCentre(container, 2);
-    expect(onPreset).toHaveBeenCalledWith('c');
+    expect(onPreset).not.toHaveBeenCalled();
     expect((container.querySelectorAll('.art-dot')[2] as HTMLElement).className).toContain('art-dot--on');
   });
 
-  it('never selects from the observer before the user has scrolled', () => {
+  it('keeps the draft clean while scrolling over a picture of their own', () => {
     vi.stubGlobal('IntersectionObserver', IOStub);
-    // A picture of their own is in place: a select on the mount callback would clobber it.
+    // A picture of their own is in place: scrolling past the presets must not clobber it.
     const { container, onPreset } = setup({ art: { imageCid: 'bafkkept' } });
     fireCentre(container, 2);
+    fireCentre(container, 5);
     expect(onPreset).not.toHaveBeenCalled();
     // The dot still moves, so the row is not frozen — only the choice is withheld.
-    expect((container.querySelectorAll('.art-dot')[2] as HTMLElement).className).toContain('art-dot--on');
+    expect((container.querySelectorAll('.art-dot')[5] as HTMLElement).className).toContain('art-dot--on');
+  });
+
+  it('is a radiogroup whose chosen tile is the checked radio', () => {
+    setup({ art: { preset: 'c' } });
+    expect(screen.getByRole('radiogroup', { name: copy.artCarousel })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: copy.artNames.c })).toBeChecked();
+    expect(screen.getByRole('radio', { name: copy.artNames.a })).not.toBeChecked();
   });
 
   it('opens the same cropper on the last tile and reports a finished upload', async () => {
     const user = userEvent.setup();
     const { onUploaded } = setup();
-    await user.click(screen.getByRole('button', { name: copy.artUpload }));
+    await user.click(screen.getByRole('radio', { name: copy.artUpload }));
     const file = new File([new Uint8Array([1, 2, 3])], 'art.jpg', { type: 'image/jpeg' });
     await user.upload(screen.getByLabelText(sharedCopy.poster.pick), file);
     await user.click(await screen.findByRole('button', { name: sharedCopy.poster.crop }));
