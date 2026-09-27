@@ -134,7 +134,8 @@ export const ko = {
     artUsed: '사용됨',
     artLabel: '{{title}} · {{tier}} 티켓 그림',
     artLabelUsed: '{{title}} · {{tier}} 티켓 그림 · 사용됨',
-    artNoTitle: '이름 없는 행사', artNoTier: '티켓',
+    // 게이트웨이가 끝내 이름을 주지 못했을 때만 쓰는 말. 아직 불러오는 중이면 이 말 대신 자리표시가 뜬다.
+    artNoTitle: '행사 이름을 불러오지 못했어요', artNoTier: '티켓',
     // 표시 이름을 비워 둔 사람의 티켓에 찍히는 말. 빈 줄보다 낫고, '이름 없음'보다 낫다.
     artGuest: '게스트',
   },

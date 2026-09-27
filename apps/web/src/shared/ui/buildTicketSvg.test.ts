@@ -256,4 +256,22 @@ describe('buildTicketSvg', () => {
     expect(svg).not.toContain('ta-live');
     expect(svg).not.toContain('<style>');
   });
+
+  it('draws a shimmer where the title goes while the name is still loading, and no word', () => {
+    const svg = buildTicketSvg({ ...base, titleLoading: true });
+    expect(svg).toContain('ticket-art__title-skeleton');
+    // Not the name, and not a fallback word standing in for it — a load is not a failure.
+    expect(svg).not.toContain('>재즈 나이트</text>');
+  });
+
+  it('draws the title and no shimmer once the name has loaded', () => {
+    const svg = buildTicketSvg({ ...base });
+    expect(svg).not.toContain('ticket-art__title-skeleton');
+    expect(svg).toContain('>재즈 나이트</text>');
+  });
+
+  it('leaves the document byte-for-byte the same when titleLoading defaults to false', () => {
+    expect(buildTicketSvg({ ...base, preset: 'g', titleLoading: false }))
+      .toBe(buildTicketSvg({ ...base, preset: 'g' }));
+  });
 });

@@ -183,6 +183,12 @@ export interface TicketSvgInput {
   dateText?: string;
   used?: boolean;
   /**
+   * The event's name has not arrived from the gateway yet, so its line is a shimmer rather than a
+   * word — never the fallback, which is what a *failed* read draws. Off by default, so a ticket
+   * whose name is known is byte-for-byte the document it always was.
+   */
+  titleLoading?: boolean;
+  /**
    * Whether this ticket should play its backdrop's animation, when it has one. Off by default and
    * left off for every thumbnail, list row and picker tile, so a page of still tickets stays
    * still; a large preview and the ticket detail turn it on. An uploaded picture is never
@@ -229,7 +235,7 @@ function line(text: string, attrs: LineAttrs): string {
 export function buildTicketSvg(input: TicketSvgInput): string {
   const {
     preset = 'a', imageHref = '', title, tierName,
-    holder = '', dateText = '', used = false, animated = false, usedLabel = '',
+    holder = '', dateText = '', used = false, titleLoading = false, animated = false, usedLabel = '',
   } = input;
   const uploaded = imageHref !== '';
   const backdrop = TICKET_BACKDROPS[preset] ?? TICKET_BACKDROPS.a;
@@ -240,8 +246,15 @@ export function buildTicketSvg(input: TicketSvgInput): string {
   const anim = uploaded ? undefined : backdrop.anim;
   const live = animated && anim !== undefined;
 
-  const titleLines = wrapTitle(title);
-  const titleTop = TITLE_BASELINE - (titleLines.length - 1) * TITLE_LINE_HEIGHT - TITLE_SIZE;
+  // A name still loading draws no words: its line is a shimmer, laid out as one line's worth of room.
+  const titleLines = titleLoading ? [] : wrapTitle(title);
+  const lineCount = titleLoading ? 1 : titleLines.length;
+  const titleTop = TITLE_BASELINE - (lineCount - 1) * TITLE_LINE_HEIGHT - TITLE_SIZE;
+  const titleSkeleton = titleLoading
+    ? `<rect class="ticket-art__title-skeleton" x="${PAD}" y="${titleTop}"`
+      + ` width="${(TICKET_WIDTH - PAD * 2) * 0.62}" height="${TITLE_SIZE}" rx="14"`
+      + ' fill="#ffffff" fill-opacity="0.22"/>'
+    : '';
 
   // The stub's lines flow: an empty name does not leave a gap where a name would have been,
   // it lets the date move up into the space. Nothing on this ticket is a placeholder.
@@ -290,6 +303,7 @@ export function buildTicketSvg(input: TicketSvgInput): string {
       x: PAD, y: titleTop - TIER_GAP, size: TIER_SIZE, weight: 600, fill: '#cfd6e4',
       spacing: TIER_SPACING,
     }),
+    titleSkeleton,
     ...titleLines.map((text, at) =>
       line(text, {
         x: PAD,

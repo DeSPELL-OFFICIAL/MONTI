@@ -32,6 +32,11 @@ export interface TicketArtProps {
   /** Derived from the index (`checkIn != null`) by whoever renders this; see T-EV-W9. */
   used?: boolean;
   /**
+   * The event name is still being read from the gateway. The title line draws a shimmer instead of
+   * a word while this is true; the fallback in {@link title} is only for a read that *failed*.
+   */
+  titleLoading?: boolean;
+  /**
    * Whether the backdrop should animate. Off by default and left off for every thumbnail, list
    * row and picker tile; the large preview and the ticket detail turn it on. When on, an
    * `IntersectionObserver` pauses the animation while the ticket is scrolled off-screen.
@@ -57,10 +62,10 @@ export interface TicketArtProps {
  * fifteen `<text>` nodes that make up the drawing.
  */
 export function TicketArt({
-  art, title, tierName, holder = '', dateText = '', used = false, animated = false,
+  art, title, tierName, holder = '', dateText = '', used = false, titleLoading = false, animated = false,
 }: TicketArtProps) {
   const copy = useCopy().tickets;
-  const label = fmt(used ? copy.artLabelUsed : copy.artLabel, { title, tier: tierName });
+  const label = fmt(used ? copy.artLabelUsed : copy.artLabel, { title: titleLoading ? '' : title, tier: tierName });
   const svg = buildTicketSvg({
     ...('preset' in art ? { preset: art.preset } : { imageHref: gatewayUrl(art.imageCid) }),
     title,
@@ -68,6 +73,7 @@ export function TicketArt({
     holder,
     dateText,
     used,
+    titleLoading,
     animated,
     usedLabel: copy.artUsed,
   });

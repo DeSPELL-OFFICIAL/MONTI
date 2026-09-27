@@ -352,7 +352,7 @@ describe('ticket art', () => {
   it('captions the picture with the event and the ticket kind', async () => {
     renderList();
     await screen.findByRole('link', { name: /입장 전/ });
-    expect(within(row('1')).getAllByText('한여름 밤의 재즈').length).toBeGreaterThan(0);
+    await waitFor(() => expect(within(row('1')).getAllByText('한여름 밤의 재즈').length).toBeGreaterThan(0));
     expect(within(row('1')).getByText('일반')).toBeInTheDocument();
   });
 
@@ -405,9 +405,9 @@ describe('ticket art', () => {
   it('names a ticket whose event nothing could describe', async () => {
     renderList();
     await screen.findByRole('link', { name: /입장 전/ });
-    // #5's document 404s at the gateway; #10's event was never pinned one to ask about.
-    expect(within(row('5')).getAllByText('이름 없는 행사').length).toBeGreaterThan(0);
-    expect(within(row('10')).getAllByText('이름 없는 행사').length).toBeGreaterThan(0);
+    // #5's document 404s at the gateway; #10's event was never pinned one to ask about. Both fail.
+    await waitFor(() => expect(within(row('5')).getAllByText('행사 이름을 불러오지 못했어요').length).toBeGreaterThan(0));
+    expect(within(row('10')).getAllByText('행사 이름을 불러오지 못했어요').length).toBeGreaterThan(0);
     // And #10's event named no tier either, so the kind falls back to a word of its own.
     expect(within(row('10')).getByText('티켓')).toBeInTheDocument();
   });
@@ -416,7 +416,7 @@ describe('ticket art', () => {
     renderDetail('2');
     expect(await screen.findByText('입장 완료')).toBeInTheDocument();
     expect(screen.getByText('사용됨')).toBeInTheDocument();
-    expect(screen.getAllByText('한여름 밤의 재즈').length).toBeGreaterThan(0);
+    await waitFor(() => expect(screen.getAllByText('한여름 밤의 재즈').length).toBeGreaterThan(0));
     expect(presetIn(document)).toBe('a');
   });
 
@@ -432,5 +432,37 @@ describe('ticket art', () => {
     expect(await screen.findByText('입장 전')).toBeInTheDocument();
     expect(screen.queryByText('사용됨')).toBeNull();
     expect(screen.getByRole('button', { name: '입장하기' })).toBeInTheDocument();
+  });
+});
+
+/**
+ * The event name is read from IPFS a beat after the row itself, so the ticket art shows a shimmer
+ * placeholder until it lands, the name once it has, and the fallback word only once the read failed.
+ */
+describe('ticket title', () => {
+  it('shimmers a placeholder while the name is still loading', async () => {
+    fetchEventMetadata.mockImplementation(() => new Promise<never>(() => {}));
+    renderList();
+    await screen.findByRole('link', { name: /입장 전/ });
+    // The row is here off the indexer; the name is not, so its line shimmers — neither the name nor
+    // the failure fallback is shown yet.
+    await waitFor(() => expect(row('1').querySelector('.ticket-art__title-skeleton')).not.toBeNull());
+    expect(within(row('1')).queryByText('한여름 밤의 재즈')).toBeNull();
+    expect(within(row('1')).queryByText('행사 이름을 불러오지 못했어요')).toBeNull();
+  });
+
+  it('shows the name once it has loaded, and no shimmer', async () => {
+    renderList();
+    await screen.findByRole('link', { name: /입장 전/ });
+    await waitFor(() => expect(within(row('1')).getAllByText('한여름 밤의 재즈').length).toBeGreaterThan(0));
+    expect(row('1').querySelector('.ticket-art__title-skeleton')).toBeNull();
+  });
+
+  it('falls back to the word only once the read has failed', async () => {
+    fetchEventMetadata.mockRejectedValue(new Error('IPFS_500'));
+    renderList();
+    await screen.findByRole('link', { name: /입장 전/ });
+    await waitFor(() => expect(within(row('1')).getAllByText('행사 이름을 불러오지 못했어요').length).toBeGreaterThan(0));
+    expect(row('1').querySelector('.ticket-art__title-skeleton')).toBeNull();
   });
 });

@@ -625,6 +625,11 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
    that adds this class. Only `.ta-live` documents carry any animation, so this reaches nothing on a
    still ticket; reduced motion is handled separately, by the global killswitch further down. */
 .ticket-art--paused .ticket-art__svg * { animation-play-state: paused; }
+/* The event name on a ticket comes off IPFS a beat after the row itself does; until it lands, the
+   title line is this shimmer rather than a word (buildTicketSvg's titleLoading). The global
+   reduced-motion killswitch further down freezes it to a flat block. */
+.ticket-art__title-skeleton { animation: ticket-title-shimmer 1.3s var(--ease) infinite; }
+@keyframes ticket-title-shimmer { 0%, 100% { fill-opacity: 0.22; } 50% { fill-opacity: 0.08; } }
 
 /* A ticket row: the picture as a thumbnail, the number and the state beside it. The column is
    a fixed width rather than a share of the row because the art is 1.41x as tall as it is wide
