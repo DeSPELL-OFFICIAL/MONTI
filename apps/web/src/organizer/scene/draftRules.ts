@@ -160,6 +160,13 @@ const UINT16_MAX = 65_535;
 const UINT32_MAX = 4_294_967_295;
 const SECONDS_PER_HOUR = 3_600;
 
+/**
+ * `무제한` in the quantity quick chips (T-SIMP-10). It is the `supply` cap the struct can hold —
+ * the largest number `tierProblems` still accepts — so an organiser who wants "as many as anyone
+ * likes" gets a real value the chain can encode rather than a special-cased zero.
+ */
+export const UNLIMITED_SUPPLY = UINT32_MAX;
+
 /** One named rule of SCENE 2; `organizer/copy.ts` owns a sentence for each. */
 export type TierProblem =
   | 'tiersTooMany' | 'tierName' | 'tierNameTooLong' | 'tierSupply' | 'tierMaxPerWallet'

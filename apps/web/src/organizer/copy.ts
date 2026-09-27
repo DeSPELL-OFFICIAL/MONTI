@@ -389,6 +389,9 @@ const ko = {
       nameHelp: '티켓에 찍히는 이름이에요',
       namePlaceholder: '일반',
       supply: '수량',
+      // 수량 칸 위 빠른 칩(30·50·100·무제한). 그룹 이름은 필드 라벨(수량)과 겹치면 안 돼서 따로 둔다.
+      supplyQuick: '수량 빠른 선택',
+      supplyUnlimited: '무제한',
       maxPerWallet: '1인당 한도',
       price: '가격',
       free: '무료',
@@ -911,6 +914,9 @@ const en: typeof ko = {
       nameHelp: 'This is the name printed on the ticket',
       namePlaceholder: 'General',
       supply: 'How many',
+      // Quick chips above the quantity box; the group name is kept apart from the field label.
+      supplyQuick: 'Quick amounts',
+      supplyUnlimited: 'Unlimited',
       maxPerWallet: 'Most one person may hold',
       price: 'Price',
       free: 'Free',
