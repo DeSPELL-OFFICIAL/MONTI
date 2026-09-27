@@ -203,10 +203,9 @@ describe('the one button', () => {
     open();
     await waitFor(() => expect(listEventDrafts).toHaveBeenCalled());
     expect(screen.getByRole('button', { name: copy.tiers.create })).toBeEnabled();
-    expect(screen.queryByText(copy.problems.poster)).toBeNull();
+    expect(screen.queryByText(copy.problems.title)).toBeNull();
 
     await user.click(screen.getByRole('button', { name: copy.tiers.create }));
-    expect(screen.getByText(copy.problems.poster)).toBeInTheDocument();
     expect(screen.getByText(copy.problems.title)).toBeInTheDocument();
     expect(screen.getByText(copy.problems.venue)).toBeInTheDocument();
     // Still here: an unfinished field is a message, not a wall — and never a second screen.

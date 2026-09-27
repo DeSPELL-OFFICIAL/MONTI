@@ -118,10 +118,10 @@ export function CreateEvent() {
    * base64 — and the bytes themselves stay in memory behind an object URL.
    */
   const poster = usePosterUpload((cid) => patch({ posterCid: cid }));
-  // A poster that is halfway to the server is not a missing poster. Dropping the problem here
-  // rather than at the button is what keeps the red line from appearing under a picture the
-  // organiser is looking at (plan section D-3).
-  const problems = eventProblems(draft).filter((key) => !(key === 'poster' && poster.busy));
+  // The poster is optional (plan B-2): a blank one is filled at publish with a default A4 poster,
+  // so it is never a problem the organiser has to fix. An in-flight manual upload is still waited
+  // on below rather than overwritten.
+  const problems = eventProblems(draft);
   const tiersWrong = tierProblems(draft);
   /**
    * The draft written days ago and opened again today. `saleWindow` derives 지금 -> `endsAt`,
@@ -298,7 +298,6 @@ export function CreateEvent() {
           <PosterCard posterCid={draft.posterCid} upload={poster} />
           {draft.posterCid === '' && poster.localUrl === ''
             ? <p className="muted">{copy.posterEmpty}</p> : null}
-          {wrong('poster')}
         </Card>
 
         {/* No heading: the box's own label is the only word this pane needs. */}

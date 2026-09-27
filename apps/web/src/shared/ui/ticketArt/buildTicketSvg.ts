@@ -22,7 +22,7 @@ import { TICKET_BACKDROPS, TICKET_HEIGHT, TICKET_WIDTH } from './presets';
  * self-contained. No font is embedded or subset: a family that is already on the device costs
  * nothing to name, and a subset large enough for arbitrary Korean would dwarf the picture.
  */
-const FONT_STACK = "system-ui, -apple-system, 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif";
+export const FONT_STACK = "system-ui, -apple-system, 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif";
 
 /**
  * How wide one character is, in multiples of the font size. SVG `<text>` cannot wrap and no

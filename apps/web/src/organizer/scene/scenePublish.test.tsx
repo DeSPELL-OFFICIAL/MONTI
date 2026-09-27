@@ -82,6 +82,13 @@ vi.mock('../../shared/config', async (orig) => ({
   getConfig: () => ({ addresses: { ticket: TICKET }, ipfsGateway: 'https://gw.test/' }),
 }));
 
+// The default-poster rasteriser needs a canvas jsdom does not have, so it is stubbed to raw
+// base64; that the create path renders and pins it is what is under test (T-SIMP-9).
+vi.mock('./autoPoster', () => ({
+  renderAutoPoster: vi.fn(async () => 'AUTO64'),
+  buildPosterSvg: () => '<svg/>',
+}));
+
 const { OpReverted } = await import('../../shared/chain/ops');
 const { CreateEvent } = await import('./CreateEvent');
 const { emptyEventDraft, emptyEventDraftTier } = await import('../useEventDraft');
@@ -296,6 +303,20 @@ describe('the publish path', () => {
     await waitFor(() => expect(saveEventArt).toHaveBeenCalled());
     expect(ticketOp).not.toHaveBeenCalled();
     expect(pinEventMetadata).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The poster is optional (plan B-2): a draft with an empty `posterCid` gets a default A4 poster
+   * synthesised from its title and theme backdrop, pinned through the same `pinEventImage` path an
+   * uploaded one takes — so the readable metadata still carries an `imageCid`.
+   */
+  it('auto-generates and pins a default poster when the draft has none (T-SIMP-9)', async () => {
+    open({ ...READY, posterCid: '' });
+    await create();
+    await waitFor(() => expect(screen.getByText('landed:/org/new/done/12')).toBeInTheDocument());
+    expect(pinEventImage).toHaveBeenCalledWith({ bytesBase64: 'AUTO64', kind: 'poster' });
+    const pinned = pinEventMetadata.mock.calls.at(-1)?.[0];
+    expect(pinned?.meta.imageCid).toBe('bafkposter');
   });
 });
 

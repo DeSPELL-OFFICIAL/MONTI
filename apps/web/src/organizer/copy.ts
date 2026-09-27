@@ -363,7 +363,6 @@ const ko = {
     },
 
     problems: {
-      poster: '포스터를 올려 주세요',
       title: '제목을 2자에서 60자 사이로 적어 주세요',
       tags: '태그는 5개까지, 하나에 12자까지예요',
       body: '소개를 2000자 안으로 적어 주세요',
@@ -887,7 +886,6 @@ const en: typeof ko = {
     },
 
     problems: {
-      poster: 'Please upload a poster',
       title: 'Write a title of 2 to 60 characters',
       tags: 'Up to five tags, each up to 12 characters',
       body: 'Write the description in 2000 characters or fewer',

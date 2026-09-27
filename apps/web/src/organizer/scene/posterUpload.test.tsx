@@ -262,7 +262,6 @@ describe('만들기 while the poster is still going up', () => {
 
     await user.click(screen.getByRole('button', { name: copy.tiers.create }));
     expect(screen.getByText(copy.posterWaiting)).toBeInTheDocument();
-    expect(screen.queryByText(copy.problems.poster)).toBeNull();
     expect(publish).not.toHaveBeenCalled();
 
     await land();
@@ -272,16 +271,17 @@ describe('만들기 while the poster is still going up', () => {
     expect(handed?.draft.posterCid).toBe('bafkposter');
   });
 
-  it('still says a poster is missing when there is no poster and no upload', async () => {
+  it('publishes without a poster — the default is generated at publish (T-SIMP-9)', async () => {
     const user = userEvent.setup();
     store = [{ id: 'd-2', updatedAt: 1_000, data: ALMOST }];
     open('/org/new/d-2');
     await waitFor(() => expect(screen.getByLabelText(copy.titleLabel)).toHaveValue(ALMOST.title));
 
+    // A blank poster no longer blocks 만들기 (plan B-2): `usePublish` synthesises a default A4
+    // poster from the title and theme backdrop at publish, so the scene lets the press through.
     await user.click(screen.getByRole('button', { name: copy.tiers.create }));
-    expect(screen.getByText(copy.problems.poster)).toBeInTheDocument();
+    await waitFor(() => expect(publish).toHaveBeenCalledTimes(1));
     expect(screen.queryByText(copy.posterWaiting)).toBeNull();
-    expect(publish).not.toHaveBeenCalled();
   });
 
   it('does not publish behind a refusal — the chip is the way on', async () => {

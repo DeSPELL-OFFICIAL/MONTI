@@ -39,7 +39,7 @@ describe('eventProblems', () => {
   /** 소개는 이제 필수(최소 10자, plan section A-4): 빈 소개는 bodyTooShort 로 잡힌다. */
   it('names an empty draft section by section, in the order the scene asks', () => {
     expect(eventProblems(emptyEventDraft)).toEqual(
-      ['poster', 'title', 'bodyTooShort', 'venue', 'startsAt', 'endsAt'],
+      ['title', 'bodyTooShort', 'venue', 'startsAt', 'endsAt'],
     );
     expect(eventProblems({ ...READY, description: '' })).toEqual(['bodyTooShort']);
   });
