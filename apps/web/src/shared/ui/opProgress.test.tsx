@@ -42,6 +42,20 @@ describe('OpProgress', () => {
     expect(screen.getByText(ko.signup.registerSlow)).toBeInTheDocument();
   });
 
+  it('keeps the per-second elapsed count out of the live region (expert-4 D4)', () => {
+    render(<OpProgress phase="saving" />);
+    act(() => vi.advanceTimersByTime(3_000));
+    // Still on screen for a sighted viewer...
+    const line = screen.getByText(elapsed(3));
+    expect(line).toBeInTheDocument();
+    // ...but aria-hidden and outside role="status", so a screen reader is not made to re-read the
+    // whole wait every second — the live region carries only the sentences.
+    expect(line).toHaveAttribute('aria-hidden', 'true');
+    const status = screen.getByRole('status');
+    expect(status.textContent ?? '').not.toContain(elapsed(3));
+    expect(status.textContent ?? '').toContain(op.typical);
+  });
+
   it('shows the timeout line and 다시 시도 at forty-five seconds, never a bare spinner', () => {
     const onRetry = vi.fn();
     render(<OpProgress phase="confirming" onRetry={onRetry} />);

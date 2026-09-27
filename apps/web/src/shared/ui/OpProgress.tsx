@@ -100,11 +100,17 @@ export function OpProgress({ phase, onRetry, onLater, laterLabel, timeoutMessage
           <>
             {note ? <p className="muted">{note}</p> : null}
             <p className="muted">{copy.op.typical}</p>
-            {seconds > 0 ? <p className="muted">{fmt(copy.op.elapsed, { sec: seconds })}</p> : null}
             {slow ? <p className="muted">{copy.signup.registerSlow}</p> : null}
           </>
         )}
       </div>
+      {/* The elapsed seconds tick once a second, so they are kept out of the live region above and
+          marked aria-hidden: otherwise `role="status"` makes a screen reader re-read the whole wait
+          every second (expert-4 D4). The live region carries only the step/delay/timeout sentences,
+          which change rarely, while the number stays on screen for a sighted viewer. */}
+      {!done && !timedOut && seconds > 0 ? (
+        <p className="muted" aria-hidden="true">{fmt(copy.op.elapsed, { sec: seconds })}</p>
+      ) : null}
     </div>
   );
 }
