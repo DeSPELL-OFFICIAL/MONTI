@@ -97,7 +97,6 @@ function DisplayName() {
         />
       </Field>
       <p className="muted">{copy.me.displayNameHelp}</p>
-      <p className="muted">{copy.me.displayNameVsNickname}</p>
       {message ? <Alert tone={tone}>{message}</Alert> : null}
       <Button onClick={() => void save()} disabled={busy}>{copy.common.save}</Button>
     </Card>

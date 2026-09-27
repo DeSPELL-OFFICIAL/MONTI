@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Alert, Button, Card, Fab, Field, Screen, Spinner } from '../shared/ui';
+import { Alert, Button, Card, EmptyState, Fab, Field, Screen, Spinner } from '../shared/ui';
 import { fmt, useLocale } from '../shared/i18n';
 import { useSession } from '../shared/session';
 import { formatEventDate } from '../attendee/discover/useEvents';
@@ -126,7 +126,7 @@ function OrganizerHome() {
         ) : null}
 
         {!eventsLoading && !eventsError && selected !== undefined && mine.length === 0 ? (
-          <p className="muted">{copy.home.eventsEmpty}</p>
+          <EmptyState>{copy.home.eventsEmpty}</EmptyState>
         ) : null}
 
         <ul className="event-list">

@@ -151,10 +151,10 @@ export function ClaimFlow({ eventId, present }: ClaimFlowProps) {
     // `id` is the text primary key, `eventId` the numeric column the tiers hang off.
     queryFn: () => gql<{ Event: EnvioEvent[]; Tier: EnvioTier[] }>(EVENT_QUERY, { id: eventId, eventId }),
   });
-  const { data: myTickets } = useMyTickets();
+  const { data: myTickets, isLoading: ticketsLoading } = useMyTickets();
   // The attendee's own request, for an event that takes requests. Refetched after a request or a
   // cancel lands, since the indexer needs a moment to catch up to the transaction.
-  const { request: myRequest, refetch: refetchRequest } = useMyRequest(eventId);
+  const { request: myRequest, isLoading: requestLoading, refetch: refetchRequest } = useMyRequest(eventId);
   const refetchRequestRef = useRef(refetchRequest);
   refetchRequestRef.current = refetchRequest;
 
@@ -185,6 +185,12 @@ export function ClaimFlow({ eventId, present }: ClaimFlowProps) {
   const soldOut = selected !== undefined && Number(selected.supply) - Number(selected.minted) <= 0;
   const cancelled = event?.status === CANCELLED;
   const blocked = limitReached || soldOut || cancelled;
+
+  // The pre-block above only holds a claim back once `held` (and, in approval mode, the pending
+  // request) is known. On a cold load — the first paint after login — those queries have not
+  // answered yet and `held` reads 0, so a fast tap would send an op the chain only reverts (live
+  // check e). The button waits: disabled with a quiet 확인 중… until both counts have resolved.
+  const countsResolved = !ticketsLoading && !(approval && requestLoading);
 
   // The button is down for every state but the two the person acts from.
   const busy = phase === 'saving' || phase === 'sent';
@@ -583,14 +589,16 @@ export function ClaimFlow({ eventId, present }: ClaimFlowProps) {
         ) : null}
         {/* Still confirming counts as busy: the op is already on its way and a second tap would
             claim twice — `held` cannot have caught up yet to stop it. */}
-        <Button onClick={() => void run()} disabled={phase !== 'idle' || blocked}>
-          {approval
-            ? busy
-              ? copy.claim.requesting
-              : copy.claim.requestCta
-            : busy
-              ? copy.claim.working
-              : copy.claim.cta}
+        <Button onClick={() => void run()} disabled={phase !== 'idle' || blocked || !countsResolved}>
+          {!countsResolved
+            ? copy.claim.checking
+            : approval
+              ? busy
+                ? copy.claim.requesting
+                : copy.claim.requestCta
+              : busy
+                ? copy.claim.working
+                : copy.claim.cta}
         </Button>
         {/* Reassurance right by the button (plan C 여정 A): free, and MONTI does the hard part.
             The detail sheet says "무료예요 · 돈 안 들어요"; the route keeps the create-path wording. */}

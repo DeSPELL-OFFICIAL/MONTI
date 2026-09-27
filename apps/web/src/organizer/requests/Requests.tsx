@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Alert, Button, Card, OpProgress, Screen, Spinner } from '../../shared/ui';
+import { Alert, Button, Card, EmptyState, OpProgress, Screen, Spinner } from '../../shared/ui';
 import { fmt } from '../../shared/i18n';
 import { gql } from '../../shared/envio/client';
 import {
@@ -216,10 +216,12 @@ export function Requests() {
       {busy ? <OpProgress phase="saving" /> : null}
       {/* The list re-reads itself every few seconds, so a lagging request and a decision made
           elsewhere both surface without a reload. */}
-      <p className="muted">{copy.checking}</p>
+      {/* The re-poll hint belongs beside a list that is being watched — not stranded over an
+          empty screen, where the centred empty state says all there is to say (visual R1-4). */}
+      {visible.length > 0 ? <p className="muted">{copy.checking}</p> : null}
 
       {isLoading ? <Spinner /> : null}
-      {!isLoading && visible.length === 0 ? <p className="muted">{copy.empty}</p> : null}
+      {!isLoading && visible.length === 0 ? <EmptyState>{copy.empty}</EmptyState> : null}
 
       {visible.length > 0 ? (
         <>

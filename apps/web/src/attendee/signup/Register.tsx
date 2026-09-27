@@ -103,6 +103,33 @@ const CHALLENGE_REFRESH_MS = 40_000;
 const SLOW_AFTER_MS = 10_000;
 
 /**
+ * `registerIdentity` goes through a single attester that sends one registration at a time, so a
+ * burst of signups queues behind it and the ones that cannot get a turn come back as
+ * `resource-exhausted` / `ATTESTER_BUSY`. That is "the queue is full, come back", not "this
+ * failed", so the run waits it out on its own — three times, longer each time — before the
+ * screen says a word about it. Only when the queue is still full after all three does the
+ * ordinary busy message surface.
+ */
+const REGISTER_RETRY_DELAYS_MS = [3_000, 6_000, 10_000];
+
+/**
+ * The stepper line shown while a busy answer is being waited out. Inlined here rather than added
+ * to `shared/copy`: this one screen is the only place a retry is waited out, and the copy files
+ * are outside this change's scope.
+ */
+const REGISTER_BUSY_LINE = '잠시 붐벼요 · 다시 시도 중…';
+
+/** A momentary "the attester is busy", worth waiting out — not a refusal that retrying would loop on. */
+function isAttesterBusy(failure: unknown): boolean {
+  const { code, reason } = callableFailure(failure);
+  return code === 'resource-exhausted' || reason === 'ATTESTER_BUSY';
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => { setTimeout(resolve, ms); });
+}
+
+/**
  * The registration challenge, minted **before** the tap and kept fresh for as long as the
  * screen is open.
  *
@@ -233,6 +260,9 @@ export function Register() {
   const [slow, setSlow] = useState(false);
   // The run is up and the challenge is not here yet. It carries on by itself the moment it is.
   const [gettingReady, setGettingReady] = useState(false);
+  // A busy answer from the attester is being waited out; the stepper says so and the run resumes
+  // by itself. No tap is involved and no error is shown until the retries are spent.
+  const [retrying, setRetrying] = useState(false);
   const [error, setError] = useState('');
   // True once this device is known to have no key store at all — a private window. Retrying
   // would fail identically, so the only thing left to offer is finishing without one.
@@ -314,7 +344,22 @@ export function Register() {
       });
       // Resolving at all is success. `alreadyRegistered` means the server found this account
       // on chain already and sent nothing — there is no hash to wait for and nothing to redo.
-      await api.registerIdentity({ personId, deviceX: x, deviceY: y, platform: platform() });
+      // A busy attester is not a failure, so the run waits it out and comes back on its own
+      // ({@link REGISTER_RETRY_DELAYS_MS}) before the catch below ever surfaces the busy answer.
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          await api.registerIdentity({ personId, deviceX: x, deviceY: y, platform: platform() });
+          break;
+        } catch (failure) {
+          // `undefined` here means the retries are spent (index past the end); a non-busy
+          // answer is a real failure. Either way the catch below gets it.
+          const backoff = REGISTER_RETRY_DELAYS_MS[attempt];
+          if (backoff === undefined || !isAttesterBusy(failure)) throw failure;
+          setRetrying(true);
+          await delay(backoff);
+          setRetrying(false);
+        }
+      }
       await refreshClaims();
       // The guard asked the server once; saying so here is cheaper and truer than asking again.
       markRegistered();
@@ -336,12 +381,14 @@ export function Register() {
       setError(message(copy, at, failure));
     } finally {
       setGettingReady(false);
+      setRetrying(false);
       setRunning(false);
     }
   }
 
   /** What the spinner says: the wait for a challenge, or the step the run has reached. */
   function workingLine(): string {
+    if (retrying) return REGISTER_BUSY_LINE;
     if (gettingReady) return copy.signup.challengeWaiting;
     return step === 'passkey' ? copy.signup.passkeyWorking : copy.signup.deviceWorking;
   }

@@ -133,7 +133,7 @@ export const en: typeof ko = {
     artGuest: 'Guest',
   },
   claim: {
-    cta: 'Get a ticket', working: 'Getting your ticket', done: "You got your ticket · It's in My Tickets", tierLabel: 'Ticket type',
+    cta: 'Get a ticket', checking: 'Checking…', working: 'Getting your ticket', done: "You got your ticket · It's in My Tickets", tierLabel: 'Ticket type',
     failed: 'Could not get the ticket. Please try again shortly.',
     confirming: 'Still confirming. Your ticket will show up under My tickets shortly.',
     limitReached: 'You already have every ticket this event allows.',

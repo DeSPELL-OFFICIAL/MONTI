@@ -9,6 +9,8 @@ const ACCOUNT = `0x${'ab'.repeat(20)}`;
 const DEVICE_X = `0x${'11'.repeat(32)}`;
 const DEVICE_Y = `0x${'22'.repeat(32)}`;
 const CHALLENGE = 'Kioqoyoqkioqoyoqkioqoyoqkioqoyoqkioqoyoq123';
+/** The stepper line while the run waits out a busy attester — inlined in Register.tsx, matched here. */
+const BUSY_LINE = '잠시 붐벼요 · 다시 시도 중…';
 
 const loginChallenge = vi.fn(async () => ({ challenge: CHALLENGE, expiresAt: 0 }));
 const registerPasskey = vi.fn(async () => ({ ok: true as const, account: ACCOUNT, credentialId: 'cred' }));
@@ -378,16 +380,56 @@ describe('register · the phone half', () => {
     expect(screen.queryByText(ko.signup.deviceWebNote)).toBeNull();
   });
 
-  it('asks the attendee to try again when the attester is busy, and succeeds on the retry', async () => {
+  it('waits out a busy attester on its own and finishes without a second tap', async () => {
+    vi.useFakeTimers();
     registerIdentity.mockRejectedValueOnce(callableError('resource-exhausted', 'ATTESTER_BUSY'));
     renderScreen(<Register />);
-    await userEvent.click(start());
+    await act(async () => { fireEvent.click(start()); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('지금 처리가 밀려 있어요. 잠시 뒤 다시 눌러 주세요.');
+    // The first attempt was refused; the run is waiting out the first backoff and says so, with
+    // no error and no tap asked of anyone.
+    expect(registerIdentity).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(BUSY_LINE)).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
+
+    // Three seconds later the retry lands and signup finishes; nobody pressed anything twice.
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(registerIdentity).toHaveBeenCalledTimes(2);
+    expect(navigate).toHaveBeenCalledWith('/signup/done');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('surfaces the busy message only after the three automatic retries are spent, and a fresh tap still recovers', async () => {
+    vi.useFakeTimers();
+    registerIdentity
+      .mockRejectedValueOnce(callableError('resource-exhausted', 'ATTESTER_BUSY'))
+      .mockRejectedValueOnce(callableError('resource-exhausted', 'ATTESTER_BUSY'))
+      .mockRejectedValueOnce(callableError('resource-exhausted', 'ATTESTER_BUSY'))
+      .mockRejectedValueOnce(callableError('resource-exhausted', 'ATTESTER_BUSY'));
+    renderScreen(<Register />);
+    await act(async () => { fireEvent.click(start()); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(registerIdentity).toHaveBeenCalledTimes(1);
+
+    // The three backoffs — 3s, then 6s, then 10s — pass with the busy line up and nothing shown.
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(registerIdentity).toHaveBeenCalledTimes(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    expect(registerIdentity).toHaveBeenCalledTimes(3);
+    expect(screen.getByText(BUSY_LINE)).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+
+    // Four attempts in all (one plus three retries); only now is the busy message allowed out.
+    expect(registerIdentity).toHaveBeenCalledTimes(4);
+    expect(screen.getByRole('alert')).toHaveTextContent(ko.signup.deviceBusy);
     expect(navigate).not.toHaveBeenCalled();
 
-    await userEvent.click(screen.getByRole('button', { name: ko.signup.registerRetry }));
-    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/signup/done'));
+    // The next attempt succeeds, so one manual tap finishes signup.
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: ko.signup.registerRetry })); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(navigate).toHaveBeenCalledWith('/signup/done');
   });
 
   it('lets a phone with no secure chip finish signup and explains the entry path', async () => {

@@ -198,6 +198,11 @@ input, select, textarea { scroll-margin-bottom: calc(var(--sticky-bar-h) + var(-
 .screen:has(.fab-anchor) {
   padding-bottom: calc(var(--sab) + var(--tabbar-h) + var(--btn-h) + var(--s-4) + var(--s-4));
 }
+/* A tab-less detail screen (the ticket) that pins its primary action in a sticky bar has to
+   reserve the bar's height too, or the last line sits under it. */
+.screen:has(.sticky-bar) {
+  padding-bottom: calc(var(--sab) + var(--sticky-bar-h) + var(--s-5));
+}
 .screen h1 {
   font-size: var(--t-large);
   line-height: var(--t-large-lh);
@@ -624,7 +629,7 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
 /* A ticket row: the picture as a thumbnail, the number and the state beside it. The column is
    a fixed width rather than a share of the row because the art is 1.41x as tall as it is wide
    — at the 480px the screen is, a full-width ticket would make one row taller than the phone. */
-.ticket-row { display: grid; grid-template-columns: 76px 1fr; gap: var(--s-3); align-items: center; }
+.ticket-row { display: grid; grid-template-columns: 56px 1fr auto; gap: var(--s-3); align-items: center; }
 .ticket-row__art { display: block; }
 /* The detail screen shows one ticket, so it is the picture rather than a thumbnail — capped
    short of the full width so the state, the door guide and 입장하기 stay on the same screen. */
@@ -935,14 +940,22 @@ table { width: 100%; display: block; overflow-x: auto; }
   background: var(--brand-tint); border-color: transparent; color: var(--brand-ink);
   vertical-align: middle;
 }
-/* A ticket row is a picture and one line: the number and where the ticket stands. The event's
-   own name is printed inside the picture, which is why it is not repeated here. */
-.ticket-row__text { min-width: 0; font-weight: 600; }
+/* A ticket row: the picture as a small thumbnail, then the event's own name leading the row, the
+   day it starts under that, and where the ticket stands as a chip pinned to the right — the name
+   used to hide inside the picture, which inverted the row's hierarchy (visual R1-2). */
+.ticket-row__body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ticket-row__title {
+  min-width: 0; font-weight: 700; letter-spacing: -0.01em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ticket-row__state { justify-self: end; white-space: nowrap; }
 
 /* ── explore skeleton + empty states (plan §2a) ─────────────────────────────────────────── */
 /* Three grey cards the moment the list starts loading, so 탐색 never opens on a lone spinner
    that reads as a dead app. The shimmer is neutralised by the reduced-motion rule above. */
-.empty-state { display: grid; gap: var(--s-3); justify-items: start; margin: var(--s-4) 0; }
+.empty-state { display: grid; gap: var(--s-3); justify-items: center; text-align: center;
+  margin: var(--s-6) auto; max-width: 320px; }
+.empty-state__icon { color: var(--brand); opacity: 0.5; line-height: 0; }
 .event-card--skeleton { pointer-events: none; }
 .event-card__art--skeleton { box-shadow: none; animation: skeleton-pulse 1.3s ease-in-out infinite; }
 .skeleton-bar {

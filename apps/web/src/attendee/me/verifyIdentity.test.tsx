@@ -152,7 +152,7 @@ describe('VerifyIdentity', () => {
     renderScreen();
     await userEvent.click(cta());
     await comeBack();
-    expect(await screen.findByText('이미 계정이 있습니다. 기존 계정으로 로그인해 주세요.')).toBeInTheDocument();
+    expect(await screen.findByText('이미 계정이 있어요. 기존 계정으로 로그인해 주세요.')).toBeInTheDocument();
   });
 
   it('reports any other failure with the generic rejection copy', async () => {
