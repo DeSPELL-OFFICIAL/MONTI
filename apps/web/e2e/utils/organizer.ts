@@ -118,28 +118,37 @@ export async function createOrganizerAndEvent(page: Page, spec: EventSpec): Prom
       await resumeKeep.waitFor({ state: 'hidden', timeout: 15_000 }).catch(() => undefined);
     }
 
-    // Poster. Open the picker whether the card offers 포스터 올리기 (empty) or 포스터 바꾸기 (a
-    // resumed draft already had one). Fire the DOM click directly — the card can still be settling
-    // from the sheet's exit, and the button's own onClick is all that opens the modal.
-    await page.getByRole('button', { name: C.posterAdd, exact: true })
-      .or(page.getByRole('button', { name: C.posterChange, exact: true }))
-      .first()
-      .evaluate((el) => (el as HTMLButtonElement).click());
-    // R2 change (was: getByLabel('사진 고르기')): the picker is now a showModal
-    // <dialog class="poster-modal"> and its file input sits inside a wrapping <label> (Field.tsx)
-    // whose text Chromium does not apply as the input's accessible name, so getByLabel no longer
-    // resolves (the input shows as a nameless button in the AX tree). Target it by CSS in the modal.
-    await page.locator('dialog.poster-modal input[type="file"]').setInputFiles(POSTER);
-    const crop = page.getByRole('button', { name: C.crop, exact: true });
-    await crop.waitFor({ state: 'attached', timeout: 15_000 });
-    await crop.evaluate((el) => (el as HTMLButtonElement).click());
-    // The modal closes and the card shows the picture; the upload runs behind the scene.
-    await expect(page.getByRole('button', { name: C.posterChange, exact: true })).toBeVisible({ timeout: 30_000 });
+    // Poster — Batch 2 made it OPTIONAL (plan B-2): a blank one is auto-filled at publish with a
+    // default A4 poster (CreateEvent.tsx line ~121; eventProblems never lists poster, so the create
+    // button enables without one). The harness therefore SKIPS the upload by default and exercises
+    // that auto-default. Set E2E_UPLOAD_POSTER=1 to still drive the full picker/crop flow.
+    const uploadPoster = process.env.E2E_UPLOAD_POSTER === '1';
+    if (uploadPoster) {
+      // Open the picker whether the card offers 포스터 올리기 (empty) or 포스터 바꾸기 (a resumed
+      // draft already had one). Fire the DOM click directly — the card can still be settling from
+      // the sheet's exit, and the button's own onClick is all that opens the modal.
+      await page.getByRole('button', { name: C.posterAdd, exact: true })
+        .or(page.getByRole('button', { name: C.posterChange, exact: true }))
+        .first()
+        .evaluate((el) => (el as HTMLButtonElement).click());
+      // The picker is a showModal <dialog class="poster-modal"> and its file input sits inside a
+      // wrapping <label> (Field.tsx) whose text Chromium does not apply as the input's accessible
+      // name, so getByLabel no longer resolves. Target it by CSS in the modal.
+      await page.locator('dialog.poster-modal input[type="file"]').setInputFiles(POSTER);
+      const crop = page.getByRole('button', { name: C.crop, exact: true });
+      await crop.waitFor({ state: 'attached', timeout: 15_000 });
+      await crop.evaluate((el) => (el as HTMLButtonElement).click());
+      // The modal closes and the card shows the picture; the upload runs behind the scene.
+      await expect(page.getByRole('button', { name: C.posterChange, exact: true })).toBeVisible({ timeout: 30_000 });
+    }
 
-    // Force-fill through the structural field locator: the poster upload keeps the scene
-    // re-rendering, so getByLabel churns and the plain fill stalls on the stability gate.
+    // Force-fill through the structural field locator: a poster upload (when enabled) keeps the
+    // scene re-rendering, so getByLabel churns and the plain fill stalls on the stability gate.
     await fieldInput(page, C.title).fill(spec.title, { force: true });
-    await fieldInput(page, C.intro).fill(spec.intro, { force: true });
+    // Batch 2 relaxed 소개 to allow an empty value (placeholder instead of the 10-char minimum), and
+    // the field lives behind the 더 설정하기 fold, so filling it is best-effort — a blank intro is a
+    // valid event now, and the create must not hinge on reaching a folded, optional box.
+    await fieldInput(page, C.intro).fill(spec.intro, { force: true }).catch(() => undefined);
     await fieldInput(page, C.startsAt).fill(futureLocal(2, 12), { force: true });
     await fieldInput(page, C.venue).fill(spec.venue, { force: true });
 
