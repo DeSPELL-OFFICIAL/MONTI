@@ -22,7 +22,7 @@ test('public surface: discover, event detail, signup entry, login', async ({ bro
     await page.waitForTimeout(2500);
     const cards = await page.locator('.event-card').count();
     notes.discoverEventCards = cards;
-    notes.fabVisible = await page.getByRole('button', { name: '만들기', exact: true }).isVisible();
+    notes.fabVisible = await page.getByRole('button', { name: '행사 만들기', exact: true }).isVisible();
     notes.discoverText = (await page.locator('main.screen').innerText()).slice(0, 1500);
     await page.screenshot({ path: `${SHOTS}/10-discover.png`, fullPage: true });
 

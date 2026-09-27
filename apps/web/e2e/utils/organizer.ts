@@ -8,7 +8,7 @@ export const POSTER = resolve(HERE, '../assets/poster.jpg');
 
 /** Copy strings, verbatim from apps/web/src/organizer/copy.ts (scene) and ko.ts. */
 const C = {
-  fab: '만들기',
+  fab: '행사 만들기',
   posterAdd: '포스터 올리기',
   posterChange: '포스터 바꾸기',
   filePick: '사진 고르기',
@@ -41,9 +41,9 @@ const C = {
   // keeps the button pressable so a second press re-checks the same op (never a second event).
   createConfirming: '만드는 중이에요',
   // publish (organizer dashboard)
-  publish: '발행하기',
+  publish: '공개하기',
   publishConfirm: '네, 진행할게요',
-  published: '발행했어요',
+  published: '공개했어요',
   publishConfirming: '아직 확인 중이에요',
 } as const;
 
