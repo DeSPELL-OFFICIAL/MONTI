@@ -647,6 +647,18 @@ describe('Discover · a hidden start time', () => {
   });
 });
 
+describe('EventDetail · a venue left blank', () => {
+  it('reads a public event without a venue as the default label 장소 미정', async () => {
+    gql.mockResolvedValue({ Event: [EVENT_ONE], Tier: TIERS });
+    fetchEventMetadata.mockResolvedValue({ ...META_A, venue: '' });
+    renderDetail();
+    await screen.findByRole('heading', { name: '재즈 나이트' });
+    // 장소는 선택이다: 빈 공개 장소는 지역과 함께 "장소 미정"으로 읽히고, 지도 링크는 없다.
+    expect(await screen.findByText(/서울 · 장소 미정/)).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /지도로 보기/ })).toBeNull();
+  });
+});
+
 describe('EventDetail · what only ticket holders see', () => {
   const HIDDEN = {
     ...META_A, venue: '', region: 'KR-11', venueHidden: true, timeHidden: true,

@@ -110,6 +110,8 @@ export const ko = {
     tagsMore: '+{{count}}',
     // 장소를 숨긴 행사의 공개 대역은 지역이다. 지역은 늘 공개이므로 17개 모두 이름이 있어야 한다.
     venueHidden: '장소는 티켓을 받으면 공개돼요',
+    // 장소를 비운 공개 행사의 기본 라벨. 장소는 이제 선택이다.
+    venueTbd: '장소 미정',
     timeHidden: '시작 시각은 티켓을 받으면 공개돼요',
     privateOnly: '나만 보여요',
     privateLoading: '확인하고 있어요',

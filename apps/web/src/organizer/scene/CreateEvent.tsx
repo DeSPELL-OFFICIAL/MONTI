@@ -366,7 +366,6 @@ export function CreateEvent() {
             </Field>
           </div>
           {wrong('region')}
-          {wrong('venue')}
           {wrong('venueTooLong')}
         </Card>
 

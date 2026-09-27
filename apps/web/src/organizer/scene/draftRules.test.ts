@@ -39,7 +39,7 @@ describe('eventProblems', () => {
   /** 소개는 이제 선택이다(계획 B-4가 ≥10자 규칙을 뒤집음): 빈 소개는 더 이상 문제가 아니다. */
   it('names an empty draft section by section, in the order the scene asks', () => {
     expect(eventProblems(emptyEventDraft)).toEqual(
-      ['title', 'venue', 'startsAt', 'endsAt'],
+      ['title', 'startsAt', 'endsAt'],
     );
     expect(eventProblems({ ...READY, description: '' })).toEqual([]);
   });
@@ -80,8 +80,11 @@ describe('eventProblems', () => {
     expect(eventProblems({ ...READY, regionCode: 'KR-99' })).toEqual(['region']);
   });
 
-  it('separates a missing venue from one that is merely too long', () => {
-    expect(eventProblems({ ...READY, venue: '  ' })).toEqual(['venue']);
+  it('allows an empty 장소 (optional now) but still caps its length', () => {
+    // P1 relaxation: 장소는 선택이다 — 빈값도 공백만도 통과한다(기본 라벨 "장소 미정"로 읽힘).
+    expect(eventProblems({ ...READY, venue: '' })).toEqual([]);
+    expect(eventProblems({ ...READY, venue: '  ' })).toEqual([]);
+    expect(eventProblems({ ...READY, venue: 'ㄱ'.repeat(200) })).toEqual([]);
     expect(eventProblems({ ...READY, venue: 'ㄱ'.repeat(201) })).toEqual(['venueTooLong']);
   });
 

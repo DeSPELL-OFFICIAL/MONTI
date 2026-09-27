@@ -477,10 +477,10 @@ describe('when it does not land', () => {
 });
 
 /**
- * expert-3 "minimum event ≤ 6 taps": the founder's "동아리 공연, 내일 저녁, 무료 30명". With the
- * batch-2 defaults in force (auto poster on publish, next-Saturday start, optional 소개, 수량 100,
- * 서울, 종류 '일반') the only fields still needing input on a fresh /org/new are the title and the
- * venue; everything else is defaulted, so it is title + venue + one tap on 행사 만들기.
+ * expert-3 "minimum event": the founder's "동아리 공연, 내일 저녁, 무료 30명". With the batch-2/P1
+ * defaults in force (auto poster on publish, next-Saturday start, optional 소개, optional 장소,
+ * 수량 100, 서울, 종류 '일반') the only field still needing input on a fresh /org/new is the title;
+ * everything else is defaulted, so the minimum is title + one tap on 행사 만들기 — two actions.
  */
 function openFresh(): void {
   render(
@@ -495,7 +495,7 @@ function openFresh(): void {
 }
 
 describe('the minimum event', () => {
-  it('reaches a published event in a handful of actions (≤ 6)', async () => {
+  it('reaches a published event in two actions (title + 행사 만들기)', async () => {
     // One team already exists, so no organiser-name tap is needed either.
     orgsListed.mockReturnValue([{ orgId: '9', canCreateEvent: true }]);
     const user = userEvent.setup();
@@ -505,22 +505,20 @@ describe('the minimum event', () => {
     // Count each field entry and the button press as one user action.
     let actions = 0;
     await user.type(screen.getByLabelText(copy.titleLabel), '동아리 공연'); actions += 1;
-    await user.type(screen.getByLabelText(copy.placeLabel), '학생회관'); actions += 1;
     await user.click(screen.getByRole('button', { name: copy.tiers.create })); actions += 1;
 
     await waitFor(() => expect(screen.getByText('landed:/org/new/done/12')).toBeInTheDocument());
     // The default poster was synthesised and pinned — no poster upload tap was ever needed.
     expect(pinEventImage).toHaveBeenCalledWith({ bytesBase64: 'AUTO64', kind: 'poster' });
-    // Measured minimum for the batch-2 form: 3 actions (title, venue, 행사 만들기).
-    expect(actions).toBe(3);
-    expect(actions).toBeLessThanOrEqual(6);
+    // Measured minimum for the P1 form: 2 actions (title, 행사 만들기). 장소는 이제 선택이다.
+    expect(actions).toBe(2);
   });
 
   /**
-   * Venue is still required in batch 2 (relaxing it is a later, P1 task), so a title-only tap does
-   * not publish — which is exactly why the venue is one of the counted actions above.
+   * 장소는 이제 선택이다(P1): 제목만으로도 발행된다. 빈 장소는 빈 문자열로 핀되고 탐색 상세는
+   * 기본 라벨 "장소 미정"으로 읽으므로, 장소는 더 이상 세는 동작이 아니다.
    */
-  it('does not publish while the still-required venue is empty', async () => {
+  it('publishes with the venue left blank (optional now)', async () => {
     orgsListed.mockReturnValue([{ orgId: '9', canCreateEvent: true }]);
     const user = userEvent.setup();
     openFresh();
@@ -529,7 +527,8 @@ describe('the minimum event', () => {
     await user.type(screen.getByLabelText(copy.titleLabel), '동아리 공연');
     await user.click(screen.getByRole('button', { name: copy.tiers.create }));
 
-    expect(screen.queryByText(/^landed:/)).toBeNull();
-    expect(screen.getByText(copy.problems.venue)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('landed:/org/new/done/12')).toBeInTheDocument());
+    const pinned = pinEventMetadata.mock.calls.at(-1)?.[0];
+    expect(pinned?.meta).toMatchObject({ venue: '', venueHidden: false });
   });
 });
