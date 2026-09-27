@@ -157,6 +157,11 @@ export function VerifyIdentity() {
         <Button variant="ghost" onClick={() => void start()}>{copy.common.retry}</Button>
       ) : null}
       <Button onClick={start} disabled={polling}>{copy.kyc.cta}</Button>
+      {/* An explicit way out to wherever they came from (returnTo). A deep-link landing may have no
+          history for the global back bar to pop, so verification is never a place a person is stuck. */}
+      {polling ? null : (
+        <Button variant="ghost" onClick={() => navigate(returnTo)}>{copy.kyc.later}</Button>
+      )}
     </Screen>
   );
 }

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Alert, Button, Card, OpProgress, Screen, Spinner } from '../../shared/ui';
@@ -23,6 +23,9 @@ import { useOrganizerCopy } from '../copy';
  * selection larger than this goes out as several sponsored ops rather than one that would run out.
  */
 const BATCH_SIZE = 20;
+/** How often the open 신청 관리 screen re-reads the pending list, so a lagging ClaimRequest and a
+ *  decision made elsewhere both surface without a reload. Paused while the tab is hidden. */
+const REQUESTS_POLL_MS = 10_000;
 /** `wait` gave up before the op landed — not a failure, it may still be on its way. */
 const STILL_CONFIRMING = 'TIMEOUT';
 
@@ -115,14 +118,20 @@ export function Requests() {
         }
         setSelected(new Set());
       } catch (cause) {
-        if (cause instanceof OpReverted && cause.revertReason === STILL_CONFIRMING) setConfirming(true);
-        else setError(copy.failed);
+        if (cause instanceof OpReverted && cause.revertReason === STILL_CONFIRMING) {
+          // Still on its way — keep the rows optimistically hidden; the poll below reconciles them.
+          setConfirming(true);
+        } else {
+          // A real refusal: the rows never moved, so let them back into the list at once.
+          setError(copy.failed);
+          setDone((prev) => new Set([...prev].filter((id) => !ids.includes(id))));
+        }
       } finally {
-        // The refetch is the truth whether every op landed, some did, or one timed out: clearing
-        // the optimistic set lets any row the chain did not move come back into the list.
-        await refetch().catch(() => []);
-        setDone(new Set());
         setBusy(false);
+        // The indexer lags the decision, so a single refetch would show the rows still pending and
+        // undo the optimistic hide. Refresh now for the fast path; the 10s poll and the reconcile
+        // effect below keep the acted rows hidden until the flip actually lands.
+        void refetch().catch(() => []);
       }
     },
     [event, eventId, refetch, copy.failed],
@@ -135,6 +144,38 @@ export function Requests() {
       else next.add(requestId);
       return next;
     });
+
+  // Keep the pending list fresh while the screen is open: a new request (which can lag the chain by
+  // minutes) appears on its own, and a decision reconciles here. Polled through a ref so react-query
+  // handing back a fresh refetch each render does not reset the timer; paused while the tab is hidden.
+  const refetchRef = useRef(refetch);
+  refetchRef.current = refetch;
+  useEffect(() => {
+    if (!mayApprove || eventId === '') return undefined;
+    let live = true;
+    let handle: ReturnType<typeof setTimeout> | undefined;
+    const tick = async (): Promise<void> => {
+      if (!live) return;
+      if (!document.hidden) await refetchRef.current().catch(() => []);
+      if (live) handle = setTimeout(() => void tick(), REQUESTS_POLL_MS);
+    };
+    handle = setTimeout(() => void tick(), REQUESTS_POLL_MS);
+    return () => {
+      live = false;
+      if (handle !== undefined) clearTimeout(handle);
+    };
+  }, [mayApprove, eventId]);
+
+  // Reconcile the optimistic hide against the indexer: a row stays hidden only while it is still in
+  // the pending set. Once a decision is indexed the row leaves that set and is dropped from `done`;
+  // a refused op left the row in the set, so it comes back on its own.
+  useEffect(() => {
+    setDone((prev) => {
+      if (prev.size === 0) return prev;
+      const next = new Set([...prev].filter((id) => requests.some((request) => request.requestId === id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [requests]);
 
   if (eventLoading || orgsLoading) {
     return (
@@ -173,6 +214,9 @@ export function Requests() {
       {error ? <Alert tone="error">{error}</Alert> : null}
       {/* The determinate wait for approve/reject, in place of a bare "처리하고 있어요" (plan §2c). */}
       {busy ? <OpProgress phase="saving" /> : null}
+      {/* The list re-reads itself every few seconds, so a lagging request and a decision made
+          elsewhere both surface without a reload. */}
+      <p className="muted">{copy.checking}</p>
 
       {isLoading ? <Spinner /> : null}
       {!isLoading && visible.length === 0 ? <p className="muted">{copy.empty}</p> : null}

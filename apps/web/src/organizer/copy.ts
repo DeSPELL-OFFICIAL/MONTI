@@ -262,6 +262,7 @@ const ko = {
     working: '처리하고 있어요',
     confirming: '아직 확인 중이에요. 잠시 뒤 새로고침하면 반영돼요',
     failed: '처리하지 못했어요. 잠시 뒤 다시 시도해 주세요',
+    checking: '새 신청 확인 중',
   },
 
   announce: {
@@ -337,7 +338,7 @@ const ko = {
     tagAdd: '태그 더하기',
     tagRemove: '{{tag}} 빼기',
     bodyLabel: '소개',
-    bodyPlaceholder: '어떤 행사인지 알려주세요',
+    bodyPlaceholder: '예: 우리 동아리 정기공연이에요! 친구들 다 놀러 와요 🎸',
     count: '{{count}}/{{max}}',
 
     placeLabel: '장소',
@@ -366,7 +367,6 @@ const ko = {
       title: '제목을 2자에서 60자 사이로 적어 주세요',
       tags: '태그는 5개까지, 하나에 12자까지예요',
       body: '소개를 2000자 안으로 적어 주세요',
-      bodyTooShort: '소개를 10자 이상 적어 주세요',
       region: '지역을 골라 주세요',
       venue: '장소를 적어 주세요',
       venueTooLong: '장소는 200자 안으로 적어 주세요',
@@ -788,6 +788,7 @@ const en: typeof ko = {
     working: 'Working',
     confirming: 'Still confirming. Refresh in a moment to see the change',
     failed: 'Could not finish. Please try again in a moment',
+    checking: 'Checking for new requests',
   },
 
   announce: {
@@ -863,7 +864,7 @@ const en: typeof ko = {
     tagAdd: 'Add a tag',
     tagRemove: 'Remove {{tag}}',
     bodyLabel: 'About this event',
-    bodyPlaceholder: 'Tell people what the event is',
+    bodyPlaceholder: "e.g. Our club's regular show — come and hang out! 🎸",
     count: '{{count}}/{{max}}',
 
     placeLabel: 'Where',
@@ -892,7 +893,6 @@ const en: typeof ko = {
       title: 'Write a title of 2 to 60 characters',
       tags: 'Up to five tags, each up to 12 characters',
       body: 'Write the description in 2000 characters or fewer',
-      bodyTooShort: 'Write a description of at least 10 characters',
       region: 'Please pick a region',
       venue: 'Please write the venue',
       venueTooLong: 'Write the venue in 200 characters or fewer',

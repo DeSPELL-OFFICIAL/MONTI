@@ -475,3 +475,61 @@ describe('when it does not land', () => {
     expect(ticketOp).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * expert-3 "minimum event ≤ 6 taps": the founder's "동아리 공연, 내일 저녁, 무료 30명". With the
+ * batch-2 defaults in force (auto poster on publish, next-Saturday start, optional 소개, 수량 100,
+ * 서울, 종류 '일반') the only fields still needing input on a fresh /org/new are the title and the
+ * venue; everything else is defaulted, so it is title + venue + one tap on 행사 만들기.
+ */
+function openFresh(): void {
+  render(
+    <MemoryRouter initialEntries={['/org/new']}>
+      <Routes>
+        <Route path="/org/new" element={<CreateEvent />} />
+        <Route path="/org/new/:draftId" element={<CreateEvent />} />
+        <Route path="*" element={<Probe />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+describe('the minimum event', () => {
+  it('reaches a published event in a handful of actions (≤ 6)', async () => {
+    // One team already exists, so no organiser-name tap is needed either.
+    orgsListed.mockReturnValue([{ orgId: '9', canCreateEvent: true }]);
+    const user = userEvent.setup();
+    openFresh();
+    await waitFor(() => expect(screen.getByLabelText(copy.titleLabel)).toBeInTheDocument());
+
+    // Count each field entry and the button press as one user action.
+    let actions = 0;
+    await user.type(screen.getByLabelText(copy.titleLabel), '동아리 공연'); actions += 1;
+    await user.type(screen.getByLabelText(copy.placeLabel), '학생회관'); actions += 1;
+    await user.click(screen.getByRole('button', { name: copy.tiers.create })); actions += 1;
+
+    await waitFor(() => expect(screen.getByText('landed:/org/new/done/12')).toBeInTheDocument());
+    // The default poster was synthesised and pinned — no poster upload tap was ever needed.
+    expect(pinEventImage).toHaveBeenCalledWith({ bytesBase64: 'AUTO64', kind: 'poster' });
+    // Measured minimum for the batch-2 form: 3 actions (title, venue, 행사 만들기).
+    expect(actions).toBe(3);
+    expect(actions).toBeLessThanOrEqual(6);
+  });
+
+  /**
+   * Venue is still required in batch 2 (relaxing it is a later, P1 task), so a title-only tap does
+   * not publish — which is exactly why the venue is one of the counted actions above.
+   */
+  it('does not publish while the still-required venue is empty', async () => {
+    orgsListed.mockReturnValue([{ orgId: '9', canCreateEvent: true }]);
+    const user = userEvent.setup();
+    openFresh();
+    await waitFor(() => expect(screen.getByLabelText(copy.titleLabel)).toBeInTheDocument());
+
+    await user.type(screen.getByLabelText(copy.titleLabel), '동아리 공연');
+    await user.click(screen.getByRole('button', { name: copy.tiers.create }));
+
+    expect(screen.queryByText(/^landed:/)).toBeNull();
+    expect(screen.getByText(copy.problems.venue)).toBeInTheDocument();
+  });
+});

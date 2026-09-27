@@ -292,6 +292,15 @@ describe('VerifyIdentity', () => {
     expect(getSignupStatus).toHaveBeenCalledTimes(before);
     vi.useRealTimers();
   });
+  /**
+   * A deep-link landing on /me/verify may have no history for the global back bar to pop, so the
+   * screen carries an explicit way out to wherever the person came from (returnTo).
+   */
+  it('lets a person leave to where they came from instead of getting stuck', async () => {
+    renderScreen('/me/verify?returnTo=%2Ftickets%2F42');
+    await userEvent.click(await screen.findByRole('button', { name: ko.kyc.later }));
+    expect(navigate).toHaveBeenCalledWith('/tickets/42');
+  });
 });
 
 describe('useKycLevel', () => {

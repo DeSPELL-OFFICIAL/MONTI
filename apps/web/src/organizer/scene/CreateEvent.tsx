@@ -314,8 +314,8 @@ export function CreateEvent() {
           {wrong('title')}
         </Card>
 
-        {/* 소개는 항상 보인다: 더 설정하기 밖의 제 카드다(plan section A-4). 서버는 빈 소개를
-            허용하지만 이 화면은 최소 10자를 요구한다. */}
+        {/* 소개는 항상 보이지만 이제 선택이다(계획 B-4): 빈값 허용, placeholder 예시로 안내한다.
+            서버·씬 모두 빈 소개를 받는다 — 남은 규칙은 2000자 상한(body)뿐이다. */}
         <Card id="scene-body">
           <Field label={copy.bodyLabel}>
             <textarea
@@ -329,7 +329,6 @@ export function CreateEvent() {
           <p className="muted">
             {fmt(copy.count, { count: charCount(draft.description), max: MAX_BODY_CHARS })}
           </p>
-          {wrong('bodyTooShort')}
           {wrong('body')}
         </Card>
 
