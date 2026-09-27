@@ -363,7 +363,6 @@ const ko = {
     },
 
     problems: {
-      poster: '포스터를 올려 주세요',
       title: '제목을 2자에서 60자 사이로 적어 주세요',
       tags: '태그는 5개까지, 하나에 12자까지예요',
       body: '소개를 2000자 안으로 적어 주세요',
@@ -390,6 +389,9 @@ const ko = {
       nameHelp: '티켓에 찍히는 이름이에요',
       namePlaceholder: '일반',
       supply: '수량',
+      // 수량 칸 위 빠른 칩(30·50·100·무제한). 그룹 이름은 필드 라벨(수량)과 겹치면 안 돼서 따로 둔다.
+      supplyQuick: '수량 빠른 선택',
+      supplyUnlimited: '무제한',
       maxPerWallet: '1인당 한도',
       price: '가격',
       free: '무료',
@@ -887,7 +889,6 @@ const en: typeof ko = {
     },
 
     problems: {
-      poster: 'Please upload a poster',
       title: 'Write a title of 2 to 60 characters',
       tags: 'Up to five tags, each up to 12 characters',
       body: 'Write the description in 2000 characters or fewer',
@@ -913,6 +914,9 @@ const en: typeof ko = {
       nameHelp: 'This is the name printed on the ticket',
       namePlaceholder: 'General',
       supply: 'How many',
+      // Quick chips above the quantity box; the group name is kept apart from the field label.
+      supplyQuick: 'Quick amounts',
+      supplyUnlimited: 'Unlimited',
       maxPerWallet: 'Most one person may hold',
       price: 'Price',
       free: 'Free',

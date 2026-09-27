@@ -43,7 +43,7 @@ const { CreateEvent } = await import('./CreateEvent');
 const { TicketSection } = await import('./TicketSection');
 const { EVENT_DRAFT_KEY, emptyEventDraft, emptyEventDraftTier } = await import('../useEventDraft');
 const { organizerCopy } = await import('../copy');
-const { TICKET_ART_PRESETS } = await import('./draftRules');
+const { TICKET_ART_PRESETS, UNLIMITED_SUPPLY } = await import('./draftRules');
 const { ko: sharedCopy } = await import('../../shared/copy/index');
 const copy = organizerCopy.ko.scene;
 
@@ -460,5 +460,48 @@ describe('the preview is the form', () => {
     );
     await user.click(screen.getByRole('button', { name: copy.tiers.editTitle }));
     expect(onEditTitle).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('the quantity — quick chips and the edit buffer', () => {
+  it('starts at 100 and does not stamp a leading zero when cleared and re-typed', async () => {
+    const user = userEvent.setup();
+    open();
+    await ready();
+    const box = screen.getByLabelText(copy.tiers.supply);
+    expect(box).toHaveValue('100');
+
+    // The '030' bug: clearing used to leave a 0 the next digit jammed against.
+    await user.clear(box);
+    await user.type(box, '30');
+    expect(box).toHaveValue('30');
+    expect(mirror().tiers[0]?.supply).toBe(30);
+  });
+
+  it('allows an empty box while editing and settles it to 0 on blur', async () => {
+    const user = userEvent.setup();
+    open();
+    await ready();
+    const box = screen.getByLabelText(copy.tiers.supply);
+    await user.clear(box);
+    // Empty is allowed mid-edit — the draft is only asked to hold a number for a non-empty box.
+    expect(box).toHaveValue('');
+    await user.tab();
+    expect(box).toHaveValue('0');
+  });
+
+  it('sets the quantity from a quick chip, 무제한 included', async () => {
+    const user = userEvent.setup();
+    open();
+    await ready();
+    await user.click(screen.getByRole('button', { name: '30' }));
+    expect(mirror().tiers[0]?.supply).toBe(30);
+    // The box follows the chip, since it is not the thing being edited.
+    expect(screen.getByLabelText(copy.tiers.supply)).toHaveValue('30');
+
+    await user.click(screen.getByRole('button', { name: copy.tiers.supplyUnlimited }));
+    expect(mirror().tiers[0]?.supply).toBe(UNLIMITED_SUPPLY);
+    expect(screen.getByRole('button', { name: copy.tiers.supplyUnlimited }))
+      .toHaveAttribute('aria-pressed', 'true');
   });
 });

@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { Alert, Button, Chip, Field, TicketArt, formatTicketDate } from '../../shared/ui';
 import { fmt, useLocale } from '../../shared/i18n';
 import { useReducedMotion } from '../../shared/motion';
@@ -6,7 +6,7 @@ import type { EventDraftTier } from '../../shared/api/firestore';
 import { approvalModesEnabled } from '../../shared/config';
 import { useOrganizerCopy } from '../copy';
 import { ArtPicker } from '../ArtPicker';
-import { MAX_TIER_NAME_CHARS, tierArt } from './draftRules';
+import { MAX_TIER_NAME_CHARS, UNLIMITED_SUPPLY, tierArt } from './draftRules';
 
 /**
  * The preview's tap regions, as bands of the frame's own height. The picture, the kind and the
@@ -31,6 +31,49 @@ const PAID_CURRENCIES = ['MON', 'USDT', 'USDC'] as const;
 function whole(value: string): number {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/** The one-tap quantities above the box; 무제한 is a fourth chip, {@link UNLIMITED_SUPPLY}. */
+const SUPPLY_CHIPS = [30, 50, 100] as const;
+
+/** The props a numeric field needs; spread onto the `<input>` so it stays inside its `<Field>`. */
+interface NumberFieldProps {
+  value: string;
+  inputMode: 'numeric';
+  onFocus: () => void;
+  onChange: (event: ChangeEvent<HTMLInputElement>) => void;
+  onBlur: () => void;
+}
+
+/**
+ * A numeric box that keeps a string buffer while it is being edited and only settles to a number
+ * on blur (plan T-SIMP-10). Binding `value={String(n)}` was the "030" bug: clearing the box wrote
+ * a 0 that the next digit jammed against. Here an empty box is allowed mid-word — the draft is
+ * only asked to hold a number for a non-empty box — and the display is never coerced back to
+ * `String(n)` while the box has focus, so a chip tap or a load still shows through when it does not.
+ */
+function useNumberField(value: number, onCommit: (next: number) => void): NumberFieldProps {
+  const [buffer, setBuffer] = useState(() => String(value));
+  const focused = useRef(false);
+  useEffect(() => {
+    if (!focused.current) setBuffer(String(value));
+  }, [value]);
+  return {
+    value: buffer,
+    inputMode: 'numeric',
+    onFocus: () => { focused.current = true; },
+    onChange: (event) => {
+      const raw = event.target.value;
+      setBuffer(raw);
+      if (raw !== '') onCommit(whole(raw));
+    },
+    onBlur: () => {
+      focused.current = false;
+      const settled = whole(buffer);
+      onCommit(settled);
+      setBuffer(String(settled));
+    },
+  };
 }
 
 export interface TierCardProps {
@@ -92,6 +135,11 @@ export function TierCard({
   const priceRef = useRef<HTMLDivElement>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
   const reduce = useReducedMotion();
+  // The three numeric boxes, each with its own edit buffer. Called unconditionally (the amount and
+  // per-person boxes only render while 유료, but a hook may not hide behind a branch).
+  const supplyField = useNumberField(tier.supply, (supply) => onPatch({ supply }));
+  const amountField = useNumberField(tier.amount, (amount) => onPatch({ amount }));
+  const maxPerWalletField = useNumberField(tier.maxPerWallet, (maxPerWallet) => onPatch({ maxPerWallet }));
 
   /**
    * Bring a control into view and give it focus. `scrollIntoView` is guarded — jsdom has none,
@@ -196,12 +244,25 @@ export function TierCard({
         />
       </Field>
       <p className="muted">{copy.nameHelp}</p>
-      <Field label={copy.supply}>
-        <input
-          value={String(tier.supply)}
-          inputMode="numeric"
-          onChange={(event) => onPatch({ supply: whole(event.target.value) })}
+      {/* One tap for the common counts, the box below for anything else. `무제한` is the struct's
+          own cap ({@link UNLIMITED_SUPPLY}) so it is a real number the chain accepts, not a zero. */}
+      <div className="chip-row" role="group" aria-label={copy.supplyQuick}>
+        {SUPPLY_CHIPS.map((amount) => (
+          <Chip
+            key={amount}
+            label={String(amount)}
+            selected={tier.supply === amount}
+            onClick={() => onPatch({ supply: amount })}
+          />
+        ))}
+        <Chip
+          label={copy.supplyUnlimited}
+          selected={tier.supply === UNLIMITED_SUPPLY}
+          onClick={() => onPatch({ supply: UNLIMITED_SUPPLY })}
         />
+      </div>
+      <Field label={copy.supply}>
+        <input {...supplyField} />
       </Field>
 
       {/* 무료 | 유료 — always visible, replacing the four currency chips and the old fold. 유료
@@ -225,18 +286,10 @@ export function TierCard({
             ))}
           </div>
           <Field label={copy.amount}>
-            <input
-              value={String(tier.amount)}
-              inputMode="numeric"
-              onChange={(event) => onPatch({ amount: whole(event.target.value) })}
-            />
+            <input {...amountField} />
           </Field>
           <Field label={copy.maxPerWallet}>
-            <input
-              value={String(tier.maxPerWallet)}
-              inputMode="numeric"
-              onChange={(event) => onPatch({ maxPerWallet: whole(event.target.value) })}
-            />
+            <input {...maxPerWalletField} />
           </Field>
           {/* The (i) tooltip: the buyer counts themselves, so 1 is one ticket per person. The
               sentence is always in the DOM and revealed on hover/focus (plan section A-3). */}

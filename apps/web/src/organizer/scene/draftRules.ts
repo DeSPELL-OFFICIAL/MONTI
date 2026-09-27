@@ -26,12 +26,12 @@ export const MAX_TAG_CHARS = 12;
 
 /** One named rule; `organizer/copy.ts` owns a sentence for each, and each names a section. */
 export type EventProblem =
-  | 'poster' | 'title' | 'tags' | 'bodyTooShort' | 'body' | 'region' | 'venue' | 'venueTooLong'
+  | 'title' | 'tags' | 'bodyTooShort' | 'body' | 'region' | 'venue' | 'venueTooLong'
   | 'startsAt' | 'endsAt' | 'schedule' | 'eventPast';
 
 /** Which section of SCENE 1 a problem belongs to, so `다음` can scroll to the first one. */
 export const PROBLEM_SECTION: Readonly<Record<EventProblem, string>> = {
-  poster: 'poster', title: 'title', tags: 'tags', bodyTooShort: 'body', body: 'body',
+  title: 'title', tags: 'tags', bodyTooShort: 'body', body: 'body',
   region: 'venue', venue: 'venue', venueTooLong: 'venue',
   startsAt: 'time', endsAt: 'time', schedule: 'time', eventPast: 'time',
 };
@@ -96,8 +96,6 @@ export function eventProblems(
 ): EventProblem[] {
   const problems: EventProblem[] = [];
 
-  if (draft.posterCid.trim() === '') problems.push('poster');
-
   const title = draft.title.trim();
   if (charCount(title) < MIN_TITLE_CHARS || charCount(title) > MAX_TITLE_CHARS) problems.push('title');
 
@@ -161,6 +159,13 @@ export const MAX_TIER_NAME_CHARS = 40;
 const UINT16_MAX = 65_535;
 const UINT32_MAX = 4_294_967_295;
 const SECONDS_PER_HOUR = 3_600;
+
+/**
+ * `무제한` in the quantity quick chips (T-SIMP-10). It is the `supply` cap the struct can hold —
+ * the largest number `tierProblems` still accepts — so an organiser who wants "as many as anyone
+ * likes" gets a real value the chain can encode rather than a special-cased zero.
+ */
+export const UNLIMITED_SUPPLY = UINT32_MAX;
 
 /** One named rule of SCENE 2; `organizer/copy.ts` owns a sentence for each. */
 export type TierProblem =

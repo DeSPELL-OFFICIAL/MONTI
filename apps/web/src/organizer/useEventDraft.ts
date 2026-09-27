@@ -71,6 +71,30 @@ export const emptyEventDraft: EventDraft = {
   submittedOpHash: '', submittedAt: 0, createdEventId: '', editingEventId: '', orgPendingName: '',
 };
 
+/**
+ * The start time a brand-new draft opens on. It is computed at fresh-draft creation rather than
+ * kept as a module const for two reasons: it has to stay in the future — a const evaluated once
+ * at import time would be a past Saturday for anyone who left the tab open — and computing it
+ * from an injected `now` is what makes it testable. The end is never seeded here; `endsAtOf`
+ * derives it as start + 2h while `endsAt` is 0, so both stay editable and never disagree.
+ */
+export function nextWeekendStart(now = Date.now()): number {
+  const at = new Date(now);
+  at.setHours(19, 0, 0, 0);
+  const daysUntilSat = ((6 - at.getDay()) + 7) % 7 || 7; // Sat = day 6; never 0, so always future
+  at.setDate(at.getDate() + daysUntilSat);
+  return Math.floor(at.getTime() / 1000);
+}
+
+/**
+ * A brand-new draft: the zero fixture with only the start seeded, so most events are a confirm
+ * rather than a fill. {@link emptyEventDraft} is left untouched as the normaliser's `startsAt: 0`
+ * fallback — this is the one place that default belongs.
+ */
+export function freshEventDraft(): EventDraft {
+  return { ...emptyEventDraft, startsAt: nextWeekendStart() };
+}
+
 export type EventDraftStatus = 'saved' | 'saving' | 'error';
 
 function text(value: unknown, fallback: string): string {
@@ -284,7 +308,7 @@ export function useEventDraft(orgId: string, wantedId?: string): EventDraftState
     return mirrored !== null && !isEditDraft(mirrored.draft) ? mirrored : null;
   });
   const [draft, setDraft] = useState<EventDraft>(() =>
-    withOrg(opened?.draft ?? emptyEventDraft, orgId));
+    withOrg(opened?.draft ?? freshEventDraft(), orgId));
   // The id is minted here rather than after the round trip, so a draft typed into while
   // Firestore is still answering already knows which document it is the mirror of.
   const [draftId, setDraftId] = useState<string>(() => opened?.id ?? wantedId ?? newDraftId());
@@ -375,7 +399,7 @@ export function useEventDraft(orgId: string, wantedId?: string): EventDraftState
     const next = newDraftId();
     idRef.current = next;
     openedIdRef.current = next;
-    const fresh = withOrg(emptyEventDraft, orgRef.current);
+    const fresh = withOrg(freshEventDraft(), orgRef.current);
     draftRef.current = fresh;
     // The device copy is deliberately left mirroring the draft being walked away from, until
     // the first keystroke here rewrites it: for a draft that never reached Firestore that copy
@@ -405,7 +429,7 @@ export function useEventDraft(orgId: string, wantedId?: string): EventDraftState
     touchedRef.current = false;
     const gone = idRef.current;
     clearMirror();
-    const fresh = withOrg(emptyEventDraft, orgRef.current);
+    const fresh = withOrg(freshEventDraft(), orgRef.current);
     draftRef.current = fresh;
     if (liveRef.current) {
       setDraft(fresh);

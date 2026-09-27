@@ -14,6 +14,7 @@ import { buildEventMeta, buildTiers, type ChainDraft } from './buildEventMeta';
 import type { OrganizerCopy } from '../copy';
 import { saveDraft, type LifecycleProblem } from '../lifecycle';
 import { endsAtOf, eventProblems, normalizeTags, saleWindow, tierProblems } from './draftRules';
+import { renderAutoPoster } from './autoPoster';
 import {
   followUpPlan, followUpsDone, runFollowUps, type FollowUpPlan, type FollowUpResult,
 } from './followUps';
@@ -275,7 +276,7 @@ export function usePublish(
   }, [draft.orgId, draft.orgPendingName, myOrgs, orgName, patch, save]);
 
   const finish = useCallback(
-    async (eventId: string): Promise<void> => {
+    async (eventId: string, posterCid: string = draft.posterCid): Promise<void> => {
       // The receipt landed but no `EventCreated` came out of its logs. The event exists and
       // nothing here can address it, so the draft — the only place its venue and its pictures
       // still are — stays, and the screen goes to `confirming`, not `idle`: from that state
@@ -296,7 +297,7 @@ export function usePublish(
       if (complete) await discard();
       onCreated({
         eventId,
-        posterCid: draft.posterCid,
+        posterCid,
         title: draft.title.trim(),
         followUpFailed: !complete,
         draftId,
@@ -474,7 +475,19 @@ export function usePublish(
         return;
       }
       setPhase('pinning');
-      const { metadataCid } = await api.pinEventMetadata({ orgId, meta: toPinnedMeta(draft) });
+      // The poster is optional (plan B-2): an event created without one gets a default A4 poster
+      // synthesised from its title and theme backdrop, pinned through the same `pinEventImage`
+      // path an uploaded one takes — so `imageCid` is never empty. The CID is recorded on the
+      // draft too, so any re-entry after this line reuses it rather than making a second poster.
+      let posterCid = draft.posterCid.trim();
+      if (posterCid === '') {
+        const bytesBase64 = await renderAutoPoster(draft);
+        const pinned = await api.pinEventImage({ bytesBase64, kind: 'poster' });
+        posterCid = pinned.cid;
+        patch({ posterCid });
+        await save().catch(() => undefined);
+      }
+      const { metadataCid } = await api.pinEventMetadata({ orgId, meta: toPinnedMeta({ ...draft, posterCid }) });
       setPhase('sending');
       const chainDraft = toChainDraft({ ...draft, orgId }, Math.floor(Date.now() / 1_000));
       const receipt = await ticketOp({
@@ -500,7 +513,7 @@ export function usePublish(
         ? { submittedOpHash: receipt.userOpHash, submittedAt: Date.now() }
         : { createdEventId: eventId });
       await save().catch(() => undefined);
-      await finish(eventId);
+      await finish(eventId, posterCid);
     } catch (cause) {
       if (cause instanceof OrgRefused) {
         setPhase('idle');

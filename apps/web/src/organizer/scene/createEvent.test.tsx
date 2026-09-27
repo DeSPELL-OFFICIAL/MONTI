@@ -51,7 +51,7 @@ const { fmt } = await import('../../shared/i18n');
 const { THEME_CODES } = await import('../../shared/eventThemes');
 const { toLocalInput } = await import('./datetime');
 const { ko: sharedCopy } = await import('../../shared/copy/index');
-const { EVENT_DRAFT_KEY, emptyEventDraft } = await import('../useEventDraft');
+const { EVENT_DRAFT_KEY, emptyEventDraft, nextWeekendStart } = await import('../useEventDraft');
 const { organizerCopy } = await import('../copy');
 const { PROBLEM_SECTION, MAX_BODY_CHARS, MAX_TAG_CHARS } = await import('./draftRules');
 const copy = organizerCopy.ko.scene;
@@ -163,6 +163,21 @@ describe('the scene layout', () => {
     expect(screen.getByLabelText(copy.tiers.supply)).toHaveValue('100');
   });
 
+  /**
+   * Plan T-SIMP-8: the start opens on the next-Saturday default, so the ordinary case is a
+   * confirm rather than a fill, and `min` blocks a past time in the picker rather than at 만들기.
+   */
+  it('opens the start on the next-Saturday default and floors the picker at now', async () => {
+    open();
+    await waitFor(() => expect(listEventDrafts).toHaveBeenCalled());
+    const start = screen.getByLabelText(copy.startsAt) as HTMLInputElement;
+    // Seeded, not blank: the default is on screen before anything is typed.
+    expect(start.value).not.toBe('');
+    expect(start.value).toBe(toLocalInput(nextWeekendStart()));
+    // `min` is now, so the box refuses a time already gone inline.
+    expect(start.getAttribute('min')).toBeTruthy();
+  });
+
   it('shows the organisation number nowhere: the address already carries it', async () => {
     open('/org/new?org=7');
     await waitFor(() => expect(listEventDrafts).toHaveBeenCalled());
@@ -188,10 +203,9 @@ describe('the one button', () => {
     open();
     await waitFor(() => expect(listEventDrafts).toHaveBeenCalled());
     expect(screen.getByRole('button', { name: copy.tiers.create })).toBeEnabled();
-    expect(screen.queryByText(copy.problems.poster)).toBeNull();
+    expect(screen.queryByText(copy.problems.title)).toBeNull();
 
     await user.click(screen.getByRole('button', { name: copy.tiers.create }));
-    expect(screen.getByText(copy.problems.poster)).toBeInTheDocument();
     expect(screen.getByText(copy.problems.title)).toBeInTheDocument();
     expect(screen.getByText(copy.problems.venue)).toBeInTheDocument();
     // Still here: an unfinished field is a message, not a wall — and never a second screen.
@@ -394,7 +408,11 @@ describe('tags and the two visibility switches', () => {
     const user = userEvent.setup();
     open();
     await waitFor(() => expect(listEventDrafts).toHaveBeenCalled());
-    await user.type(screen.getByLabelText(copy.startsAt), '2026-10-13T19:00');
+    // The start now opens on the next-Saturday default (T-SIMP-8), so it is cleared before the
+    // fixed value this case pins the derived end to is typed in.
+    const start = screen.getByLabelText(copy.startsAt);
+    await user.clear(start);
+    await user.type(start, '2026-10-13T19:00');
 
     const startsAt = mirror().startsAt;
     // The draft keeps what was typed; the derived end is what the folded box shows.

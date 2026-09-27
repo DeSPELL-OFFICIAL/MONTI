@@ -6,13 +6,16 @@ const C = {
   claimCta: '티켓 받기',
   requestCta: '신청하기',
   working: '받는 중이에요',
+  // Success is now an in-place 완료 state on the claim screen (ClaimFlow phase 'done'),
+  // not a silent navigate('/tickets') — plan T-SIMP-1 ③. This copy is how a claim reads as landed.
+  done: '티켓을 받았어요 · 내 티켓에 있어요',
   requesting: '신청하는 중이에요',
   limit: '이 행사에서 받을 수 있는 티켓을 이미 다 받았어요.',
   soldOut: '이 종류는 마감됐어요. 다른 종류를 골라 주세요.',
   confirming: '아직 확인 중이에요. 잠시 뒤 내 티켓에서 확인해 주세요.',
   failed: '티켓을 받지 못했어요. 잠시 뒤 다시 시도해 주세요.',
   pending: '신청 완료 · 승인을 기다리고 있어요',
-  approved: '승인됐어요. 티켓이 발급됐어요',
+  approved: '승인됐어요. 티켓을 받았어요',
   ticketsTab: '내 티켓',
   ticketsEmpty: '아직 티켓이 없어요.',
 } as const;
@@ -38,6 +41,7 @@ export async function claimFree(page: Page, personaId: string, eventId: string):
 
       await claim.click();
       const confirming = page.getByText(C.confirming, { exact: true });
+      const done = page.getByText(C.done, { exact: true });
       const failed = page.getByText(C.failed, { exact: true });
       const soldOut = page.getByText(C.soldOut, { exact: true });
       const limit = page.getByText(C.limit, { exact: true });
@@ -45,6 +49,8 @@ export async function claimFree(page: Page, personaId: string, eventId: string):
       const deadline = Date.now() + 3 * 60 * 1000;
       while (Date.now() < deadline) {
         if (/\/tickets(\/|$)/.test(page.url())) return 'claimed';
+        // The claim now completes in place (no auto-navigate): the 완료 alert is the success signal.
+        if (await done.isVisible().catch(() => false)) return 'claimed';
         if (await confirming.isVisible().catch(() => false)) {
           await page.getByRole('button', { name: C.ticketsTab, exact: true }).click().catch(() => undefined);
           return 'confirming';
@@ -74,16 +80,40 @@ export type RequestOutcome = 'pending' | 'approved' | 'confirming' | 'failed';
 export async function requestApproval(page: Page, personaId: string, eventId: string): Promise<RequestOutcome> {
   return timed(personaId, 'request', async () => {
     await page.goto(`/claim/${eventId}`);
-    const request = page.getByRole('button', { name: C.requestCta, exact: true });
-    await expect(request).toBeVisible({ timeout: 30_000 });
-    await request.click();
     const pending = page.getByText(C.pending, { exact: true });
     const approved = page.getByText(C.approved, { exact: true });
     const confirming = page.getByText(C.confirming, { exact: true });
-    await expect(pending.or(approved).or(confirming)).toBeVisible({ timeout: 3 * 60 * 1000 });
-    if (await approved.isVisible()) return 'approved';
-    if (await pending.isVisible()) return 'pending';
-    return 'confirming';
+    const request = page.getByRole('button', { name: C.requestCta, exact: true });
+    // Re-run resilience: a request this persona already made in an earlier run renders the
+    // pending/approved state directly (ClaimFlow's hasLiveRequest branch has no 신청하기 button),
+    // so wait for the screen to resolve to EITHER that state or a fresh request button, then branch.
+    await expect(pending.or(approved).or(request)).toBeVisible({ timeout: 30_000 });
+    if (await approved.isVisible().catch(() => false)) return 'approved';
+    if (await pending.isVisible().catch(() => false)) return 'pending';
+    await request.click();
+    // Grace window first, WITHOUT reloading: let the op submit and land on its own — the op's wait
+    // runs up to 45s and ClaimFlow refetches the request status once when it settles (fast path:
+    // pending shows in a few seconds). A reload mid-send would be needless churn here.
+    const natural = pending.or(approved).or(confirming);
+    if (await natural.waitFor({ state: 'visible', timeout: 90_000 }).then(() => true).catch(() => false)) {
+      if (await approved.isVisible().catch(() => false)) return 'approved';
+      if (await pending.isVisible().catch(() => false)) return 'pending';
+      return 'confirming';
+    }
+    // Landed but the single refetch missed the row: requests, unlike claims, have no re-poll loop
+    // (a real product friction — LIVE RUN 5 saw the pending state lag the indexer past this window
+    // for some users), so reload to force useMyRequest to re-read the now-indexed request. The op
+    // already landed, so it is not re-clicked. Honest: throws if nothing ever surfaces.
+    const deadline = Date.now() + 2 * 60 * 1000;
+    while (Date.now() < deadline) {
+      await page.goto(`/claim/${eventId}`);
+      await page.waitForTimeout(3000);
+      if (await approved.isVisible().catch(() => false)) return 'approved';
+      if (await pending.isVisible().catch(() => false)) return 'pending';
+      if (await confirming.isVisible().catch(() => false)) return 'confirming';
+      await page.waitForTimeout(4000);
+    }
+    throw new Error(`request for ${personaId} on ${eventId} never surfaced pending/approved/confirming`);
   });
 }
 
