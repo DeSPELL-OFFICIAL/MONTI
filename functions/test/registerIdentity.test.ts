@@ -333,13 +333,17 @@ describe('registerIdentity — idempotency (spec §10.4 rule 3)', () => {
 });
 
 describe('registerIdentity — the attester is a single key', () => {
-  it('refuses to send while another attester transaction holds the lease', async () => {
-    write('system/attester', { holder: 'someone-else', lockedUntil: Date.now() + 10_000 });
-    await expect(call()).rejects.toThrow('ATTESTER_BUSY');
-    expect(sendAttesterTx).not.toHaveBeenCalled();
-    // 잠금 실패로 끝난 자리에 pending 딱지가 남으면 이 사람은 영원히 가입을 못 한다.
-    expect(snapshot(`persons/${PERSON_ID}`).get('chain.registerPending')).toBeUndefined();
-    expect(field(docs.get('system/attester'), 'holder')).toBe('someone-else');
+  it('waits for a held lease to free instead of failing fast, then sends once', async () => {
+    // 예전에는 리스가 잡혀 있으면 바로 429(ATTESTER_BUSY) 였다. 이제는 풀릴 때까지 기다린다 —
+    // 어테스터 EOA 가 하나라 동시 가입이 겹치면 경합은 일상이고, 바로 떨어뜨리면 멀쩡한 가입이 실패한다.
+    write('system/attester', { holder: 'someone-else', lockedUntil: Date.now() + 60_000 });
+    // 다른 트랜잭션이 잠깐 들고 있다가 첫 폴링(500ms) 전에 놓는다.
+    setTimeout(() => write('system/attester', { holder: null, lockedUntil: 0 }), 200);
+    await expect(call()).resolves.toEqual({ txHash: TX, claimsUpdated: true });
+    expect(sendAttesterTx).toHaveBeenCalledTimes(1);
+    expect(snapshot(`persons/${PERSON_ID}`).get('status')).toBe('active');
+    // 기다린 뒤 우리가 리스를 잡았다가 반납했다.
+    expect(field(docs.get('system/attester'), 'lockedUntil')).toBe(0);
   });
 
   it('takes an expired lease over', async () => {
