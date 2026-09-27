@@ -198,6 +198,11 @@ input, select, textarea { scroll-margin-bottom: calc(var(--sticky-bar-h) + var(-
 .screen:has(.fab-anchor) {
   padding-bottom: calc(var(--sab) + var(--tabbar-h) + var(--btn-h) + var(--s-4) + var(--s-4));
 }
+/* A tab-less detail screen (the ticket) that pins its primary action in a sticky bar has to
+   reserve the bar's height too, or the last line sits under it. */
+.screen:has(.sticky-bar) {
+  padding-bottom: calc(var(--sab) + var(--sticky-bar-h) + var(--s-5));
+}
 .screen h1 {
   font-size: var(--t-large);
   line-height: var(--t-large-lh);
