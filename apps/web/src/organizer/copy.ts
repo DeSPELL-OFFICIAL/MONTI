@@ -528,12 +528,11 @@ const ko = {
   },
 
   /**
-   * 페이마스터가 주최자 셀렉터를 아직 허용하지 않을 때만 뜬다. 운영자에게만 보이는 안내라
-   * '지갑'을 쓸 수 있는 유일한 문구이고(`copy.test.ts` 가 이 한 문장만 허용한다),
+   * 페이마스터가 주최자 셀렉터를 아직 허용하지 않을 때만 뜬다. 운영자에게만 보이는 안내이고,
    * 01b 재배포로 허용 목록이 채워지면 영영 뜨지 않는다.
    */
   unsponsored: {
-    notice: '주최자 작업은 지금은 수수료 지갑이 필요해요',
+    notice: '주최자 작업은 지금은 수수료가 들어요',
     help: '다음 업데이트가 끝나면 MONTI가 대신 내드려요. 그때까지는 담당자에게 문의해 주세요',
   },
 };
@@ -1051,9 +1050,9 @@ const en: typeof ko = {
     },
   },
 
-  /** See the Korean block: the one notice allowed that vocabulary, and only to an organiser. */
+  /** See the Korean block: shown only while organiser writes are not sponsored yet. */
   unsponsored: {
-    notice: 'Organiser actions need a fee wallet for now',
+    notice: 'Organiser actions carry a fee for now',
     help: 'MONTI will cover them once the next update lands. Until then, please ask your contact',
   },
 };

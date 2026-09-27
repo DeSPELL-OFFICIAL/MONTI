@@ -19,17 +19,15 @@ describe('organizer copy', () => {
   });
 
   /**
-   * `pnpm lint:copy` skips this folder, so the same rule is kept honest here instead — with
-   * the one exception the controller ruled: until the paymaster sponsors organiser writes,
-   * an organiser has to be told plainly what is missing, and no other sentence may say it.
+   * `pnpm lint:copy` now scans this folder too (T-EV-W14); this keeps the same rule next to the
+   * copy so it fails fast in unit tests: no attendee-banned vocabulary anywhere, no exception.
    */
-  it('uses no attendee-banned vocabulary outside the ruled fee notice', () => {
+  it('uses no attendee-banned vocabulary', () => {
     for (const locale of ['ko', 'en'] as const) {
       const copy = organizerCopy[locale];
-      const allowed: string[] = [copy.unsponsored.notice];
-      const offenders = sentences(copy)
-        .filter((line) => !allowed.includes(line))
-        .filter((line) => BANNED_ATTENDEE_WORDS.some((word) => line.toLowerCase().includes(word.toLowerCase())));
+      const offenders = sentences(copy).filter((line) =>
+        BANNED_ATTENDEE_WORDS.some((word) => line.toLowerCase().includes(word.toLowerCase())),
+      );
       expect(offenders, `${locale} copy`).toEqual([]);
     }
   });
@@ -49,8 +47,8 @@ describe('organizer copy', () => {
     }
   });
 
-  it('carries the ruled notice for an organiser write nothing sponsors yet', () => {
-    expect(organizerCopy.ko.unsponsored.notice).toBe('주최자 작업은 지금은 수수료 지갑이 필요해요');
-    expect(organizerCopy.en.unsponsored.notice).toContain('wallet');
+  it('states plainly, with no web3 words, that an unsponsored organiser write costs a fee', () => {
+    expect(organizerCopy.ko.unsponsored.notice).toBe('주최자 작업은 지금은 수수료가 들어요');
+    expect(organizerCopy.en.unsponsored.notice).toContain('fee');
   });
 });
