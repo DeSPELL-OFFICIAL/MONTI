@@ -63,6 +63,7 @@ export function TicketList() {
       {!isLoading && !isError && tickets.length === 0 ? <p className="muted">{copy.tickets.empty}</p> : null}
       <m.ul className="event-list" {...list}>
         {tickets.map((ticket) => {
+          const props = artPropsOf(ticket);
           // The event's own name leads the row now, its day sits under it, and the state rides a
           // chip on the right (visual R1-2). The day is formatted the same way the picture prints
           // it, and a ticket the index gave no start time carries no date line rather than a 1970.
@@ -76,11 +77,11 @@ export function TicketList() {
                     state it prints are the lines beside it now, so leaving it in the name would
                     read each of them out twice. */}
                 <span className="ticket-row__art" aria-hidden="true">
-                  <TicketArt {...artPropsOf(ticket)} />
+                  <TicketArt {...props} />
                 </span>
                 <span className="ticket-row__body">
                   <span className="ticket-row__title">
-                    {ticket.title === '' ? copy.tickets.artNoTitle : ticket.title}
+                    {props.titleLoading ? <Skeleton width="55%" height={16} /> : props.title}
                   </span>
                   {day === '' ? null : <span className="ticket-row__date muted">{day}</span>}
                 </span>

@@ -53,15 +53,16 @@ export function TicketDetail() {
     );
   }
 
+  const props = artPropsOf(ticket);
   // 입장 전 ticket waits at the door: the state word rides in the sticky bar so it reads
   // "입장 전 → [입장하기]", the way in is the bar's one primary action, and 친구에게 주기 sits
   // below the card as the quieter choice (visual R1-1). Every other state keeps the state word
   // in the body, where there is no bar.
   const canEnter = ticket.state === 'before';
   return (
-    <Screen title={ticket.title === '' ? copy.tickets.artNoTitle : ticket.title}>
+    <Screen title={props.titleLoading ? copy.tickets.title : props.title}>
       <div className="ticket-detail-art">
-        <TicketArt {...artPropsOf(ticket)} animated />
+        <TicketArt {...props} animated />
       </div>
       {canEnter ? null : <p>{labels[ticket.state]}</p>}
       <p>{copy.tickets.detailGuide}</p>

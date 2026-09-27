@@ -11,7 +11,7 @@ const now = () => Math.floor(Date.now() / 1000);
 function ticket(tokenId: string, eventId: string, state: MyTicket['state'] = 'before'): MyTicket {
   // The art fields the ticket screens read; the chat list only ever looks at the event id.
   return {
-    tokenId, eventId, tier: 0, state, checkInTs: null, used: false, title: '', tierName: '', startsAt: 0,
+    tokenId, eventId, tier: 0, state, checkInTs: null, used: false, imageCid: '', tierName: '', startsAt: 0,
   };
 }
 
