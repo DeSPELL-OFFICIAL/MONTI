@@ -123,7 +123,7 @@ describe('TransferInvite', () => {
     expect(createTransferInvite.mock.invocationCallOrder[0]).toBeLessThan(
       ticketOp.mock.invocationCallOrder[0]!,
     );
-    expect(await screen.findByText('초대를 보냈어요. 상대가 가입하면 티켓이 자동으로 전달됩니다.')).toBeInTheDocument();
+    expect(await screen.findByText('초대를 보냈어요. 상대가 가입하면 티켓이 자동으로 전달돼요.')).toBeInTheDocument();
   });
 
   it('hands the sms link to the person to tap, unrewritten, with the text as the fallback', async () => {
