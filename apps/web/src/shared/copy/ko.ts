@@ -139,7 +139,7 @@ export const ko = {
     artGuest: '게스트',
   },
   claim: {
-    cta: '티켓 받기', working: '받는 중이에요', done: '티켓을 받았어요 · 내 티켓에 있어요', tierLabel: '티켓 종류',
+    cta: '티켓 받기', checking: '확인 중…', working: '받는 중이에요', done: '티켓을 받았어요 · 내 티켓에 있어요', tierLabel: '티켓 종류',
     failed: '티켓을 받지 못했어요. 잠시 뒤 다시 시도해 주세요.',
     confirming: '아직 확인 중이에요. 잠시 뒤 내 티켓에서 확인해 주세요.',
     limitReached: '이 행사에서 받을 수 있는 티켓을 이미 다 받았어요.',

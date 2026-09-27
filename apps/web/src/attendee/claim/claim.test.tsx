@@ -220,6 +220,34 @@ describe('Claim', () => {
     expect(await screen.findByRole('button', { name: '티켓 받기' })).toBeEnabled();
     expect(screen.queryByText('이미 받았어요 · 내 티켓에서 확인하세요')).toBeNull();
   });
+
+  /**
+   * Cold load, first paint after login: the held-ticket count has not answered yet, so `held`
+   * still reads 0. The button must not let a fast tap through before the count lands — it would
+   * only send an op the chain reverts (live check e). It waits, disabled, showing 확인 중….
+   */
+  it('holds the claim button disabled with 확인 중 until the held-ticket count resolves', async () => {
+    const owner = `0x${'cd'.repeat(20)}`;
+    setSession({ status: 'signedIn', account: owner as `0x${string}` });
+    let releaseHeld: () => void = () => undefined;
+    const heldGate = new Promise<void>((resolve) => {
+      releaseHeld = resolve;
+    });
+    gql.mockImplementation(async (query: string) => {
+      if (query.includes('OwnedTickets')) {
+        await heldGate;
+        return { Ticket: [], Offer: [] };
+      }
+      return answerIndexer(query);
+    });
+    renderClaim();
+    // Event loaded, count still in flight: the primary button reads 확인 중… and cannot be tapped.
+    const waiting = await screen.findByRole('button', { name: '확인 중…' });
+    expect(waiting).toBeDisabled();
+    releaseHeld();
+    // Count landed below the cap: the button becomes the real 받기 and acts again.
+    expect(await screen.findByRole('button', { name: '티켓 받기' })).toBeEnabled();
+  });
 });
 
 /**
