@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -148,5 +148,73 @@ describe('Requests · actions', () => {
     // Every id is a bigint and the two chunks together cover all twenty-five.
     expect(first.args[1].concat(second.args[1]).every((id) => typeof id === 'bigint')).toBe(true);
     expect(first.args[1].length + second.args[1].length).toBe(25);
+  });
+});
+
+describe('Requests · re-polling the pending list', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  const flush = async (): Promise<void> => {
+    for (let i = 0; i < 10; i += 1) await vi.advanceTimersByTimeAsync(0);
+  };
+  const advanceUntil = async (ok: () => boolean, capMs: number): Promise<void> => {
+    for (let waited = 0; waited < capMs && !ok(); waited += 1_000) {
+      await vi.advanceTimersByTimeAsync(1_000);
+      await flush();
+    }
+  };
+  const eventReqCalls = (): number =>
+    gql.mock.calls.filter(([query]) => String(query).includes('EventRequests')).length;
+
+  it('re-reads the pending list every ~10s and shows the checking hint', async () => {
+    requests.rows = [req('1')];
+    renderRequests();
+    await flush();
+    // The hint the plan asks for, and the one request the indexer holds so far.
+    expect(screen.getByText('새 신청 확인 중')).toBeInTheDocument();
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(1);
+
+    // A second request lands in the indexer; the open screen surfaces it on its own poll — no reload.
+    const before = eventReqCalls();
+    requests.rows = [req('1'), req('2')];
+    await advanceUntil(() => screen.queryAllByRole('checkbox').length === 2, 20_000);
+    expect(eventReqCalls()).toBeGreaterThan(before);
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(2);
+  });
+
+  it('keeps an approved row hidden across a poll while the indexer still lists it pending', async () => {
+    const AA = `0x${'aa'.repeat(20)}`;
+    const BB = `0x${'bb'.repeat(20)}`;
+    requests.rows = [req('3', AA), req('4', BB)];
+    names.rows = [{ id: AA, nickname: '민수' }, { id: BB, nickname: '지현' }];
+    renderRequests();
+    await flush();
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(2);
+
+    // Approve 민수's request (the first row).
+    fireEvent.click(screen.getAllByRole('checkbox')[0]!);
+    fireEvent.click(screen.getByRole('button', { name: '선택 승인' }));
+    await flush();
+    expect(ticketOp).toHaveBeenCalledWith(
+      expect.objectContaining({ functionName: 'approveClaims', args: [5n, [3n]] }),
+    );
+    // Hidden the moment it is sent.
+    expect(screen.queryByText(/민수/)).toBeNull();
+    expect(screen.queryByText(/지현/)).toBeInTheDocument();
+
+    // The indexer LAGS the approval and still lists 민수 as pending. The old single refetch would
+    // un-hide the row here; the reconcile must keep it hidden until the flip actually shows.
+    requests.rows = [req('3', AA), req('4', BB)];
+    await vi.advanceTimersByTimeAsync(10_000);
+    await flush();
+    expect(screen.queryByText(/민수/)).toBeNull();
+    expect(screen.queryByText(/지현/)).toBeInTheDocument();
+
+    // Once the indexer catches up (민수 leaves the pending set), the list settles to just 지현.
+    requests.rows = [req('4', BB)];
+    await advanceUntil(() => screen.queryAllByRole('checkbox').length === 1, 20_000);
+    expect(screen.queryByText(/지현/)).toBeInTheDocument();
+    expect(screen.queryByText(/민수/)).toBeNull();
   });
 });

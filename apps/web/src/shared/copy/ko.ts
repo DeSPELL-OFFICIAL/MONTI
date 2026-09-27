@@ -145,6 +145,7 @@ export const ko = {
     requestCta: '신청하기', requesting: '신청하는 중이에요',
     approvalOnly: '이 행사는 주최자 승인 후 받을 수 있어요.',
     pending: '신청 완료 · 승인을 기다리고 있어요',
+    received: '신청을 접수했어요 · 확인 중',
     approved: '승인됐어요. 티켓을 받았어요',
     approvedCta: '내 티켓 보기',
     rejected: '이번엔 승인되지 않았어요',

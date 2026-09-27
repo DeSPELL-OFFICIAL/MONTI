@@ -85,6 +85,22 @@ type ClaimPhase = 'idle' | 'saving' | 'sent' | 'stuck' | 'done';
 const CLAIM_POLL_MS = 4_000;
 
 /**
+ * After a requestClaim lands, how long to wait between checks for its ClaimRequest to appear:
+ * 2s, then 5s, then 10s repeating, up to {@link APPEAR_CAP_MS}. The indexer writes a claim's mint
+ * in seconds but a ClaimRequest row can lag by minutes, so a single refetch shows nothing and the
+ * request looks lost (live run scenario d). Polling pauses while the tab is hidden.
+ */
+const APPEAR_DELAYS = [2_000, 5_000, 10_000] as const;
+const APPEAR_CAP_MS = 5 * 60_000;
+/** Once the request is in and still Pending, how often to look for an approve/reject. */
+const PENDING_POLL_MS = 15_000;
+
+/** The tab is in the background; a poll pauses rather than spending its budget while nobody looks. */
+function tabHidden(): boolean {
+  return typeof document !== 'undefined' && document.hidden;
+}
+
+/**
  * How the one claim engine is framed (plan B1: 입구 = 상세 인라인 시트, 엔진 = 통일 상태머신).
  *
  *   - `screen` — the `/claim/:id` route, kept for deep-link and identity-check return only.
@@ -123,6 +139,12 @@ export function ClaimFlow({ eventId, present }: ClaimFlowProps) {
   const [retrying, setRetrying] = useState(false);
   const [needsKyc, setNeedsKyc] = useState(false);
   const resumed = useRef(false);
+  // Approval mode only: a landed requestClaim whose ClaimRequest has not surfaced in the indexer
+  // yet. `awaiting` runs the appearance poll below; `awaitTimedOut` is the five-minute cap, after
+  // which the person is handed a manual 다시 확인 rather than a poll that never stops.
+  const [awaiting, setAwaiting] = useState(false);
+  const [awaitTimedOut, setAwaitTimedOut] = useState(false);
+  const [appearNonce, setAppearNonce] = useState(0);
 
   const { data, isLoading, isError, error: loadError, refetch } = useQuery({
     queryKey: ['claim', eventId],
@@ -133,6 +155,8 @@ export function ClaimFlow({ eventId, present }: ClaimFlowProps) {
   // The attendee's own request, for an event that takes requests. Refetched after a request or a
   // cancel lands, since the indexer needs a moment to catch up to the transaction.
   const { request: myRequest, refetch: refetchRequest } = useMyRequest(eventId);
+  const refetchRequestRef = useRef(refetchRequest);
+  refetchRequestRef.current = refetchRequest;
 
   const event = data?.Event[0];
   const tiers = data?.Tier ?? [];
@@ -206,8 +230,9 @@ export function ClaimFlow({ eventId, present }: ClaimFlowProps) {
           // The recorded op already landed. The ticket (or request) exists; do not send again.
           clearClaimDraft(eventId);
           if (fn === 'requestClaim') {
-            await refetchRequest();
+            const row = await refetchRequest();
             setPhase('idle');
+            if (row === null) { setAwaitTimedOut(false); setAwaiting(true); }
           } else {
             setPhase('done');
           }
@@ -238,10 +263,11 @@ export function ClaimFlow({ eventId, present }: ClaimFlowProps) {
       // Landed. The ticket exists (claim) or the request is in (requestClaim).
       clearClaimDraft(eventId);
       if (fn === 'requestClaim') {
-        // No mint here — the request reserves supply and waits for the organiser. The screen stays
-        // put and refetches, so the button becomes the pending state rather than jumping away.
-        await refetchRequest();
+        // No mint here — the request reserves supply and waits for the organiser. The row can lag
+        // the transaction by minutes, so start the appearance wait rather than showing nothing.
+        const row = await refetchRequest();
         setPhase('idle');
+        if (row === null) { setAwaitTimedOut(false); setAwaiting(true); }
       } else {
         // A real completion in place of the old silent navigate('/tickets') (plan T-SIMP-1 ③).
         setPhase('done');
@@ -350,8 +376,11 @@ export function ClaimFlow({ eventId, present }: ClaimFlowProps) {
       clearClaimDraft(eventId);
       if (step === 'complete') {
         if (approval) {
-          await refetchRequest();
-          if (live) setPhase('idle');
+          const row = await refetchRequest();
+          if (live) {
+            setPhase('idle');
+            if (row === null) { setAwaitTimedOut(false); setAwaiting(true); }
+          }
         } else if (live) {
           setPhase('done');
         }
@@ -365,6 +394,79 @@ export function ClaimFlow({ eventId, present }: ClaimFlowProps) {
       if (timer !== undefined) clearTimeout(timer);
     };
   }, [pendingOp, phase, eventId, approval, refetchRequest]);
+
+  // Approval mode: a landed requestClaim whose ClaimRequest has not surfaced in the indexer yet.
+  // Re-poll on a 2s -> 5s -> 10s backoff up to five minutes, pausing while the tab is hidden, until
+  // the row appears -- then this stops and the pending poll keeps it live. `appearNonce` restarts it
+  // when the cap was hit and the person taps 다시 확인.
+  useEffect(() => {
+    if (!approval || !awaiting || myRequest !== null || awaitTimedOut) return undefined;
+    let live = true;
+    let handle: ReturnType<typeof setTimeout> | undefined;
+    let index = 1;
+    let elapsed = APPEAR_DELAYS[0] as number;
+    const tick = async (): Promise<void> => {
+      if (!live) return;
+      if (tabHidden()) return; // paused; the visibility listener resumes it
+      const row = await refetchRequestRef.current();
+      if (!live) return;
+      if (row !== null) {
+        setAwaiting(false);
+        return;
+      }
+      if (elapsed >= APPEAR_CAP_MS) {
+        setAwaitTimedOut(true);
+        return;
+      }
+      const delay = APPEAR_DELAYS[Math.min(index, APPEAR_DELAYS.length - 1)] ?? 10_000;
+      index += 1;
+      elapsed += delay;
+      handle = setTimeout(() => void tick(), delay);
+    };
+    handle = setTimeout(() => void tick(), APPEAR_DELAYS[0]);
+    const onVisible = (): void => {
+      if (!live || tabHidden()) return;
+      if (handle !== undefined) clearTimeout(handle);
+      void tick();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      live = false;
+      if (handle !== undefined) clearTimeout(handle);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [approval, awaiting, myRequest, awaitTimedOut, appearNonce]);
+
+  // Approval mode: keep a Pending request live, so an approve/reject shows without a reload. Every
+  // 15s while Pending, paused while the tab is hidden; it stops the moment the status changes.
+  useEffect(() => {
+    if (!approval || myRequest?.status !== 'Pending') return undefined;
+    let live = true;
+    let handle: ReturnType<typeof setTimeout> | undefined;
+    const tick = async (): Promise<void> => {
+      if (!live) return;
+      if (!tabHidden()) await refetchRequestRef.current();
+      if (live) handle = setTimeout(() => void tick(), PENDING_POLL_MS);
+    };
+    handle = setTimeout(() => void tick(), PENDING_POLL_MS);
+    const onVisible = (): void => {
+      if (!live || tabHidden()) return;
+      if (handle !== undefined) clearTimeout(handle);
+      void tick();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      live = false;
+      if (handle !== undefined) clearTimeout(handle);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [approval, myRequest?.status]);
+
+  // 다시 확인: the appearance cap was hit with nothing showing; restart the poll from the top.
+  const recheck = (): void => {
+    setAwaitTimedOut(false);
+    setAppearNonce((nonce) => nonce + 1);
+  };
 
   // The one seam between the two entries: the route paints a full 화면, the detail entry a 시트 in
   // place. Everything above this line is identical for both. The sheet also carries an explicit
@@ -423,6 +525,16 @@ export function ClaimFlow({ eventId, present }: ClaimFlowProps) {
         <Button variant="ghost" onClick={() => void cancel()} disabled={phase !== 'idle'}>
           {busy ? copy.claim.cancelling : copy.claim.cancel}
         </Button>
+      </>
+    ) : approval && awaiting && myRequest === null ? (
+      <>
+        {/* The request landed on chain but the indexer has not caught up; the poll above keeps
+            looking. A real "we have it" in place of a screen showing nothing (live run d). */}
+        <Alert tone="info">{copy.claim.received}</Alert>
+        {awaitTimedOut ? (
+          <Button variant="ghost" onClick={recheck}>{copy.common.retry}</Button>
+        ) : null}
+        <Link to="/tickets" className="btn btn--primary btn--link">{copy.claim.approvedCta}</Link>
       </>
     ) : (
       <>

@@ -262,6 +262,7 @@ const ko = {
     working: '처리하고 있어요',
     confirming: '아직 확인 중이에요. 잠시 뒤 새로고침하면 반영돼요',
     failed: '처리하지 못했어요. 잠시 뒤 다시 시도해 주세요',
+    checking: '새 신청 확인 중',
   },
 
   announce: {
@@ -787,6 +788,7 @@ const en: typeof ko = {
     working: 'Working',
     confirming: 'Still confirming. Refresh in a moment to see the change',
     failed: 'Could not finish. Please try again in a moment',
+    checking: 'Checking for new requests',
   },
 
   announce: {

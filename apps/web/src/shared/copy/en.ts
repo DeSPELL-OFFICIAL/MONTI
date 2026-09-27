@@ -139,6 +139,7 @@ export const en: typeof ko = {
     requestCta: 'Request a ticket', requesting: 'Sending your request',
     approvalOnly: 'You can get a ticket after the organiser approves.',
     pending: 'Request sent · waiting for approval',
+    received: 'Request received · confirming',
     approved: 'Approved. You got your ticket',
     approvedCta: 'View my ticket',
     rejected: 'Not approved this time',
