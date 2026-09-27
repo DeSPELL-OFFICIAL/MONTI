@@ -72,7 +72,7 @@ export const en: typeof ko = {
   },
   kyc: {
     title: 'Let us check your ID and face', body: 'It takes 30 seconds. A verification page opens and returns here.',
-    cta: 'Verify my identity', waiting: 'Checking. Please wait a moment.',
+    cta: 'Verify my identity', later: 'Do this later', waiting: 'Checking. Please wait a moment.',
     duplicate: 'You already have an account. Please sign in instead.',
     rejected: 'Verification failed. Please try again.',
     inFlight: 'Please try again in a moment.',
@@ -208,6 +208,7 @@ export const en: typeof ko = {
     deviceMismatch: 'This phone is not the one this ticket is set up with. Set it up again in your profile.',
     qrTitle: 'Show this screen to the staff',
     done: 'You are in', resultWaiting: 'Confirming', resultSettling: 'Recording it',
+    toTickets: 'My tickets',
     notConfirmed: 'The door did not confirm your entry. Please show your ticket to the staff.',
     deviceUnavailable: 'Entry is not available on this phone. Please speak to the staff at the door.',
     locked: 'Your phone is locked. Unlock it in your profile.',

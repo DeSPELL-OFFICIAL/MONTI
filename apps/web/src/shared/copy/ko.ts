@@ -75,7 +75,7 @@ export const ko = {
   },
   kyc: {
     title: '신분증과 얼굴을 확인할게요', body: '30초면 끝나요. 확인 화면이 열렸다가 돌아옵니다.',
-    cta: '본인인증 하기', waiting: '확인하고 있어요. 잠시만 기다려 주세요.',
+    cta: '본인인증 하기', later: '나중에 하기', waiting: '확인하고 있어요. 잠시만 기다려 주세요.',
     duplicate: '이미 계정이 있습니다. 기존 계정으로 로그인해 주세요.',
     rejected: '본인 확인에 실패했어요. 다시 시도해 주세요.',
     inFlight: '잠시 후 다시 시도해 주세요.',
@@ -214,6 +214,7 @@ export const ko = {
     deviceMismatch: '이 휴대폰은 이 티켓에 등록된 기기가 아니에요. 프로필에서 다시 등록해 주세요.',
     qrTitle: '이 화면을 스태프에게 보여주세요',
     done: '입장 완료', resultWaiting: '확인하고 있어요', resultSettling: '기록하고 있어요',
+    toTickets: '내 티켓 보기',
     notConfirmed: '입구에서 확인되지 않았어요. 스태프에게 티켓을 보여 주세요.',
     deviceUnavailable: '이 휴대폰에서는 입장 기능을 쓸 수 없어요. 입구 스태프에게 말씀해 주세요.',
     locked: '휴대폰이 잠겨 있어요. 프로필에서 잠금을 풀어 주세요.',

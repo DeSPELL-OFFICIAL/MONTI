@@ -36,12 +36,12 @@ describe('eventProblems', () => {
     expect(eventProblems(READY)).toEqual([]);
   });
 
-  /** 소개는 이제 필수(최소 10자, plan section A-4): 빈 소개는 bodyTooShort 로 잡힌다. */
+  /** 소개는 이제 선택이다(계획 B-4가 ≥10자 규칙을 뒤집음): 빈 소개는 더 이상 문제가 아니다. */
   it('names an empty draft section by section, in the order the scene asks', () => {
     expect(eventProblems(emptyEventDraft)).toEqual(
-      ['title', 'bodyTooShort', 'venue', 'startsAt', 'endsAt'],
+      ['title', 'venue', 'startsAt', 'endsAt'],
     );
-    expect(eventProblems({ ...READY, description: '' })).toEqual(['bodyTooShort']);
+    expect(eventProblems({ ...READY, description: '' })).toEqual([]);
   });
 
   /**
@@ -57,11 +57,11 @@ describe('eventProblems', () => {
     expect(eventProblems({ ...READY, description: 'ㄱ'.repeat(2_001) })).toEqual(['body']);
   });
 
-  /** 소개는 최소 10자. 9자는 bodyTooShort, 10자는 통과 — 공백은 세지 않는다(trim). */
-  it('requires a description of at least ten code points (plan section A-4)', () => {
-    expect(eventProblems({ ...READY, description: 'ㄱ'.repeat(9) })).toEqual(['bodyTooShort']);
-    expect(eventProblems({ ...READY, description: 'ㄱ'.repeat(10) })).toEqual([]);
-    expect(eventProblems({ ...READY, description: `  ${'ㄱ'.repeat(9)}  ` })).toEqual(['bodyTooShort']);
+  /** 소개는 선택이다(계획 B-4): 빈값도 아주 짧은 값도 통과한다 — 남은 규칙은 2000자 상한뿐이다. */
+  it('accepts an empty or very short description (plan section B-4)', () => {
+    expect(eventProblems({ ...READY, description: '' })).toEqual([]);
+    expect(eventProblems({ ...READY, description: 'ㄱ' })).toEqual([]);
+    expect(eventProblems({ ...READY, description: `  ${'ㄱ'.repeat(3)}  ` })).toEqual([]);
   });
 
   it('counts code points rather than UTF-16 units, as the server does', () => {
