@@ -28,7 +28,6 @@
   --brand-grad: linear-gradient(135deg, var(--brand-soft) 0%, var(--brand-strong) 100%);
   --brand-tint: rgba(131, 110, 249, 0.12);
   --brand-tint-strong: rgba(131, 110, 249, 0.20);
-  --brand-ring: rgba(131, 110, 249, 0.38);
 
   /* ── ground and ink ─────────────────────────────────────────────────────────────────── */
   --bg: #F5F3FF;
@@ -72,19 +71,22 @@
   --s-6: 32px;
 
   /* ── type ───────────────────────────────────────────────────────────────────────────── */
+  /* rem, not px, so the browser font-size and text-only zoom are honoured (WCAG 1.4.4). Base is
+     16px, so each value is its px size / 16 — the one exception is --t-input, held at a real 16px. */
   /** The large title on a screen top — Apple's rhythm: one big line, then the body. */
-  --t-large: 28px;
-  --t-large-lh: 34px;
-  --t-title: 22px;
-  --t-title-lh: 28px;
-  --t-head: 17px;
-  --t-head-lh: 24px;
+  --t-large: 1.75rem;
+  --t-large-lh: 2.125rem;
+  --t-title: 1.375rem;
+  --t-title-lh: 1.75rem;
+  --t-head: 1.0625rem;
+  --t-head-lh: 1.5rem;
   /** Body sits at 17 now — the reading size the rest of the type scale is built around. */
-  --t-body: 17px;
-  --t-body-lh: 22px;
-  --t-cap: 13px;
-  --t-cap-lh: 18px;
-  /** Anything below 16px makes iOS Safari zoom the page on focus, so no field ever is. */
+  --t-body: 1.0625rem;
+  --t-body-lh: 1.375rem;
+  --t-cap: 0.8125rem;
+  --t-cap-lh: 1.125rem;
+  /** Held at a literal 16px, never 1rem: anything below 16px makes iOS Safari zoom the page on
+      focus, and px keeps that floor even where the base font has been shrunk. */
   --t-input: 16px;
 
   /* ── metrics ────────────────────────────────────────────────────────────────────────── */
@@ -345,7 +347,7 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
 .field input:focus, .field select:focus, .field textarea:focus {
   outline: none;
   border-color: var(--brand);
-  box-shadow: 0 0 0 3px var(--brand-ring);
+  box-shadow: 0 0 0 3px var(--brand-ink);
 }
 .field textarea { height: auto; min-height: 120px; padding: var(--s-3); line-height: 22px; resize: vertical; }
 /* The chevron is drawn here because the native one is a different grey in every browser and
@@ -554,7 +556,7 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
   position: absolute; inset: 0;
   transform: translateX(-100%);
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
-  animation: skeleton-sweep 1.4s var(--ease) infinite;
+  animation: skeleton-sweep 1.3s var(--ease) infinite;
 }
 @keyframes skeleton-sweep { to { transform: translateX(100%); } }
 
@@ -579,7 +581,7 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
 .steps__step--pulse .steps__dot { animation: step-pulse 1.2s ease-in-out infinite; }
 @keyframes step-pulse {
   0%, 100% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.6); opacity: 0.45; }
+  50% { transform: scale(1.25); opacity: 0.45; }
 }
 
 /* ── pictures ──────────────────────────────────────────────────────────────────────────── */

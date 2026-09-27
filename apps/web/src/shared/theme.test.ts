@@ -229,3 +229,35 @@ describe('sheets scroll inside a capped body and sit behind a scrim', () => {
     expect(scrim).toMatch(/inset:\s*0/);
   });
 });
+
+/** Motion / type / focus cleanup (expert-4 D8/D9 + motion), read out of the stylesheet. */
+describe('motion, type and focus cleanup', () => {
+  it('states the type scale in rem so browser font-size and text zoom are honoured (1.4.4)', () => {
+    for (const name of ['--t-large', '--t-title', '--t-head', '--t-body', '--t-cap']) {
+      expect(TOKENS.get(name), name).toMatch(/rem$/);
+    }
+    // The input floor is the one exception: a literal 16px, to hold off iOS's focus zoom.
+    expect(TOKENS.get('--t-input')).toBe('16px');
+  });
+
+  it('draws the field focus ring in the opaque accent, not a translucent wash (D9)', () => {
+    const field = /\.field input:focus[^{]*\{([^}]*)\}/.exec(CSS)?.[1] ?? '';
+    expect(field).toMatch(/box-shadow:[^;]*var\(--brand-ink\)/);
+    // The old translucent ring token is gone, not merely unused.
+    expect(CSS).not.toContain('--brand-ring');
+  });
+
+  it('softens the step pulse and gives the skeletons one period', () => {
+    expect(CSS).not.toContain('scale(1.6)');
+    expect(CSS).toContain('scale(1.25)');
+    const periods = [...CSS.matchAll(/skeleton-(?:sweep|pulse)\s+([\d.]+)s/g)].map((m) => m[1]);
+    expect(periods.length).toBeGreaterThan(0);
+    expect(new Set(periods)).toEqual(new Set(['1.3']));
+  });
+
+  it('keeps the reduced-motion killswitch neutralising every animation', () => {
+    const block = /@media \(prefers-reduced-motion: reduce\)\s*\{([\s\S]*?)\n\}/.exec(CSS)?.[1] ?? '';
+    expect(block).toMatch(/animation-duration:\s*0\.001ms\s*!important/);
+    expect(block).toMatch(/transition-duration:\s*0\.001ms\s*!important/);
+  });
+});
