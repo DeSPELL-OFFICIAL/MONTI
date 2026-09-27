@@ -143,6 +143,7 @@ export const ko = {
     failed: '티켓을 받지 못했어요. 잠시 뒤 다시 시도해 주세요.',
     confirming: '아직 확인 중이에요. 잠시 뒤 내 티켓에서 확인해 주세요.',
     limitReached: '이 행사에서 받을 수 있는 티켓을 이미 다 받았어요.',
+    alreadyHave: '이미 받았어요 · 내 티켓에서 확인하세요',
     soldOut: '이 종류는 마감됐어요. 다른 종류를 골라 주세요.',
     requestCta: '신청하기', requesting: '신청하는 중이에요',
     approvalOnly: '이 행사는 주최자 승인 후 받을 수 있어요.',

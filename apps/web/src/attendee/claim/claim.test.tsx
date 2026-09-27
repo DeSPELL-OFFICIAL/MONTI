@@ -196,7 +196,7 @@ describe('Claim', () => {
     expect(await screen.findByRole('button', { name: '티켓 받기' })).toBeDisabled();
   });
 
-  it('blocks the button once the event-wide per-wallet limit is reached', async () => {
+  it('blocks the button and points at 내 티켓 once the per-wallet limit is reached', async () => {
     const owner = `0x${'cd'.repeat(20)}`;
     setSession({ status: 'signedIn', account: owner as `0x${string}` });
     ownedTickets.rows = [
@@ -204,9 +204,21 @@ describe('Claim', () => {
       { id: '12', eventId: '5', tier: 0, owner, transfers: 0, revoked: false },
     ];
     renderClaim();
-    expect(await screen.findByText('이 행사에서 받을 수 있는 티켓을 이미 다 받았어요.')).toBeInTheDocument();
+    // held (2) >= maxPerWallet (2): the pre-block fires before a 받기 the chain would only revert.
+    expect(await screen.findByText('이미 받았어요 · 내 티켓에서 확인하세요')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '내 티켓 보기' })).toHaveAttribute('href', '/tickets');
     expect(await screen.findByRole('button', { name: '티켓 받기' })).toBeDisabled();
     expect(ticketOp).not.toHaveBeenCalled();
+  });
+
+  it('keeps the claim button enabled while still under the per-wallet limit', async () => {
+    const owner = `0x${'cd'.repeat(20)}`;
+    setSession({ status: 'signedIn', account: owner as `0x${string}` });
+    // One held, maxPerWallet 2: under the cap, so no pre-block and the button still acts.
+    ownedTickets.rows = [{ id: '11', eventId: '5', tier: 0, owner, transfers: 0, revoked: false }];
+    renderClaim();
+    expect(await screen.findByRole('button', { name: '티켓 받기' })).toBeEnabled();
+    expect(screen.queryByText('이미 받았어요 · 내 티켓에서 확인하세요')).toBeNull();
   });
 });
 
