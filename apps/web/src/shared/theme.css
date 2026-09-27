@@ -758,7 +758,7 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
 .tier-card { border-radius: var(--r-lg); padding: var(--s-4); }
 .tier-card__head { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); }
 .tier-card__head h3 { font-size: 14px; margin: 0; color: var(--ink-2); font-weight: 700; }
-.tier-card__head .btn { width: auto; min-height: 0; height: 36px; padding: 0 var(--s-4); font-size: 14px; }
+.tier-card__head .btn { width: auto; min-height: var(--tap); height: var(--tap); padding: 0 var(--s-4); font-size: 14px; }
 /* The picture is A4, so at card width it would be taller than the phone. It is a preview. */
 /* The preview is the form: it is the positioning context for the transparent tap regions and the
    price badge laid over it, and it is a little larger than a thumbnail now because it is a control
@@ -783,7 +783,7 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
    well past 4.5:1 whatever pixels of the picture sit behind it. */
 .tier-preview__badge {
   position: absolute; top: var(--s-2); right: var(--s-2); z-index: 2;
-  display: inline-flex; align-items: center; min-height: 32px;
+  display: inline-flex; align-items: center; min-height: var(--tap);
   padding: 0 12px; border-radius: var(--r-pill);
   border: 1px solid rgba(255, 255, 255, 0.28);
   background: var(--brand-deep); color: #fff;
@@ -886,7 +886,10 @@ table { width: 100%; display: block; overflow-x: auto; }
    A poster beside the words. The picture column is a fixed width rather than a share of the
    row because an A4 page is 1.41x as tall as it is wide: at a phone's width, a full-bleed
    poster would make one card taller than the screen and the list would be one event long. */
-.event-card { display: grid; grid-template-columns: 64px 1fr; gap: var(--s-3); align-items: start; }
+/* The whole card is the tap target, not the 20px title link (expert-4 D1): the title <a> is
+   stretched over the card with ::after below, so the picture and body are live too. It stays
+   one link with the title as its name, so a screen reader still announces the event by name. */
+.event-card { position: relative; display: grid; grid-template-columns: 64px 1fr; gap: var(--s-3); align-items: start; min-height: var(--tap); }
 .event-card__art {
   display: block; width: 64px; aspect-ratio: 1240 / 1754;
   object-fit: cover; border-radius: var(--r-sm);
@@ -899,6 +902,7 @@ table { width: 100%; display: block; overflow-x: auto; }
 .event-card__body { min-width: 0; }
 .event-card__title { margin: 0; font-size: var(--t-body); line-height: var(--t-body-lh); }
 .event-card__title a { color: var(--ink); text-decoration: none; font-weight: 700; }
+.event-card__title a::after { content: ''; position: absolute; inset: 0; }
 /* The theme, small enough to sit inside a caption line rather than beside one. */
 .chip--tiny {
   min-height: 0; padding: 1px 8px; font-size: 12px; font-weight: 700;

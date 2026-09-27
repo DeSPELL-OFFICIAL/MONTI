@@ -182,3 +182,34 @@ describe('theme tokens', () => {
     expect(CSS).toMatch(/\.event-list\s*>\s*li\s*\{[^}]*background:\s*var\(--glass-solid\)/);
   });
 });
+
+/**
+ * Tap-target floors (expert-4 D1/D6). jsdom measures nothing, so — like the contrast tests above —
+ * these read the geometry out of `theme.css` rather than off a rendered node. `--tap` is 44px.
+ */
+describe('tap targets on a phone (expert-4 D1/D6)', () => {
+  /** A rule's declaration block, by its exact selector. */
+  function rule(selector: string): string {
+    const esc = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = new RegExp(`${esc}\\s*\\{([^}]*)\\}`).exec(CSS);
+    if (match?.[1] === undefined) throw new Error(`theme.css has no rule for ${selector}`);
+    return match[1];
+  }
+
+  it('makes the whole explore card the tap target, not the 20px title link', () => {
+    const card = rule('.event-card');
+    expect(card).toMatch(/position:\s*relative/);
+    expect(card).toMatch(/min-height:\s*var\(--tap\)/);
+    // The title link is stretched over the card, so the picture and body are live too.
+    const stretch = rule('.event-card__title a::after');
+    expect(stretch).toMatch(/position:\s*absolute/);
+    expect(stretch).toMatch(/inset:\s*0/);
+  });
+
+  it('holds the price badge and the kind edit button to the 44px target', () => {
+    expect(rule('.tier-preview__badge')).toMatch(/min-height:\s*var\(--tap\)/);
+    const edit = rule('.tier-card__head .btn');
+    expect(edit).toMatch(/height:\s*var\(--tap\)/);
+    expect(edit).not.toMatch(/36px/);
+  });
+});
