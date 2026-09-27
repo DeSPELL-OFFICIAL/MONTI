@@ -629,7 +629,7 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
 /* A ticket row: the picture as a thumbnail, the number and the state beside it. The column is
    a fixed width rather than a share of the row because the art is 1.41x as tall as it is wide
    — at the 480px the screen is, a full-width ticket would make one row taller than the phone. */
-.ticket-row { display: grid; grid-template-columns: 76px 1fr; gap: var(--s-3); align-items: center; }
+.ticket-row { display: grid; grid-template-columns: 56px 1fr auto; gap: var(--s-3); align-items: center; }
 .ticket-row__art { display: block; }
 /* The detail screen shows one ticket, so it is the picture rather than a thumbnail — capped
    short of the full width so the state, the door guide and 입장하기 stay on the same screen. */
@@ -940,9 +940,15 @@ table { width: 100%; display: block; overflow-x: auto; }
   background: var(--brand-tint); border-color: transparent; color: var(--brand-ink);
   vertical-align: middle;
 }
-/* A ticket row is a picture and one line: the number and where the ticket stands. The event's
-   own name is printed inside the picture, which is why it is not repeated here. */
-.ticket-row__text { min-width: 0; font-weight: 600; }
+/* A ticket row: the picture as a small thumbnail, then the event's own name leading the row, the
+   day it starts under that, and where the ticket stands as a chip pinned to the right — the name
+   used to hide inside the picture, which inverted the row's hierarchy (visual R1-2). */
+.ticket-row__body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ticket-row__title {
+  min-width: 0; font-weight: 700; letter-spacing: -0.01em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ticket-row__state { justify-self: end; white-space: nowrap; }
 
 /* ── explore skeleton + empty states (plan §2a) ─────────────────────────────────────────── */
 /* Three grey cards the moment the list starts loading, so 탐색 never opens on a lone spinner

@@ -114,7 +114,9 @@ async function answerGateway(cid: string) {
 
 /** One row of the list, found by the line that names it rather than by its position. */
 function row(tokenId: string): HTMLElement {
-  return screen.getByRole('link', { name: new RegExp(`^#${tokenId} · `) });
+  const link = document.querySelector(`a[href="/tickets/${tokenId}"]`);
+  if (!(link instanceof HTMLElement)) throw new Error(`no ticket row #${tokenId}`);
+  return link;
 }
 
 /**
@@ -182,23 +184,25 @@ function renderDetail(tokenId: string) {
 describe('TicketList', () => {
   it('shows every derived state', async () => {
     renderList();
-    expect(await screen.findByRole('link', { name: '#1 · 입장 전' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '#2 · 입장 완료' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '#3 · 보내는 중' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '#5 · 친구에게 줌' })).toBeInTheDocument();
+    await screen.findByRole('link', { name: /입장 전/ });
+    expect(within(row('1')).getByText('입장 전')).toBeInTheDocument();
+    expect(within(row('2')).getByText('입장 완료')).toBeInTheDocument();
+    expect(within(row('3')).getByText('보내는 중')).toBeInTheDocument();
+    expect(within(row('5')).getByText('친구에게 줌')).toBeInTheDocument();
     // A revoked ticket, a ticket on a called-off event and a ticket handed over out of one.
     expect(screen.getAllByRole('link', { name: /취소됨/ })).toHaveLength(3);
   });
 
   it('lets a called-off event outrank 양도됨 even when its status arrives a trip later', async () => {
     renderList();
-    expect(await screen.findByRole('link', { name: '#10 · 취소됨' })).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: '#10 · 친구에게 줌' })).not.toBeInTheDocument();
+    await screen.findAllByRole('link', { name: /취소됨/ });
+    expect(within(row('10')).getByText('취소됨')).toBeInTheDocument();
+    expect(within(row('10')).queryByText('친구에게 줌')).toBeNull();
   });
 
   it('asks the indexer only for the check-ins, events and handovers its own rows name', async () => {
     renderList();
-    await screen.findByRole('link', { name: '#1 · 입장 전' });
+    await screen.findByRole('link', { name: /입장 전/ });
     expect(gql).toHaveBeenNthCalledWith(2, expect.stringContaining('TicketContext'), {
       tokenIds: ['1', '2', '3', '4', '6'],
       eventIds: ['7', '9'],
@@ -294,7 +298,7 @@ describe('TicketDetail', () => {
 describe('ticket art', () => {
   it('bands the ticket that was used, and only that one', async () => {
     renderList();
-    await screen.findByRole('link', { name: '#1 · 입장 전' });
+    await screen.findByRole('link', { name: /입장 전/ });
     expect(within(row('2')).getByText('사용됨')).toBeInTheDocument();
     expect(within(row('1')).queryByText('사용됨')).toBeNull();
     expect(within(row('3')).queryByText('사용됨')).toBeNull();
@@ -307,14 +311,15 @@ describe('ticket art', () => {
    */
   it('keeps the used art on a ticket that was revoked after it was used', async () => {
     renderList();
-    expect(await screen.findByRole('link', { name: '#4 · 취소됨' })).toBeInTheDocument();
+    await screen.findAllByRole('link', { name: /취소됨/ });
+    expect(within(row('4')).getByText('취소됨')).toBeInTheDocument();
     expect(within(row('4')).getByText('사용됨')).toBeInTheDocument();
   });
 
   it('draws the stored preset, and the bundled one where there is no document', async () => {
     art.docs.set('eventArt/7', { tiers: [{ design: 'c' }] });
     renderList();
-    await screen.findByRole('link', { name: '#1 · 입장 전' });
+    await screen.findByRole('link', { name: /입장 전/ });
     await waitFor(() => expect(presetIn(row('1'))).toBe('c'));
     // #5 belongs to an event `saveEventArt` has never been called for — the ordinary case.
     expect(presetIn(row('5'))).toBe('a');
@@ -329,7 +334,7 @@ describe('ticket art', () => {
     art.docs.set('eventArt/7', { tiers: [{ design: 'aurora' }] });
     art.docs.set('eventArt/8', { tiers: [{ design: 'c' }] });
     renderList();
-    await screen.findByRole('link', { name: '#1 · 입장 전' });
+    await screen.findByRole('link', { name: /입장 전/ });
     // The same render honours a key it does know, so this is a fallback and not a dead read.
     await waitFor(() => expect(presetIn(row('5'))).toBe('c'));
     expect(presetIn(row('1'))).toBe('a');
@@ -339,15 +344,15 @@ describe('ticket art', () => {
   it('still draws every row when the art document cannot be read at all', async () => {
     art.refuse = true;
     renderList();
-    expect(await screen.findByRole('link', { name: '#1 · 입장 전' })).toBeInTheDocument();
+    await screen.findByRole('link', { name: /입장 전/ });
     expect(presetIn(row('1'))).toBe('a');
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('captions the picture with the event and the ticket kind', async () => {
     renderList();
-    await screen.findByRole('link', { name: '#1 · 입장 전' });
-    expect(within(row('1')).getByText('한여름 밤의 재즈')).toBeInTheDocument();
+    await screen.findByRole('link', { name: /입장 전/ });
+    expect(within(row('1')).getAllByText('한여름 밤의 재즈').length).toBeGreaterThan(0);
     expect(within(row('1')).getByText('일반')).toBeInTheDocument();
   });
 
@@ -358,7 +363,7 @@ describe('ticket art', () => {
    */
   it('prints whose ticket it is, from the profile', async () => {
     renderList();
-    await screen.findByRole('link', { name: '#1 · 입장 전' });
+    await screen.findByRole('link', { name: /입장 전/ });
     await waitFor(() => expect(within(row('1')).getByText('김태완')).toBeInTheDocument());
     // Every row is the same person's, so every row carries the same name.
     expect(within(row('5')).getByText('김태완')).toBeInTheDocument();
@@ -367,7 +372,7 @@ describe('ticket art', () => {
   it('falls back to a word for somebody who never gave a name', async () => {
     art.docs.set('users/uid-1', { displayName: '' });
     renderList();
-    await screen.findByRole('link', { name: '#1 · 입장 전' });
+    await screen.findByRole('link', { name: /입장 전/ });
     await waitFor(() => expect(within(row('1')).getByText('게스트')).toBeInTheDocument());
     expect(within(row('1')).queryByText('김태완')).toBeNull();
   });
@@ -375,22 +380,22 @@ describe('ticket art', () => {
   it('falls back to the same word when there is no profile document at all', async () => {
     me.uid = null;
     renderList();
-    await screen.findByRole('link', { name: '#1 · 입장 전' });
+    await screen.findByRole('link', { name: /입장 전/ });
     await waitFor(() => expect(within(row('1')).getByText('게스트')).toBeInTheDocument());
   });
 
   /** The start time comes off the indexer's `Event.startsAt`, formatted for the locale. */
   it('prints the day the event starts', async () => {
     renderList();
-    await screen.findByRole('link', { name: '#1 · 입장 전' });
-    await waitFor(() => expect(within(row('1')).getByText(STARTS_ON)).toBeInTheDocument());
+    await screen.findByRole('link', { name: /입장 전/ });
+    await waitFor(() => expect(within(row('1')).getAllByText(STARTS_ON).length).toBeGreaterThan(0));
   });
 
   /** A ticket the index has no start time for carries no date — never a placeholder one. */
   it('draws no date for a ticket whose event named no start', async () => {
     renderList();
-    await screen.findByRole('link', { name: '#10 · 취소됨' });
-    await waitFor(() => expect(within(row('1')).getByText(STARTS_ON)).toBeInTheDocument());
+    await screen.findAllByRole('link', { name: /취소됨/ });
+    await waitFor(() => expect(within(row('1')).getAllByText(STARTS_ON).length).toBeGreaterThan(0));
     expect(within(row('10')).queryByText(STARTS_ON)).toBeNull();
     // The stub is drawn all the same — the name is on it, the date line simply is not there.
     expect(within(row('10')).getByText('김태완')).toBeInTheDocument();
@@ -399,10 +404,10 @@ describe('ticket art', () => {
   /** A gateway that will not answer costs the ticket its title, never its row. */
   it('names a ticket whose event nothing could describe', async () => {
     renderList();
-    await screen.findByRole('link', { name: '#1 · 입장 전' });
+    await screen.findByRole('link', { name: /입장 전/ });
     // #5's document 404s at the gateway; #10's event was never pinned one to ask about.
-    expect(within(row('5')).getByText('이름 없는 행사')).toBeInTheDocument();
-    expect(within(row('10')).getByText('이름 없는 행사')).toBeInTheDocument();
+    expect(within(row('5')).getAllByText('이름 없는 행사').length).toBeGreaterThan(0);
+    expect(within(row('10')).getAllByText('이름 없는 행사').length).toBeGreaterThan(0);
     // And #10's event named no tier either, so the kind falls back to a word of its own.
     expect(within(row('10')).getByText('티켓')).toBeInTheDocument();
   });
