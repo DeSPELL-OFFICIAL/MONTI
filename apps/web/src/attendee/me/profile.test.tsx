@@ -390,8 +390,8 @@ describe('the display name', () => {
   it('starts filled in with the name already stored', async () => {
     wrap(<Profile />);
     await waitFor(() => expect(screen.getByLabelText(ko.me.displayName)).toHaveValue('김태완'));
-    // One line saying which of the two names this is, so the pair is not one question twice.
-    expect(screen.getByText(ko.me.displayNameVsNickname)).toBeInTheDocument();
+    // One concise line saying what the name is for — the long nickname disambiguation was cut.
+    expect(screen.getByText(ko.me.displayNameHelp)).toBeInTheDocument();
   });
 
   it('sends the one field the rule admits, and nothing else', async () => {
