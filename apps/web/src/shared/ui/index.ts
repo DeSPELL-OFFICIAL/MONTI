@@ -13,6 +13,7 @@ export { Field } from './Field';
 export { KycBadge } from './KycBadge';
 export { ContactLink } from './ContactLink';
 export { Chip, type ChipProps } from './Chip';
+export { EmptyState } from './EmptyState';
 export { Toggle, type ToggleProps } from './Toggle';
 export { StickyBar } from './StickyBar';
 export { Toast, TOAST_MS, type ToastProps } from './Toast';

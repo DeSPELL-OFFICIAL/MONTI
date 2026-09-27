@@ -953,7 +953,9 @@ table { width: 100%; display: block; overflow-x: auto; }
 /* ── explore skeleton + empty states (plan §2a) ─────────────────────────────────────────── */
 /* Three grey cards the moment the list starts loading, so 탐색 never opens on a lone spinner
    that reads as a dead app. The shimmer is neutralised by the reduced-motion rule above. */
-.empty-state { display: grid; gap: var(--s-3); justify-items: start; margin: var(--s-4) 0; }
+.empty-state { display: grid; gap: var(--s-3); justify-items: center; text-align: center;
+  margin: var(--s-6) auto; max-width: 320px; }
+.empty-state__icon { color: var(--brand); opacity: 0.5; line-height: 0; }
 .event-card--skeleton { pointer-events: none; }
 .event-card__art--skeleton { box-shadow: none; animation: skeleton-pulse 1.3s ease-in-out infinite; }
 .skeleton-bar {
