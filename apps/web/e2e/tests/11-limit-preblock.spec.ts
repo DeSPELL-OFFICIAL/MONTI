@@ -128,14 +128,14 @@ test.describe('MONTI limit pre-block (live check e, post-fix)', () => {
             const already = page.getByText(ALREADY_HAVE, { exact: true });
             const limit = page.getByText(LIMIT_REACHED, { exact: true });
             // The claim screen has resolved once either the CTA or a block alert is on screen.
-            await expect(cta.or(already).or(limit)).toBeVisible({ timeout: 60_000 });
+            await expect(cta.or(already).or(limit).first()).toBeVisible({ timeout: 60_000 });
             // Wait for the held-driven block to settle: up to 15s, then one reload and another 15s.
             // A held count that is already warm shows the pre-block at once; a laggy indexer read gets
             // the reload. If it never appears the button stays enabled and the cell fails honestly.
             const block = already.or(limit);
             if (!(await block.waitFor({ state: 'visible', timeout: 15_000 }).then(() => true).catch(() => false))) {
               await page.goto(`/claim/${eventId}`);
-              await expect(cta.or(already).or(limit)).toBeVisible({ timeout: 60_000 });
+              await expect(cta.or(already).or(limit).first()).toBeVisible({ timeout: 60_000 });
               await block.waitFor({ state: 'visible', timeout: 15_000 }).catch(() => undefined);
             }
             // A final beat so any (unwanted) op would have been issued by now.

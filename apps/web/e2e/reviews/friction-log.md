@@ -87,3 +87,48 @@ a **PASS** · b+c(3명) **PASS** · d **제품 PASS(온체인)** · e **FAIL(제
 ## 팀이 고쳐야 할 두 가지
 1. **페이마스터 deposit 상향/자동 충전** — 한 판(약 20+ op)을 버티게. (이번엔 후반에 고갈되어 마감·승인 후반이 막혔다.)
 2. **승인 신청 상태 재폴링** — 클레임처럼 신청도 인덱서 지연을 스스로 따라잡게. 그러면 하니스가 d(신청→승인→승인됨)를 그대로 재검증한다.
+
+---
+
+
+## 라이브 실행 7 — 단순화 전체 흐름 풀스케일(9명) (2026-09-27)
+
+대상: 프로덕션 (mvp-web `02e28f4` · 단순화 Batch 1–3 + claim 사전차단 + W14 카피). 페이마스터 deposit **8.83 MON**(상향분). 명령: `E2E_BASE_URL=https://monti.despell.io E2E_APPROVAL=1 E2E_USERS=9 pnpm e2e`(헤디드). 승인(d)은 시나리오 a 가 **매 런 새 승인 행사**를 만들어서, 재시도에서 `E2E_EXISTING_REQUESTERS=0 E2E_NEW_REQUESTS=4`로 신규 신청부터 돌렸다(관객 02–05).
+
+### 시나리오 결과 (라이브 7)
+smoke·공개표면 **PASS** · a **PASS** · b+c(9명) **PASS** · e(한도 사전차단) **PASS**(하니스 수정 후) · d(승인 4건→선택2+전체) **PASS**(신규 신청 경로) · 한도 사전차단(11-preblock 02·03·04) **PASS**(하니스 수정 후) · verify **PASS** · **f(5석 마감) FAIL(재현 2/2)**.
+
+### Top-5 마찰 (심각도순)
+1. **[S1·제품·라이브·신규·퇴행] 5석 소량 행사 생성이 완료되지 않는다(f).** 무료 선착순 소량(supply 5) 행사를 만들면 `행사 만들기` 버튼이 활성→클릭돼도 create op 가 온체인에 안 실리고(**deposit 무변동·이벤트 미생성**) 화면이 `/org/new` 에 그대로 머문다(create-event **453s 타임아웃**, `/org/new/done/{id}` 미도달). **동일한 무료 선착순 supply 100 은 성공**(Event 11), 라이브 5 에선 5석 행사가 정상 생성(Event 9, minted 5/5)됐으므로 **단순화 배치(수량 칩 30/50/100/무제한 신설 등) 이후의 회귀**로 보인다. run1·retry 2회 동일 재현. 근본원인은 타임박스 내 미특정 — 소량/비칩 수량값 또는 Batch 2 수량 UI 의 create 경로 조사 필요. (앱 무수정, 하니스 전용 과업.)
+2. **[S3·하니스·해소] claim 사전차단 문구 인식 갱신.** 보유자 재수령 시 앱은 `claim.limitReached`(`이 행사에서…`)가 아니라 `claim.alreadyHave`(`이미 받았어요 · 내 티켓에서 확인하세요`, held>0 분기)를 띄우고 `티켓 받기`를 disabled 로 둔다. 기존 `claim.ts` 는 옛 문구만 봐 사전차단을 놓치고 disabled 버튼을 클릭→30s 타임아웃(e 최초 FAIL). → `claimFree` 가 `alreadyHave` 를 사전차단 'limit' 으로 인식 + 콜드 첫 로드에서 held resolve 전까지 폴링(버튼 enabled 되면 진행)하도록 갱신. **제품 사전차단 자체는 정상**(라이브 체크 e 예고대로 갱신).
+3. **[S3·하니스·해소] 11-preblock 셀렉터 strict-mode.** 사전차단이 옳게 발화하면 알림(`이미 받았어요…`)과 disabled `티켓 받기`가 **둘 다** 뜨는데, 스펙의 `cta.or(already).or(limit)` 가 2요소 매치→strict-mode 위반(02 통과, 03·04 실패). → `.first()` 보정(2곳). 제품 정상.
+4. **[S2·설정·라이브] 새 승인 행사엔 신규 신청부터 필요.** a 가 매 런 새 승인 행사(Event 12)를 만들어서 d 기본값(`EXISTING=4/NEW=0`, 기존 대기 재사용 전제)으론 신청 0건→승인 대상 없음(최초 d FAIL). 재시도 `EXISTING=0/NEW=4`로 관객 02–05 신규 신청→선택2+전체→전원 승인·티켓(token 37–40).
+5. **[S3·인프라] Playwright fixture 내부오류 + .artifacts 소실.** 03/04 에 `Internal error: step id not found: fixture@…`(부수적, 실제 원인은 strict-mode) + 세션 중 다른 런이 `.artifacts` 를 초기화해 run1 스텝 타이밍/트레이스 유실. 부차 관찰: 일부 티켓 아트가 `이름 없는 행사`로 제목 미해결.
+
+### 온체인 증거 (indexer `e6b82a8` + RPC EntryPoint `0x5FF1…2789`.balanceOf)
+- **a/b+c**: Event 11(무료 선착순) Published, tier `maxPerWallet 1 · minted 9/100`, Ticket **28–36** — 관객 02–10 각기 다른 스마트계정 1장씩.
+- **d**: Event 12(관리자 승인) Published, ClaimRequest **12-1…12-4 전부 Approved**, tokenId **37·38·39·40**(관객 02·03·04·05), pendingRequests 0.
+- **e / 한도**: Event 6·10, 관객 02·03·04 → `alreadyHave` + disabled + `eth_sendUserOperation` 0.
+- **f**: 신규 5석 행사 **미생성**(온체인 최대 Event id 12 유지), deposit 무변동.
+- **verify**: 관객 02·05 내 티켓에 승인 티켓 보유(read-only, 무소모).
+
+### deposit 추이 (paymaster `0xf73220…8dE4`)
+| 지점 | MON |
+|---|---|
+| 시작 | 8.8295 |
+| run1 후(a + b+c 9건) | 6.9626 (−1.867) |
+| retry 후(e 0 · d 4신청+2승인 · f 0) | 6.1395 (−0.823) |
+| 종료 | **6.1395** (총 −2.690, >1 안전) |
+
+deposit 상향(8.83)으로 **9명 풀 패스가 예산상 여유**(라이브 6 의 예산 부족 해소). 전체 승인 다중 민팅도 2.4/3.3s 로 가볍게 착지.
+
+### 실측 타이밍 (ok 중앙값, run2)
+패스키 재로그인 **7.2s**(n=8) · 승인 신청 **6.8s**(n=4) · 선택 승인 2.4s · 전체 승인 3.3s · 무료 받기 ~4s(b+c, 라이브 6 과 동수준; 사전차단 반환 1.0s) · create-event(f) 453s→실패.
+
+### 하니스 수정 (앱 무수정 · e2e 파일만)
+- `e2e/utils/claim.ts`: `claimFree` 가 `alreadyHave` 사전차단을 'limit' 으로 인식 + 콜드 첫 로드 폴링(20s, 버튼 enabled 시 클릭 진행). C 에 `alreadyHave` 추가.
+- `e2e/tests/11-limit-preblock.spec.ts`: `expect(cta.or(already).or(limit).first())` — 사전차단이 알림+버튼 2요소를 띄울 때의 strict-mode 위반 회피(2곳).
+
+### 팀이 고쳐야 할 것
+1. **5석 소량 행사 생성 회귀(f)** — supply 100 은 되고 supply 5 는 create op 가 안 실린다. Batch 2 수량 UI/소량값 create 경로 조사(라이브 5 에선 되던 5석 행사).
+2. (지속) 콜드 딥링크 첫 로드 시 held resolve 전 버튼 잠깐 enabled — 온체인 한도는 안전.

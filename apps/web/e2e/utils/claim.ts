@@ -11,6 +11,7 @@ const C = {
   done: '티켓을 받았어요 · 내 티켓에 있어요',
   requesting: '신청하는 중이에요',
   limit: '이 행사에서 받을 수 있는 티켓을 이미 다 받았어요.',
+  alreadyHave: '이미 받았어요 · 내 티켓에서 확인하세요',
   soldOut: '이 종류는 마감됐어요. 다른 종류를 골라 주세요.',
   confirming: '아직 확인 중이에요. 잠시 뒤 내 티켓에서 확인해 주세요.',
   failed: '티켓을 받지 못했어요. 잠시 뒤 다시 시도해 주세요.',
@@ -35,9 +36,23 @@ export async function claimFree(page: Page, personaId: string, eventId: string):
       const claim = page.getByRole('button', { name: C.claimCta, exact: true });
       await expect(claim).toBeVisible({ timeout: 30_000 });
 
-      // Blocked before the tap: the button is disabled and the reason is on screen.
-      if (await page.getByText(C.limit, { exact: true }).isVisible().catch(() => false)) return 'limit';
-      if (await page.getByText(C.soldOut, { exact: true }).isVisible().catch(() => false)) return 'soldout';
+      // Blocked before the tap. On a cold /claim load the held/pending counts have not resolved yet
+      // (the button shows a quiet 확인 중… and stays disabled), so the pre-block reason can lag a
+      // beat — poll until a block reason shows OR the button becomes enabled (claimable). An
+      // already-holder sees `alreadyHave`, a maxPerWallet-0 tier sees `limitReached`; both are a
+      // 'limit' outcome and both keep 받기 disabled, so a tap would only time out on the disabled
+      // button (live run 7, scenario e: alreadyHave was unrecognised → click on disabled → timeout).
+      const limitTxt = page.getByText(C.limit, { exact: true });
+      const alreadyTxt = page.getByText(C.alreadyHave, { exact: true });
+      const soldTxt = page.getByText(C.soldOut, { exact: true });
+      const preBlockDeadline = Date.now() + 20_000;
+      while (Date.now() < preBlockDeadline) {
+        if (await limitTxt.isVisible().catch(() => false)) return 'limit';
+        if (await alreadyTxt.isVisible().catch(() => false)) return 'limit';
+        if (await soldTxt.isVisible().catch(() => false)) return 'soldout';
+        if (await claim.isEnabled().catch(() => false)) break;
+        await page.waitForTimeout(500);
+      }
 
       await claim.click();
       const confirming = page.getByText(C.confirming, { exact: true });
