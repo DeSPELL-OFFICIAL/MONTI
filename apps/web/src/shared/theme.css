@@ -749,6 +749,21 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
 .poster-modal__frame .a4-frame { width: auto; height: 100%; max-width: 100%; }
 .poster-modal__frame .field { width: 100%; }
 .poster-modal__bar { display: grid; gap: var(--s-2); }
+
+/* The account-deletion confirm (expert-4 D2). Opened with showModal(), so it is in the top layer
+   above the route transform and the sticky bar, with a native focus trap and a ::backdrop scrim —
+   the plain <dialog open> before it was non-modal, borderless-boxed and left the page behind live. */
+.confirm-modal {
+  max-width: min(92vw, 420px); margin: auto; padding: 0;
+  border: 0; border-radius: var(--r-lg);
+  background: var(--glass-solid); color: var(--ink);
+  box-shadow: var(--glass-shadow);
+}
+.confirm-modal::backdrop { background: rgba(20, 8, 48, 0.44); }
+.confirm-modal__body { display: grid; gap: var(--s-3); padding: var(--s-4); }
+.confirm-modal__body h3 { margin: 0; }
+.confirm-modal__body ul { margin: 0; padding-left: var(--s-4); display: grid; gap: var(--s-1); }
+.confirm-modal__bar { display: grid; gap: var(--s-2); }
 /* A rule the organiser is about to break, said under the field rather than in an alert box. */
 .problem { margin: 6px 0 0; color: var(--danger); font-size: var(--t-cap); line-height: var(--t-cap-lh); font-weight: 600; }
 

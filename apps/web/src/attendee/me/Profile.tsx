@@ -158,6 +158,27 @@ function DeleteAccount() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [scheduled, setScheduled] = useState('');
+  const dialogRef = useRef<HTMLDialogElement>(null);
+
+  // Top layer, so the confirm sits above the route transform and the sticky bar with a native
+  // focus trap and a ::backdrop scrim (expert-4 D2, the same showModal pattern as PosterModal).
+  // A browser (or jsdom) that will not run showModal falls back to the plain open attribute.
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!asking || dialog === null) return undefined;
+    try {
+      dialog.showModal();
+    } catch {
+      dialog.setAttribute('open', '');
+    }
+    return () => {
+      try {
+        dialog.close();
+      } catch {
+        dialog.removeAttribute('open');
+      }
+    };
+  }, [asking]);
 
   async function run(): Promise<void> {
     setBusy(true);
@@ -184,19 +205,32 @@ function DeleteAccount() {
       {scheduled ? <Alert tone="info">{scheduled}</Alert> : null}
       {error ? <Alert tone="error">{error}</Alert> : null}
       {asking ? (
-        <dialog open aria-label={copy.me.deleteConfirmTitle}>
-          <h3>{copy.me.deleteConfirmTitle}</h3>
-          <ul>
-            <li>{copy.me.deleteSignOut}</li>
-            <li>{copy.me.deleteErase}</li>
-            <li>{copy.me.deleteRetained}</li>
-          </ul>
-          <Button variant="danger" onClick={() => void run()} disabled={busy}>
-            {copy.me.deleteConfirmCta}
-          </Button>
-          <Button variant="ghost" onClick={() => setAsking(false)} disabled={busy}>
-            {copy.common.cancel}
-          </Button>
+        <dialog
+          ref={dialogRef}
+          className="confirm-modal"
+          aria-label={copy.me.deleteConfirmTitle}
+          // Escape closes through the same path 취소 uses, and never mid-request.
+          onCancel={(event) => {
+            event.preventDefault();
+            if (!busy) setAsking(false);
+          }}
+        >
+          <div className="confirm-modal__body">
+            <h3>{copy.me.deleteConfirmTitle}</h3>
+            <ul>
+              <li>{copy.me.deleteSignOut}</li>
+              <li>{copy.me.deleteErase}</li>
+              <li>{copy.me.deleteRetained}</li>
+            </ul>
+            <div className="confirm-modal__bar">
+              <Button variant="danger" onClick={() => void run()} disabled={busy}>
+                {copy.me.deleteConfirmCta}
+              </Button>
+              <Button variant="ghost" onClick={() => setAsking(false)} disabled={busy}>
+                {copy.common.cancel}
+              </Button>
+            </div>
+          </div>
         </dialog>
       ) : null}
       {asking || scheduled ? null : (
