@@ -22,9 +22,12 @@ const DISMISS_VELOCITY = 500;
  * A panel that rises from the foot of the screen with one decision on it.
  *
  * A `role="dialog"` panel rather than a route: it is one question with every answer on it, and a
- * route would put it in the back button's history. Non-modal on purpose — a modal takes focus,
- * and on a phone that closes the keyboard of whatever was being typed behind it, so this never
- * sets `aria-modal`.
+ * route would put it in the back button's history. It is modal (`aria-modal`) with a scrim behind
+ * it (expert-4 D7): every sheet in this app carries a decision, not a text field, so nothing is
+ * being typed behind it to lose — and a decision left over a live, tappable scene is how a stray
+ * tap lands on the screen the person meant to decide about. The scrim turns that scene inert to
+ * taps and, when there is a way out, a tap on it leaves the same way a fling does. `showModal()`'s
+ * focus-stealing is still avoided — it would close a keyboard — so this stays a plain motion panel.
  *
  * The rise is a spring rather than the old CSS `@keyframes`, so it can be the same motion the
  * fling springs back along. Under reduced motion it appears in place — no transform entry — and
@@ -48,17 +51,31 @@ export function Sheet({ label, children, onDismiss }: SheetProps) {
         };
 
   return (
-    <m.div
-      role="dialog"
-      aria-label={label}
-      className="sheet"
-      initial={reduce ? false : { y: '100%' }}
-      animate={{ y: 0 }}
-      exit={{ y: '100%' }}
-      transition={SPRING.gentle}
-      {...drag}
-    >
-      <div className="sheet__body">{children}</div>
-    </m.div>
+    <>
+      {/* The scrim turns the scene behind the sheet inert to taps; a tap on it dismisses when
+          there is a way out, and does nothing when the sheet is a summary that needs a choice. */}
+      <m.div
+        className="sheet-scrim"
+        aria-hidden="true"
+        onClick={onDismiss}
+        initial={reduce ? false : { opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={SPRING.gentle}
+      />
+      <m.div
+        role="dialog"
+        aria-label={label}
+        aria-modal="true"
+        className="sheet"
+        initial={reduce ? false : { y: '100%' }}
+        animate={{ y: 0 }}
+        exit={{ y: '100%' }}
+        transition={SPRING.gentle}
+        {...drag}
+      >
+        <div className="sheet__body">{children}</div>
+      </m.div>
+    </>
   );
 }

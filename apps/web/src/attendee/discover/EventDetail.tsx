@@ -153,13 +153,18 @@ export function EventDetail() {
             </a>
             {metadata?.venueHidden ? <span className="badge">{copy.discover.privateOnly}</span> : null}
           </p>
-        ) : null}
-        {metadata?.venueHidden && venue === '' ? (
+        ) : metadata?.venueHidden ? (
           <p className="muted">
             {region === '' ? '' : `${region} · `}
             {venueWaiting ? copy.discover.privateLoading : copy.discover.venueHidden}
           </p>
-        ) : null}
+        ) : (
+          // 장소를 비운 공개 행사: 이제 장소는 선택이라 기본 라벨 "장소 미정"으로 읽힌다.
+          <p className="muted">
+            {region === '' ? '' : `${region} · `}
+            {copy.discover.venueTbd}
+          </p>
+        )}
       </Card>
 
       {/* What is left, and at what price. Its own pane because it is the one part of this

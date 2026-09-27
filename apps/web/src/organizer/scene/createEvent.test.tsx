@@ -207,7 +207,7 @@ describe('the one button', () => {
 
     await user.click(screen.getByRole('button', { name: copy.tiers.create }));
     expect(screen.getByText(copy.problems.title)).toBeInTheDocument();
-    expect(screen.getByText(copy.problems.venue)).toBeInTheDocument();
+    // 장소는 이제 선택이라 빈 장소는 더 이상 막지 않는다 — 남은 건 제목뿐.
     // Still here: an unfinished field is a message, not a wall — and never a second screen.
     expect(screen.queryByText(/^landed:/)).toBeNull();
   });

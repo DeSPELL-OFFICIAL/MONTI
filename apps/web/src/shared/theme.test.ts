@@ -182,3 +182,82 @@ describe('theme tokens', () => {
     expect(CSS).toMatch(/\.event-list\s*>\s*li\s*\{[^}]*background:\s*var\(--glass-solid\)/);
   });
 });
+
+/**
+ * Tap-target floors (expert-4 D1/D6). jsdom measures nothing, so — like the contrast tests above —
+ * these read the geometry out of `theme.css` rather than off a rendered node. `--tap` is 44px.
+ */
+describe('tap targets on a phone (expert-4 D1/D6)', () => {
+  /** A rule's declaration block, by its exact selector. */
+  function rule(selector: string): string {
+    const esc = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = new RegExp(`${esc}\\s*\\{([^}]*)\\}`).exec(CSS);
+    if (match?.[1] === undefined) throw new Error(`theme.css has no rule for ${selector}`);
+    return match[1];
+  }
+
+  it('makes the whole explore card the tap target, not the 20px title link', () => {
+    const card = rule('.event-card');
+    expect(card).toMatch(/position:\s*relative/);
+    expect(card).toMatch(/min-height:\s*var\(--tap\)/);
+    // The title link is stretched over the card, so the picture and body are live too.
+    const stretch = rule('.event-card__title a::after');
+    expect(stretch).toMatch(/position:\s*absolute/);
+    expect(stretch).toMatch(/inset:\s*0/);
+  });
+
+  it('holds the price badge and the kind edit button to the 44px target', () => {
+    expect(rule('.tier-preview__badge')).toMatch(/min-height:\s*var\(--tap\)/);
+    const edit = rule('.tier-card__head .btn');
+    expect(edit).toMatch(/height:\s*var\(--tap\)/);
+    expect(edit).not.toMatch(/36px/);
+  });
+});
+
+/** Sheet scroll + scrim (expert-4 D3/D7), read out of the stylesheet like the rest of this file. */
+describe('sheets scroll inside a capped body and sit behind a scrim', () => {
+  it('caps the sheet body and scrolls inside it, so the title and grab bar stay reachable', () => {
+    const body = /\.sheet__body\s*\{([^}]*)\}/.exec(CSS)?.[1] ?? '';
+    expect(body).toMatch(/max-height:\s*calc\(100dvh/);
+    expect(body).toMatch(/overflow-y:\s*auto/);
+    expect(body).toMatch(/overscroll-behavior:\s*contain/);
+  });
+
+  it('lays a full-viewport scrim under the sheet to turn the scene behind it inert', () => {
+    const scrim = /\.sheet-scrim\s*\{([^}]*)\}/.exec(CSS)?.[1] ?? '';
+    expect(scrim).toMatch(/position:\s*fixed/);
+    expect(scrim).toMatch(/inset:\s*0/);
+  });
+});
+
+/** Motion / type / focus cleanup (expert-4 D8/D9 + motion), read out of the stylesheet. */
+describe('motion, type and focus cleanup', () => {
+  it('states the type scale in rem so browser font-size and text zoom are honoured (1.4.4)', () => {
+    for (const name of ['--t-large', '--t-title', '--t-head', '--t-body', '--t-cap']) {
+      expect(TOKENS.get(name), name).toMatch(/rem$/);
+    }
+    // The input floor is the one exception: a literal 16px, to hold off iOS's focus zoom.
+    expect(TOKENS.get('--t-input')).toBe('16px');
+  });
+
+  it('draws the field focus ring in the opaque accent, not a translucent wash (D9)', () => {
+    const field = /\.field input:focus[^{]*\{([^}]*)\}/.exec(CSS)?.[1] ?? '';
+    expect(field).toMatch(/box-shadow:[^;]*var\(--brand-ink\)/);
+    // The old translucent ring token is gone, not merely unused.
+    expect(CSS).not.toContain('--brand-ring');
+  });
+
+  it('softens the step pulse and gives the skeletons one period', () => {
+    expect(CSS).not.toContain('scale(1.6)');
+    expect(CSS).toContain('scale(1.25)');
+    const periods = [...CSS.matchAll(/skeleton-(?:sweep|pulse)\s+([\d.]+)s/g)].map((m) => m[1]);
+    expect(periods.length).toBeGreaterThan(0);
+    expect(new Set(periods)).toEqual(new Set(['1.3']));
+  });
+
+  it('keeps the reduced-motion killswitch neutralising every animation', () => {
+    const block = /@media \(prefers-reduced-motion: reduce\)\s*\{([\s\S]*?)\n\}/.exec(CSS)?.[1] ?? '';
+    expect(block).toMatch(/animation-duration:\s*0\.001ms\s*!important/);
+    expect(block).toMatch(/transition-duration:\s*0\.001ms\s*!important/);
+  });
+});

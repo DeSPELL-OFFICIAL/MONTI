@@ -76,15 +76,41 @@ async function dragDown(el: Element, points: number[], pauseBeforeRelease = 40) 
 }
 
 describe('Sheet', () => {
-  it('is still a named, non-modal dialog through the motion foundation', () => {
-    render(
+  it('is a named, modal dialog behind a scrim (expert-4 D7)', () => {
+    const { container } = render(
       <MotionProvider>
         <Sheet label="이어서 쓸까요?"><p>본문</p></Sheet>
       </MotionProvider>,
     );
     const sheet = screen.getByRole('dialog', { name: '이어서 쓸까요?' });
     expect(sheet).toHaveClass('sheet');
-    expect(sheet).not.toHaveAttribute('aria-modal', 'true');
+    expect(sheet).toHaveAttribute('aria-modal', 'true');
+    // A full-viewport scrim sits under it, so the scene it covers is inert to taps.
+    expect(container.querySelector('.sheet-scrim')).not.toBeNull();
+  });
+
+  it('dismisses on a tap on the scrim when there is a way out', async () => {
+    const onDismiss = vi.fn();
+    const { container } = render(
+      <MotionProvider>
+        <Sheet label="이어서 쓸까요?" onDismiss={onDismiss}><p>본문</p></Sheet>
+      </MotionProvider>,
+    );
+    await settle();
+    fireEvent.click(container.querySelector('.sheet-scrim') as Element);
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a summary sheet with no way out up when its scrim is tapped', async () => {
+    const { container } = render(
+      <MotionProvider>
+        <Sheet label="이어서 쓸까요?"><p>본문</p></Sheet>
+      </MotionProvider>,
+    );
+    await settle();
+    // No onDismiss: the scrim still swallows the tap, but the decision has to be made on the sheet.
+    fireEvent.click(container.querySelector('.sheet-scrim') as Element);
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 
   it('dismisses when flung down past the distance threshold', async () => {

@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -508,6 +508,20 @@ describe('Profile', () => {
     expect(signOut).not.toHaveBeenCalled();
     expect(screen.queryByText(ko.me.deleteSignOut)).not.toBeInTheDocument();
     // The way back in is still there.
+    expect(screen.getByRole('button', { name: ko.me.deleteCta })).toBeInTheDocument();
+  });
+
+  it('confirms as a top-layer modal and closes on Escape without deleting (T-SIMP-13)', async () => {
+    wrap(<Profile />);
+    await userEvent.click(await screen.findByRole('button', { name: ko.me.deleteCta }));
+    // The confirm is a real modal now (showModal / open fallback in jsdom), not a bare dialog.
+    const dialog = document.querySelector('dialog');
+    expect(dialog).toHaveClass('confirm-modal');
+    // Escape fires the dialog's cancel event; it closes through the same path 취소 uses.
+    fireEvent(dialog as HTMLDialogElement, new Event('cancel', { cancelable: true }));
+
+    await waitFor(() => expect(screen.queryByText(ko.me.deleteSignOut)).not.toBeInTheDocument());
+    expect(requestAccountDeletion).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: ko.me.deleteCta })).toBeInTheDocument();
   });
 

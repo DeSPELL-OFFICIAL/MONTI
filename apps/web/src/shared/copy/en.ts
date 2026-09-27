@@ -105,6 +105,8 @@ export const en: typeof ko = {
     tagsMore: '+{{count}}',
     // The region is the public band of an event whose venue is hidden, so all 17 are named.
     venueHidden: 'The venue is shown once you have a ticket',
+    // Default label for a public event left without a venue; the venue is optional now.
+    venueTbd: 'Venue TBD',
     timeHidden: 'The start time is shown once you have a ticket',
     privateOnly: 'Only you can see this',
     privateLoading: 'Checking',

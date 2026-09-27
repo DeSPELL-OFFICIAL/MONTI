@@ -39,10 +39,12 @@ export interface ArtPickerProps {
  * `eventArt/{eventId}` and not on the chain — so the picker had to be reachable from both, and a
  * second copy of it would be a second set of names.
  *
- * Each tile is a toggle button rather than a swatch: the roving tabindex keeps one tab stop into
- * the row and the arrow keys move within it, and the twelve previews are marked `aria-hidden` so
- * a screen reader hears one name per tile — the preset — and never the fifteen `<text>` nodes of
- * the drawing behind it. The callback contract (`onPreset`/`onUploaded`) is unchanged.
+ * The row is a `radiogroup` and each tile a `radio`: one choice among the twelve backdrops and the
+ * organiser's own picture. The roving tabindex keeps one tab stop into the row and the arrow keys
+ * move within it; the twelve previews are `aria-hidden` so a screen reader hears one name per tile
+ * — the preset — and never the fifteen `<text>` nodes of the drawing behind it. A scroll only
+ * lights the dot; selecting is a tap or an arrow key (expert-4 D5), never a browse. The callback
+ * contract (`onPreset`/`onUploaded`) is unchanged.
  */
 export function ArtPicker({
   art, title, tierName, holder = '', dateText = '', onPreset, onUploaded,
@@ -61,15 +63,6 @@ export function ArtPicker({
 
   const scroller = useRef<HTMLDivElement>(null);
   const tiles = useRef<(HTMLButtonElement | null)[]>([]);
-  // The observer outlives the render it was made in, so the newest callback and choice are read
-  // through refs rather than closed over — otherwise a scroll would select against a stale value.
-  const onPresetRef = useRef(onPreset);
-  onPresetRef.current = onPreset;
-  const chosenRef = useRef(chosen);
-  chosenRef.current = chosen;
-  // A scroll the user drove, told apart from the observer's own opening callback: the latter must
-  // only light a dot, never select — a select on mount would clobber a picture they uploaded.
-  const scrolled = useRef(false);
 
   async function upload(cropped: CroppedPoster): Promise<void> {
     const cid = await pin(cropped);
@@ -124,20 +117,10 @@ export function ArtPicker({
     }
   }
 
-  // A real scroll, told apart from the observer's opening callback (see `scrolled`).
-  useEffect(() => {
-    const root = scroller.current;
-    if (!root) return undefined;
-    const onScroll = (): void => {
-      scrolled.current = true;
-    };
-    root.addEventListener('scroll', onScroll, { passive: true });
-    return () => root.removeEventListener('scroll', onScroll);
-  }, []);
-
-  // The centre tile drives the dot, and a scroll-snap onto it selects it — the same choice a
-  // click makes, which is what turns a row of previews into a picker. Guarded for the server and
-  // for jsdom, where there is no `IntersectionObserver`; the row is then a plain scroller.
+  // The centre tile drives the dot only. A scroll shows the person where they are in the row; it
+  // never selects — the choice is a tap or an arrow key (expert-4 D5), so a browse never changes
+  // the art or marks the draft dirty. Guarded for the server and for jsdom, which have no
+  // `IntersectionObserver`; the row is then a plain scroller whose dots do not move.
   useEffect(() => {
     if (typeof IntersectionObserver === 'undefined') return undefined;
     const root = scroller.current;
@@ -156,10 +139,6 @@ export function ArtPicker({
         }
         if (best < 0) return;
         setCentre(best);
-        const preset = TICKET_ART_PRESETS[best];
-        if (scrolled.current && preset && preset !== chosenRef.current) {
-          onPresetRef.current(preset);
-        }
       },
       { root, threshold: [0.5, 0.75, 1] },
     );
@@ -173,7 +152,7 @@ export function ArtPicker({
     <>
       {/* Twelve live previews and an upload in one sideways-snapping row: the neighbours peek, the
           centre one is the choice, and nothing here is wider than the phone (plan section C-1). */}
-      <div className="art-carousel" role="group" aria-label={copy.artCarousel} ref={scroller}>
+      <div className="art-carousel" role="radiogroup" aria-label={copy.artCarousel} ref={scroller}>
         {TICKET_ART_PRESETS.map((preset, index) => {
           const on = chosen === preset;
           return (
@@ -182,7 +161,8 @@ export function ArtPicker({
               type="button"
               className={on ? 'art-tile art-tile--on' : 'art-tile'}
               data-tile-index={index}
-              aria-pressed={on}
+              role="radio"
+              aria-checked={on}
               // The tile's name is the preset, not the fifteen words of the drawing inside it.
               aria-label={presetLabel(copy, preset)}
               // Roving tabindex: one tab stop (the chosen tile, or the first), arrows do the rest.
@@ -203,7 +183,8 @@ export function ArtPicker({
         <button
           type="button"
           className={chosen === null ? 'art-tile art-tile--upload art-tile--on' : 'art-tile art-tile--upload'}
-          aria-pressed={chosen === null}
+          role="radio"
+          aria-checked={chosen === null}
           onClick={() => setUploading((open) => !open)}
         >
           {uploading ? copy.artUploadClose : copy.artUpload}

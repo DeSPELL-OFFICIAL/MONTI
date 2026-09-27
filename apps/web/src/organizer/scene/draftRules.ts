@@ -25,13 +25,13 @@ export const MAX_TAG_CHARS = 12;
 
 /** One named rule; `organizer/copy.ts` owns a sentence for each, and each names a section. */
 export type EventProblem =
-  | 'title' | 'tags' | 'body' | 'region' | 'venue' | 'venueTooLong'
+  | 'title' | 'tags' | 'body' | 'region' | 'venueTooLong'
   | 'startsAt' | 'endsAt' | 'schedule' | 'eventPast';
 
 /** Which section of SCENE 1 a problem belongs to, so `다음` can scroll to the first one. */
 export const PROBLEM_SECTION: Readonly<Record<EventProblem, string>> = {
   title: 'title', tags: 'tags', body: 'body',
-  region: 'venue', venue: 'venue', venueTooLong: 'venue',
+  region: 'venue', venueTooLong: 'venue',
   startsAt: 'time', endsAt: 'time', schedule: 'time', eventPast: 'time',
 };
 
@@ -111,9 +111,11 @@ export function eventProblems(
   if (charCount(draft.description.trim()) > MAX_BODY_CHARS) problems.push('body');
 
   if (!REGION_CODES.has(draft.regionCode)) problems.push('region');
+  // 장소는 이제 선택이다(P1, 최소 행사 = 제목 + 한 번의 탭): 빈 장소는 문제가 아니고 발행 시
+  // `장소 미정`으로 읽힌다(EventDetail 기본 라벨). venueHidden 의미는 그대로이며, 남은 규칙은
+  // `pinEventMetadata`가 `BAD_META`로 거부하는 200자 상한뿐이다.
   const venue = draft.venue.trim();
-  if (venue === '') problems.push('venue');
-  else if (charCount(venue) > MAX_VENUE_CHARS) problems.push('venueTooLong');
+  if (charCount(venue) > MAX_VENUE_CHARS) problems.push('venueTooLong');
 
   if (!isTimestamp(draft.startsAt)) problems.push('startsAt');
   const endsAt = endsAtOf(draft);
