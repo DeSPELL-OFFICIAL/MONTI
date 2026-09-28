@@ -23,6 +23,29 @@ fnm exec --using=22 pnpm -F web e2e e2e/tests/01-public-surface.spec.ts   # 로�
 | `E2E_HEADLESS=1` | 헤드리스 강제 | 헤디드 |
 | `E2E_APPROVAL=1` | 승인제 시나리오(d) 및 승인 행사 생성 활성화 | off |
 
+## 릴레이 클레임 경로 (2026-09-29 재배포)
+
+티켓 받기는 더 이상 스폰서 UserOperation 을 보내지 않는다. 앱이 디바이스 키로 `ClaimAuth` 에
+서명하고 `relayClaim` 콜러블을 호출하면 MONTI 릴레이어가 `claimFor`/`requestClaimFor` 를 대납
+제출하고, 앱은 `relays/{relayId}` 문서를 따라 저장→확인→완료로 진행한다(화면 문구·상태는 그대로).
+승인제 신청도 같은 콜러블(`mode:'request'`)이며, 주최자 승인(`approveClaims`)만 스폰서 op 다.
+주최자 행사 생성/공개·게이트는 그대로 스폰서 op(페이마스터).
+
+- `utils/claim.ts` 의 `claimFree`/`requestApproval` 은 결과를 **화면 문구**로 읽으므로(문구 불변)
+  그대로 동작한다. 스폰서 op 수신자/번들러 오류를 보던 `bundler-capture` 대신
+  `utils/relay-capture.ts` 가 **`relayClaim` 콜러블**을 관찰한다: 요청 본문의 `auth.account` 로
+  페르소나 계정을 기록하고(클레임이 더는 userOp `sender` 를 남기지 않으므로 유일한 출처),
+  실패 시 콜러블의 `HttpsError`(`details.code`)를 `e2e/.artifacts/relay-errors/…` 와 friction 로그에
+  남긴다. (송금(친구에게 주기)은 여전히 스폰서 op 라 `30-transfer` 는 `bundler-capture` 유지.)
+- **비용 측정**은 시나리오 사이 페이마스터 deposit 대신 **릴레이어 EOA 잔액**으로 잰다(클레임은
+  릴레이어가 대납). 릴레이어 `0xFA93A9dB40a4396a8CdcF63991FA8615d1A35fFd` 잔액은
+  `eth_getBalance`(`https://testnet-rpc.monad.xyz`), 주최자 op 용 페이마스터 deposit 은 EntryPoint
+  `balanceOf(0x1bec436408F6988AD3A6c41DCA4D0094Fe80ae58)` 로 라이브 런 전후에 직접 읽는다
+  (하니스 코드가 아니라 운영자가 RPC 로 측정). deposit 체크는 시나리오 a(주최자 op)에만 남긴다.
+- tokenId 는 이제 `(eventId<<96)|(tier<<88)|serial` 큰 수다. 하니스는 인덱서/URL 에서 tokenId 를
+  **문자열 그대로**(`held.id` → `/tickets/{id}`, GraphQL `String!`) 다루므로 숫자 파싱이 없어 그대로
+  안전하다(신규 파싱 불필요 — 새 숫자 파싱을 넣지 말 것).
+
 ## 가입 캡차 우회 (monti:e2e)
 
 모든 페르소나 컨텍스트는 첫 페이지 로드 전에 `addInitScript` 로 `localStorage['monti:e2e']='1'`
@@ -36,8 +59,13 @@ fnm exec --using=22 pnpm -F web e2e e2e/tests/01-public-surface.spec.ts   # 로�
 
 ## 아직 막혀 있는 것
 
-- **승인제(d)**: 신청 관리(승인) 화면과 `VITE_APPROVAL_MODES=on` 은 01c 배포에서 도착한다.
+- **승인제(d)**: 신청 관리(승인) 화면과 `VITE_APPROVAL_MODES=on` 이 프로덕션 빌드에 반영됐다
+  (`E2E_APPROVAL=1` 로 켠다). 승인 신청은 `relayClaim(mode:'request')`, 주최자 승인은 스폰서 op.
 - **유료 티켓**: 컨트랙트가 계속 거절 — 시나리오 a 는 "발행 버튼 비활성 + 안내 문구"만 검증한다.
+- **프로덕션 주소 전환 대기**: 라이브 런은 프로덕션 번들의 `VITE_ADDR_TICKET` 이 재배포 티켓
+  `0x86550c…A671` 로 바뀐 뒤에만 유효하다. 활성 config 가 이전 배포(`0x6046e51B…`)를 가리키는
+  동안에는 릴레이/자금이 신규 배포에 있어 서명 도메인이 어긋나므로 실행하지 말 것
+  (`packages/shared/src/deployments/10143.json` 이 current/previous 의 기준).
 
 ## 세션 재사용
 
