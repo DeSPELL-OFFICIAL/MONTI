@@ -495,3 +495,44 @@ Keystore/StrongBox 유지(`gateKey.ts` 무변경). 번들러/paymaster 연결 �
    운영자 한정은 데모 후 강화 권고.
 5. 게이트코드 다이제스트 도메인 강화(chainId+태그)는 **선택적 방어심화**(짝인 관객
    deviceDigest가 이미 chainId 바인딩 → 필수 아님). 재배포 겸사 반영 여부는 팀 판단.
+
+---
+
+## 12. 확정 변경 — 슬림 저장 구조 (2026-09-28 저녁, 창업자 승인)
+
+가스 바닥 스파이크(`.superpowers/sdd/2026-09-22-monti-01b-redeploy-bundle/spike-gasfloor-report.md`)
+결과를 반영해 §3·§4의 저장 구조를 다음으로 **확정**한다. 함수 이름과 이벤트는 §3·§4 그대로.
+목표 비용: 발급 ≈ 0.014 MON, 입장 ≈ 0.009 MON (한도 ×1.03, 102 gwei) → 100명 행사 ≈ 2.8 MON.
+
+1. **발급(claimFor) = B2 압축 저장.**
+   - tokenId 에 `eventId · tier · serial` 을 인코딩한다(예: `eventId << 96 | tier << 88 | serial`;
+     비트 폭은 구현이 정하되 eventId ≥ 2^64, serial ≥ 2^32 를 보장). 토큰별 `eventOf/tierOf`
+     **저장 슬롯을 두지 않고** id 에서 계산한다. `eventOf(tokenId)`·`tierOf(tokenId)` 뷰는 **이름·
+     시그니처를 유지**하고 내부만 계산식으로 바꾼다(호출부 12곳: web 양도·입장 결과·Inbox,
+     functions snapshot/transferInvites/tenderlyWebhook, MontiPaymaster ArgKind.TokenId).
+   - (event, account) 당 슬롯 하나에 `claimNonce`(승인서 순번) + `heldCount`(1인 한도 카운트)
+     를 패킹한다. `claimNonce[account]` 전역 매핑 대신 **(eventId, account) 키**로 두어 첫 발급
+     때 콜드 슬롯 1개만 연다(설계 §2 의 "계정별 nonce" 를 (행사, 계정)별로 좁힌 것 — 승인서에
+     eventId 가 이미 들어 있으므로 재생 방지 강도는 동일).
+   - 티어 카운터(`minted/supply`)는 (event, tier) 슬롯 그대로. ERC-721 `ownerOf`·`balanceOf`·
+     `Transfer` **표준 유지**(B3 비표준 변형은 채택하지 않음).
+2. **입장(checkInFor) = 입장 시각 압축 저장(창업자 요구: 시각은 온체인 저장소에 남긴다).**
+   - 티켓별 **`uint32 usedAt`(Unix 초)** 을 **한 슬롯에 8장씩 패킹**한다: 슬롯 = `serial / 8`,
+     오프셋 = `(serial % 8) * 32 bit`. `usedAt == 0` 이 미사용, `!= 0` 이 사용됨(별도 비트맵 없음).
+   - **8의 배수가 아니어도 동작해야 한다(창업자 명시 요구).** 마지막 부분 슬롯(예: 티켓 9장 →
+     두 번째 슬롯에 1장)도 정상 기록·조회되어야 하며, 테스트는 1·7·8·9·255·257장 및 임의
+     serial 로 확인한다. 같은 행사 안에서 티켓 순번이 띄엄띄엄(취소·환불) 있어도 상관없다.
+   - 게이트 번호·코드 지문(nonceHash)·late/manual 플래그는 **저장하지 않고** 기존 이벤트
+     `CheckedIn(tokenId, eventId, gateId, nonceHash, ts)` / `CheckedInLate` / `ManualOverride`
+     로만 남긴다. 1회 입장 보장은 `usedAt != 0` 검사로 유지.
+   - 뷰: `usedAt(tokenId) → uint32` 를 추가하고, 기존 `checkInOf(tokenId)` 는 **이름을 유지**하되
+     `ts`(=usedAt) 와 `used` 만 채워 돌려준다(gateId·nonceHash 필드는 0). 호출부: web
+     `enter/Result.tsx`, `transfer/precheck.ts`.
+   - 다른 컨트랙트가 `usedAt` 을 읽어 "특정 시각 이전 입장자" 같은 온체인 로직을 만들 수
+     있어야 한다(창업자가 원한 호환성).
+3. **비용 근거(스파이크 실측, 102 gwei, 한도 ×1.03):** 입장 A3 비트맵 0.0088 / A2 티켓별 한 칸
+   0.0105 → 8장 패킹 시각 저장은 (22.1k + 7×5k)/8 ≈ 7.1k/건의 저장 비용으로 **≈ 0.0090 MON**
+   추정(A4 의 CheckInGas 로 확정). 발급 B2 0.0138 MON.
+4. **테스트 요구:** 위 부분 슬롯 케이스, tokenId 인코딩 왕복(eventOf/tierOf/serial), 1인 한도·
+   nonce 패킹 경계(오버플로 불가 확인), 기존 CheckIn/CheckInLate/Override/Transfer/Offer
+   스위트 green, ContractSize 한도 유지, 가스 리포트(ClaimGas·CheckInGas) 로그.
