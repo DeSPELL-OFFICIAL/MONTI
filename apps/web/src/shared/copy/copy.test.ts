@@ -27,23 +27,29 @@ describe('attendee copy', () => {
   });
 
   /**
-   * Face ID is an iPhone feature and half the demo runs on Android, where that title is simply
+   * Face ID is an iPhone feature and half the demo runs on Android, where naming it is simply
    * a lie. The promise has to be one both phones can keep.
    */
   it('promises a lock both phones can actually offer', () => {
-    expect(ko.signup.passkeyTitle).toBe('얼굴이나 지문으로 잠그기');
-    expect(en.signup.passkeyTitle).toBe('Lock with your face or fingerprint');
-    expect(`${ko.signup.passkeyTitle} ${en.signup.passkeyTitle}`).not.toMatch(/face id/i);
+    const lock = [
+      ko.signup.registerBody, en.signup.registerBody,
+      ko.signup.passkeyWorking, en.signup.passkeyWorking,
+      ko.signup.passkeyUnsupported, en.signup.passkeyUnsupported,
+    ].join(' ');
+    expect(ko.signup.registerBody).toContain('얼굴·지문');
+    expect(lock).not.toMatch(/face id/i);
   });
 
   /**
-   * The registration step is the security ground for entry, so it says what it buys the person
-   * rather than describing itself: nobody else can walk in on their ticket.
+   * The founder's first complaint was the second tap. The screen promises one, in both
+   * locales, so a copy edit cannot quietly take the promise back while the code still keeps it.
    */
-  it('says what registering this phone is for', () => {
-    expect(ko.signup.deviceTitle).toBe('입장은 이 휴대폰으로만');
-    expect(ko.signup.deviceBody).toBe('표를 다른 사람이 대신 쓸 수 없게, 이 휴대폰만 입구에서 인정돼요.');
-    expect(en.signup.deviceTitle).toBe('Entry works on this phone only');
+  it('promises the whole of signing up in one tap', () => {
+    expect(ko.signup.registerTitle).toBe('계정 만들기');
+    expect(ko.signup.registerBody).toBe('얼굴·지문 잠금을 걸고 이 휴대폰을 등록할게요. 한 번만 누르면 끝나요.');
+    expect(en.signup.registerBody).toMatch(/one tap/i);
+    // Three dots, three names — the screen cannot show a step nothing is called.
+    expect([ko.signup.stepPasskey, ko.signup.stepDevice, ko.signup.stepDone].every(Boolean)).toBe(true);
   });
 
   it('interpolates with fmt', () => {

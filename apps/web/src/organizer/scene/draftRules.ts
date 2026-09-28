@@ -23,19 +23,16 @@ export const MAX_VENUE_CHARS = 200;
 export const MAX_TAGS = 5;
 export const MAX_TAG_CHARS = 12;
 
-/** The four themes the discover filter offers (`attendee/discover/useEvents.ts`). */
-export const THEME_CODES = [0, 1, 2, 3] as const;
-
 /** One named rule; `organizer/copy.ts` owns a sentence for each, and each names a section. */
 export type EventProblem =
-  | 'poster' | 'title' | 'tags' | 'body' | 'region' | 'venue' | 'venueTooLong'
-  | 'startsAt' | 'endsAt' | 'schedule';
+  | 'title' | 'tags' | 'body' | 'region' | 'venueTooLong'
+  | 'startsAt' | 'endsAt' | 'schedule' | 'eventPast';
 
 /** Which section of SCENE 1 a problem belongs to, so `다음` can scroll to the first one. */
 export const PROBLEM_SECTION: Readonly<Record<EventProblem, string>> = {
-  poster: 'poster', title: 'title', tags: 'tags', body: 'body',
-  region: 'venue', venue: 'venue', venueTooLong: 'venue',
-  startsAt: 'time', endsAt: 'time', schedule: 'time',
+  title: 'title', tags: 'tags', body: 'body',
+  region: 'venue', venueTooLong: 'venue',
+  startsAt: 'time', endsAt: 'time', schedule: 'time', eventPast: 'time',
 };
 
 /**
@@ -71,13 +68,32 @@ function isTimestamp(value: number): boolean {
 }
 
 /**
+ * How long an event runs when nobody says otherwise. The end time is one of the three fields
+ * the founder's phone test put behind `더 설정하기` (plan section B-3): most events last an
+ * evening, and asking for a second `datetime-local` before anybody has typed a title is how a
+ * creation screen loses the person filling it in.
+ */
+export const DEFAULT_EVENT_SECONDS = 2 * 60 * 60;
+
+/**
+ * The end of the event — the one the organiser set, or two hours after it starts. Every reader
+ * goes through here (the rules, the sign-up window, the scene's own field and the chain draft)
+ * so a derived end can never disagree with the one being checked.
+ */
+export function endsAtOf(draft: EventDraft): number {
+  if (isTimestamp(draft.endsAt)) return draft.endsAt;
+  return isTimestamp(draft.startsAt) ? draft.startsAt + DEFAULT_EVENT_SECONDS : 0;
+}
+
+/**
  * Everything SCENE 1 refuses, in the order the sections ask for it — so the first entry is
  * both the sentence to show and the section to scroll to.
  */
-export function eventProblems(draft: EventDraft): EventProblem[] {
+export function eventProblems(
+  draft: EventDraft,
+  now: number = Math.floor(Date.now() / 1_000),
+): EventProblem[] {
   const problems: EventProblem[] = [];
-
-  if (draft.posterCid.trim() === '') problems.push('poster');
 
   const title = draft.title.trim();
   if (charCount(title) < MIN_TITLE_CHARS || charCount(title) > MAX_TITLE_CHARS) problems.push('title');
@@ -88,17 +104,30 @@ export function eventProblems(draft: EventDraft): EventProblem[] {
     problems.push('tags');
   }
 
-  const body = draft.description.trim();
-  if (body === '' || charCount(body) > MAX_BODY_CHARS) problems.push('body');
+  // Optional now (plan section B-4 reverses the earlier ≥10 rule): an empty 소개 is allowed and
+  // the placeholder carries an example instead. The server allows an empty description too
+  // (`functions/src/functions/organizer.ts:206-212`); the only cap left is the 2,000 one
+  // `pinEventMetadata` refuses over with `BAD_META` at publish.
+  if (charCount(draft.description.trim()) > MAX_BODY_CHARS) problems.push('body');
 
   if (!REGION_CODES.has(draft.regionCode)) problems.push('region');
+  // 장소는 이제 선택이다(P1, 최소 행사 = 제목 + 한 번의 탭): 빈 장소는 문제가 아니고 발행 시
+  // `장소 미정`으로 읽힌다(EventDetail 기본 라벨). venueHidden 의미는 그대로이며, 남은 규칙은
+  // `pinEventMetadata`가 `BAD_META`로 거부하는 200자 상한뿐이다.
   const venue = draft.venue.trim();
-  if (venue === '') problems.push('venue');
-  else if (charCount(venue) > MAX_VENUE_CHARS) problems.push('venueTooLong');
+  if (charCount(venue) > MAX_VENUE_CHARS) problems.push('venueTooLong');
 
   if (!isTimestamp(draft.startsAt)) problems.push('startsAt');
-  if (!isTimestamp(draft.endsAt)) problems.push('endsAt');
-  else if (isTimestamp(draft.startsAt) && draft.startsAt >= draft.endsAt) problems.push('schedule');
+  const endsAt = endsAtOf(draft);
+  if (!isTimestamp(endsAt)) problems.push('endsAt');
+  else if (isTimestamp(draft.startsAt) && draft.startsAt >= endsAt) problems.push('schedule');
+  // A draft written days ago and published today. Nothing on the screen is wrong and nothing
+  // the organiser typed has changed, but `saleWindow` derives 지금 -> `endsAt`, so the window
+  // runs backwards and `Ticket.createEvent` reverts `InvalidSchedule()` — during the *estimate*,
+  // where there is no receipt and no `OpReverted` to name it. That is exactly the failure the
+  // founder hit (task-create-failure-2 report §0): a correct-looking screen and the most
+  // generic sentence the app has. It is a rule now, said before anything is sent.
+  else if (endsAt <= now) problems.push('eventPast');
 
   return problems;
 }
@@ -111,7 +140,7 @@ export function eventProblems(draft: EventDraft): EventProblem[] {
  * deleted wizard asked for are gone.
  */
 export function saleWindow(draft: EventDraft, now: number): { saleStart: number; saleEnd: number } {
-  return { saleStart: now, saleEnd: draft.endsAt };
+  return { saleStart: now, saleEnd: endsAtOf(draft) };
 }
 
 /** `Ticket.createEvent` refuses more than eight kinds with `InvalidTiers` (`Ticket.sol:193`). */
@@ -129,6 +158,13 @@ export const MAX_TIER_NAME_CHARS = 40;
 const UINT16_MAX = 65_535;
 const UINT32_MAX = 4_294_967_295;
 const SECONDS_PER_HOUR = 3_600;
+
+/**
+ * `무제한` in the quantity quick chips (T-SIMP-10). It is the `supply` cap the struct can hold —
+ * the largest number `tierProblems` still accepts — so an organiser who wants "as many as anyone
+ * likes" gets a real value the chain can encode rather than a special-cased zero.
+ */
+export const UNLIMITED_SUPPLY = UINT32_MAX;
 
 /** One named rule of SCENE 2; `organizer/copy.ts` owns a sentence for each. */
 export type TierProblem =
@@ -182,5 +218,11 @@ export function tierArt(tier: EventDraftTier): TicketArtSource {
   return { preset: preset ?? 'a' };
 }
 
-/** The alphabet, in the order the picker offers it. */
-export const TICKET_ART_PRESETS: readonly TicketArtPreset[] = ['a', 'b', 'c', 'd'];
+/**
+ * The alphabet, in the order the picker offers it. Twelve letters, matching the server's
+ * `ART_PRESETS` and the draft rule's `^[a-l]$`: a letter this list has and the rule does not
+ * would fail autosave for the whole document the moment somebody picked it.
+ */
+export const TICKET_ART_PRESETS: readonly TicketArtPreset[] = [
+  'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l',
+];

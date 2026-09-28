@@ -50,7 +50,7 @@ import { checkInDigest, type DeviceDigestDomain } from './offlineVerify';
 const RPC_URL = 'https://testnet-rpc.monad.xyz';
 const CHAIN_ID = 10143;
 /** The Ticket deployed 2026-09-23. A fixture derived against any other address is meaningless. */
-const TICKET = '0x4B8353C9F3503Cdbd011E8f35da0a955D95b1367' as const;
+const TICKET = '0x40D90AF3a3B22542AEeF0ec3E6a66F1EAb6f7AFA' as const;
 
 /** The five caller-chosen inputs of the doc's vector (§7.2, re-derived on chain in §10). */
 const VECTOR = {
@@ -88,7 +88,7 @@ const DOMAIN: DeviceDigestDomain = { chainId: BigInt(CHAIN_ID), ticket: TICKET }
  * two words itself. The pair of vectors is the point — same five inputs, different domain,
  * different digest.
  */
-const EXPECTED = '0xec0c84e899cdacfab3dc560fc6ad89a3db7800cd07154b5ad3f24d0d4f46f8e9';
+const EXPECTED = '0x5c014ee4a32b8aedf37999aa8df99f3fa47726954a504cbb6f1e1dcf823b9c44';
 
 /** Generous, because a public testnet RPC is slow; bounded, because CI must not hang on it. */
 const TIMEOUT_MS = 20_000;
@@ -127,7 +127,7 @@ describe('the gate digest against the deployed Ticket', () => {
         args: [VECTOR.tokenId, VECTOR.gateId, VECTOR.eventId, VECTOR.nonce, VECTOR.issuedAt],
       })) as Hex;
 
-      // (1) the chain agrees with the value recorded when 01b was deployed.
+      // (1) the chain agrees with the value recorded when the 01c Ticket was deployed.
       expect(live).toBe(EXPECTED);
 
       // (2) our seven-word re-implementation reproduces it, with the two words the caller does

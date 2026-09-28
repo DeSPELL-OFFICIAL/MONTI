@@ -25,6 +25,7 @@ vi.mock('react-router-dom', async (orig) => ({
 
 const { OrganizerRoutes } = await import('./Layout');
 const { organizerCopy } = await import('./copy');
+const { setSession } = await import('../shared/session');
 const { formatEventDate } = await import('../attendee/discover/useEvents');
 const copy = organizerCopy.ko.home;
 
@@ -111,6 +112,8 @@ beforeEach(() => {
   navigate.mockReset();
   refetchOrgs.mockReset();
   refetchEvents.mockReset();
+  // The home is a signed-in screen; the session is the one source the FAB reads (S5).
+  setSession({ status: 'signedIn' });
   withOrgs([ORG_A]);
   withEvents([]);
 });
@@ -254,6 +257,38 @@ describe('organiser home', () => {
     expect(screen.queryByText(/1단계/)).toBeNull();
   });
 
+  /**
+   * The ticket screen the scene absorbed (plan section B-1). Addresses to `/org/new/<id>/tickets`
+   * are already out there — an organiser's own Back button, a draft opened in another tab — and
+   * a dead route would answer them with the catch-all, which is the explore tab and a lost draft.
+   * The draft id has to survive the hop, or the person lands on somebody's newest draft instead
+   * of the one they were filling in.
+   */
+  it('lands the ticket screen it absorbed on the same draft, not on a new one', () => {
+    withOrgs([ORG_A]);
+    const seen = open('/org/new/d-42/tickets');
+    expect(seen.at(-1)).toBe('/org/new/d-42');
+    expect(screen.getByRole('heading', { name: organizerCopy.ko.scene.title, level: 1 }))
+      .toBeInTheDocument();
+    // The kinds are a section of that one scroll now, so there is no second screen to land on.
+    expect(screen.getByLabelText(organizerCopy.ko.scene.tiers.supply)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: organizerCopy.ko.scene.tiers.create })).toBeInTheDocument();
+  });
+
+  /**
+   * `EditEvent` writes a draft from an event and hands over to `/org/new/<draftId>`
+   * (`EditEvent.tsx`). The plan's "건드리지 않는 것" says that path keeps working after the
+   * merge — this is the test that says it does, against the real route table rather than a
+   * table a test built for itself.
+   */
+  it('opens a named draft at `/org/new/<id>`, which is where an edit hands over', () => {
+    withOrgs([ORG_A]);
+    const seen = open('/org/new/d-42');
+    expect(seen.at(-1)).toBe('/org/new/d-42');
+    expect(screen.getByRole('heading', { name: organizerCopy.ko.scene.title, level: 1 }))
+      .toBeInTheDocument();
+  });
+
   it('refuses the floating action to somebody who may not create events, and says why', () => {
     withOrgs([ORG_NONE]);
     open();
@@ -263,6 +298,23 @@ describe('organiser home', () => {
 
   it('refuses the floating action when there is no organisation at all', () => {
     withOrgs([]);
+    open();
+    expect(screen.getByRole('button', { name: copy.create })).toBeDisabled();
+  });
+
+  it('keeps the create action live while the organisations are still loading (visual R1-8)', () => {
+    // A signed-in reload whose organisations have not landed yet: the FAB stays enabled rather
+    // than greying out over the spinner, which read as a permission refusal.
+    withOrgs([], { isLoading: true });
+    open();
+    expect(screen.getByRole('button', { name: copy.create })).toBeEnabled();
+  });
+
+  it('holds the create action while the session is still re-hydrating (S5)', () => {
+    // Even with an organisation to hand, a reload's unresolved session keeps 만들기 disabled until
+    // the session is known, rather than offering it as if nobody were signed in.
+    setSession({ status: 'loading' });
+    withOrgs([ORG_A]);
     open();
     expect(screen.getByRole('button', { name: copy.create })).toBeDisabled();
   });

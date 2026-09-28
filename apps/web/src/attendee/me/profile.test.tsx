@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -83,7 +83,19 @@ const saveUserProfile = vi.fn(async () => undefined);
 // profile's 주최자 section — reads an organisation's display name with. Left out of the mock it
 // is not a missing stub but a missing export, and every render in this file throws.
 const loadOrgName = vi.fn(async (): Promise<string | null> => null);
-vi.mock('../../shared/api/firestore', () => ({ saveUserProfile, loadOrgName }));
+// The stored 표시 이름, which is what the ticket is printed with and what the box prefills from.
+const loadMyProfile = vi.fn(async (): Promise<{ displayName: string } | null> => ({
+  displayName: '김태완',
+}));
+/**
+ * The cap `users/{uid}.displayName` is held to, on this side and in the deployed rule alike.
+ * Written out here rather than imported because the module it lives in is mocked away above —
+ * the screen reuses the real constant, and this is the number that constant has to be.
+ */
+const MAX_DISPLAY_NAME_CHARS = 24;
+vi.mock('../../shared/api/firestore', () => ({
+  saveUserProfile, loadOrgName, loadMyProfile, MAX_DISPLAY_NAME_CHARS,
+}));
 
 // The 주최자 section is driven through the real `useMyOrgs` here — this file is where the
 // whole chain, indexer row to button label, is proved — so the indexer transport is mocked and
@@ -136,6 +148,8 @@ beforeEach(() => {
   loadMyTickets.mockReset().mockResolvedValue([]);
   gql.mockReset();
   loadOrgName.mockReset();
+  loadMyProfile.mockReset().mockResolvedValue({ displayName: '김태완' });
+  saveUserProfile.mockReset().mockResolvedValue(undefined);
   // The plain case: this person organises for nobody.
   gql.mockResolvedValue({ Organizer: [], Admin: [], Manager: [] });
   loadOrgName.mockResolvedValue(null);
@@ -352,6 +366,86 @@ describe('KycStatus', () => {
   });
 });
 
+/**
+ * T-UX2-16. The name printed on a ticket is asked for once while signing up; this is the only
+ * place it can be changed afterwards. It shares a screen with the chain nickname and shares
+ * nothing else with it.
+ */
+describe('the display name', () => {
+  /**
+   * The box, once the stored name has actually landed in it. Waiting matters: the read answers
+   * a tick after the first render, and typing into the box before it lands would be typing that
+   * the prefill then appends itself to — which is the bug the `typed` guard exists to stop.
+   */
+  async function nameBox(prefill = '김태완'): Promise<HTMLElement> {
+    const box = await screen.findByLabelText(ko.me.displayName);
+    await waitFor(() => expect(box).toHaveValue(prefill));
+    return box;
+  }
+
+  function nameSection(box: HTMLElement): HTMLElement {
+    return box.closest('section') as HTMLElement;
+  }
+
+  it('starts filled in with the name already stored', async () => {
+    wrap(<Profile />);
+    await waitFor(() => expect(screen.getByLabelText(ko.me.displayName)).toHaveValue('김태완'));
+    // One concise line saying what the name is for — the long nickname disambiguation was cut.
+    expect(screen.getByText(ko.me.displayNameHelp)).toBeInTheDocument();
+  });
+
+  it('sends the one field the rule admits, and nothing else', async () => {
+    wrap(<Profile />);
+    const box = await nameBox();
+    await userEvent.clear(box);
+    await userEvent.type(box, '김민지');
+    await userEvent.click(within(nameSection(box)).getByRole('button', { name: ko.common.save }));
+
+    // Exactly `{ displayName }`: `changedOnly` in firestore.rules refuses a patch that carries
+    // anything the list does not name, and a refusal is not a message anybody can act on.
+    await waitFor(() => expect(saveUserProfile).toHaveBeenCalledWith({ displayName: '김민지' }));
+    expect(saveUserProfile).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText(ko.me.displayNameSaved)).toBeInTheDocument();
+  });
+
+  it('stops at the length the rule stops at', async () => {
+    loadMyProfile.mockResolvedValue({ displayName: '' });
+    wrap(<Profile />);
+    const box = await nameBox('');
+    expect(box).toHaveAttribute('maxlength', String(MAX_DISPLAY_NAME_CHARS));
+
+    await userEvent.type(box, '가'.repeat(MAX_DISPLAY_NAME_CHARS + 6));
+    expect(box).toHaveValue('가'.repeat(MAX_DISPLAY_NAME_CHARS));
+  });
+
+  it('keeps what was typed when the write is refused, and says so', async () => {
+    saveUserProfile.mockRejectedValueOnce(new Error('permission-denied') as never);
+    wrap(<Profile />);
+    const box = await nameBox();
+    await userEvent.clear(box);
+    await userEvent.type(box, '김민지');
+    await userEvent.click(within(nameSection(box)).getByRole('button', { name: ko.common.save }));
+
+    expect(await screen.findByText(ko.me.displayNameFailed)).toBeInTheDocument();
+    // The only copy of what somebody just wrote is not thrown away to tell them it failed.
+    expect(box).toHaveValue('김민지');
+  });
+
+  it('leaves the chain nickname alone', async () => {
+    wrap(<Profile />);
+    const box = await nameBox();
+    await userEvent.clear(box);
+    await userEvent.type(box, '김민지');
+    await userEvent.click(within(nameSection(box)).getByRole('button', { name: ko.common.save }));
+    await waitFor(() => expect(saveUserProfile).toHaveBeenCalledWith({ displayName: '김민지' }));
+
+    // 별명 costs a sponsored write and is unique across everybody; this costs neither.
+    expect(identityOp).not.toHaveBeenCalled();
+    expect(nicknameOwner).not.toHaveBeenCalled();
+    expect(screen.getByLabelText(ko.me.nickname)).toHaveValue('');
+  });
+});
+
 describe('Profile', () => {
   it('stores the chosen language on the device and on the profile', async () => {
     wrap(<Profile />);
@@ -417,10 +511,25 @@ describe('Profile', () => {
     expect(screen.getByRole('button', { name: ko.me.deleteCta })).toBeInTheDocument();
   });
 
+  it('confirms as a top-layer modal and closes on Escape without deleting (T-SIMP-13)', async () => {
+    wrap(<Profile />);
+    await userEvent.click(await screen.findByRole('button', { name: ko.me.deleteCta }));
+    // The confirm is a real modal now (showModal / open fallback in jsdom), not a bare dialog.
+    const dialog = document.querySelector('dialog');
+    expect(dialog).toHaveClass('confirm-modal');
+    // Escape fires the dialog's cancel event; it closes through the same path 취소 uses.
+    fireEvent(dialog as HTMLDialogElement, new Event('cancel', { cancelable: true }));
+
+    await waitFor(() => expect(screen.queryByText(ko.me.deleteSignOut)).not.toBeInTheDocument());
+    expect(requestAccountDeletion).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: ko.me.deleteCta })).toBeInTheDocument();
+  });
+
   /**
-   * The profile is the other half of the answer to "there is no way into `/org`" — the first
-   * half being 탐색's floating 만들기. Both read `useOrganizerEntry`, and this is the file that
-   * drives it through the real indexer rows rather than through a stubbed hook.
+   * The profile is the way into `/org` — 탐색's floating 만들기 is the other way in, but it only
+   * ever opens the creation scene. So the profile is the one place that reads `useOrganizerEntry`
+   * to decide who is an organiser, and this file drives it through the real indexer rows rather
+   * than through a stubbed hook.
    */
   it('opens the organiser screens for somebody who organises for an organisation', async () => {
     gql.mockResolvedValue({
@@ -437,7 +546,9 @@ describe('Profile', () => {
   it('offers to make one, and says what for, when there is no organisation', async () => {
     wrap(<Profile />);
     await userEvent.click(await screen.findByRole('button', { name: ko.me.organizerBecome }));
-    expect(navigate).toHaveBeenCalledWith('/org/become');
+    // The creation scene, not a screen about organisations: it asks for the organiser name
+    // inline and makes the organisation inside 만들기 (plan section B-4).
+    expect(navigate).toHaveBeenCalledWith('/org/new');
     expect(screen.getByText(ko.me.organizerHint)).toBeInTheDocument();
   });
 

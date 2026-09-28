@@ -152,7 +152,7 @@ describe('VerifyIdentity', () => {
     renderScreen();
     await userEvent.click(cta());
     await comeBack();
-    expect(await screen.findByText('이미 계정이 있습니다. 기존 계정으로 로그인해 주세요.')).toBeInTheDocument();
+    expect(await screen.findByText('이미 계정이 있어요. 기존 계정으로 로그인해 주세요.')).toBeInTheDocument();
   });
 
   it('reports any other failure with the generic rejection copy', async () => {
@@ -291,6 +291,21 @@ describe('VerifyIdentity', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 5); });
     expect(getSignupStatus).toHaveBeenCalledTimes(before);
     vi.useRealTimers();
+  });
+  /**
+   * A deep-link landing on /me/verify may have no history for the global back bar to pop, so the
+   * screen carries an explicit way out to wherever the person came from (returnTo).
+   */
+  it('lets a person leave to where they came from instead of getting stuck', async () => {
+    renderScreen('/me/verify?returnTo=%2Ftickets%2F42');
+    await userEvent.click(await screen.findByRole('button', { name: ko.kyc.later }));
+    expect(navigate).toHaveBeenCalledWith('/tickets/42');
+  });
+
+  /** visual R1-5 — the primary check button now anchors the bottom sticky bar. */
+  it('anchors 본인인증 하기 in the bottom sticky bar (visual R1-5)', () => {
+    renderScreen();
+    expect(cta().closest('.sticky-bar')).not.toBeNull();
   });
 });
 

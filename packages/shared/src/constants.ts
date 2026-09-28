@@ -164,7 +164,7 @@ export const TRANSFER_INVITE_TTL_SECONDS = 7 * 24 * 60 * 60;
 /** 종료된 이벤트 채팅을 닫는 스케줄. */
 export const CHAT_CLOSE_SCHEDULE = 'every 10 minutes';
 /** 사용자가 직접 쓸 수 있는 유일한 필드들. Firestore 규칙과 정합성 테스트가 함께 쓴다. */
-export const USER_WRITABLE_FIELDS = ['nickname', 'locale', 'chatOrder'] as const;
+export const USER_WRITABLE_FIELDS = ['nickname', 'locale', 'chatOrder', 'displayName'] as const;
 
 export interface Deployment {
   chainId: number;

@@ -69,7 +69,7 @@ describe('protocol timings', () => {
   it('pins the social limits shared by rules and server code', () => {
     expect(EVENT_CHAT_MESSAGE_MAX_CHARS).toBe(500);
     expect(TRANSFER_INVITE_TTL_SECONDS).toBe(604_800);
-    expect([...USER_WRITABLE_FIELDS]).toEqual(['nickname', 'locale', 'chatOrder']);
+    expect([...USER_WRITABLE_FIELDS]).toEqual(['nickname', 'locale', 'chatOrder', 'displayName']);
   });
 });
 

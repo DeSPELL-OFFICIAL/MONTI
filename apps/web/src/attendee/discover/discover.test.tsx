@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
@@ -36,7 +36,10 @@ vi.mock('../../shared/api/functions', async (orig) => ({
 const { setSession } = await import('../../shared/session');
 const { Discover } = await import('./Discover');
 const { EventDetail } = await import('./EventDetail');
-const { METADATA_CONCURRENCY, mapWithPool } = await import('./useEvents');
+const { DEFAULT_FILTERS, METADATA_CONCURRENCY, loadFilters, mapWithPool, saveFilters } =
+  await import('./useEvents');
+const { THEME_CODES, themeLabels } = await import('../../shared/eventThemes');
+const { ko } = await import('../../shared/copy/index');
 
 const NOW_SECONDS = Math.floor(Date.now() / 1000);
 const IN_TWO_DAYS = String(NOW_SECONDS + 2 * 86_400);
@@ -128,7 +131,7 @@ const ORG_NO_PERMISSION = { ...ORG, role: 'manager', bits: 0, canCreateEvent: fa
 const ME = `0x${'ab'.repeat(20)}` as const;
 
 async function tapCreate(): Promise<void> {
-  await userEvent.click(await screen.findByRole('button', { name: '만들기' }));
+  await userEvent.click(await screen.findByRole('button', { name: '행사 만들기' }));
 }
 
 function renderDetail(eventId = '1') {
@@ -141,6 +144,28 @@ function renderDetail(eventId = '1') {
       </MemoryRouter>
     </QueryClientProvider>,
   );
+}
+
+/** Records every address the router visits, so a route hop (or the absence of one) is read off it. */
+function renderDetailTracked(eventId = '1'): string[] {
+  const seen: string[] = [];
+  function Probe() {
+    seen.push(useLocation().pathname);
+    return null;
+  }
+  render(
+    <QueryClientProvider client={client()}>
+      <MemoryRouter initialEntries={[`/events/${eventId}`]}>
+        <Probe />
+        <Routes>
+          <Route path="/events/:eventId" element={<EventDetail />} />
+          {/* The claim route still exists (plan B1) — a hop here would show up in `seen`. */}
+          <Route path="/claim/:eventId" element={<div>claim route</div>} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  return seen;
 }
 
 beforeEach(() => {
@@ -178,11 +203,11 @@ describe('Discover', () => {
     renderDiscover();
     expect(await screen.findByText('재즈 나이트')).toBeInTheDocument();
 
-    await userEvent.selectOptions(screen.getByLabelText('날짜'), 'week');
+    await userEvent.click(screen.getByRole('button', { name: '이번 주' }));
     expect(screen.queryByText('개발자 모임')).toBeNull();
     expect(screen.getByText('재즈 나이트')).toBeInTheDocument();
 
-    await userEvent.selectOptions(screen.getByLabelText('날짜'), 'all');
+    await userEvent.click(screen.getByRole('button', { name: '전체' }));
     await userEvent.selectOptions(screen.getByLabelText('지역'), 'KR-26');
     expect(screen.queryByText('재즈 나이트')).toBeNull();
     expect(screen.getByText('개발자 모임')).toBeInTheDocument();
@@ -191,6 +216,39 @@ describe('Discover', () => {
     await userEvent.selectOptions(screen.getByLabelText('테마'), '0');
     expect(screen.getByText('재즈 나이트')).toBeInTheDocument();
     expect(screen.queryByText('개발자 모임')).toBeNull();
+  });
+
+  /**
+   * The organiser's dropdown and this one read `shared/eventThemes.ts`. They held their own
+   * copies of `[0, 1, 2, 3]` until the list grew to twelve, and widening one alone would have
+   * hidden every 페스티벌 from the only screen that can find one (plan section A-4).
+   */
+  it('offers every theme an organiser can pick, plus 전체', async () => {
+    renderDiscover();
+    expect(await screen.findByText('재즈 나이트')).toBeInTheDocument();
+    const theme = screen.getByLabelText('테마') as HTMLSelectElement;
+    expect([...theme.options].map((option) => option.value))
+      .toEqual(['all', ...THEME_CODES.map(String)]);
+    expect([...theme.options].map((option) => option.textContent))
+      .toEqual(['전체', ...THEME_CODES.map((code) => themeLabels(ko)[code])]);
+  });
+
+  /**
+   * The stored filter is the one place a theme number arrives from outside the twelve: a
+   * device that kept a filter from a build with a different list, or a hand-edited
+   * `localStorage`. A number nothing matches would open 탐색 on an empty screen with a theme
+   * box showing nothing selected, and no way to tell that the filter — not the city — is why.
+   */
+  it('keeps a stored theme only while it is one of the twelve', () => {
+    for (const category of THEME_CODES) {
+      saveFilters({ ...DEFAULT_FILTERS, category });
+      expect(loadFilters().category, String(category)).toBe(category);
+    }
+    // 12 is the first number past the list, and a negative one is what a bad edit looks like.
+    for (const bad of [12, -1, 99]) {
+      saveFilters({ ...DEFAULT_FILTERS, category: bad });
+      expect(loadFilters().category, String(bad)).toBe('all');
+    }
   });
 
   it('remembers the last filter across mounts', async () => {
@@ -240,17 +298,86 @@ describe('Discover', () => {
 });
 
 /**
- * One button, five answers. The whole point of the table is that the person never has to know
- * which of them applies to them — so every row is checked here, through the router, rather
- * than through the hook that decides it.
+ * T-UX3-P0-1 · plan §2a. The three states the list used to fold into one spinner and one line:
+ * loading, empty and the indexer being down. Empty splits again by who is looking at it.
+ */
+describe('Discover · loading and empty states', () => {
+  it('shows skeleton cards while the page loads, never a lone spinner', () => {
+    gql.mockReturnValue(new Promise(() => undefined));
+    const { container } = renderDiscover();
+    expect(container.querySelectorAll('.event-card--skeleton')).toHaveLength(3);
+    expect(screen.queryByRole('progressbar')).toBeNull();
+  });
+
+  it('invites a signed-in visitor with no events to make the first one', async () => {
+    gql.mockResolvedValue({ Event: [] });
+    setSession({ status: 'signedIn', account: ME });
+    myOrgs({ orgs: [], canCreateEvent: false });
+    const seen = renderDiscoverTracked();
+    expect(await screen.findByText('첫 행사를 만들어 보세요')).toBeInTheDocument();
+    // The empty-state CTA and the FAB both read 만들기; press the one in the empty state.
+    const cta = within(document.querySelector('.empty-state') as HTMLElement)
+      .getByRole('button', { name: '행사 만들기' });
+    await userEvent.click(cta);
+    expect(seen.at(-1)).toBe('/org/new');
+  });
+
+  it('reassures a signed-out visitor that events are on the way, with no button', async () => {
+    gql.mockResolvedValue({ Event: [] });
+    renderDiscover();
+    expect(await screen.findByText('곧 행사가 올라와요')).toBeInTheDocument();
+    expect(screen.queryByText('첫 행사를 만들어 보세요')).toBeNull();
+    expect(document.querySelector('.empty-state')).toBeNull();
+  });
+
+  it('offers to clear the filters when they hide every event, apart from having none at all', async () => {
+    renderDiscover();
+    expect(await screen.findByText('재즈 나이트')).toBeInTheDocument();
+    await userEvent.type(screen.getByPlaceholderText('행사 이름 검색'), '없는행사');
+    expect(screen.getByText('조건에 맞는 행사가 없어요.')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: '필터 지우기' }));
+    expect(await screen.findByText('재즈 나이트')).toBeInTheDocument();
+  });
+
+  it('sets the indexer being down apart from an empty list', async () => {
+    gql.mockRejectedValue(indexerFailure('http', 'HTTP_500'));
+    renderDiscover();
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('지금 정보를 가져올 수 없어요. 잠시 뒤 다시 시도해 주세요.');
+    expect(screen.getByRole('button', { name: '다시 시도' })).toBeInTheDocument();
+    // A down indexer is not "no events": neither empty-state line appears.
+    expect(screen.queryByText('곧 행사가 올라와요')).toBeNull();
+    expect(screen.queryByText('첫 행사를 만들어 보세요')).toBeNull();
+  });
+});
+
+/**
+ * One button, three answers: make an event for anybody signed in, sign up for anybody who is
+ * not, and nothing at all while the session is still re-hydrating. 만들기 means "make an event",
+ * so it always opens the creation scene — the indexer no longer diverts it to `/org` depending
+ * on which organisations the person runs (the old `to`≠`profileTo` split, now gone).
  */
 describe('Discover · 만들기', () => {
+  it('holds the button while the session is still re-hydrating, rather than guessing (S5)', async () => {
+    // The beforeEach state is 'loading': a tap here must not read an unresolved session and send a
+    // signed-in organiser to /signup/phone.
+    const seen = renderDiscoverTracked();
+    expect(await screen.findByRole('button', { name: '행사 만들기' })).toBeDisabled();
+    await tapCreate();
+    expect(seen.at(-1)).toBe('/');
+  });
+
   it('shows the button to a visitor who is not signed in, rather than hiding the way in', async () => {
+    setSession({ status: 'anonymous' });
     renderDiscoverTracked();
-    expect(await screen.findByRole('button', { name: '만들기' })).toBeEnabled();
+    const fab = await screen.findByRole('button', { name: '행사 만들기' });
+    expect(fab).toBeEnabled();
+    // Portaled out of the screen (and so out of the route transform) so it never rides the slide (R1).
+    expect(fab.closest('.screen')).toBeNull();
   });
 
   it('sends a visitor who is not signed in to signing up', async () => {
+    setSession({ status: 'anonymous' });
     const seen = renderDiscoverTracked();
     await tapCreate();
     expect(seen.at(-1)).toBe('/signup/phone');
@@ -264,38 +391,45 @@ describe('Discover · 만들기', () => {
     expect(seen.at(-1)).toBe('/org/new');
   });
 
-  it('offers 주최사 만들기 to somebody who belongs to no organisation', async () => {
+  /**
+   * The founder's second tap (plan section B-4). Somebody with no organisation is not sent to a
+   * screen about organisations first: `만들기` means "make an event", and the scene asks for the
+   * organiser name inline on the way.
+   */
+  it('goes straight to creating for somebody who belongs to no organisation', async () => {
     setSession({ status: 'signedIn', account: ME });
     myOrgs({ orgs: [], canCreateEvent: false });
     const seen = renderDiscoverTracked();
     await tapCreate();
-    expect(seen.at(-1)).toBe('/org/become');
+    expect(seen.at(-1)).toBe('/org/new');
   });
 
-  it('hands somebody who belongs but may not create to the screen that explains why', async () => {
+  it('opens the creation scene even for somebody who belongs but may not create', async () => {
     setSession({ status: 'signedIn', account: ME });
     myOrgs({ orgs: [ORG_NO_PERMISSION], canCreateEvent: false });
     const seen = renderDiscoverTracked();
     await tapCreate();
-    // `/org` already carries `행사를 만들 권한이 없어요…`; no second sentence is written here.
-    expect(seen.at(-1)).toBe('/org');
+    // 만들기 is not a permission check: it opens the scene, which is where any "행사를 만들 권한이
+    // 없어요…" belongs. Whether this person may create is not asked before the tap.
+    expect(seen.at(-1)).toBe('/org/new');
   });
 
-  it('still leads somewhere while the indexer has not answered', async () => {
+  it('opens the creation scene while the indexer has not answered', async () => {
     setSession({ status: 'signedIn', account: ME });
     myOrgs({ isLoading: true });
     const seen = renderDiscoverTracked();
     await tapCreate();
-    expect(seen.at(-1)).toBe('/org');
+    // The FAB no longer consults the indexer, so a slow one never holds up making an event.
+    expect(seen.at(-1)).toBe('/org/new');
   });
 
-  it('still leads somewhere when the indexer will not answer at all', async () => {
+  it('opens the creation scene when the indexer will not answer at all', async () => {
     setSession({ status: 'signedIn', account: ME });
     myOrgs({ isError: true });
     const seen = renderDiscoverTracked();
     await tapCreate();
-    // The organiser home owns that failure and offers its own retry there.
-    expect(seen.at(-1)).toBe('/org');
+    // A down indexer does not divert the FAB either — it still opens the scene.
+    expect(seen.at(-1)).toBe('/org/new');
   });
 });
 
@@ -427,6 +561,56 @@ describe('EventDetail', () => {
 });
 
 /**
+ * plan B1 / T-SIMP-5 — the claim was absorbed into an inline sheet on the detail screen. A
+ * signed-in visitor gets it in one tap with no route hop; the `/claim/:id` route survives for the
+ * deep-link and identity-check return, so a signed-out visitor is still sent there to sign in.
+ */
+describe('EventDetail · 받기 시트 (B1)', () => {
+  /** Clean answers for the claim engine's own reads, so opening the sheet paints its claimable state. */
+  function claimIndexer() {
+    gql.mockImplementation(async (query: string) => {
+      if (query.includes('OwnedTickets')) return { Ticket: [], Offer: [] };
+      if (query.includes('TicketContext')) return { CheckIn: [], Event: [], Tier: [], Ticket: [] };
+      if (query.includes('MyRequests')) return { ClaimRequest: [] };
+      return { Event: [EVENT_ONE], Tier: TIERS };
+    });
+  }
+
+  it('opens the claim as an inline sheet in one tap, with no hop to /claim', async () => {
+    claimIndexer();
+    setSession({ status: 'signedIn', account: ME });
+    const seen = renderDetailTracked();
+    await userEvent.click(await screen.findByRole('button', { name: '티켓 받기' }));
+    // The claim runs on this same screen: a dialog with the engine's own claim button in it.
+    const sheet = await screen.findByRole('dialog', { name: '티켓 받기' });
+    expect(within(sheet).getByRole('button', { name: '티켓 받기' })).toBeInTheDocument();
+    // The address never left the event page — the tap opened a sheet, it did not navigate.
+    expect(seen).not.toContain('/claim/1');
+    expect(seen.at(-1)).toBe('/events/1');
+  });
+
+  it('reassures in the sheet that it is free, by the claim button', async () => {
+    claimIndexer();
+    setSession({ status: 'signedIn', account: ME });
+    renderDetail();
+    await userEvent.click(await screen.findByRole('button', { name: '티켓 받기' }));
+    const sheet = await screen.findByRole('dialog', { name: '티켓 받기' });
+    expect(within(sheet).getByText('무료예요')).toBeInTheDocument();
+  });
+
+  it('keeps the /claim route as the entry for a visitor who is not signed in yet', async () => {
+    gql.mockResolvedValue({ Event: [EVENT_ONE], Tier: TIERS });
+    setSession({ status: 'anonymous' });
+    renderDetail();
+    await screen.findByRole('heading', { name: '재즈 나이트' });
+    // No inline sheet before sign-in: the link sends them to /claim, where the session guard and
+    // then the surviving route take over (deep-link / resume path, plan B1).
+    expect(screen.getByRole('link', { name: '티켓 받기' })).toHaveAttribute('href', '/claim/1');
+    expect(screen.queryByRole('button', { name: '티켓 받기' })).toBeNull();
+  });
+});
+
+/**
  * T-EV-W8 — what an event's own organiser chose to tell only the people who hold a ticket.
  *
  * There is one authorisation for both halves and it is the callable: it asks the chain on
@@ -460,6 +644,18 @@ describe('Discover · a hidden start time', () => {
     const at = new Date(Number(EVENT_ONE.startsAt) * 1000);
     expect(screen.getByText(at.toLocaleString('ko', { dateStyle: 'medium', timeStyle: 'short' })))
       .toBeInTheDocument();
+  });
+});
+
+describe('EventDetail · a venue left blank', () => {
+  it('reads a public event without a venue as the default label 장소 미정', async () => {
+    gql.mockResolvedValue({ Event: [EVENT_ONE], Tier: TIERS });
+    fetchEventMetadata.mockResolvedValue({ ...META_A, venue: '' });
+    renderDetail();
+    await screen.findByRole('heading', { name: '재즈 나이트' });
+    // 장소는 선택이다: 빈 공개 장소는 지역과 함께 "장소 미정"으로 읽히고, 지도 링크는 없다.
+    expect(await screen.findByText(/서울 · 장소 미정/)).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /지도로 보기/ })).toBeNull();
   });
 });
 
@@ -520,8 +716,9 @@ describe('EventDetail · what only ticket holders see', () => {
     getEventPrivate.mockReturnValue(new Promise(() => undefined));
     setSession({ status: 'signedIn', account: ME });
     renderDetail();
-    // The tiers and the call to action are already there; only the venue line is waiting.
-    expect(await screen.findByRole('link', { name: '티켓 받기' })).toBeInTheDocument();
+    // The tiers and the call to action are already there; only the venue line is waiting. For a
+    // signed-in visitor the claim is the inline-sheet opener (a button), not the /claim link (B1).
+    expect(await screen.findByRole('button', { name: '티켓 받기' })).toBeInTheDocument();
     expect(screen.getByText(/서울 · 확인하고 있어요/)).toBeInTheDocument();
   });
 
@@ -582,5 +779,58 @@ describe('Discover · tags on a card', () => {
     expect(screen.getByText('재즈').tagName).toBe('LI');
     expect(screen.queryByRole('button', { name: '재즈' })).toBeNull();
     expect(screen.queryByRole('link', { name: '재즈' })).toBeNull();
+  });
+});
+
+/**
+ * visual R1-5 — the one primary action now lives in the bottom sticky bar, and which action it is
+ * depends on the state: a holder is sent back to their ticket, and a non-holder is offered 받기 or
+ * 신청 by whether the event needs approval. The ticket reads go through the same mocked `gql` the
+ * claim sheet already uses, so `useMyTickets` sees this address holding token 42.
+ */
+describe('EventDetail · the sticky primary (visual R1-5)', () => {
+  const HELD = { id: '42', eventId: '1', tier: 0, owner: ME.toLowerCase(), revoked: false };
+
+  function heldIndexer() {
+    gql.mockImplementation(async (query: string) => {
+      if (query.includes('OwnedTickets')) return { Ticket: [HELD], Offer: [] };
+      if (query.includes('TicketContext')) {
+        return {
+          CheckIn: [], Ticket: [HELD],
+          Event: [{ id: '1', status: 'Published', startsAt: IN_TWO_DAYS, imageCid: 'cid-a' }],
+          Tier: [{ eventId: '1', idx: 0, name: '일반' }],
+        };
+      }
+      return { Event: [EVENT_ONE], Tier: TIERS };
+    });
+  }
+
+  it('sends a holder back to their ticket, in the sticky bar', async () => {
+    heldIndexer();
+    setSession({ status: 'signedIn', account: ME });
+    renderDetail();
+    const link = await screen.findByRole('link', { name: '내 티켓 보기' });
+    expect(link).toHaveAttribute('href', '/tickets/42');
+    expect(link.closest('.sticky-bar')).not.toBeNull();
+    // A holder is not offered the claim at all.
+    expect(screen.queryByRole('button', { name: '티켓 받기' })).toBeNull();
+  });
+
+  it('offers 신청하기 in the sticky bar for a non-holder when the event needs approval', async () => {
+    gql.mockResolvedValue({ Event: [{ ...EVENT_ONE, approvalRequired: true }], Tier: TIERS });
+    setSession({ status: 'anonymous' });
+    renderDetail();
+    const link = await screen.findByRole('link', { name: '신청하기' });
+    expect(link).toHaveAttribute('href', '/claim/1');
+    expect(link.closest('.sticky-bar')).not.toBeNull();
+  });
+
+  it('offers 티켓 받기 in the sticky bar for a non-holder when no approval is needed', async () => {
+    gql.mockResolvedValue({ Event: [EVENT_ONE], Tier: TIERS });
+    setSession({ status: 'anonymous' });
+    renderDetail();
+    const link = await screen.findByRole('link', { name: '티켓 받기' });
+    expect(link).toHaveAttribute('href', '/claim/1');
+    expect(link.closest('.sticky-bar')).not.toBeNull();
   });
 });

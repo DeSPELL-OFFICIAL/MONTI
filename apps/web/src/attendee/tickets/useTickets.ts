@@ -4,12 +4,10 @@ import {
   EVENT_STATES_QUERY,
   OWNED_TICKETS_QUERY,
   TICKET_CONTEXT_QUERY,
-  type EnvioEventState,
   type EventStatesResult,
   type OwnedTicketsResult,
   type TicketContextResult,
 } from '../../shared/envio/ticketQueries';
-import { fetchEventMetadata } from '../../shared/envio/ipfs';
 import type { EnvioTicket } from '../../shared/envio/queries';
 import { useSession } from '../../shared/session';
 import { deriveTicketState, type TicketState } from './ticketState';
@@ -28,10 +26,20 @@ export interface MyTicket {
    * unchangeably, a ticket that was used.
    */
   used: boolean;
-  /** The event's name from its metadata document, or '' when the gateway did not answer. */
-  title: string;
+  /**
+   * The CID of the event's metadata document, or '' when no Event row named one. The readable
+   * name lives in that pinned JSON, not on the chain, so it is read off this — asynchronously and
+   * per event ({@link useEventTitles}) — rather than blocking the whole list on a gateway here.
+   */
+  imageCid: string;
   /** The ticket kind's name as the index holds it, or '' when no Tier row named it. */
   tierName: string;
+  /**
+   * When the event starts, in Unix seconds, or `0` when no Event row named it — a handed-over
+   * token whose event is still arriving, or an index that has not caught up. Zero is drawn as
+   * no date rather than as 1970: the ticket carries a date or it carries nothing.
+   */
+  startsAt: number;
 }
 
 /** Event.status when the organiser called the whole thing off. */
@@ -45,23 +53,6 @@ const EMPTY_EVENT_STATES: EventStatesResult = { Event: [], Tier: [] };
 /** One tier of one event. `Tier.id` is the contract's own key and says nothing about which. */
 function tierKey(eventId: string, idx: number): string {
   return `${eventId}:${idx}`;
-}
-
-/**
- * The readable half of an event lives in one pinned JSON document, so a title can only come
- * from the gateway. A gateway that does not answer costs a ticket its title and never its row:
- * the empty string travels on and the screen puts a word from copy in its place, the same way
- * the discover list and the invite inbox already do.
- */
-async function loadTitles(events: EnvioEventState[]): Promise<Map<string, string>> {
-  const entries = await Promise.all(
-    events.map(async (event): Promise<readonly [string, string]> => {
-      if (event.imageCid === '') return [event.id, ''];
-      const metadata = await fetchEventMetadata(event.imageCid).catch(() => null);
-      return [event.id, metadata?.title ?? ''];
-    }),
-  );
-  return new Map(entries);
 }
 
 /**
@@ -113,9 +104,10 @@ export async function loadMyTickets(owner: string): Promise<MyTicket[]> {
   const tierNames = new Map(
     [...context.Tier, ...late.Tier].map((tier) => [tierKey(String(tier.eventId), tier.idx), tier.name]),
   );
-  // One gateway read per event, not per ticket: four tickets to the same event share a title,
-  // and `fetchEventMetadata` memoises the document for the session on top of that.
-  const titles = await loadTitles(events);
+  // The index carries `startsAt` as a decimal string; anything unparseable is 'no date'.
+  const startTimes = new Map(events.map((event) => [event.id, Number(event.startsAt)]));
+  // The name lives in a pinned JSON, read per event behind the rows rather than blocking them here.
+  const imageCids = new Map(events.map((event) => [event.id, event.imageCid]));
   const now = Math.floor(Date.now() / 1000);
 
   // Rows I hold win over the handover copies, in case an accepted offer came back to me.
@@ -133,8 +125,9 @@ export async function loadMyTickets(owner: string): Promise<MyTicket[]> {
         tier: ticket.tier,
         checkInTs: checkIn ? Number(checkIn.ts) : null,
         used: checkIn !== null,
-        title: titles.get(eventId) ?? '',
+        imageCid: imageCids.get(eventId) ?? '',
         tierName: tierNames.get(tierKey(eventId, ticket.tier)) ?? '',
+        startsAt: Number.isFinite(startTimes.get(eventId)) ? (startTimes.get(eventId) as number) : 0,
         state: deriveTicketState({
           ownerIsMe: ticket.owner.toLowerCase() === owner,
           revoked: ticket.revoked,

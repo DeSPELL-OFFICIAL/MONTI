@@ -1,5 +1,5 @@
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Alert, Button, Fab, Screen, Spinner, TicketArt } from '../../shared/ui';
+import { Alert, Button, Screen, Spinner, StickyBar, TicketArt } from '../../shared/ui';
 import { useCopy } from '../../shared/i18n';
 import { describeFailure } from '../../shared/errors';
 import { useTicketArtProps } from './useTicketArt';
@@ -53,24 +53,32 @@ export function TicketDetail() {
     );
   }
 
+  const props = artPropsOf(ticket);
+  // 입장 전 ticket waits at the door: the state word rides in the sticky bar so it reads
+  // "입장 전 → [입장하기]", the way in is the bar's one primary action, and 친구에게 주기 sits
+  // below the card as the quieter choice (visual R1-1). Every other state keeps the state word
+  // in the body, where there is no bar.
+  const canEnter = ticket.state === 'before';
   return (
-    <Screen title={`#${ticket.tokenId}`}>
+    <Screen title={props.titleLoading ? copy.tickets.title : props.title}>
       <div className="ticket-detail-art">
-        <TicketArt {...artPropsOf(ticket)} />
+        <TicketArt {...props} animated />
       </div>
-      <p>{labels[ticket.state]}</p>
+      {canEnter ? null : <p>{labels[ticket.state]}</p>}
       <p>{copy.tickets.detailGuide}</p>
       <p className="muted">{copy.tickets.noBarcode}</p>
+      {canEnter ? (
+        <Button variant="ghost" onClick={() => navigate(`/tickets/${tokenId}/transfer`)}>
+          {copy.tickets.transfer}
+        </Button>
+      ) : null}
       <p>
         <Link to={`/events/${ticket.eventId}`}>{copy.discover.title}</Link>
       </p>
-      {ticket.state === 'before' ? (
-        <>
-          <Button variant="ghost" onClick={() => navigate(`/tickets/${tokenId}/transfer`)}>
-            {copy.tickets.transfer}
-          </Button>
-          <Fab label={copy.tickets.enter} onClick={() => navigate(`/tickets/${tokenId}/enter`)} />
-        </>
+      {canEnter ? (
+        <StickyBar status={<span>{labels[ticket.state]}</span>}>
+          <Button onClick={() => navigate(`/tickets/${tokenId}/enter`)}>{copy.tickets.enter}</Button>
+        </StickyBar>
       ) : null}
     </Screen>
   );

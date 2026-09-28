@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 interface SentOp { functionName: string; orgId: bigint; args: readonly unknown[] }
@@ -39,9 +40,11 @@ vi.mock('../shared/api/functions', async (orig) => ({
 // Two reads the picture section makes on its own. Stubbed rather than left out: both swallow
 // their own failures, so an unmocked one would be a real network call inside a unit test.
 const loadEventArt = vi.fn(async () => [{ preset: 'c' as const }]);
-vi.mock('../shared/api/firestore', () => ({ loadEventArt }));
+/** The ticket preview prints whose ticket it is, so this screen reads the profile too. */
+const loadMyProfile = vi.fn(async () => ({ displayName: '박주최' }));
+vi.mock('../shared/api/firestore', () => ({ loadEventArt, loadMyProfile }));
 
-const fetchEventMetadata = vi.fn(async () => ({ title: '재즈 나이트', tags: [] }));
+const fetchEventMetadata = vi.fn(async (): Promise<Record<string, unknown>> => ({ title: '재즈 나이트', tags: [] }));
 vi.mock('../shared/envio/ipfs', async (orig) => ({
   ...(await orig<typeof import('../shared/envio/ipfs')>()),
   fetchEventMetadata,
@@ -56,7 +59,9 @@ const TIERS = [
   { id: '5-0', eventId: '5', idx: 0, name: '일반', priceUsdCents: '0', supply: '100', minted: '40', maxPerWallet: '2', seated: false },
 ];
 
-const gql = vi.fn(async () => ({ Event: [DRAFT_EVENT], Tier: TIERS }));
+// The resolved shape is widened so a test can also stand in a `ClaimRequest` array — the same mock
+// answers both the event read and the pending-count read the 신청 관리 link makes.
+const gql = vi.fn(async (): Promise<Record<string, unknown>> => ({ Event: [DRAFT_EVENT], Tier: TIERS }));
 vi.mock('../shared/envio/client', () => ({ gql }));
 
 const { organizerCopy } = await import('./copy');
@@ -66,11 +71,13 @@ const life = organizerCopy.ko.lifecycle;
 
 function open() {
   render(
-    <MemoryRouter initialEntries={['/org/events/5']}>
-      <Routes>
-        <Route path="/org/events/:eventId" element={<Dashboard />} />
-      </Routes>
-    </MemoryRouter>,
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <MemoryRouter initialEntries={['/org/events/5']}>
+        <Routes>
+          <Route path="/org/events/:eventId" element={<Dashboard />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -113,6 +120,32 @@ describe('publishing and cancelling', () => {
         expect.objectContaining({ orgId: 9n, functionName: 'publishEvent', args: [5n] }),
       ),
     );
+  });
+
+  /** Plan §2b: the summary sheet shows what goes public, and confirming publishes exactly once. */
+  it('summarises the event in a sheet and publishes exactly once', async () => {
+    const user = userEvent.setup();
+    fetchEventMetadata.mockResolvedValue({
+      title: '재즈 나이트', venue: '한남동 클럽', region: 'KR-11', venueHidden: false, timeHidden: false, tags: [],
+    });
+    gql.mockResolvedValue({ Event: [{ ...DRAFT_EVENT, requireKyc: true }], Tier: TIERS });
+    open();
+    await user.click(await screen.findByRole('button', { name: life.publish }));
+
+    // The summary: place, the ticket-kind count and the identity check, then the confirmation.
+    expect(await screen.findByText('한남동 클럽')).toBeInTheDocument();
+    expect(screen.getByText(life.summary.kycOn)).toBeInTheDocument();
+    expect(screen.getByText('1종')).toBeInTheDocument();
+    expect(screen.getByText(life.publishConfirm)).toBeInTheDocument();
+    expect(ticketOp).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: life.confirm }));
+    await waitFor(() =>
+      expect(ticketOp).toHaveBeenCalledWith(
+        expect.objectContaining({ functionName: 'publishEvent', args: [5n] }),
+      ),
+    );
+    expect(ticketOp).toHaveBeenCalledTimes(1);
   });
 
   /** Ruling 3: after sub-plan 01b a cancelled event blocks hand-overs — say so beforehand. */
@@ -185,6 +218,24 @@ describe('publishing and cancelling', () => {
     await user.click(screen.getByRole('button', { name: life.confirm }));
     expect(await screen.findByText(life.notDraft)).toBeInTheDocument();
   });
+
+  /** Plan §2c: a timed-out publish shows determinate progress and resolves itself — no refresh. */
+  it('turns a timed-out publish into progress that auto-resolves when the indexer catches up', async () => {
+    const user = userEvent.setup();
+    const { OpReverted } = await import('../shared/chain/ops');
+    ticketOp.mockRejectedValueOnce(new OpReverted('publishEvent', 'TIMEOUT'));
+    open();
+    await user.click(await screen.findByRole('button', { name: life.publish }));
+    await user.click(screen.getByRole('button', { name: life.confirm }));
+
+    // The determinate wait, not the old "reopen this screen" alert — and nothing to refresh by hand.
+    await waitFor(() => expect(document.querySelector('.op-progress')).not.toBeNull());
+    expect(screen.queryByText(life.confirming)).toBeNull();
+
+    // The indexer catches up; the background poll turns the screen to 발행했어요 on its own.
+    gql.mockResolvedValue({ Event: [{ ...DRAFT_EVENT, status: 'Published' }], Tier: TIERS });
+    expect(await screen.findByText(life.published, {}, { timeout: 5_000 })).toBeInTheDocument();
+  });
 });
 
 describe('an event the indexer has no row for', () => {
@@ -220,5 +271,26 @@ describe('an event the indexer has no row for', () => {
     expect(screen.getByRole('button', { name: dash.art.change })).toBeInTheDocument();
     expect(loadEventArt).toHaveBeenCalledWith('5');
     expect(fetchEventMetadata).toHaveBeenCalledWith('bafy');
+  });
+});
+
+describe('the 신청 관리 link', () => {
+  it('appears with the pending count on an approvalRequired event', async () => {
+    // One resolved value serves both reads: the event (approvalRequired) and the pending list.
+    gql.mockResolvedValue({
+      Event: [{ ...DRAFT_EVENT, approvalRequired: true }],
+      Tier: TIERS,
+      ClaimRequest: [{ requestId: '1' }, { requestId: '2' }],
+    });
+    open();
+    const link = await screen.findByRole('link', { name: /신청 관리/ });
+    expect(link).toHaveAttribute('href', '/org/events/5/requests');
+    expect(link.textContent).toContain('2');
+  });
+
+  it('is absent on an ordinary event', async () => {
+    open();
+    await screen.findByRole('heading', { name: dash.art.title });
+    expect(screen.queryByRole('link', { name: /신청 관리/ })).not.toBeInTheDocument();
   });
 });

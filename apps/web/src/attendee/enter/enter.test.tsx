@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { encodeGateResponse, type GateCodeWire, type GateResponseWire, type Hex } from '@monti/shared';
@@ -62,6 +63,7 @@ vi.mock('react-router-dom', async (orig) => ({
 }));
 
 const { Enter } = await import('./Enter');
+const { Result, WAITING_DEADLINE_MS } = await import('./Result');
 const { ARM_WINDOW_SECONDS, ATTENDEE_KEY_ALIAS, DeviceKeyUnavailable } = await import('../../shared/deviceKey');
 const { NFC_ERROR, NfcError } = await import('../../shared/nfc');
 
@@ -100,7 +102,7 @@ beforeEach(() => {
 
 async function tapEnter() {
   const user = userEvent.setup();
-  render(<Enter />);
+  render(<MemoryRouter><Enter /></MemoryRouter>);
   await user.click(screen.getByRole('button', { name: ko.enter.cta }));
 }
 
@@ -153,7 +155,7 @@ describe('<Enter /> arming', () => {
   it('keeps the armed sentence and the timer on the same second', async () => {
     vi.useFakeTimers();
     verifyGate.mockReturnValue(new Promise(() => undefined));
-    render(<Enter />);
+    render(<MemoryRouter><Enter /></MemoryRouter>);
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: ko.enter.cta }));
     });
@@ -171,7 +173,7 @@ describe('<Enter /> arming', () => {
     // Fake timers here, so `userEvent` (which schedules its own) is swapped for a plain click.
     vi.useFakeTimers();
     verifyGate.mockReturnValue(new Promise(() => undefined));
-    render(<Enter />);
+    render(<MemoryRouter><Enter /></MemoryRouter>);
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: ko.enter.cta }));
     });
@@ -221,7 +223,7 @@ describe('<Enter /> one session', () => {
       opened += 1;
       await new Promise(() => undefined);
     });
-    render(<Enter />);
+    render(<MemoryRouter><Enter /></MemoryRouter>);
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: ko.enter.cta }));
     });
@@ -248,7 +250,7 @@ describe('<Enter /> one session', () => {
       });
       written = await sign(WIRE);
     });
-    render(<Enter />);
+    render(<MemoryRouter><Enter /></MemoryRouter>);
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: ko.enter.cta }));
     });
@@ -348,10 +350,23 @@ describe('<Enter /> gate verification', () => {
   it('comes back to the start button after a refusal', async () => {
     const user = userEvent.setup();
     verifyGate.mockResolvedValue({ ok: false, reason: 'unknownGate' });
-    render(<Enter />);
+    render(<MemoryRouter><Enter /></MemoryRouter>);
     await user.click(screen.getByRole('button', { name: ko.enter.cta }));
     await user.click(screen.getByRole('button', { name: ko.common.retry }));
     expect(screen.getByRole('button', { name: ko.enter.cta })).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+});
+
+describe('<Result /> exits', () => {
+  // A tap that reaches the door but is never confirmed is a terminal state; the global back bar
+  // may have nothing to pop on a deep-link landing, so Result carries its own way to My Tickets.
+  it('offers a way to My Tickets when entry cannot be confirmed', async () => {
+    vi.useFakeTimers();
+    render(<MemoryRouter><Result tokenId="7" /></MemoryRouter>);
+    await act(async () => { await vi.advanceTimersByTimeAsync(WAITING_DEADLINE_MS + 1); });
+    expect(screen.getByText(ko.enter.notConfirmed)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: ko.enter.toTickets })).toHaveAttribute('href', '/tickets');
+    vi.useRealTimers();
   });
 });

@@ -11,7 +11,7 @@ vi.mock('../shared/api/firestore', () => ({ listEventDrafts, saveEventDraft, del
 
 const {
   DRAFT_DEBOUNCE_MS, DRAFT_INTERVAL_MS, EVENT_DRAFT_KEY, MAX_EVENT_DRAFTS,
-  emptyEventDraft, normalizeEventDraft, useEventDraft,
+  emptyEventDraft, freshEventDraft, normalizeEventDraft, useEventDraft,
 } = await import('./useEventDraft');
 
 /**
@@ -178,6 +178,26 @@ describe('opening the scene', () => {
   });
 
   /**
+   * The resume sheet dates the draft it is asking about, and the server's clock is the one that
+   * survives a phone whose own time is wrong — so `updatedAt` is what comes back, not `Date.now`.
+   */
+  it('dates the resumed draft by the stamp the server wrote', async () => {
+    store = [{ id: 'kept', updatedAt: 1_711_000_000_000, data: { title: '지난 초안' } }];
+    const view = await openDraft();
+    expect(view.result.current.resumedAt).toBe(1_711_000_000_000);
+  });
+
+  it('dates a draft only this device has by the device copy, because there is nothing else', async () => {
+    localStorage.setItem(EVENT_DRAFT_KEY, JSON.stringify({
+      id: 'local-1', draft: { title: '오프라인에서 쓴 제목' }, at: 1_700_000_000_000,
+    }));
+    listEventDrafts.mockRejectedValue(new Error('offline'));
+
+    const view = await openDraft();
+    expect(view.result.current.resumedAt).toBe(1_700_000_000_000);
+  });
+
+  /**
    * T-EV-W12. `/org/new` starts a creation; an abandoned edit draft belongs to the event it
    * was opened from, and resuming it there would put 만들기 in front of somebody else's event
    * and then send `updateEventMeta` to it.
@@ -215,7 +235,8 @@ describe('opening the scene', () => {
 
   it('starts empty when this account has no draft', async () => {
     const view = await openDraft();
-    expect(view.result.current.draft).toEqual({ ...emptyEventDraft, orgId: '9' });
+    // A brand-new draft carries the next-Saturday start default (T-SIMP-8); everything else is empty.
+    expect(view.result.current.draft).toEqual({ ...freshEventDraft(), orgId: '9' });
     expect(view.result.current.resumed).toBe(false);
     expect(view.result.current.draftId).not.toBe('');
   });
@@ -257,6 +278,94 @@ describe('opening the scene', () => {
   });
 });
 
+/**
+ * Plan section F-2. The debounce, the ten minutes and the four unload events were all already
+ * here; what was missing was a way to ask for a write and be told it happened.
+ */
+describe('임시 저장', () => {
+  it('runs the pending write now rather than two seconds from now', async () => {
+    const view = await openDraft();
+    act(() => view.result.current.patch({ title: '재즈 나이트' }));
+
+    await act(async () => { await view.result.current.saveNow(); });
+    expect(saveEventDraft).toHaveBeenCalledTimes(1);
+
+    // The debounce it overtook is cancelled, not left to write the same draft again.
+    await advance(DRAFT_DEBOUNCE_MS);
+    expect(saveEventDraft).toHaveBeenCalledTimes(1);
+  });
+
+  it('writes even when there is nothing unsaved left, because it was pressed', async () => {
+    const view = await openDraft();
+    act(() => view.result.current.patch({ title: '재즈 나이트' }));
+    await advance(DRAFT_DEBOUNCE_MS);
+    expect(saveEventDraft).toHaveBeenCalledTimes(1);
+
+    await act(async () => { expect(await view.result.current.saveNow()).toBe(true); });
+    expect(saveEventDraft).toHaveBeenCalledTimes(2);
+  });
+
+  it('answers that it did not land, so nothing claims 저장됨 over a refusal', async () => {
+    const view = await openDraft();
+    act(() => view.result.current.patch({ title: '재즈 나이트' }));
+    saveEventDraft.mockRejectedValue(new Error('permission-denied'));
+
+    await act(async () => { expect(await view.result.current.saveNow()).toBe(false); });
+    expect(view.result.current.status).toBe('error');
+  });
+});
+
+/**
+ * Plan section F-4, and the whole difference between this and `discard`: somebody who starts a
+ * second event has not said the first one may be thrown away.
+ */
+describe('starting another draft', () => {
+  it('opens a new id and leaves the stored draft exactly where it was', async () => {
+    seed(['kept']);
+    const view = await openDraft();
+    expect(view.result.current.draftId).toBe('kept');
+
+    await act(async () => { await view.result.current.startNew(); });
+
+    expect(view.result.current.draftId).not.toBe('kept');
+    // A brand-new draft carries the next-Saturday start default (T-SIMP-8); everything else is empty.
+    expect(view.result.current.draft).toEqual({ ...freshEventDraft(), orgId: '9' });
+    expect(view.result.current.resumed).toBe(false);
+    expect(deleteEventDraft).not.toHaveBeenCalled();
+    expect(ids()).toEqual(['kept']);
+  });
+
+  it('writes what was typed into the old draft before the id changes under it', async () => {
+    seed(['kept']);
+    const view = await openDraft();
+    act(() => view.result.current.patch({ title: '두고 가는 초안' }));
+    // Still inside the debounce: the last thing typed has not been written yet.
+    expect(saveEventDraft).not.toHaveBeenCalled();
+
+    await act(async () => { await view.result.current.startNew(); });
+
+    // Under its own id, not the new one — which is what filing it after the switch would do.
+    expect(saveEventDraft).toHaveBeenCalledWith('kept', expect.objectContaining({
+      title: '두고 가는 초안',
+    }));
+    expect((store.find((row) => row.id === 'kept')?.data as EventDraft).title).toBe('두고 가는 초안');
+  });
+
+  it('keeps the account inside the cap by pushing the oldest out, and no more', async () => {
+    seed(['d1', 'd2', 'd3', 'd4', 'd5']);
+    const view = await openDraft();
+
+    await act(async () => { await view.result.current.startNew(); });
+
+    // One slot for the draft starting now, and the oldest is what pays for it.
+    expect(deleteEventDraft).toHaveBeenCalledWith('d5');
+    expect(deleteEventDraft).toHaveBeenCalledTimes(1);
+    act(() => view.result.current.patch({ title: '새 행사' }));
+    await advance(DRAFT_DEBOUNCE_MS);
+    expect(store.length).toBeLessThanOrEqual(MAX_EVENT_DRAFTS);
+  });
+});
+
 describe('throwing a draft away', () => {
   it('deletes the document, clears the device copy and opens an empty one', async () => {
     seed(['newest']);
@@ -270,7 +379,8 @@ describe('throwing a draft away', () => {
     expect(deleteEventDraft).toHaveBeenCalledWith('newest');
     expect(store).toHaveLength(0);
     expect(localStorage.getItem(EVENT_DRAFT_KEY)).toBeNull();
-    expect(view.result.current.draft).toEqual({ ...emptyEventDraft, orgId: '9' });
+    // A brand-new draft carries the next-Saturday start default (T-SIMP-8); everything else is empty.
+    expect(view.result.current.draft).toEqual({ ...freshEventDraft(), orgId: '9' });
     expect(view.result.current.draftId).not.toBe('newest');
     expect(view.result.current.resumed).toBe(false);
   });

@@ -1,0 +1,112 @@
+import { forwardRef } from 'react';
+import type { ButtonHTMLAttributes, ReactNode, Ref } from 'react';
+import {
+  AnimatePresence,
+  LazyMotion,
+  MotionConfig,
+  m,
+  useReducedMotion,
+  type HTMLMotionProps,
+  type Variants,
+} from 'motion/react';
+
+/**
+ * The app's one motion foundation. Every animated part imports from here so that the feature
+ * bundle, the spring numbers and the reduced-motion rule are decided in a single place.
+ *
+ * Why `domMax` and not `domAnimation`: the design batch this belongs to needs pan/drag (the
+ * ticket sheet's drag-to-dismiss) and shared-layout (`layoutId`) — the tab indicator here, the
+ * FAB's shared element later. `domAnimation` ships neither gesture, so it would force a second,
+ * larger bundle the moment the next screen lands. `domMax` is that larger bundle, pulled in once
+ * through a dynamic `import()` (see {@link ./motionFeatures}) so it lands in its own chunk after
+ * the first paint instead of weighing down the main entry. `strict` forbids the full `motion.*`
+ * component, so every call site must use `m.*` and that lazy chunk stays the only place features
+ * are pulled in.
+ *
+ * Reduced motion is honoured twice, because the two halves of the app hear it differently:
+ *   - CSS transitions/animations are neutered by the killswitch `@media` block in `theme.css`.
+ *   - JS-driven motion (framer) is neutered here — `MotionConfig reducedMotion="user"` makes
+ *     transform/layout animations instant when the OS asks, and `useReducedMotion()` lets a
+ *     component drop a slide entirely rather than merely run it in 0ms.
+ */
+/**
+ * The features, loaded on demand. Until this dynamic import resolves, `m.*` render as plain,
+ * un-animated DOM; the route transition carries `initial={false}` so the first screen appears in
+ * its resting state and there is no flash of hidden content while the chunk is on its way.
+ */
+const loadMotionFeatures = () => import('./motionFeatures').then((mod) => mod.default);
+
+export function MotionProvider({ children }: { children: ReactNode }) {
+  return (
+    <LazyMotion features={loadMotionFeatures} strict>
+      <MotionConfig reducedMotion="user">{children}</MotionConfig>
+    </LazyMotion>
+  );
+}
+
+/**
+ * The springs the app is allowed to use. `snappy` is the tap and the tab indicator — a short,
+ * firm settle; `gentle` is for larger travel that should feel unhurried; `bouncy` is the one
+ * celebratory overshoot, kept to the success mark. These numbers are the tokens: a screen picks
+ * one, it does not invent stiffness of its own.
+ */
+export const SPRING = {
+  snappy: { type: 'spring', stiffness: 520, damping: 38 },
+  gentle: { type: 'spring', stiffness: 260, damping: 30 },
+  /** The success morph: a looser, springier settle that overshoots once — the check on the two
+      "done" screens, and nothing else. Louder than `snappy` on purpose, so a finish reads as one. */
+  bouncy: { type: 'spring', stiffness: 420, damping: 22 },
+} as const;
+
+/**
+ * A list that deals its rows in rather than snapping the whole block on at once. The container
+ * hands each child a 20ms head start; a row rises 8px and fades as it lands. A screen picks these,
+ * it does not invent its own stagger. The head start is 20ms, not 30ms (expert-4 motion): at 30ms a
+ * 10+ row list's last row arrived ~300ms+ late, so a refresh or a back read as sluggish. Under
+ * reduced motion a screen drops them entirely so the list appears at once — framer would otherwise
+ * keep the stagger timing with only the movement removed, a list that arrives late for no reason.
+ */
+export const LIST_STAGGER: Record<'container' | 'item', Variants> = {
+  container: { hidden: {}, show: { transition: { staggerChildren: 0.02, delayChildren: 0.02 } } },
+  item: { hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0, transition: SPRING.gentle } },
+};
+
+/** The one press feedback: the element gives 3% under the thumb and springs back. */
+const TAP = { scale: 0.97 } as const;
+
+export interface PressableProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  /** `button` (the default) for a control; `div` for a tappable card that is not itself a link. */
+  as?: 'button' | 'div';
+}
+
+/**
+ * A control that presses. It is `m.button` by default — Button and Fab are built on it — and
+ * `m.div` for a card that is the tap target but not a link. When the OS asks for reduced motion
+ * the press animation is dropped, not run instantly: no `whileTap`, no transform at all.
+ *
+ * Everything a `<button>` needs travels straight through: `className`, `onClick`, `disabled`,
+ * `type`, `aria-*`, `children` and the `ref`. The `.btn`/`.fab` CSS `:active` rules stay as the
+ * no-JS fallback; this only adds the spring on top of them. The public props are plain DOM
+ * button attributes — framer's own overridden handlers are not part of the surface — so the cast
+ * at the `m.*` boundary is where those plain props become motion props.
+ */
+export const Pressable = forwardRef<HTMLButtonElement, PressableProps>(
+  function Pressable({ as = 'button', children, ...rest }, ref) {
+    const reduce = useReducedMotion();
+    const tap = reduce ? undefined : { whileTap: TAP, transition: SPRING.snappy };
+    if (as === 'div') {
+      return (
+        <m.div ref={ref as unknown as Ref<HTMLDivElement>} {...(rest as unknown as HTMLMotionProps<'div'>)} {...tap}>
+          {children}
+        </m.div>
+      );
+    }
+    return (
+      <m.button ref={ref} {...(rest as unknown as HTMLMotionProps<'button'>)} {...tap}>
+        {children}
+      </m.button>
+    );
+  },
+);
+
+export { AnimatePresence, MotionConfig, m, useReducedMotion };

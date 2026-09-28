@@ -7,7 +7,7 @@ import { CallableError } from './api/functions';
 import { en, ko } from './copy';
 
 /** The table a screen hands in: the server's reasons that are worth a sentence of their own. */
-const TABLE = { NOT_ACTIVE: '가입을 먼저 마무리해 주세요', ORG_LIMIT: '주최사는 3개까지 만들 수 있어요' };
+const TABLE = { NOT_ACTIVE: '가입을 먼저 마무리해 주세요', ORG_LIMIT: '팀은 3개까지 만들 수 있어요' };
 
 /**
  * jsdom serves `onLine` from `Navigator.prototype`, so an own property shadows it for the

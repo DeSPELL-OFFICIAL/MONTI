@@ -1,4 +1,5 @@
 import { act, render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { encodeEventTopics, numberToHex } from 'viem';
 import { CLOCK_SKEW_SECONDS, CODE_WINDOW_SECONDS, type Hex } from '@monti/shared';
@@ -69,7 +70,7 @@ afterEach(() => {
 
 /** Renders and lets the mount read settle, so a test asserting "still waiting" means it. */
 async function show(tokenId = '42') {
-  render(<Result tokenId={tokenId} />);
+  render(<MemoryRouter><Result tokenId={tokenId} /></MemoryRouter>);
   await act(async () => {
     await Promise.resolve();
   });
@@ -197,7 +198,7 @@ describe('<Result /> — the push', () => {
 
   it('registers once across mounts and stays silent when the person refused', async () => {
     registerPush.mockResolvedValue({ status: 'unavailable', reason: 'PUSH_PERMISSION_DENIED' });
-    const first = render(<Result tokenId="42" />);
+    const first = render(<MemoryRouter><Result tokenId="42" /></MemoryRouter>);
     first.unmount();
     await show();
     expect(registerPush).toHaveBeenCalledTimes(1);
@@ -217,7 +218,7 @@ describe('<Result /> — the push', () => {
 describe('<Result /> — the deadline', () => {
   it('stops waiting one code window plus the clock skew after the hand-over', async () => {
     vi.useFakeTimers();
-    render(<Result tokenId="42" />);
+    render(<MemoryRouter><Result tokenId="42" /></MemoryRouter>);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(WAITING_DEADLINE_MS - 1_000);
     });
@@ -233,12 +234,12 @@ describe('<Result /> — the deadline', () => {
   it('does not restart the deadline when the person signs in while waiting', async () => {
     vi.useFakeTimers();
     account = undefined;
-    const view = render(<Result tokenId="42" />);
+    const view = render(<MemoryRouter><Result tokenId="42" /></MemoryRouter>);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(WAITING_DEADLINE_MS - 1_000);
     });
     account = ACCOUNT;
-    view.rerender(<Result tokenId="42" />);
+    view.rerender(<MemoryRouter><Result tokenId="42" /></MemoryRouter>);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_000);
     });
@@ -249,7 +250,7 @@ describe('<Result /> — the deadline', () => {
 
   it('lets the chain overrule the deadline when the log finally lands', async () => {
     vi.useFakeTimers();
-    render(<Result tokenId="42" />);
+    render(<MemoryRouter><Result tokenId="42" /></MemoryRouter>);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(WAITING_DEADLINE_MS);
     });
@@ -262,7 +263,7 @@ describe('<Result /> — the deadline', () => {
 describe('<Result /> — cleanup', () => {
   it('drops the subscription, the push listener and the deadline on unmount', async () => {
     vi.useFakeTimers();
-    const view = render(<Result tokenId="42" />);
+    const view = render(<MemoryRouter><Result tokenId="42" /></MemoryRouter>);
     view.unmount();
     expect(stopLogs).toHaveBeenCalledTimes(1);
 

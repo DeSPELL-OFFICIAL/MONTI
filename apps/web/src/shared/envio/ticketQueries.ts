@@ -15,13 +15,19 @@ import type { EnvioCheckIn, EnvioOffer, EnvioTicket, EnvioTier } from './queries
  */
 
 /**
- * What the list needs from an event: its id, what turns a ticket 취소됨, and the CID of the
- * metadata document — the only place the event's readable title exists at all.
+ * What the list needs from an event: its id, what turns a ticket 취소됨, the CID of the
+ * metadata document — the only place the event's readable title exists at all — and when it
+ * starts, which is the date printed on the ticket.
+ *
+ * `startsAt` is the chain's own `uint64` in Unix seconds, carried as a decimal string the way
+ * every `BigInt!` column is (see the note at the top of this file). An event whose row the
+ * index has not reached yet answers `'0'`, and a ticket with no start draws no date at all.
  */
 export interface EnvioEventState {
   id: string;
   status: string;
   imageCid: string;
+  startsAt: string;
 }
 
 /** A ticket kind's name, and the two columns that say which ticket wears it. */
@@ -44,8 +50,8 @@ export interface EventStatesResult {
   Tier: EnvioTierName[];
 }
 
-/** The three columns both event documents below read. */
-const EVENT_STATE_FIELDS = 'id status imageCid';
+/** The four columns both event documents below read. */
+const EVENT_STATE_FIELDS = 'id status imageCid startsAt';
 /** Enough of a tier to put its name on the right ticket, and nothing the screen will not draw. */
 const TIER_NAME_FIELDS = 'id eventId idx name';
 

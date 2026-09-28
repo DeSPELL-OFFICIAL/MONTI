@@ -151,12 +151,14 @@ export async function loadOrgName(orgId: string): Promise<string | null> {
 }
 
 /**
- * The four bundled backdrops, by the letter `eventArt` stores. Spelled out here rather than
+ * The twelve bundled backdrops, by the letter `eventArt` stores. Spelled out here rather than
  * imported as a value so that reading a document pulls in no pictures: this list is the
  * validator's alphabet, and TypeScript fails the build if {@link TicketArtPreset} ever
  * gains a letter this one does not.
  */
-const TICKET_ART_PRESETS: readonly TicketArtPreset[] = ['a', 'b', 'c', 'd'];
+const TICKET_ART_PRESETS: readonly TicketArtPreset[] = [
+  'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l',
+];
 
 /** What a ticket looks like before anybody has chosen anything, and after anything went wrong. */
 const DEFAULT_TICKET_ART: TicketArtSource = { preset: 'a' };
@@ -239,7 +241,32 @@ export async function sendChatMessage(eventId: string, text: string): Promise<st
   return ref.id;
 }
 
-export async function saveUserProfile(patch: { nickname?: string; locale?: 'ko' | 'en'; chatOrder?: string[] }): Promise<void> {
+/**
+ * The cap on `users/{uid}.displayName`, which the security rule holds to the same number. It is
+ * the name drawn on a ticket — not the chain nickname, which is `^[a-z0-9_]{3,20}$` and cannot
+ * hold a Korean name at all (plan section E-3).
+ */
+export const MAX_DISPLAY_NAME_CHARS = 24;
+
+/**
+ * This account's own `users/{uid}` document, or `null` when it has none yet. Only the fields
+ * this side writes are read back — the rest of that document is the server's.
+ */
+export async function loadMyProfile(): Promise<{ displayName: string } | null> {
+  const uid = getFirebaseAuth().currentUser?.uid;
+  if (!uid) return null;
+  const snapshot = await getDoc(doc(getDb(), 'users', uid));
+  if (!snapshot.exists()) return null;
+  const data = snapshot.data() as { displayName?: unknown };
+  return { displayName: typeof data.displayName === 'string' ? data.displayName : '' };
+}
+
+export async function saveUserProfile(patch: {
+  nickname?: string;
+  displayName?: string;
+  locale?: 'ko' | 'en';
+  chatOrder?: string[];
+}): Promise<void> {
   const uid = getFirebaseAuth().currentUser?.uid;
   if (!uid) throw new Error('NOT_SIGNED_IN');
   await setDoc(doc(getDb(), 'users', uid), patch, { merge: true });
@@ -309,12 +336,23 @@ export interface EventDraft {
   transferable: boolean;
   transferCutoffHours: number;
   requireKyc: boolean;
+  /**
+   * Whether tickets are issued only after the organiser approves each request, rather than on a
+   * first-come basis. One switch per event (it lives on `EventMeta`, not on a kind), written by
+   * the first tier card's 받는 방식 control and read by `buildEventMeta`. Off by default.
+   */
+  approvalRequired: boolean;
   tiers: EventDraftTier[];
   /**
    * The `userOpHash` of a `createEvent` whose `wait` gave up before it landed, or `''`. The
    * draft outlives the page, so without it a second attempt is a second event.
    */
   submittedOpHash: string;
+  /**
+   * Epoch ms {@link submittedOpHash} was recorded, or 0. `resolveSubmittedOp` uses it to tell a
+   * young op still on its way from one that has been stuck in the mempool too long to land.
+   */
+  submittedAt: number;
   /**
    * The id of the event this draft already created, or `''`. Written the moment the chain
    * names it and **before** anything that could still fail, so a draft can never make a second
@@ -332,6 +370,14 @@ export interface EventDraft {
    * made, the other an event this draft was opened from.
    */
   editingEventId: string;
+  /**
+   * The name a new organisation is being created under, or `''`. Written **before**
+   * `createOrganizerForMe` is called and cleared once it answers, because that callable is not
+   * idempotent: a second call is a second organisation. A draft that comes back with this
+   * still set is a run that died mid-call, and the next attempt asks the indexer what became
+   * of it before it makes another (plan section B-5).
+   */
+  orgPendingName: string;
 }
 
 /**

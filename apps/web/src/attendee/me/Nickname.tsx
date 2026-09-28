@@ -145,7 +145,7 @@ export function Nickname() {
         />
       </Field>
       {message ? <Alert tone={tone}>{message}</Alert> : null}
-      <Button onClick={() => void save()} disabled={busy}>{copy.common.save}</Button>
+      <Button variant="ghost" onClick={() => void save()} disabled={busy}>{copy.common.save}</Button>
     </section>
   );
 }
