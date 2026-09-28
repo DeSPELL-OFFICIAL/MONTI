@@ -55,6 +55,13 @@ export const EVENT_PRIVATE = 'eventPrivate';
  * 서버 전용이고, 클라이언트는 규칙의 포괄 거부로 닿지 못한다.
  */
 export const PIN_QUOTA = 'pinQuota';
+/**
+ * 사람 한 명의 **하루 복구 횟수**. 문서 id 는 `personId` 이고 값은 `{ day, count }` 하나뿐이다.
+ * `recoverAccess` 가 비싼 검증·회전 전송 앞에서 소비해 실패한 시도까지 세므로, 어테스터로
+ * 나가는 회전을 사람당 하루 세 번으로 묶는다(SIM 스왑 재시도 방어). 서버 전용이고, 클라이언트는
+ * 규칙의 포괄 거부로 닿지 못한다.
+ */
+export const RECOVERY_QUOTA = 'recoveryQuota';
 /** 서버 내부 상태만 들어간다. 클라이언트는 규칙의 포괄 거부로 닿지 못한다(어테스터 리스). */
 export const SYSTEM = 'system';
 
@@ -80,6 +87,7 @@ export const ALLOWED_COLLECTIONS = [
   EVENT_PRIVATE,
   ORG_PROFILES,
   PIN_QUOTA,
+  RECOVERY_QUOTA,
   SYSTEM,
   'members',
   'messages',
