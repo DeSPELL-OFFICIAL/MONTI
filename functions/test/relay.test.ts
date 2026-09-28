@@ -7,9 +7,8 @@ import {
   encodeEventTopics,
   getAddress,
 } from 'viem';
-import type { Hex } from '@monti/shared';
+import { ticketAbi, type Hex } from '@monti/shared';
 import { createFakeFirestore } from './helpers/fakeFirestore.js';
-import { ticketRelayAbi } from '../src/lib/ticketAbi.js';
 
 process.env.GCP_PROJECT_ID = 'monti-dev';
 
@@ -75,14 +74,14 @@ const auth = { uid: 'uid-1', token: { account: ACCOUNT_LOWER, personId: PERSON_I
 
 /** viem 이 디코딩할 수 있는 커스텀-에러 revert. estimateContractGas 가 이걸 던진다. */
 function reverted(errorName: string) {
-  const data = encodeErrorResult({ abi: ticketRelayAbi, errorName } as never);
-  return new ContractFunctionRevertedError({ abi: ticketRelayAbi, data, functionName: 'claimFor' });
+  const data = encodeErrorResult({ abi: ticketAbi, errorName } as never);
+  return new ContractFunctionRevertedError({ abi: ticketAbi, data, functionName: 'claimFor' });
 }
 
 function claimedLog(tokenId: bigint, tier: number) {
   return {
     address: TICKET,
-    topics: encodeEventTopics({ abi: ticketRelayAbi, eventName: 'Claimed', args: { tokenId, eventId: EVENT_ID, to: ACCOUNT } }),
+    topics: encodeEventTopics({ abi: ticketAbi, eventName: 'Claimed', args: { tokenId, eventId: EVENT_ID, to: ACCOUNT } }),
     data: encodeAbiParameters([{ type: 'uint8' }], [tier]),
     blockNumber: 100n,
     blockHash: `0x${'bb'.repeat(32)}`,
@@ -95,7 +94,7 @@ function claimedLog(tokenId: bigint, tier: number) {
 function checkedInLog(ts: bigint) {
   return {
     address: TICKET,
-    topics: encodeEventTopics({ abi: ticketRelayAbi, eventName: 'CheckedIn', args: { tokenId: TOKEN_ID, eventId: EVENT_ID, gateId: GATE_ID } }),
+    topics: encodeEventTopics({ abi: ticketAbi, eventName: 'CheckedIn', args: { tokenId: TOKEN_ID, eventId: EVENT_ID, gateId: GATE_ID } }),
     data: encodeAbiParameters([{ type: 'bytes32' }, { type: 'uint64' }], [`0x${'00'.repeat(32)}`, ts]),
     blockNumber: 100n,
     blockHash: `0x${'bb'.repeat(32)}`,

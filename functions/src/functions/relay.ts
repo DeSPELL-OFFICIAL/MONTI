@@ -9,14 +9,13 @@ import {
   parseEventLogs,
   type TransactionReceipt,
 } from 'viem';
-import { identityAbi, type Hex } from '@monti/shared';
+import { identityAbi, ticketAbi, type Hex } from '@monti/shared';
 import { RELAYER_PK } from '../config.js';
 import { resolveCallerAccount } from '../lib/auth.js';
 import { deployment, publicClient } from '../lib/chain.js';
 import { ADMISSIONS, ADMISSION_TOKENS, RELAYS, USERS, db } from '../lib/db.js';
 import { getRelayerAccount, sendRelayed } from '../lib/relayer.js';
 import { checkInRelayId, claimRelayId, type RelayKind } from '../lib/relayTypes.js';
-import { ticketRelayAbi } from '../lib/ticketAbi.js';
 
 /**
  * 설계 §5 Q4 — 관객의 두 고빈도 동작(발급·입장)을 릴레이한다. 관객/게이트 폰은 기기 키로
@@ -171,7 +170,7 @@ async function callerPersonId(request: CallableRequest): Promise<Hex> {
 async function simulateGas(functionName: string, args: readonly unknown[]): Promise<bigint> {
   return publicClient().estimateContractGas({
     address: deployment().ticket,
-    abi: ticketRelayAbi,
+    abi: ticketAbi,
     functionName,
     args,
     account: getRelayerAccount().address,
@@ -179,7 +178,7 @@ async function simulateGas(functionName: string, args: readonly unknown[]): Prom
 }
 
 function calldata(functionName: string, args: readonly unknown[]): Hex {
-  return encodeFunctionData({ abi: ticketRelayAbi, functionName, args } as never);
+  return encodeFunctionData({ abi: ticketAbi, functionName, args } as never);
 }
 
 /** 확정 영수증을 상한까지만 기다린다. 타임아웃이면 null(→ `sent` 응답, 대사가 마무리). */
@@ -258,7 +257,7 @@ export const relayClaim = onCall({ secrets: [RELAYER_PK] }, async (request): Pro
   // nonce 재대조 — 진부/중복 승인서를 가스 쓰기 전에 막고, 현재 nonce 를 돌려줘 재서명하게 한다.
   const chainNonce = (await pc.readContract({
     address: contracts.ticket,
-    abi: ticketRelayAbi,
+    abi: ticketAbi,
     functionName: 'claimNonce',
     args: [eventId, account],
   })) as bigint;
@@ -348,7 +347,7 @@ export const relayClaim = onCall({ secrets: [RELAYER_PK] }, async (request): Pro
 
   let tokenId: string | undefined;
   if (mode === 'claim') {
-    const logs = parseEventLogs({ abi: ticketRelayAbi, logs: receipt.logs, eventName: 'Claimed' });
+    const logs = parseEventLogs({ abi: ticketAbi, logs: receipt.logs, eventName: 'Claimed' }) as { args: { tokenId?: bigint } }[];
     tokenId = logs[0]?.args.tokenId?.toString();
   }
   await ref.set(
@@ -407,7 +406,7 @@ export const relayCheckIn = onCall({ secrets: [RELAYER_PK] }, async (request): P
 
   // 이미 입장(usedAt != 0)이면 성공으로 돌려준다 — 게이트의 재탭/교차 게이트는 오류가 아니다.
   const used = Number(
-    await pc.readContract({ address: contracts.ticket, abi: ticketRelayAbi, functionName: 'usedAt', args: [tokenId] }),
+    await pc.readContract({ address: contracts.ticket, abi: ticketAbi, functionName: 'usedAt', args: [tokenId] }),
   );
   if (used !== 0) return { relayId, status: 'confirmed', usedAt: used };
 
@@ -491,7 +490,7 @@ export const relayCheckIn = onCall({ secrets: [RELAYER_PK] }, async (request): P
     throw new HttpsError('aborted', 'REVERTED', { code: 'REVERTED' });
   }
 
-  const inLogs = parseEventLogs({ abi: ticketRelayAbi, logs: receipt.logs, eventName: 'CheckedIn' });
+  const inLogs = parseEventLogs({ abi: ticketAbi, logs: receipt.logs, eventName: 'CheckedIn' }) as { args: { ts?: bigint } }[];
   const ts = inLogs[0]?.args.ts;
   const usedAtSec = ts === undefined ? undefined : Number(ts);
   const confirmedAt = FieldValue.serverTimestamp();
