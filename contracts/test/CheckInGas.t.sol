@@ -27,8 +27,10 @@ abstract contract CheckInGasBase is MontiTest {
     uint256 internal gateId;
 
     /// @dev 서명은 픽스처에서 만든다. 측정 트랜잭션 안에서 만들면 sha256 프리컴파일이 미리
-    ///      따뜻해져 `checkIn` 이 내야 할 콜드 비용이 사라지고, 덤으로 prank 까지 먹힌다.
+    ///      따뜻해져 `checkInFor` 가 내야 할 콜드 비용이 사라지고, 덤으로 prank 까지 먹힌다.
+    ///      릴레이 입장은 게이트 서명과 기기 서명 둘 다 필요하므로 둘을 각각 들고 있는다.
     bytes internal gateSig;
+    bytes internal deviceSig;
 
     /// @dev One holder with the vector device key, one published free event, one claimed ticket, one
     ///      open gate. This must run in `setUp`, i.e. in a transaction of its own: run it in the same
@@ -40,24 +42,21 @@ abstract contract CheckInGasBase is MontiTest {
         _memberWithDeviceKey(ALICE, 0xA1A1);
         uint256 orgId = _org();
         eventId = _freeEvent(orgId, 1, 1, true);
-        vm.prank(ALICE);
-        tokenId = ticket.claim(eventId, 0, "");
+        tokenId = _claimForFixture(ALICE, eventId, 0);
         vm.startPrank(ORG_OWNER);
-        gateId = organizers.registerGate(eventId, GATE_A, bytes32(uint256(0x6A01)), bytes32(uint256(0x6A02)));
+        gateId = organizers.registerGate(eventId, GATE_A, GATE_KX, GATE_KY);
         organizers.openGate(gateId);
         vm.stopPrank();
         vm.warp(P256Vectors.ISSUED_AT + 5);
 
         assertEq(eventId, P256Vectors.EVENT_ID, "vectors were generated for event 1");
-        assertEq(tokenId, P256Vectors.TOKEN_ID, "vectors were generated for token 1");
         assertEq(gateId, P256Vectors.GATE1_ID, "vectors were generated for gate 1");
 
-        gateSig = _deviceSig(
-            tokenId,
-            Ticket.GateCode({
-                gateId: gateId, eventId: P256Vectors.EVENT_ID, issuedAt: P256Vectors.ISSUED_AT, nonce: P256Vectors.NONCE
-            })
-        );
+        Ticket.GateCode memory code = Ticket.GateCode({
+            gateId: gateId, eventId: P256Vectors.EVENT_ID, issuedAt: P256Vectors.ISSUED_AT, nonce: P256Vectors.NONCE
+        });
+        gateSig = _gateSig(code);
+        deviceSig = _deviceSig(tokenId, code);
     }
 
     /// @dev Only the `checkIn` call sits inside the window; the fixture does not. The window does
@@ -67,18 +66,19 @@ abstract contract CheckInGasBase is MontiTest {
         Ticket.GateCode memory g = Ticket.GateCode({
             gateId: gateId, eventId: P256Vectors.EVENT_ID, issuedAt: P256Vectors.ISSUED_AT, nonce: P256Vectors.NONCE
         });
-        bytes memory sig = gateSig;
-        // Cache the test's own bookkeeping so its SLOADs are not billed to `checkIn`.
+        bytes memory gs = gateSig;
+        bytes memory ds = deviceSig;
+        // Cache the test's own bookkeeping so its SLOADs are not billed to `checkInFor`.
         Ticket t = ticket;
         uint256 id = tokenId;
 
-        vm.prank(GATE_A);
+        vm.prank(RELAYER);
         uint256 before = gasleft();
-        t.checkIn(id, g, sig);
+        t.checkInFor(id, g, gs, ds);
         used = before - gasleft();
 
         // A reverted call is cheap; make sure we priced a check-in that actually happened.
-        assertEq(ticket.checkInOf(tokenId).gateId, gateId, "the measured call must be a real check-in");
+        assertTrue(ticket.usedAt(tokenId) != 0, "the measured call must be a real check-in");
     }
 
     function _assertUnderCeiling(uint256 used) internal pure {

@@ -34,14 +34,13 @@ contract TicketOverrideTest is MontiTest {
         _memberWithDeviceKey(ALICE, 0xA1A1);
         orgId = _org();
         eventId = _freeEvent(orgId, 1, 1, true);
-        vm.prank(ALICE);
-        tokenId = ticket.claim(eventId, 0, "");
+        tokenId = _claimForFixture(ALICE, eventId, 0);
 
         vm.startPrank(ORG_OWNER);
         organizers.setAdmin(orgId, ADMIN, organizers.PERM_APPROVE_OVERRIDE());
         organizers.setManager(orgId, MANAGER_YES, true, true);
         organizers.setManager(orgId, MANAGER_NO, true, false);
-        gateId = organizers.registerGate(eventId, GATE_A, bytes32(uint256(0x6A01)), bytes32(uint256(0x6A02)));
+        gateId = organizers.registerGate(eventId, GATE_A, GATE_KX, GATE_KY);
         organizers.openGate(gateId);
         // Left closed on purpose: an override is not a tap, so it does not need an open door.
         closedGateId = organizers.registerGate(eventId, GATE_B, bytes32(uint256(0x6B01)), bytes32(uint256(0x6B02)));
@@ -73,9 +72,12 @@ contract TicketOverrideTest is MontiTest {
         vm.prank(MANAGER_YES);
         ticket.manualOverride(tokenId, gateId, 3);
 
+        // 슬림 저장: role·gateId 는 ManualOverride 이벤트(위 expectEmit)가 검증한다. 저장에는
+        // usedAt(ts)만 남고 gateId·nonceHash·manual 은 0/false 다(설계 §12-2).
         Ticket.CheckIn memory c = ticket.checkInOf(tokenId);
-        assertEq(c.gateId, gateId);
-        assertTrue(c.manual);
+        assertEq(c.ts, uint64(block.timestamp));
+        assertEq(c.gateId, 0);
+        assertFalse(c.manual);
         assertEq(c.nonceHash, bytes32(0));
     }
 
@@ -84,7 +86,7 @@ contract TicketOverrideTest is MontiTest {
         emit ManualOverride(tokenId, gateId, ADMIN, roleApprover, 5);
         vm.prank(ADMIN);
         ticket.manualOverride(tokenId, gateId, 5);
-        assertTrue(ticket.checkInOf(tokenId).manual);
+        assertTrue(ticket.usedAt(tokenId) != 0);
     }
 
     function test_strangerCanNeitherRequestNorApprove() public {
@@ -110,7 +112,7 @@ contract TicketOverrideTest is MontiTest {
         emit ManualOverride(tokenId, gateId, ORG_OWNER, roleApprover, 7);
         vm.prank(ORG_OWNER);
         ticket.manualOverride(tokenId, gateId, 7);
-        assertTrue(ticket.checkInOf(tokenId).manual);
+        assertTrue(ticket.usedAt(tokenId) != 0);
     }
 
     /// @dev Overrides come from a staff passkey account, never from the gate account itself.
@@ -237,7 +239,7 @@ contract TicketOverrideTest is MontiTest {
         emit ManualOverride(tokenId, closedGateId, MANAGER_YES, roleManager, 3);
         vm.prank(MANAGER_YES);
         ticket.manualOverride(tokenId, closedGateId, 3);
-        assertEq(ticket.checkInOf(tokenId).gateId, closedGateId);
+        assertTrue(ticket.usedAt(tokenId) != 0);
     }
 
     /// @dev Minor 5. 승인할 수 없는 요청은 애초에 올라가지 않는다 — manualOverride 와 같은 기준이다.

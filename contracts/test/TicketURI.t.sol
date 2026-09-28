@@ -25,10 +25,9 @@ contract TicketURITest is MontiTest {
         _memberWithDeviceKey(ALICE, 0xA1A1);
         orgId = _org();
         eventId = _freeEvent(orgId, 1, 1, true);
-        vm.prank(ALICE);
-        tokenId = ticket.claim(eventId, 0, "");
+        tokenId = _claimForFixture(ALICE, eventId, 0);
         vm.startPrank(ORG_OWNER);
-        gateId = organizers.registerGate(eventId, GATE_A, bytes32(uint256(0x6A01)), bytes32(uint256(0x6A02)));
+        gateId = organizers.registerGate(eventId, GATE_A, GATE_KX, GATE_KY);
         organizers.openGate(gateId);
         vm.stopPrank();
     }
@@ -63,11 +62,8 @@ contract TicketURITest is MontiTest {
         Ticket.GateCode memory code = Ticket.GateCode({
             gateId: gateId, eventId: P256Vectors.EVENT_ID, issuedAt: P256Vectors.ISSUED_AT, nonce: P256Vectors.NONCE
         });
-        // 서명을 먼저 만든다. _deviceSig 는 sha256 프리컴파일과 치트코드를 부르므로 prank 뒤에
-        // 두면 그 prank 를 먹어 치운다(Task 9 가 _sig 에서 겪은 것과 같은 함정이다).
-        bytes memory deviceSig = _deviceSig(tokenId, code);
-        vm.prank(GATE_A);
-        ticket.checkIn(tokenId, code, deviceSig);
+        // 릴레이 입장: 게이트 서명 + 관객 기기 서명을 임의 RELAYER 가 대신 제출한다.
+        _checkInFor(tokenId, code);
     }
 
     /// @dev One published event whose organizer-supplied strings are ours to choose.
@@ -100,7 +96,7 @@ contract TicketURITest is MontiTest {
 
     function test_uriCarriesNameImageAndNotYetEnteredStatus() public view {
         string memory json = _json(tokenId);
-        assertTrue(LibString.contains(json, "MONTI Ticket #1"));
+        assertTrue(LibString.contains(json, string.concat("MONTI Ticket #", vm.toString(tokenId))));
         assertTrue(LibString.contains(json, "ipfs://bafyTestCid"));
         assertTrue(LibString.contains(json, "General"));
         assertTrue(LibString.contains(json, NOT_ENTERED));
@@ -112,7 +108,9 @@ contract TicketURITest is MontiTest {
         assertEq(
             _json(tokenId),
             string.concat(
-                '{"name":"MONTI Ticket #1",',
+                '{"name":"MONTI Ticket #',
+                vm.toString(tokenId),
+                '",',
                 '"description":"MONTI on-chain admission. The chain decides, not our server.",',
                 '"image":"ipfs://bafyTestCid",',
                 '"attributes":[',
@@ -191,8 +189,7 @@ contract TicketURITest is MontiTest {
     ///      early and let them write their own attributes, so both go through the escaper.
     function test_uriEscapesOrganizerSuppliedText() public {
         uint256 id = _eventWithText(unicode'V"I\\P\t석', 'bafy"cid');
-        vm.prank(ALICE);
-        uint256 vip = ticket.claim(id, 0, "");
+        uint256 vip = _claimForFixture(ALICE, id, 0);
 
         string memory json = _json(vip);
         assertTrue(LibString.contains(json, '\\"'), "the quote must be escaped, not raw");
@@ -206,8 +203,7 @@ contract TicketURITest is MontiTest {
         if (bytes(cid).length > 64) cid = LibString.slice(cid, 0, 64);
 
         uint256 id = _eventWithText(tierName, cid);
-        vm.prank(ALICE);
-        uint256 fuzzed = ticket.claim(id, 0, "");
+        uint256 fuzzed = _claimForFixture(ALICE, id, 0);
 
         string memory json = _json(fuzzed);
         assertEq(_attr(json, "Tier"), tierName);

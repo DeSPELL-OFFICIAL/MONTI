@@ -6,8 +6,10 @@ import {Ticket} from "../src/Ticket.sol";
 import {P256} from "solady/utils/P256.sol";
 import {P256Vectors} from "./utils/P256Vectors.sol";
 
-/// @notice 스펙 12 의 오프라인 큐. 벡터가 event 1 / token 1 / gate 1 에 묶여 있으므로 각 시나리오는
-///         자기 배포 위에서 그 세 id 를 처음부터 만든다. 행사 일정만 바꿔 가며 창의 양 끝을 본다.
+/// @notice 스펙 12 의 오프라인 큐 + 릴레이 전환(설계 §4). 게이트 권한은 게이트 키 서명이 증명하고,
+///         입장은 임의 RELAYER 가 제출한다. 슬림 저장(§12)으로 checkInOf.late 는 항상 false 이고
+///         '늦음'은 CheckedInLate 이벤트에만 남으므로, 큐 플러시는 현장 경로가 같은 시각에 막힌다는
+///         것(또는 CheckedInLate 방출)으로 증명한다.
 abstract contract CheckInLateBase is MontiTest {
     uint256 internal orgId;
     uint256 internal eventId;
@@ -15,11 +17,13 @@ abstract contract CheckInLateBase is MontiTest {
     uint256 internal gateId;
 
     uint64 internal constant ISSUED = uint64(P256Vectors.ISSUED_AT);
+    bytes32 internal constant NONCE_HASH = keccak256(abi.encode(P256Vectors.NONCE));
 
-    /// @dev TicketCheckIn.t.sol 과 같은 이유로 setUp 에서 한 번 만들어 들고 있는다: _deviceSig 는
+    /// @dev TicketCheckIn.t.sol 과 같은 이유로 setUp 에서 한 번 만들어 들고 있는다: 서명 헬퍼는
     ///      치트코드를 부르므로 prank/expectRevert 뒤에 두면 그것을 먹는다.
     bytes internal deviceSig;
     bytes internal foreignSig;
+    bytes internal gsig;
 
     event CheckedIn(
         uint256 indexed tokenId, uint256 indexed eventId, uint256 indexed gateId, bytes32 nonceHash, uint64 ts
@@ -59,20 +63,19 @@ abstract contract CheckInLateBase is MontiTest {
         ticket.publishEvent(eventId);
         vm.stopPrank();
 
-        vm.prank(ALICE);
-        tokenId = ticket.claim(eventId, 0, "");
+        tokenId = _claimForFixture(ALICE, eventId, 0);
 
         vm.startPrank(ORG_OWNER);
-        gateId = organizers.registerGate(eventId, GATE_A, bytes32(uint256(0x6A01)), bytes32(uint256(0x6A02)));
+        gateId = organizers.registerGate(eventId, GATE_A, GATE_KX, GATE_KY);
         organizers.openGate(gateId);
         vm.stopPrank();
 
         assertEq(eventId, P256Vectors.EVENT_ID, "vectors were generated for event 1");
-        assertEq(tokenId, P256Vectors.TOKEN_ID, "vectors were generated for token 1");
         assertEq(gateId, P256Vectors.GATE1_ID, "vectors were generated for gate 1");
 
         deviceSig = _deviceSig(tokenId, _code());
         foreignSig = _foreignDeviceSig(tokenId, _code());
+        gsig = _gateSig(_code());
     }
 
     function _code() internal pure returns (Ticket.GateCode memory) {
@@ -99,52 +102,50 @@ contract TicketCheckInLateTest is CheckInLateBase {
     function test_C1_aQueuedTapLandsAnHourLater() public {
         vm.warp(ISSUED + 1 hours);
 
-        vm.prank(GATE_A);
         vm.expectRevert(Ticket.CodeExpired.selector);
-        ticket.checkIn(tokenId, _code(), _sig());
+        ticket.checkInFor(tokenId, _code(), gsig, _sig());
 
         vm.expectEmit(true, true, false, true);
         emit CheckedInLate(tokenId, gateId, ISSUED, ISSUED + 1 hours);
         vm.expectEmit(true, true, true, true);
-        emit CheckedIn(tokenId, eventId, gateId, keccak256(abi.encode(P256Vectors.NONCE)), ISSUED + 1 hours);
-        vm.prank(GATE_A);
-        ticket.checkInLate(tokenId, _code(), _sig());
+        emit CheckedIn(tokenId, eventId, gateId, NONCE_HASH, ISSUED + 1 hours);
+        vm.prank(RELAYER);
+        ticket.checkInForLate(tokenId, _code(), gsig, _sig());
 
         Ticket.CheckIn memory c = ticket.checkInOf(tokenId);
-        assertEq(c.gateId, gateId);
         assertEq(c.ts, ISSUED + 1 hours);
-        assertEq(c.nonceHash, keccak256(abi.encode(P256Vectors.NONCE)));
+        assertEq(c.gateId, 0, "slim storage keeps no gateId");
+        assertEq(c.nonceHash, bytes32(0), "slim storage keeps no nonceHash");
         assertFalse(c.manual, "a queued tap is not a manual override");
-        assertTrue(c.late, "the record says the queue flushed it");
+        assertFalse(c.late, "late lives in the event, not slim storage");
+        assertEq(ticket.usedAt(tokenId), uint32(ISSUED + 1 hours));
     }
 
     function test_theQueueStillFlushesAfterTheEventEnds() public {
         vm.warp(ISSUED + 6 hours + 11 hours);
-        vm.prank(GATE_A);
-        ticket.checkInLate(tokenId, _code(), _sig());
-        assertTrue(ticket.checkInOf(tokenId).late);
+        vm.prank(RELAYER);
+        ticket.checkInForLate(tokenId, _code(), gsig, _sig());
+        assertTrue(ticket.usedAt(tokenId) != 0, "the queue flushed it");
     }
 
     function test_theFlushDeadlineIsExactlyLateWindowAfterTheEventEnds() public {
         vm.warp(ISSUED + 6 hours + 12 hours);
-        vm.prank(GATE_A);
-        ticket.checkInLate(tokenId, _code(), _sig());
-        assertTrue(ticket.checkInOf(tokenId).late);
+        vm.prank(RELAYER);
+        ticket.checkInForLate(tokenId, _code(), gsig, _sig());
+        assertTrue(ticket.usedAt(tokenId) != 0, "the queue flushed it at the deadline");
     }
 
     function test_oneSecondPastTheFlushDeadlineIsRejected() public {
         vm.warp(ISSUED + 6 hours + 12 hours + 1);
-        vm.prank(GATE_A);
         vm.expectRevert(Ticket.EventEnded.selector);
-        ticket.checkInLate(tokenId, _code(), _sig());
+        ticket.checkInForLate(tokenId, _code(), gsig, _sig());
     }
 
     /// @dev 현장 경로는 폐장 순간 그대로 닫힌다. 넓어진 것은 기록 경로뿐이다.
     function test_theLiveDoorStillClosesAtEndsAt() public {
         vm.warp(ISSUED + 6 hours + 1);
-        vm.prank(GATE_A);
         vm.expectRevert(Ticket.EventEnded.selector);
-        ticket.checkIn(tokenId, _code(), _sig());
+        ticket.checkInFor(tokenId, _code(), gsig, _sig());
     }
 
     /// @dev 열림은 문을 여닫는 스위치이지 권한이 아니다. 닫힌 게이트도 자기 장부는 정리한다.
@@ -153,13 +154,12 @@ contract TicketCheckInLateTest is CheckInLateBase {
         organizers.closeGate(gateId);
         vm.warp(ISSUED + 2 hours);
 
-        vm.prank(GATE_A);
         vm.expectRevert(Ticket.GateNotOpen.selector);
-        ticket.checkIn(tokenId, _code(), _sig());
+        ticket.checkInFor(tokenId, _code(), gsig, _sig());
 
-        vm.prank(GATE_A);
-        ticket.checkInLate(tokenId, _code(), _sig());
-        assertTrue(ticket.checkInOf(tokenId).late);
+        vm.prank(RELAYER);
+        ticket.checkInForLate(tokenId, _code(), gsig, _sig());
+        assertTrue(ticket.usedAt(tokenId) != 0, "a closed gate still flushes its queue");
     }
 
     /// @dev T14: 도난당한 단말기는 폐기하면 큐도 못 흘린다.
@@ -168,43 +168,37 @@ contract TicketCheckInLateTest is CheckInLateBase {
         organizers.revokeGate(gateId);
         vm.warp(ISSUED + 2 hours);
 
-        vm.prank(GATE_A);
         vm.expectRevert(Ticket.GateNotOpen.selector);
-        ticket.checkInLate(tokenId, _code(), _sig());
+        ticket.checkInForLate(tokenId, _code(), gsig, _sig());
     }
 
-    /// @dev 게이트 id 는 다이제스트에 묶여 있다. 다른 게이트의 큐를 대신 흘릴 수 없다.
-    function test_T13_aGateCannotFlushAnotherGatesQueue() public {
-        vm.startPrank(ORG_OWNER);
-        uint256 gateBId = organizers.registerGate(eventId, GATE_B, bytes32(uint256(0x6B01)), bytes32(uint256(0x6B02)));
-        organizers.openGate(gateBId);
-        vm.stopPrank();
+    /// @dev 게이트 코드에 게이트 키가 아닌 키로 서명하면 큐도 못 흘린다(위조 게이트 서명, 설계 §4).
+    ///      릴레이 전환 전의 "게이트가 남의 큐를 흘린다" 개념(msg.sender 바인딩)은 사라졌고, 그
+    ///      자리를 게이트 서명 위조 방지가 대신한다.
+    function test_forgedGateSignatureRejectedOnTheLatePath() public {
         vm.warp(ISSUED + 2 hours);
-
-        vm.prank(GATE_B);
-        vm.expectRevert(Ticket.GateMismatch.selector);
-        ticket.checkInLate(tokenId, _code(), _sig());
+        bytes memory forgedGate = _foreignGateSig(_code());
+        vm.expectRevert(Ticket.BadGateSignature.selector);
+        ticket.checkInForLate(tokenId, _code(), forgedGate, _sig());
     }
 
     /// @dev T12: 04 의 큐는 이 revert 를 '이미 기록됨 = 성공'으로 처리한다.
     function test_T12_flushingAnAlreadyAdmittedTicketReverts() public {
         vm.warp(ISSUED + 5);
-        vm.prank(GATE_A);
-        ticket.checkIn(tokenId, _code(), _sig());
+        vm.prank(RELAYER);
+        ticket.checkInFor(tokenId, _code(), gsig, _sig());
 
         vm.warp(ISSUED + 2 hours);
-        vm.prank(GATE_A);
         vm.expectRevert(Ticket.AlreadyCheckedIn.selector);
-        ticket.checkInLate(tokenId, _code(), _sig());
-        assertFalse(ticket.checkInOf(tokenId).late, "the live record stands");
+        ticket.checkInForLate(tokenId, _code(), gsig, _sig());
+        assertEq(ticket.usedAt(tokenId), uint32(ISSUED + 5), "the live record stands");
     }
 
     /// @dev T15: 단말기 혼자서는 큐 항목을 만들 수 없다. 관객 기기 서명이 여전히 필수다.
     function test_T15_theQueueStillNeedsTheAttendeeSignature() public {
         vm.warp(ISSUED + 2 hours);
-        vm.prank(GATE_A);
         vm.expectRevert(Ticket.BadDeviceSignature.selector);
-        ticket.checkInLate(tokenId, _code(), foreignSig);
+        ticket.checkInForLate(tokenId, _code(), gsig, foreignSig);
     }
 
     /// @dev Gap 2. 늦은 경로가 payload 의 수명을 60초에서 행사 창 전체로 늘리므로, 도메인
@@ -215,9 +209,8 @@ contract TicketCheckInLateTest is CheckInLateBase {
         bytes32 old5 = sha256(abi.encode(tokenId, g.gateId, g.eventId, g.nonce, g.issuedAt));
         (bytes32 r, bytes32 s) = vm.signP256(P256Vectors.DEVICE_PRIV, old5);
 
-        vm.prank(GATE_A);
         vm.expectRevert(Ticket.BadDeviceSignature.selector);
-        ticket.checkInLate(tokenId, g, abi.encode(r, s));
+        ticket.checkInForLate(tokenId, g, gsig, abi.encode(r, s));
     }
 
     /// @dev 다른 체인 / 다른 배포본을 위한 서명도 마찬가지다.
@@ -228,27 +221,23 @@ contract TicketCheckInLateTest is CheckInLateBase {
         bytes32 otherChain =
             sha256(abi.encode(uint256(1), address(ticket), tokenId, g.gateId, g.eventId, g.nonce, g.issuedAt));
         (bytes32 r, bytes32 s) = vm.signP256(P256Vectors.DEVICE_PRIV, otherChain);
-        vm.prank(GATE_A);
         vm.expectRevert(Ticket.BadDeviceSignature.selector);
-        ticket.checkInLate(tokenId, g, abi.encode(r, s));
+        ticket.checkInForLate(tokenId, g, gsig, abi.encode(r, s));
 
         bytes32 otherTicket =
             sha256(abi.encode(block.chainid, address(0xDEAD), tokenId, g.gateId, g.eventId, g.nonce, g.issuedAt));
         (r, s) = vm.signP256(P256Vectors.DEVICE_PRIV, otherTicket);
-        vm.prank(GATE_A);
         vm.expectRevert(Ticket.BadDeviceSignature.selector);
-        ticket.checkInLate(tokenId, g, abi.encode(r, s));
+        ticket.checkInForLate(tokenId, g, gsig, abi.encode(r, s));
     }
 
     /// @dev C2 의 요구는 늦은 경로에도 그대로 붙는다.
     function test_C2_highSRejectedOnTheLatePathToo() public {
         vm.warp(ISSUED + 2 hours);
-        // 치트코드를 쓰는 줄이 먼저다.
         (bytes32 r, bytes32 s) = _deviceRS(P256Vectors.DEVICE_PRIV, tokenId, _code());
 
-        vm.prank(GATE_A);
         vm.expectRevert(Ticket.BadDeviceSignature.selector);
-        ticket.checkInLate(tokenId, _code(), abi.encode(r, bytes32(P256.N - uint256(s))));
+        ticket.checkInForLate(tokenId, _code(), gsig, abi.encode(r, bytes32(P256.N - uint256(s))));
     }
 
     function test_aCancelledEventRejectsTheQueueToo() public {
@@ -256,17 +245,15 @@ contract TicketCheckInLateTest is CheckInLateBase {
         ticket.cancelEvent(eventId);
         vm.warp(ISSUED + 2 hours);
 
-        vm.prank(GATE_A);
         vm.expectRevert(Ticket.EventCancelled.selector);
-        ticket.checkInLate(tokenId, _code(), _sig());
+        ticket.checkInForLate(tokenId, _code(), gsig, _sig());
     }
 
     /// @dev 앞선 시계는 두 경로 모두에서 위조다. CLOCK_SKEW 는 넓히지 않았다.
     function test_aFutureCodeIsStillAForgeryOnTheLatePath() public {
         vm.warp(ISSUED - 6);
-        vm.prank(GATE_A);
         vm.expectRevert(Ticket.CodeExpired.selector);
-        ticket.checkInLate(tokenId, _code(), _sig());
+        ticket.checkInForLate(tokenId, _code(), gsig, _sig());
     }
 
     /// @dev 잠긴 기기는 두 경로 모두에서 막힌다(I1/I2 와 짝).
@@ -275,9 +262,8 @@ contract TicketCheckInLateTest is CheckInLateBase {
         identity.lockDevice(ALICE);
         vm.warp(ISSUED + 2 hours);
 
-        vm.prank(GATE_A);
         vm.expectRevert(Ticket.DeviceLocked.selector);
-        ticket.checkInLate(tokenId, _code(), _sig());
+        ticket.checkInForLate(tokenId, _code(), gsig, _sig());
     }
 }
 
@@ -290,9 +276,8 @@ contract TicketCheckInLatePreHarvestTest is CheckInLateBase {
 
     function test_aCodeIssuedBeforeTheWindowOpensIsRejected() public {
         vm.warp(ISSUED + 14 hours);
-        vm.prank(GATE_A);
         vm.expectRevert(Ticket.CodeExpired.selector);
-        ticket.checkInLate(tokenId, _code(), _sig());
+        ticket.checkInForLate(tokenId, _code(), gsig, _sig());
     }
 }
 
@@ -304,23 +289,18 @@ contract TicketCheckInLateBoundaryTest is CheckInLateBase {
 
     function test_aCodeIssuedExactlyLateWindowBeforeDoorsIsAccepted() public {
         vm.warp(ISSUED + 13 hours);
-        vm.prank(GATE_A);
-        ticket.checkInLate(tokenId, _code(), _sig());
-        assertTrue(ticket.checkInOf(tokenId).late);
+        vm.prank(RELAYER);
+        ticket.checkInForLate(tokenId, _code(), gsig, _sig());
+        assertTrue(ticket.usedAt(tokenId) != 0, "a code issued exactly LATE_WINDOW before doors is accepted");
     }
 }
 
 /// @notice 04 가 UserOp 의 네 가스 필드를 잡을 때 쓰는 출발점(I10). 두 경로를 **같은 픽스처
-///         위에서** 나란히 잰다 — `CheckInGas.t.sol` 의 현장 측정은 자기 행사를 따로 세우므로
-///         두 숫자의 차이를 늦은 경로의 값으로 읽을 수 없다. 여기서는 배포도, 행사도, 티켓도,
-///         게이트도 같고 다른 것은 호출하는 함수와 탭이 흘러 들어온 시각뿐이다.
-///
-///         픽스처는 `setUp` 에, 즉 별도 트랜잭션에 둔다 — 같은 트랜잭션에서 재면 계정과 슬롯이
-///         이미 따뜻해서 게이트 폰이 실제로 내는 값보다 한참 낮게 나온다. 측정 창 안에는 인자를
-///         calldata 로 인코딩하는 비용과 CALL 자체도 들어가므로 몇백 가스 보수적으로 나온다.
+///         위에서** 나란히 잰다. 픽스처는 setUp 에, 즉 별도 트랜잭션에 둔다 — 같은 트랜잭션에서
+///         재면 계정과 슬롯이 이미 따뜻해서 게이트 폰이 실제로 내는 값보다 한참 낮게 나온다.
 contract CheckInLateGasTest is CheckInLateBase {
-    /// @dev 스펙 8.3 은 스폰서된 UserOp 전체에 275k 를 준다. 번들러·검증 오버헤드에 75k 를 남기고
-    ///      호출 자체에 200k 를 주는 것이 그 배분이며, 아래 로그가 실제 여유를 그대로 찍는다.
+    /// @dev 스펙 8.3 은 스폰서된 UserOp 전체에 275k 를 준다. 호출 자체에 200k 를 주는 배분이며,
+    ///      아래 로그가 실제 여유를 그대로 찍는다.
     uint256 internal constant CHECK_IN_GAS_CEILING = 200_000;
 
     function setUp() public {
@@ -331,41 +311,37 @@ contract CheckInLateGasTest is CheckInLateBase {
     function test_checkInGasOnThisFixture() public {
         vm.warp(ISSUED + 5);
         Ticket.GateCode memory g = _code();
+        bytes memory gs = gsig;
         bytes memory sig = _sig();
         Ticket t = ticket;
         uint256 id = tokenId;
 
-        vm.prank(GATE_A);
+        vm.prank(RELAYER);
         uint256 before = gasleft();
-        t.checkIn(id, g, sig);
+        t.checkInFor(id, g, gs, sig);
         uint256 used = before - gasleft();
 
-        assertEq(ticket.checkInOf(id).gateId, gateId, "the measured call must be a real check-in");
-        assertFalse(ticket.checkInOf(id).late, "and it must be the live path");
-        emit log_named_uint("checkIn gas (local osaka, shared fixture)", used);
+        assertTrue(ticket.usedAt(id) != 0, "the measured call must be a real check-in");
+        emit log_named_uint("checkInFor gas (local osaka, shared fixture)", used);
         assertLt(used, CHECK_IN_GAS_CEILING, "spec 8.3 budgets 275k for the whole user op; the call gets 200k");
     }
 
-    /// @dev 늦은 경로. 같은 `_admit` 을 타지만 제출 기한을 재느라 `endsAt` 을 한 번 더 읽고
-    ///      `late` 를 세운다(`Ticket.sol:66` — `ts` 와 같은 슬롯이고 `ts` 는 언제나 비0이므로
-    ///      추가 SSTORE 는 없다. `manual` 과 같은 슬롯이라는 것만으로는 아무것도 얻지 못했다 —
-    ///      그때 그 칸은 통째로 0이었고, Commit E 의 −21,800 가스가 그 값이다).
+    /// @dev 늦은 경로. 같은 `_admit` 을 타지만 제출 기한을 재느라 `endsAt` 을 한 번 더 읽는다.
     function test_checkInLateGas() public {
         vm.warp(ISSUED + 1 hours);
         Ticket.GateCode memory g = _code();
+        bytes memory gs = gsig;
         bytes memory sig = _sig();
-        // 테스트 자신의 장부 SLOAD 가 측정 창에 들어오지 않게 미리 읽어 둔다.
         Ticket t = ticket;
         uint256 id = tokenId;
 
-        vm.prank(GATE_A);
+        vm.prank(RELAYER);
         uint256 before = gasleft();
-        t.checkInLate(id, g, sig);
+        t.checkInForLate(id, g, gs, sig);
         uint256 used = before - gasleft();
 
-        // 되돌린 호출은 싸다. 진짜 늦은 입장을 쟀는지 확인하고 나서 숫자를 믿는다.
-        assertTrue(ticket.checkInOf(id).late, "the measured call must be a real late check-in");
-        emit log_named_uint("checkInLate gas (local osaka)", used);
+        assertTrue(ticket.usedAt(id) != 0, "the measured call must be a real late check-in");
+        emit log_named_uint("checkInForLate gas (local osaka)", used);
         emit log_named_uint("margin under the 200k call budget (gas)", CHECK_IN_GAS_CEILING - used);
         assertLt(used, CHECK_IN_GAS_CEILING, "spec 8.3 budgets 275k for the whole user op; the call gets 200k");
     }
