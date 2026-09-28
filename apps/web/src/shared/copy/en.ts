@@ -154,6 +154,8 @@ export const en: typeof ko = {
     limitReached: 'You already have every ticket this event allows.',
     alreadyHave: 'You already have your tickets for this event. Check My tickets.',
     soldOut: 'This type is sold out. Please pick another one.',
+    notOnSale: 'Not available right now. Please check the sale period.',
+    deviceLocked: "This phone can't get it right now. Please sign in again.",
     requestCta: 'Request a ticket', requesting: 'Sending your request',
     approvalOnly: 'You can get a ticket after the organiser approves.',
     pending: 'Request sent · waiting for approval',

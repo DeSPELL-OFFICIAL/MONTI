@@ -8,18 +8,17 @@ import { gql } from '../../shared/envio/client';
 import { describeFailure } from '../../shared/errors';
 import { EVENT_QUERY, type EnvioEvent, type EnvioTier } from '../../shared/envio/queries';
 import { useMyRequest } from '../../shared/envio/claimRequests';
-import { ticketOp, resolveSubmittedOp, OpReverted } from '../../shared/chain/ops';
+import { ticketOp, OpReverted } from '../../shared/chain/ops';
 import { MAX_WAIT_TIMEOUT_MS } from '../../shared/chain/sendSponsoredOp';
-import { ticketAbi } from '../../shared/chain/abis';
-import { revertMatch } from '../../shared/chain/revert';
 import { getAttendeeAccount } from '../../shared/chain/accounts';
+import { api } from '../../shared/api/functions';
+import { watchRelay } from '../../shared/api/firestore';
 import { useKycLevel } from '../me/useKycLevel';
 import { useMyTickets } from '../tickets/useTickets';
-import { clearClaimDraft, guardClaim, readClaimDraft, writeClaimDraft } from './claimDraft';
+import { buildClaimAuth } from './buildClaimAuth';
+import { relayClaimCopy, relayClaimError } from './claimErrors';
 
-/** Free tiers only in the MVP, so the voucher the contract takes is always empty. */
-const NO_VOUCHER = '0x';
-/** `wait` gave up before the op landed. Not a failure — it is still on its way. */
+/** `wait` gave up before a cancel op landed. Not a failure — it is still on its way. */
 const STILL_CONFIRMING = 'TIMEOUT';
 /** Level 1 is id + face confirmed; the events that ask for it ask for exactly that. */
 const VERIFIED_LEVEL = 1;
@@ -70,19 +69,17 @@ export function KycRequiredSheet({
 }
 
 /**
- * Where a claim is in its determinate 저장 → 확인 → 완료 wait (plan T-SIMP-1 ④), the create path's
- * engine ported onto claim/requestClaim:
+ * Where a claim is in its determinate 저장 → 확인 → 완료 wait (plan T-SIMP-1 ④), the 09-27 engine
+ * ported onto the relayed claim/request (design §7): the state is the same, only its source moved
+ * from an op handle to the `relays/{id}` doc.
  *
  *   - `idle`    — nothing in flight; the button is the claim.
- *   - `saving`  — building and sending the op (저장 중). A transient precheck resend shows here.
- *   - `sent`    — the op is in the mempool, its hash recorded, waiting for the receipt (확인 중).
- *   - `stuck`   — `wait` gave up (still on its way). The recorded hash lets a return resolve it.
+ *   - `saving`  — building the authorization and calling the relayer (저장 중).
+ *   - `sent`    — the relayer accepted it; the relay doc is being followed (확인 중).
+ *   - `stuck`   — a cancel op's `wait` gave up (still on its way). Approval mode only.
  *   - `done`    — a direct claim landed. A real completion, not a silent redirect.
  */
 type ClaimPhase = 'idle' | 'saving' | 'sent' | 'stuck' | 'done';
-
-/** How often a resumed, still-pending op is re-checked — the create home banner's own cadence. */
-const CLAIM_POLL_MS = 4_000;
 
 /**
  * After a requestClaim lands, how long to wait between checks for its ClaimRequest to appear:
@@ -118,9 +115,9 @@ export interface ClaimFlowProps {
 }
 
 /**
- * The whole claim experience — tier picker, 저장 → 확인 → 완료 wait, durable-hash resolve-first
- * dedup, auto-resend and completion — as one component both entries render (plan B1). Nothing is
- * copied between the route and the sheet: this is the single place the state machine lives.
+ * The whole claim experience — tier picker, 저장 → 확인 → 완료 wait over the relayer, completion —
+ * as one component both entries render (plan B1). Nothing is copied between the route and the
+ * sheet: this is the single place the state machine lives.
  */
 export function ClaimFlow({ eventId, present }: ClaimFlowProps) {
   const copy = useCopy();
@@ -135,10 +132,13 @@ export function ClaimFlow({ eventId, present }: ClaimFlowProps) {
   });
   const [error, setError] = useState('');
   const [phase, setPhase] = useState<ClaimPhase>('idle');
-  // A send-layer resend is under way ("잠시 붐벼요…"). Only meaningful while `saving`.
+  // A cancel op's send-layer resend is under way ("잠시 붐벼요…"). Only meaningful while `saving`.
   const [retrying, setRetrying] = useState(false);
   const [needsKyc, setNeedsKyc] = useState(false);
   const resumed = useRef(false);
+  // The relay doc this claim is following, or null. The subscription effect below drives 확인 → 완료
+  // from it; a fresh submission or a retry replaces it.
+  const [relayId, setRelayId] = useState<string | null>(null);
   // Approval mode only: a landed requestClaim whose ClaimRequest has not surfaced in the indexer
   // yet. `awaiting` runs the appearance poll below; `awaitTimedOut` is the five-minute cap, after
   // which the person is handed a manual 다시 확인 rather than a poll that never stops.
@@ -188,90 +188,24 @@ export function ClaimFlow({ eventId, present }: ClaimFlowProps) {
 
   // The pre-block above only holds a claim back once `held` (and, in approval mode, the pending
   // request) is known. On a cold load — the first paint after login — those queries have not
-  // answered yet and `held` reads 0, so a fast tap would send an op the chain only reverts (live
+  // answered yet and `held` reads 0, so a fast tap would send a claim the chain only reverts (live
   // check e). The button waits: disabled with a quiet 확인 중… until both counts have resolved.
   const countsResolved = !ticketsLoading && !(approval && requestLoading);
 
   // The button is down for every state but the two the person acts from.
   const busy = phase === 'saving' || phase === 'sent';
 
-  // The ApprovalRequired revert is the one an attendee can hit from either call — `claim` on an
-  // event that turned on approval after the page loaded — so it is named first, off the Ticket ABI.
-  // Everything else goes through describeFailure (offline, indexer, generic); a plain claim keeps
-  // its own short sentence, which its tests pin.
+  // A cancel op's real failure sentence. Approval mode is the only place cancel runs, so this is
+  // describeFailure (offline, indexer, generic); the STILL_CONFIRMING timeout is handled before it.
   const opFailure = useCallback(
-    (cause: unknown): string => {
-      if (cause instanceof OpReverted && cause.revertReason && cause.revertReason !== STILL_CONFIRMING) {
-        const named = revertMatch(ticketAbi, cause.revertReason as Hex, [
-          ['ApprovalRequired', copy.claim.approvalOnly],
-        ]);
-        if (named !== undefined) return named;
-      }
-      return approval ? describeFailure(cause, copy) : copy.claim.failed;
-    },
+    (cause: unknown): string => (approval ? describeFailure(cause, copy) : copy.claim.failed),
     [approval, copy],
   );
 
-  const run = useCallback(async () => {
-    if (!event) return;
-    // The contract checks this again, so the sheet is here to save a doomed signature, not to secure.
-    if (event.requireKyc && kycLevel < VERIFIED_LEVEL) {
-      setNeedsKyc(true);
-      return;
-    }
-    const fn = event.approvalRequired === true ? 'requestClaim' : 'claim';
-    setPhase('saving');
-    setError('');
-    setRetrying(false);
-    try {
-      // Never a blind resend (plan T-SIMP-1 ②): only when an op is already recorded for this event
-      // does this ask what became of it first — the same guard the create path is built on. With
-      // nothing recorded there is nothing to duplicate, so a fresh claim goes straight to the send.
-      const existing = readClaimDraft(eventId);
-      if (existing !== null) {
-        const step = await guardClaim(existing, resolveSubmittedOp);
-        if (step === 'wait') {
-          // Still on its way. Keep waiting rather than sending a second ticket.
-          setPhase('sent');
-          return;
-        }
-        if (step === 'complete') {
-          // The recorded op already landed. The ticket (or request) exists; do not send again.
-          clearClaimDraft(eventId);
-          if (fn === 'requestClaim') {
-            const row = await refetchRequest();
-            setPhase('idle');
-            if (row === null) { setAwaitTimedOut(false); setAwaiting(true); }
-          } else {
-            setPhase('done');
-          }
-          return;
-        }
-        // `send`: the recorded op is dead/stuck — drop it and resend with current fees.
-        clearClaimDraft(eventId);
-      }
-      const args = fn === 'requestClaim'
-        ? [BigInt(eventId), tier]
-        : [BigInt(eventId), tier, NO_VOUCHER];
-      await ticketOp({
-        account: await getAttendeeAccount(),
-        orgId: BigInt(event.orgId),
-        functionName: fn,
-        args,
-        // Poll the receipt to the same 45s cap OpProgress shows, so a late inclusion lands on
-        // its own instead of dropping to 확인/stuck at 15s while the counter still runs (T-SIMP-7).
-        maxTimeoutMs: MAX_WAIT_TIMEOUT_MS,
-        // Recorded the moment the bundler accepts it, before the wait, so a page closed mid-wait
-        // resolves this op next time instead of claiming twice. This is also what turns 저장 → 확인.
-        onSubmitted: (hash) => {
-          writeClaimDraft(eventId, { fn, tier, opHash: hash, submittedAt: Date.now() });
-          setPhase('sent');
-        },
-        onSendRetry: () => setRetrying(true),
-      });
-      // Landed. The ticket exists (claim) or the request is in (requestClaim).
-      clearClaimDraft(eventId);
-      if (fn === 'requestClaim') {
+  // Finishes a confirmed relay: a direct claim shows 완료, a request starts the appearance wait.
+  const settleConfirmed = useCallback(
+    async (mode: 'claim' | 'request'): Promise<void> => {
+      if (mode === 'request') {
         // No mint here — the request reserves supply and waits for the organiser. The row can lag
         // the transaction by minutes, so start the appearance wait rather than showing nothing.
         const row = await refetchRequest();
@@ -281,21 +215,63 @@ export function ClaimFlow({ eventId, present }: ClaimFlowProps) {
         // A real completion in place of the old silent navigate('/tickets') (plan T-SIMP-1 ③).
         setPhase('done');
       }
-    } catch (cause) {
-      if (cause instanceof OpReverted && cause.revertReason === STILL_CONFIRMING) {
-        // The op is on its way; its hash was recorded before the wait, so a return resolves it.
-        setPhase('stuck');
+    },
+    [refetchRequest],
+  );
+
+  // One submission through the relayer, with the single BAD_NONCE retry (design §5): if the chain
+  // moved the nonce under us (a stale or duplicate authorization) the server reports the current
+  // one, so the auth is rebuilt with it and sent once more — never a loop.
+  const submitRelay = useCallback(
+    async (mode: 'claim' | 'request', account: Hex) => {
+      const send = async (nonce?: bigint) => {
+        const { auth, deviceSig } = await buildClaimAuth({ eventId, tier, account, nonce });
+        return api.relayClaim({ mode, auth, deviceSig });
+      };
+      try {
+        return await send();
+      } catch (cause) {
+        const { code, nonce } = relayClaimError(cause);
+        if (code === 'BAD_NONCE' && nonce !== undefined) return await send(BigInt(nonce));
+        throw cause;
+      }
+    },
+    [eventId, tier],
+  );
+
+  const run = useCallback(async () => {
+    if (!event) return;
+    // The contract checks this again, so the sheet is here to save a doomed signature, not to secure.
+    if (event.requireKyc && kycLevel < VERIFIED_LEVEL) {
+      setNeedsKyc(true);
+      return;
+    }
+    const mode: 'claim' | 'request' = event.approvalRequired === true ? 'request' : 'claim';
+    setPhase('saving');
+    setError('');
+    setRetrying(false);
+    setRelayId(null);
+    try {
+      const account = (await getAttendeeAccount()).address;
+      const result = await submitRelay(mode, account);
+      // The relayer already saw the receipt: skip the wait and settle straight away.
+      if (result.status === 'confirmed') {
+        await settleConfirmed(mode);
         return;
       }
-      // A real failure — the op will never land, so drop the record and let the button send fresh.
-      clearClaimDraft(eventId);
-      setError(opFailure(cause));
+      // Still on its way: follow the relay doc and let the subscription below drive 확인 → 완료.
+      setRelayId(result.relayId);
+      setPhase('sent');
+    } catch (cause) {
+      // A determinate refusal, mapped to its attendee sentence; an unknown code is the generic retry.
+      setError(relayClaimCopy(relayClaimError(cause).code, copy));
       setPhase('idle');
     }
-  }, [event, kycLevel, eventId, tier, refetchRequest, opFailure]);
+  }, [event, kycLevel, submitRelay, settleConfirmed, copy]);
 
   // Takes back a pending request. `cancelRequest` emits the same `ClaimRejected` an organiser's
-  // reject does, so after it lands the row reads `Rejected` and the screen offers 신청하기 again.
+  // reject does, so after it lands the row reads `Rejected` and the screen offers 신청하기 again. It
+  // is the attendee's own sponsored op — not relayed — so it keeps the 09-27 op wait as it was.
   const cancel = useCallback(async () => {
     if (!event || myRequest === null) return;
     setPhase('saving');
@@ -324,6 +300,30 @@ export function ClaimFlow({ eventId, present }: ClaimFlowProps) {
     }
   }, [event, myRequest, eventId, refetchRequest, opFailure]);
 
+  // Follows the relay doc while a claim is confirming. `confirmed` settles it (완료, or the request
+  // appearance wait); `failed` shows the code's sentence and hands the button back; pending/sent
+  // stay in 확인 중. A dropped listener leaves the wait as it is — the 45s cap and 다시 시도 are the
+  // way out, and re-tapping is idempotent by nonce.
+  useEffect(() => {
+    if (relayId === null || phase !== 'sent') return undefined;
+    const mode: 'claim' | 'request' = approval ? 'request' : 'claim';
+    return watchRelay(
+      relayId,
+      (relay) => {
+        if (relay === null) return;
+        if (relay.status === 'confirmed') {
+          setRelayId(null);
+          void settleConfirmed(mode);
+        } else if (relay.status === 'failed') {
+          setRelayId(null);
+          setError(relayClaimCopy(relay.error?.code ?? '', copy));
+          setPhase('idle');
+        }
+      },
+      () => undefined,
+    );
+  }, [relayId, phase, approval, settleConfirmed, copy]);
+
   /**
    * Coming back from the identity check with `intent=claim` finishes the claim the sheet
    * interrupted. Four things keep it honest:
@@ -350,59 +350,6 @@ export function ClaimFlow({ eventId, present }: ClaimFlowProps) {
     setSearchParams(next, { replace: true });
     void run();
   }, [params, setSearchParams, event, selected, kycLoading, kycLevel, phase, blocked, hasLiveRequest, run]);
-
-  /**
-   * A refresh or deep-link return to `/claim/:id` while an op was in flight (plan B1: this route
-   * exists for exactly that). The op hash was stored in the claim draft, so `run` re-checks it and
-   * routes — pending keeps waiting, landed completes, dead resends — never a blind second claim.
-   * Captured once at mount so a hash `run` records mid-flight cannot re-trigger this. Shares the
-   * resume latch with the identity-check path, so at most one auto-resume ever fires.
-   */
-  const [pendingOp] = useState(() => readClaimDraft(eventId));
-  useEffect(() => {
-    if (resumed.current || pendingOp === null) return;
-    if (!event || selected === undefined || hasLiveRequest) return;
-    if (kycLoading) return; // wait for the answer rather than flashing the verification sheet
-    if (event.requireKyc && kycLevel < VERIFIED_LEVEL) return;
-    resumed.current = true;
-    void run();
-  }, [pendingOp, event, selected, hasLiveRequest, kycLoading, kycLevel, run]);
-
-  // While a resumed op is still confirming, keep asking until it settles — the create home banner's
-  // poll, ported. Only runs in the `sent` state a resume produced; a fresh claim's own wait covers
-  // the live case. Landed completes it; dead clears the record and hands the button back.
-  useEffect(() => {
-    if (pendingOp === null || phase !== 'sent') return undefined;
-    let live = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const tick = async (): Promise<void> => {
-      const step = await guardClaim(readClaimDraft(eventId), resolveSubmittedOp);
-      if (!live) return;
-      if (step === 'wait') {
-        timer = setTimeout(() => void tick(), CLAIM_POLL_MS);
-        return;
-      }
-      clearClaimDraft(eventId);
-      if (step === 'complete') {
-        if (approval) {
-          const row = await refetchRequest();
-          if (live) {
-            setPhase('idle');
-            if (row === null) { setAwaitTimedOut(false); setAwaiting(true); }
-          }
-        } else if (live) {
-          setPhase('done');
-        }
-        return;
-      }
-      if (live) setPhase('idle'); // the op died: hand the button back for a fresh claim
-    };
-    timer = setTimeout(() => void tick(), CLAIM_POLL_MS);
-    return () => {
-      live = false;
-      if (timer !== undefined) clearTimeout(timer);
-    };
-  }, [pendingOp, phase, eventId, approval, refetchRequest]);
 
   // Approval mode: a landed requestClaim whose ClaimRequest has not surfaced in the indexer yet.
   // Re-poll on a 2s -> 5s -> 10s backoff up to five minutes, pausing while the tab is hidden, until
@@ -575,25 +522,21 @@ export function ClaimFlow({ eventId, present }: ClaimFlowProps) {
         ) : null}
         {soldOut ? <Alert tone="warn">{copy.claim.soldOut}</Alert> : null}
         {cancelled ? <Alert tone="warn">{copy.discover.cancelled}</Alert> : null}
-        {phase === 'stuck' ? (
-          <>
-            <Alert tone="info">{copy.claim.confirming}</Alert>
-            <Button variant="ghost" onClick={() => navigate('/tickets')}>{copy.tabs.tickets}</Button>
-          </>
-        ) : null}
         {error ? <Alert tone="error">{error}</Alert> : null}
         {needsKyc ? (
           <KycRequiredSheet eventId={eventId} tier={tier} level={kycLevel} onClose={() => setNeedsKyc(false)} />
         ) : null}
-        {/* The determinate wait for claim/requestClaim, in place of a bare spinner (plan §2c). */}
+        {/* The determinate wait for claim/requestClaim, in place of a bare spinner (plan §2c). Past
+            the 45s cap OpProgress offers 다시 시도; re-running is idempotent by nonce, so a late relay
+            cannot be doubled by it. */}
         {busy ? (
           <OpProgress
             phase={phase === 'sent' ? 'confirming' : 'saving'}
-            note={phase === 'saving' && retrying ? copy.op.busy : undefined}
+            onRetry={phase === 'sent' ? () => void run() : undefined}
           />
         ) : null}
-        {/* Still confirming counts as busy: the op is already on its way and a second tap would
-            claim twice — `held` cannot have caught up yet to stop it. */}
+        {/* Still confirming counts as busy: the submission is already on its way and a second tap
+            would ask twice — `held` cannot have caught up yet to stop it. */}
         <Button onClick={() => void run()} disabled={phase !== 'idle' || blocked || !countsResolved}>
           {!countsResolved
             ? copy.claim.checking

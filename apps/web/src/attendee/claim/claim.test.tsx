@@ -1,20 +1,47 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { StrictMode } from 'react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { encodeErrorResult } from 'viem';
+import type { Hex } from 'viem';
 import { clearSession, setSession } from '../../shared/session';
+import type { RelayView } from '../../shared/api/firestore';
 
-// The op layer is mocked, but its real OpReverted class is kept: the screen tells a revert from
-// a "still confirming" timeout by the sentinel reason that class carries.
+// The claim submission is the relayer callable now, not a sponsored op. The authorization builder
+// (device-key signing + chain nonce read) is mocked to a fixed value, the callable and the relay
+// doc subscription are mocked, and everything else is the real screen. `ticketOp` stays mocked for
+// the one op the attendee still sends themselves — the approval-mode cancel.
+const ACCOUNT = `0x${'ab'.repeat(20)}` as Hex;
+const AUTH = { eventId: '5', tier: 0, account: ACCOUNT, nonce: '0', deadline: '1799999999' };
+const DEVICE_SIG = `0x${'cd'.repeat(64)}` as Hex;
+const buildClaimAuth = vi.fn(async () => ({ auth: AUTH, deviceSig: DEVICE_SIG }));
+vi.mock('./buildClaimAuth', () => ({ buildClaimAuth }));
+
+const relayClaim = vi.fn();
+vi.mock('../../shared/api/functions', () => ({ api: { relayClaim } }));
+
+// The relay-doc subscription: keep the callback so a test can push doc states through it.
+let relayListener: ((relay: RelayView | null) => void) | null = null;
+const watchRelay = vi.fn((_relayId: string, onChange: (relay: RelayView | null) => void) => {
+  relayListener = onChange;
+  return () => {
+    relayListener = null;
+  };
+});
+vi.mock('../../shared/api/firestore', () => ({ watchRelay }));
+async function emitRelay(relay: RelayView): Promise<void> {
+  await act(async () => {
+    relayListener?.(relay);
+  });
+}
+
 const ticketOp = vi.fn();
 vi.mock('../../shared/chain/ops', async (orig) => ({
   ...(await orig<typeof import('../../shared/chain/ops')>()),
   ticketOp,
 }));
-vi.mock('../../shared/chain/accounts', () => ({ getAttendeeAccount: async () => ({ address: `0x${'ab'.repeat(20)}` }) }));
+vi.mock('../../shared/chain/accounts', () => ({ getAttendeeAccount: async () => ({ address: ACCOUNT }) }));
 // `navigate` is only read when the screen calls `useNavigate()`, well after this module is
 // initialised, so the factory never touches it too early. `useSearchParams` stays real: the
 // resume latch is about what it does to the address.
@@ -50,9 +77,12 @@ vi.mock('../me/useKycLevel', () => ({
 }));
 
 const { Claim } = await import('./Claim');
-const { OpReverted } = await import('../../shared/chain/ops');
-const { ticketAbi } = await import('../../shared/chain/abis');
 const { MAX_WAIT_TIMEOUT_MS } = await import('../../shared/chain/sendSponsoredOp');
+
+/** A callable rejection shaped like the frozen HttpsError: the code (and nonce) live in details. */
+function callableError(code: string, extra: Record<string, unknown> = {}) {
+  return Object.assign(new Error(code), { code: 'failed-precondition', details: { code, ...extra } });
+}
 
 /** `setSearchParams` navigates for real under MemoryRouter, so the address is read back here. */
 function Address() {
@@ -76,8 +106,6 @@ function renderClaim(entry = '/claim/5') {
 }
 
 beforeEach(() => {
-  // The claim draft lives in sessionStorage; a fresh screen must not resume another test's op.
-  sessionStorage.clear();
   kycLevel.value = 1;
   kycLevel.loading = false;
   ownedTickets.rows = [];
@@ -86,6 +114,13 @@ beforeEach(() => {
   requests.rows = [];
   navigate.mockReset();
   gql.mockImplementation(answerIndexer);
+  buildClaimAuth.mockClear();
+  buildClaimAuth.mockResolvedValue({ auth: AUTH, deviceSig: DEVICE_SIG });
+  relayClaim.mockReset();
+  // The default: the relayer already saw the receipt, so the claim confirms without a wait.
+  relayClaim.mockResolvedValue({ relayId: 'r1', status: 'confirmed', tokenId: '77' });
+  watchRelay.mockClear();
+  relayListener = null;
   ticketOp.mockReset();
   ticketOp.mockResolvedValue({ success: true, txHash: '0x2', blockNumber: 1n });
 });
@@ -103,25 +138,34 @@ describe('Claim', () => {
     renderClaim();
     await userEvent.click(await screen.findByRole('button', { name: '티켓 받기' }));
     expect(await screen.findByText('이 행사는 본인인증이 필요해요')).toBeInTheDocument();
-    expect(ticketOp).not.toHaveBeenCalled();
+    expect(relayClaim).not.toHaveBeenCalled();
   });
 
-  it('sends a sponsored claim for the selected tier with the event org id', async () => {
+  it('submits a relayed claim for the selected tier in claim mode', async () => {
     renderClaim();
     await userEvent.click(await screen.findByRole('button', { name: '티켓 받기' }));
-    expect(ticketOp).toHaveBeenCalledWith(
-      expect.objectContaining({ orgId: 9n, functionName: 'claim', args: [5n, 0, '0x'], maxTimeoutMs: MAX_WAIT_TIMEOUT_MS }),
-    );
+    await waitFor(() => expect(relayClaim).toHaveBeenCalled());
+    expect(buildClaimAuth).toHaveBeenCalledWith(expect.objectContaining({ eventId: '5', tier: 0, account: ACCOUNT }));
+    expect(relayClaim).toHaveBeenCalledWith({ mode: 'claim', auth: AUTH, deviceSig: DEVICE_SIG });
   });
 
-  it('confirms a landed claim in place with a real 완료 state, not a silent redirect', async () => {
+  it('confirms a claim the callable already saw land, with a real 완료 state', async () => {
     renderClaim();
     await userEvent.click(await screen.findByRole('button', { name: '티켓 받기' }));
     expect(await screen.findByText('티켓을 받았어요 · 내 티켓에 있어요')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '내 티켓 보기' })).toHaveAttribute('href', '/tickets');
-    // The old path navigated away the moment the op returned; the new one shows success and lets
-    // the person choose when to go.
+    // The relayer answered `confirmed`, so no relay-doc wait was needed.
+    expect(watchRelay).not.toHaveBeenCalled();
     expect(navigate).not.toHaveBeenCalledWith('/tickets');
+  });
+
+  it('follows the relay doc to 완료 when the callable only accepts the claim', async () => {
+    relayClaim.mockResolvedValue({ relayId: 'r1', status: 'sent' });
+    renderClaim();
+    await userEvent.click(await screen.findByRole('button', { name: '티켓 받기' }));
+    await waitFor(() => expect(watchRelay).toHaveBeenCalledWith('r1', expect.any(Function), expect.any(Function)));
+    await emitRelay({ status: 'confirmed', tokenId: '77' });
+    expect(await screen.findByText('티켓을 받았어요 · 내 티켓에 있어요')).toBeInTheDocument();
   });
 
   it('reassures near the button that it is free and MONTI handles it', async () => {
@@ -130,30 +174,45 @@ describe('Claim', () => {
     expect(screen.getByText('무료예요 · MONTI가 대신 처리해요')).toBeInTheDocument();
   });
 
-  it('reads a timed-out op as still confirming, not as a failure', async () => {
-    ticketOp.mockRejectedValueOnce(new OpReverted('claim', 'TIMEOUT'));
+  it('shows the generic failure sentence when the relay fails with an unknown code', async () => {
+    relayClaim.mockResolvedValue({ relayId: 'r1', status: 'sent' });
     renderClaim();
     await userEvent.click(await screen.findByRole('button', { name: '티켓 받기' }));
-    expect(await screen.findByText('아직 확인 중이에요. 잠시 뒤 내 티켓에서 확인해 주세요.')).toBeInTheDocument();
-    expect(screen.queryByText('티켓을 받지 못했어요. 잠시 뒤 다시 시도해 주세요.')).not.toBeInTheDocument();
-  });
-
-  it('shows the failure sentence when the op reverts', async () => {
-    ticketOp.mockRejectedValueOnce(new OpReverted('claim', '0xdeadbeef'));
-    renderClaim();
-    await userEvent.click(await screen.findByRole('button', { name: '티켓 받기' }));
+    await waitFor(() => expect(watchRelay).toHaveBeenCalled());
+    await emitRelay({ status: 'failed', error: { code: 'INTERNAL', message: 'boom' } });
     expect(await screen.findByText('티켓을 받지 못했어요. 잠시 뒤 다시 시도해 주세요.')).toBeInTheDocument();
   });
 
-  it('keeps the button down while an op is still confirming, so a second tap cannot claim twice', async () => {
-    ticketOp.mockRejectedValueOnce(new OpReverted('claim', 'TIMEOUT'));
+  it('maps a known relay failure code to its own sentence', async () => {
+    relayClaim.mockResolvedValue({ relayId: 'r1', status: 'sent' });
+    renderClaim();
+    await userEvent.click(await screen.findByRole('button', { name: '티켓 받기' }));
+    await waitFor(() => expect(watchRelay).toHaveBeenCalled());
+    await emitRelay({ status: 'failed', error: { code: 'SOLD_OUT', message: 'gone' } });
+    expect(await screen.findByText('이 종류는 마감됐어요. 다른 종류를 골라 주세요.')).toBeInTheDocument();
+  });
+
+  it('rebuilds with the current nonce and retries once on BAD_NONCE', async () => {
+    relayClaim
+      .mockRejectedValueOnce(callableError('BAD_NONCE', { nonce: '7' }))
+      .mockResolvedValueOnce({ relayId: 'r2', status: 'confirmed', tokenId: '78' });
+    renderClaim();
+    await userEvent.click(await screen.findByRole('button', { name: '티켓 받기' }));
+    expect(await screen.findByText('티켓을 받았어요 · 내 티켓에 있어요')).toBeInTheDocument();
+    expect(relayClaim).toHaveBeenCalledTimes(2);
+    // The rebuild carried the nonce the server reported, and only one retry ever fires.
+    expect(buildClaimAuth).toHaveBeenLastCalledWith(expect.objectContaining({ nonce: 7n }));
+  });
+
+  it('keeps the button down while a claim is still confirming, so a second tap cannot claim twice', async () => {
+    relayClaim.mockResolvedValue({ relayId: 'r1', status: 'sent' });
     renderClaim();
     const cta = await screen.findByRole('button', { name: '티켓 받기' });
     await userEvent.click(cta);
-    expect(await screen.findByText('아직 확인 중이에요. 잠시 뒤 내 티켓에서 확인해 주세요.')).toBeInTheDocument();
-    expect(cta).toBeDisabled();
-    await userEvent.click(cta);
-    expect(ticketOp).toHaveBeenCalledTimes(1);
+    const busy = await screen.findByRole('button', { name: '받는 중이에요' });
+    expect(busy).toBeDisabled();
+    await userEvent.click(busy);
+    expect(relayClaim).toHaveBeenCalledTimes(1);
   });
 
   /**
@@ -179,7 +238,7 @@ describe('Claim', () => {
     renderClaim();
     expect(await screen.findByText('이 행사에서 받을 수 있는 티켓을 이미 다 받았어요.')).toBeInTheDocument();
     expect(await screen.findByRole('button', { name: '티켓 받기' })).toBeDisabled();
-    expect(ticketOp).not.toHaveBeenCalled();
+    expect(relayClaim).not.toHaveBeenCalled();
   });
 
   it('leaves a sold-out type unclaimable with the reason on the screen', async () => {
@@ -208,7 +267,7 @@ describe('Claim', () => {
     expect(await screen.findByText('이미 받았어요 · 내 티켓에서 확인하세요')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '내 티켓 보기' })).toHaveAttribute('href', '/tickets');
     expect(await screen.findByRole('button', { name: '티켓 받기' })).toBeDisabled();
-    expect(ticketOp).not.toHaveBeenCalled();
+    expect(relayClaim).not.toHaveBeenCalled();
   });
 
   it('keeps the claim button enabled while still under the per-wallet limit', async () => {
@@ -224,7 +283,7 @@ describe('Claim', () => {
   /**
    * Cold load, first paint after login: the held-ticket count has not answered yet, so `held`
    * still reads 0. The button must not let a fast tap through before the count lands — it would
-   * only send an op the chain reverts (live check e). It waits, disabled, showing 확인 중….
+   * only send a claim the chain reverts (live check e). It waits, disabled, showing 확인 중….
    */
   it('holds the claim button disabled with 확인 중 until the held-ticket count resolves', async () => {
     const owner = `0x${'cd'.repeat(20)}`;
@@ -293,49 +352,47 @@ describe('Claim · resuming after the identity check', () => {
 
   it('finishes the claim by itself, and clears the address before it starts', async () => {
     renderClaim(RESUME);
-    await waitFor(() => expect(ticketOp).toHaveBeenCalledTimes(1));
-    expect(ticketOp).toHaveBeenCalledWith(
-      expect.objectContaining({ orgId: 9n, functionName: 'claim', args: [5n, 0, '0x'], maxTimeoutMs: MAX_WAIT_TIMEOUT_MS }),
-    );
+    await waitFor(() => expect(relayClaim).toHaveBeenCalledTimes(1));
+    expect(relayClaim).toHaveBeenCalledWith({ mode: 'claim', auth: AUTH, deviceSig: DEVICE_SIG });
     // Stripped first, so a refresh in the middle of the claim cannot start a second one.
-    expect(screen.getByTestId('address')).toHaveTextContent('/claim/5');
+    await waitFor(() => expect(screen.getByTestId('address')).toHaveTextContent('/claim/5'));
     expect(screen.getByTestId('address').textContent).not.toContain('intent');
     expect(screen.getByTestId('address').textContent).not.toContain('tier');
   });
 
   it('claims once and once only, through the double effect run of StrictMode', async () => {
     render(<StrictMode>{claimTree(RESUME)}</StrictMode>);
-    await waitFor(() => expect(ticketOp).toHaveBeenCalledTimes(1));
-    expect(ticketOp).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(relayClaim).toHaveBeenCalledTimes(1));
+    expect(relayClaim).toHaveBeenCalledTimes(1);
   });
 
   it('does not claim again when the screen re-renders', async () => {
     const tree = claimTree(RESUME);
     const { rerender } = render(tree);
-    await waitFor(() => expect(ticketOp).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(relayClaim).toHaveBeenCalledTimes(1));
     rerender(tree);
     rerender(tree);
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(ticketOp).toHaveBeenCalledTimes(1);
+    expect(relayClaim).toHaveBeenCalledTimes(1);
   });
 
   it('never claims while one is still on its way', async () => {
-    // The first op never settles, so the screen stays busy: a second claim here is a second ticket.
-    ticketOp.mockImplementation(() => new Promise(() => undefined));
+    // The first submission never settles, so the screen stays busy: a second claim here is a second ticket.
+    relayClaim.mockImplementation(() => new Promise(() => undefined));
     const tree = claimTree(RESUME);
     const { rerender } = render(tree);
-    await waitFor(() => expect(ticketOp).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(relayClaim).toHaveBeenCalledTimes(1));
     expect(await screen.findByRole('button', { name: '받는 중이에요' })).toBeDisabled();
     rerender(tree);
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(ticketOp).toHaveBeenCalledTimes(1);
+    expect(relayClaim).toHaveBeenCalledTimes(1);
   });
 
   it('claims nothing without the intent, however the person arrived', async () => {
     renderClaim('/claim/5?tier=0');
     expect(await screen.findByRole('button', { name: '티켓 받기' })).toBeEnabled();
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(ticketOp).not.toHaveBeenCalled();
+    expect(relayClaim).not.toHaveBeenCalled();
   });
 
   it('claims nothing for somebody the check has not passed yet', async () => {
@@ -343,7 +400,7 @@ describe('Claim · resuming after the identity check', () => {
     renderClaim(RESUME);
     await screen.findByRole('button', { name: '티켓 받기' });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(ticketOp).not.toHaveBeenCalled();
+    expect(relayClaim).not.toHaveBeenCalled();
     // The sheet is not thrown up either: nobody tapped anything.
     expect(screen.queryByText('이 행사는 본인인증이 필요해요')).toBeNull();
   });
@@ -353,7 +410,7 @@ describe('Claim · resuming after the identity check', () => {
     renderClaim(RESUME);
     await screen.findByRole('button', { name: '티켓 받기' });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(ticketOp).not.toHaveBeenCalled();
+    expect(relayClaim).not.toHaveBeenCalled();
     // The address is untouched, so the claim still resumes once the answer lands.
     expect(screen.getByTestId('address').textContent).toContain('intent=claim');
   });
@@ -363,7 +420,7 @@ describe('Claim · resuming after the identity check', () => {
     renderClaim(RESUME);
     expect(await screen.findByText('이 행사에서 받을 수 있는 티켓을 이미 다 받았어요.')).toBeInTheDocument();
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(ticketOp).not.toHaveBeenCalled();
+    expect(relayClaim).not.toHaveBeenCalled();
   });
 
   it('claims nothing when the type sold out while the person was verifying', async () => {
@@ -371,7 +428,7 @@ describe('Claim · resuming after the identity check', () => {
     renderClaim(RESUME);
     expect(await screen.findByText('이 종류는 마감됐어요. 다른 종류를 골라 주세요.')).toBeInTheDocument();
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(ticketOp).not.toHaveBeenCalled();
+    expect(relayClaim).not.toHaveBeenCalled();
   });
 
   it('claims nothing when the event was called off while the person was verifying', async () => {
@@ -379,7 +436,7 @@ describe('Claim · resuming after the identity check', () => {
     renderClaim(RESUME);
     expect(await screen.findByText('취소된 행사예요.')).toBeInTheDocument();
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(ticketOp).not.toHaveBeenCalled();
+    expect(relayClaim).not.toHaveBeenCalled();
   });
 });
 
@@ -396,13 +453,14 @@ describe('Claim · approval mode', () => {
     event.row = { ...EVENT, requireKyc: false, approvalRequired: true };
   });
 
-  it('asks with requestClaim instead of claiming, and stays to show the request', async () => {
+  it('asks with request mode instead of claiming, and stays to show the request', async () => {
+    // The request lands (confirmed) but the indexer row has not surfaced yet: 접수 · 확인 중.
     renderClaim();
     await userEvent.click(await screen.findByRole('button', { name: '신청하기' }));
-    await waitFor(() => expect(ticketOp).toHaveBeenCalled());
-    expect(ticketOp).toHaveBeenCalledWith(
-      expect.objectContaining({ orgId: 9n, functionName: 'requestClaim', args: [5n, 0], maxTimeoutMs: MAX_WAIT_TIMEOUT_MS }),
-    );
+    await waitFor(() => expect(relayClaim).toHaveBeenCalled());
+    expect(relayClaim).toHaveBeenCalledWith({ mode: 'request', auth: AUTH, deviceSig: DEVICE_SIG });
+    // The request landed but its row has not surfaced yet: a reassuring 접수 · 확인 중, not nothing.
+    expect(await screen.findByText('신청을 접수했어요 · 확인 중')).toBeInTheDocument();
     // A request is not a claim: approval decides the ticket later, so it never leaves for /tickets.
     expect(navigate).not.toHaveBeenCalledWith('/tickets');
   });
@@ -413,9 +471,11 @@ describe('Claim · approval mode', () => {
     expect(await screen.findByText('신청 완료 · 승인을 기다리고 있어요')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: '신청 취소' }));
     await waitFor(() => expect(ticketOp).toHaveBeenCalled());
+    // The cancel is the attendee's own sponsored op, unchanged by the relay switch.
     expect(ticketOp).toHaveBeenCalledWith(
       expect.objectContaining({ functionName: 'cancelRequest', args: [5n, 3n], maxTimeoutMs: MAX_WAIT_TIMEOUT_MS }),
     );
+    expect(relayClaim).not.toHaveBeenCalled();
   });
 
   it('sends the approved attendee to their issued ticket', async () => {
@@ -433,10 +493,8 @@ describe('Claim · approval mode', () => {
     expect(screen.getByRole('button', { name: '신청하기' })).toBeInTheDocument();
   });
 
-  it('names the approval-only revert rather than the generic sentence', async () => {
-    ticketOp.mockRejectedValueOnce(
-      new OpReverted('requestClaim', encodeErrorResult({ abi: ticketAbi, errorName: 'ApprovalRequired' })),
-    );
+  it('names the approval-only refusal rather than the generic sentence', async () => {
+    relayClaim.mockRejectedValue(callableError('APPROVAL_REQUIRED'));
     renderClaim();
     await userEvent.click(await screen.findByRole('button', { name: '신청하기' }));
     expect(await screen.findByText('이 행사는 주최자 승인 후 받을 수 있어요.')).toBeInTheDocument();
@@ -448,6 +506,6 @@ describe('Claim · approval mode', () => {
     renderClaim();
     await userEvent.click(await screen.findByRole('button', { name: '신청하기' }));
     expect(await screen.findByText('이 행사는 본인인증이 필요해요')).toBeInTheDocument();
-    expect(ticketOp).not.toHaveBeenCalled();
+    expect(relayClaim).not.toHaveBeenCalled();
   });
 });

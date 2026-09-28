@@ -2,17 +2,28 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Hex } from 'viem';
 import { clearSession, setSession } from '../../shared/session';
 
 // Approval mode's ClaimRequest row can lag the transaction by minutes in the indexer, so the screen
 // re-polls until it appears and then until it flips. These tests drive that with fake timers; the
-// op layer and the indexer transport are mocked, everything else is the real screen.
+// relayer callable and the indexer transport are mocked, everything else is the real screen. The
+// relayer answers `confirmed`, which is what starts the appearance wait.
+const ACCOUNT = `0x${'ab'.repeat(20)}` as Hex;
+const AUTH = { eventId: '5', tier: 0, account: ACCOUNT, nonce: '0', deadline: '1799999999' };
+const DEVICE_SIG = `0x${'cd'.repeat(64)}` as Hex;
+vi.mock('./buildClaimAuth', () => ({ buildClaimAuth: vi.fn(async () => ({ auth: AUTH, deviceSig: DEVICE_SIG })) }));
+
+const relayClaim = vi.fn();
+vi.mock('../../shared/api/functions', () => ({ api: { relayClaim } }));
+vi.mock('../../shared/api/firestore', () => ({ watchRelay: vi.fn(() => () => undefined) }));
+
 const ticketOp = vi.fn();
 vi.mock('../../shared/chain/ops', async (orig) => ({
   ...(await orig<typeof import('../../shared/chain/ops')>()),
   ticketOp,
 }));
-vi.mock('../../shared/chain/accounts', () => ({ getAttendeeAccount: async () => ({ address: `0x${'ab'.repeat(20)}` }) }));
+vi.mock('../../shared/chain/accounts', () => ({ getAttendeeAccount: async () => ({ address: ACCOUNT }) }));
 const navigate = vi.fn();
 vi.mock('react-router-dom', async (orig) => ({
   ...(await orig<typeof import('react-router-dom')>()), useParams: () => ({ eventId: '5' }), useNavigate: () => navigate,
@@ -77,10 +88,12 @@ async function advanceUntil(text: string, capMs: number): Promise<void> {
 
 beforeEach(() => {
   vi.useFakeTimers();
-  sessionStorage.clear();
   requests.rows = [];
   navigate.mockReset();
   gql.mockImplementation(answerIndexer);
+  relayClaim.mockReset();
+  // The relayer already saw the receipt; the request's own row is what the poll then waits for.
+  relayClaim.mockResolvedValue({ relayId: 'r1', status: 'confirmed' });
   ticketOp.mockReset();
   ticketOp.mockResolvedValue({ success: true, txHash: '0x2', blockNumber: 1n });
   setSession({ status: 'signedIn', account: ME });
@@ -94,15 +107,15 @@ afterEach(() => {
 });
 
 describe('Claim · approval mode re-polls the indexer', () => {
-  it('shows 확인 중 after a request lands, then pending, then approved — one op only', async () => {
+  it('shows 확인 중 after a request lands, then pending, then approved — one submission only', async () => {
     renderClaim();
     await flush();
 
     fireEvent.click(screen.getByRole('button', { name: '신청하기' }));
     await flush();
-    // The op landed but the row has not surfaced yet: a reassuring "받았어요 · 확인 중", not nothing.
+    // The request landed but the row has not surfaced yet: a reassuring "받았어요 · 확인 중", not nothing.
     expect(screen.getByText('신청을 접수했어요 · 확인 중')).toBeInTheDocument();
-    expect(ticketOp).toHaveBeenCalledTimes(1);
+    expect(relayClaim).toHaveBeenCalledTimes(1);
 
     // The row appears on the first backoff poll.
     requests.rows = [REQUEST];
@@ -116,7 +129,7 @@ describe('Claim · approval mode re-polls the indexer', () => {
     await advanceUntil('승인됐어요. 티켓을 받았어요', 30_000);
     expect(myRequestCalls()).toBeGreaterThan(pendingPollBefore); // the pending poll fired
     expect(screen.getByText('승인됐어요. 티켓을 받았어요')).toBeInTheDocument();
-    expect(ticketOp).toHaveBeenCalledTimes(1);
+    expect(relayClaim).toHaveBeenCalledTimes(1);
   });
 
   it('pauses polling while the tab is hidden and resumes when it comes back', async () => {
