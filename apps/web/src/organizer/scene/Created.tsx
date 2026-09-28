@@ -199,7 +199,10 @@ export function Created() {
           <>
             {/* Before it is public the link and the QR are deliberately absent: an address nobody
                 can open yet is a false promise, and `claim` refuses anything but Published. */}
-            <Alert tone="info">{copy.notYetPublic}</Alert>
+            {/* 공개 전 상태는 입력창처럼 보이던 info 박스가 아니라 상태 칩으로 읽힌다(visual R1-9). */}
+            <p>
+              <span className="badge">{copy.notYetPublic}</span>
+            </p>
             {publishing === 'saving' || publishing === 'confirming' ? (
               <OpProgress phase={publishing === 'confirming' ? 'confirming' : 'saving'} />
             ) : (

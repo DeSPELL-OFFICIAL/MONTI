@@ -96,7 +96,7 @@ describe('the done screen — before it is public', () => {
     open();
     expect(screen.queryByText(LINK)).toBeNull();
     expect(screen.queryByAltText(copy.qr)).toBeNull();
-    expect(screen.getByText(copy.notYetPublic)).toBeInTheDocument();
+    expect(screen.getByText(copy.notYetPublic)).toHaveClass('badge');
     expect(screen.getByRole('button', { name: copy.publishNow })).toBeInTheDocument();
   });
 
