@@ -156,7 +156,7 @@ interface HeldChallenge {
   wait: () => Promise<string>;
 }
 
-function useRegisterChallenge(): HeldChallenge {
+export function useRegisterChallenge(): HeldChallenge {
   const held = useRef<{ at: number; challenge: string } | null>(null);
   const flight = useRef<Promise<string> | null>(null);
 

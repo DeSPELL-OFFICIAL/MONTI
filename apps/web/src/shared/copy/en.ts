@@ -63,6 +63,20 @@ export const en: typeof ko = {
     namePlaceholder: 'e.g. Taewan Kim',
     doneCta: 'Get started',
   },
+  // See the Korean block: the lost-lock recovery screen (Recover.tsx). Plain "lock / phone /
+  // ticket" words only, and {{date}} is filled by fmt.
+  recover: {
+    title: 'Set up again on this phone',
+    body: "This phone doesn't have your lock — we'll set up a new one",
+    cta: 'Set up again',
+    working: 'Setting up your new lock…',
+    undoNote: 'Your old phone can undo this within 24 hours',
+    ticketsNote: 'Your tickets move to this phone after 24 hours',
+    cooldown: 'You changed your setup recently, so you cannot set up again yet. Please try again after {{date}}.',
+    rateLimit: 'You have tried to set up again too many times today. Please try again tomorrow.',
+    deviceUnavailable: 'This phone cannot set up again. Please try again on another phone.',
+    failed: 'Could not set up again. Please try again in a moment.',
+  },
   login: {
     title: 'Welcome back', body: 'Your face or fingerprint gets you in.', cta: 'Sign in',
     failed: 'Could not sign in. Please try again.', working: 'Checking',
