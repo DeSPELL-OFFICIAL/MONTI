@@ -36,8 +36,7 @@ contract PaymasterTest is MontiTest {
         orgId = _org();
         eventId = _freeEvent(orgId, 2, 1, true);
         _member(ALICE, 0xA11CE);
-        vm.prank(ALICE);
-        tokenId = ticket.claim(eventId, 0, "");
+        tokenId = _claimForFixture(ALICE, eventId, 0);
 
         vm.deal(address(this), 100 ether);
         vm.deal(ORG_OWNER, 100 ether);
@@ -63,7 +62,10 @@ contract PaymasterTest is MontiTest {
     }
 
     function _claimCall() internal view returns (bytes memory) {
-        return _execute(address(ticket), abi.encodeCall(Ticket.claim, (eventId, 0, "")));
+        return _execute(
+            address(ticket),
+            abi.encodeWithSelector(bytes4(keccak256("claim(uint256,uint8,bytes)")), eventId, uint8(0), bytes(""))
+        );
     }
 
     function _selfSponsor() internal {
@@ -163,7 +165,8 @@ contract PaymasterTest is MontiTest {
 
     function test_refusesForeignTarget() public {
         paymaster.depositPlatform{value: 1 ether}();
-        bytes memory inner = abi.encodeCall(Ticket.claim, (eventId, 0, ""));
+        bytes memory inner =
+            abi.encodeWithSelector(bytes4(keccak256("claim(uint256,uint8,bytes)")), eventId, uint8(0), bytes(""));
         vm.expectRevert(MontiPaymaster.TargetNotAllowed.selector);
         ep.callValidate(address(paymaster), _op(_execute(address(0xDEAD), inner), 0), bytes32(0), 0.01 ether);
     }
@@ -178,7 +181,11 @@ contract PaymasterTest is MontiTest {
     function test_executeBatchChecksEveryCall() public {
         paymaster.depositPlatform{value: 1 ether}();
         Call[] memory good = new Call[](2);
-        good[0] = Call(address(ticket), 0, abi.encodeCall(Ticket.claim, (eventId, 0, "")));
+        good[0] = Call(
+            address(ticket),
+            0,
+            abi.encodeWithSelector(bytes4(keccak256("claim(uint256,uint8,bytes)")), eventId, uint8(0), bytes(""))
+        );
         good[1] = Call(address(identity), 0, abi.encodeWithSignature("lockDevice(address)", ALICE));
         bytes memory ok = abi.encodeWithSignature("executeBatch((address,uint256,bytes)[])", good);
         ep.callValidate(address(paymaster), _op(ok, 0), bytes32(0), 0.01 ether);
@@ -206,14 +213,20 @@ contract PaymasterTest is MontiTest {
     ///      quietly falling out of the allowlist. `revoke` used to be pinned false; I4 sponsors it,
     ///      because spec 5.5 has the organizer void a ticket and that must not demand MON of them.
     function test_theDoorAndTheOrganizersOwnActionsAreAllSponsored() public view {
-        assertTrue(paymaster.allowedSelector(Ticket.checkIn.selector), "checkIn");
+        assertTrue(
+            paymaster.allowedSelector(bytes4(keccak256("checkIn(uint256,(uint256,uint256,uint64,bytes32),bytes)"))),
+            "checkIn"
+        );
         assertTrue(paymaster.allowedSelector(Ticket.requestOverride.selector), "requestOverride");
         assertTrue(paymaster.allowedSelector(Ticket.manualOverride.selector), "manualOverride");
         assertTrue(paymaster.allowedSelector(Ticket.migrate.selector), "migrate");
         assertTrue(paymaster.allowedSelector(Ticket.revoke.selector), "revoke is sponsored (I4)");
 
         // All four name a tokenId in the first word, which is how the paying project is found.
-        assertEq(uint8(paymaster.argKindOf(Ticket.checkIn.selector)), uint8(MontiPaymaster.ArgKind.TokenId));
+        assertEq(
+            uint8(paymaster.argKindOf(bytes4(keccak256("checkIn(uint256,(uint256,uint256,uint64,bytes32),bytes)")))),
+            uint8(MontiPaymaster.ArgKind.TokenId)
+        );
         assertEq(uint8(paymaster.argKindOf(Ticket.requestOverride.selector)), uint8(MontiPaymaster.ArgKind.TokenId));
         assertEq(uint8(paymaster.argKindOf(Ticket.manualOverride.selector)), uint8(MontiPaymaster.ArgKind.TokenId));
         assertEq(uint8(paymaster.argKindOf(Ticket.migrate.selector)), uint8(MontiPaymaster.ArgKind.TokenId));
@@ -322,7 +335,8 @@ contract PaymasterTest is MontiTest {
         vm.expectRevert(MontiPaymaster.UnknownSponsorTarget.selector);
         ep.callValidate(address(paymaster), _op(_execute(address(ticket), noToken), 0), bytes32(0), 0.01 ether);
 
-        bytes memory noEvent = abi.encodeCall(Ticket.claim, (999, 0, ""));
+        bytes memory noEvent =
+            abi.encodeWithSelector(bytes4(keccak256("claim(uint256,uint8,bytes)")), uint256(999), uint8(0), bytes(""));
         vm.expectRevert(MontiPaymaster.UnknownSponsorTarget.selector);
         ep.callValidate(address(paymaster), _op(_execute(address(ticket), noEvent), 0), bytes32(0), 0.01 ether);
 
@@ -340,7 +354,11 @@ contract PaymasterTest is MontiTest {
         paymaster.setSelfSponsored(other, true);
 
         Call[] memory calls = new Call[](2);
-        calls[0] = Call(address(ticket), 0, abi.encodeCall(Ticket.claim, (eventId, 0, "")));
+        calls[0] = Call(
+            address(ticket),
+            0,
+            abi.encodeWithSelector(bytes4(keccak256("claim(uint256,uint8,bytes)")), eventId, uint8(0), bytes(""))
+        );
         calls[1] = Call(
             address(organizers), 0, abi.encodeWithSignature("setAdmin(uint256,address,uint32)", other, BOB, uint32(1))
         );
@@ -357,7 +375,11 @@ contract PaymasterTest is MontiTest {
         _selfSponsor();
 
         Call[] memory calls = new Call[](2);
-        calls[0] = Call(address(ticket), 0, abi.encodeCall(Ticket.claim, (eventId, 0, "")));
+        calls[0] = Call(
+            address(ticket),
+            0,
+            abi.encodeWithSelector(bytes4(keccak256("claim(uint256,uint8,bytes)")), eventId, uint8(0), bytes(""))
+        );
         calls[1] = Call(address(identity), 0, abi.encodeWithSignature("lockDevice(address)", ALICE));
         bytes memory batch = abi.encodeWithSignature("executeBatch((address,uint256,bytes)[])", calls);
 
@@ -431,7 +453,18 @@ contract PaymasterTest is MontiTest {
             Ticket.GateCode({gateId: 1, eventId: eventId, issuedAt: T0, nonce: bytes32(0)});
         ep.callValidate(
             address(paymaster),
-            _op(_execute(address(ticket), abi.encodeCall(Ticket.checkInLate, (tokenId, lateCode, ""))), 0),
+            _op(
+                _execute(
+                    address(ticket),
+                    abi.encodeWithSelector(
+                        bytes4(keccak256("checkInLate(uint256,(uint256,uint256,uint64,bytes32),bytes)")),
+                        tokenId,
+                        lateCode,
+                        bytes("")
+                    )
+                ),
+                0
+            ),
             bytes32(0),
             0.01 ether
         );
@@ -463,7 +496,15 @@ contract PaymasterTest is MontiTest {
 
         Ticket.GateCode memory g =
             Ticket.GateCode({gateId: organizers.gateOf(GATE_A), eventId: eventId, issuedAt: T0, nonce: bytes32(0)});
-        UserOperation memory op = _op(_execute(address(ticket), abi.encodeCall(Ticket.checkIn, (tokenId, g, ""))), 0);
+        UserOperation memory op = _op(
+            _execute(
+                address(ticket),
+                abi.encodeWithSelector(
+                    bytes4(keccak256("checkIn(uint256,(uint256,uint256,uint64,bytes32),bytes)")), tokenId, g, bytes("")
+                )
+            ),
+            0
+        );
         op.sender = GATE_A;
 
         (bytes memory context,) = ep.callValidate(address(paymaster), op, bytes32(0), 0.01 ether);
@@ -473,7 +514,8 @@ contract PaymasterTest is MontiTest {
 
     function test_valueBearingCallIsRefused() public {
         paymaster.depositPlatform{value: 1 ether}();
-        bytes memory inner = abi.encodeCall(Ticket.claim, (eventId, 0, ""));
+        bytes memory inner =
+            abi.encodeWithSelector(bytes4(keccak256("claim(uint256,uint8,bytes)")), eventId, uint8(0), bytes(""));
         bytes memory withValue =
             abi.encodeWithSignature("execute(address,uint256,bytes)", address(ticket), uint256(1), inner);
         vm.expectRevert(MontiPaymaster.ValueNotAllowed.selector);

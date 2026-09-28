@@ -104,7 +104,10 @@ contract DeployTicket is Script {
     ///         dynamic array follows (approve/rejectClaims) the paymaster reads only the head word. The
     ///         constructor already seeded the 2026-09-23 list, so this adds only the four new rows.
     function installApprovalSelectors(MontiPaymaster paymaster_) public {
-        paymaster_.setAllowed(Ticket.requestClaim.selector, MontiPaymaster.ArgKind.EventId, 0);
+        // NOTE(A4): 릴레이 전환(설계 §2-4)으로 발급·입장이 릴레이 EOA 트랜잭션이 되면서 4337 스폰서
+        // 대상이 바뀌지만, 페이마스터 스폰서 allowlist 재설계는 별도 배치다. 여기서는 심볼만 문자열
+        // selector 로 두어 컴파일·기존 테스트를 보존한다(구 requestClaim(uint256,uint8)).
+        paymaster_.setAllowed(bytes4(keccak256("requestClaim(uint256,uint8)")), MontiPaymaster.ArgKind.EventId, 0);
         paymaster_.setAllowed(Ticket.approveClaims.selector, MontiPaymaster.ArgKind.EventId, 0);
         paymaster_.setAllowed(Ticket.rejectClaims.selector, MontiPaymaster.ArgKind.EventId, 0);
         paymaster_.setAllowed(Ticket.cancelRequest.selector, MontiPaymaster.ArgKind.EventId, 0);

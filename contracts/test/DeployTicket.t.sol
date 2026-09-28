@@ -97,7 +97,7 @@ contract DeployTicketTest is Test {
         _deploy();
         MontiPaymaster paymaster = script.paymaster();
 
-        _assertEventIdWord0(paymaster, Ticket.requestClaim.selector, 0x85563044, "requestClaim");
+        _assertEventIdWord0(paymaster, bytes4(keccak256("requestClaim(uint256,uint8)")), 0x85563044, "requestClaim");
         _assertEventIdWord0(paymaster, Ticket.approveClaims.selector, 0x0b177ad6, "approveClaims");
         _assertEventIdWord0(paymaster, Ticket.rejectClaims.selector, 0x2c261b04, "rejectClaims");
         _assertEventIdWord0(paymaster, Ticket.cancelRequest.selector, 0xd586d2e4, "cancelRequest");
@@ -115,7 +115,9 @@ contract DeployTicketTest is Test {
             "createEvent Platform"
         );
         assertEq(
-            uint8(paymaster.argKindOf(Ticket.claim.selector)), uint8(MontiPaymaster.ArgKind.EventId), "claim EventId"
+            uint8(paymaster.argKindOf(bytes4(keccak256("claim(uint256,uint8,bytes)")))),
+            uint8(MontiPaymaster.ArgKind.EventId),
+            "claim EventId"
         );
         assertEq(uint8(paymaster.argKindOf(CHECK_IN)), uint8(MontiPaymaster.ArgKind.TokenId), "checkIn TokenId");
         assertEq(

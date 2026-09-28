@@ -90,6 +90,7 @@ import { Verify } from './attendee/signup/Verify';
 import { VerifyIdentity } from './attendee/me/VerifyIdentity';
 import { KycCallback } from './attendee/me/KycCallback';
 import { Register } from './attendee/signup/Register';
+import { Recover } from './attendee/signup/Recover';
 import { Done } from './attendee/signup/Done';
 import { Claim } from './attendee/claim/Claim';
 import { TicketList } from './attendee/tickets/List';
@@ -119,6 +120,9 @@ export const routes: RouteObject[] = [
       { path: '/signup/passkey', element: <ToRegister /> },
       { path: '/signup/device', element: <ToRegister /> },
       { path: '/signup/done', element: <Done /> },
+      // Public on purpose: recovery runs on a fresh phone that has only a phone session, not a
+      // passkey session, so it must sit outside RequireSession next to the other signup screens.
+      { path: '/recover', element: <Recover /> },
       // Where the link in an invite text lands. Public on purpose: the person it was sent to
       // is usually not signed in yet, and this screen is what starts their signup.
       { path: '/i/:inviteId', element: <InviteLanding /> },

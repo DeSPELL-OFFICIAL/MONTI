@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { keccak256, toBytes } from 'viem';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { loadEventArt } from '../../../test/mocks/eventArt';
 
 // The indexer is not deployed yet, so both sides of the data path are mocked: the GraphQL
 // transport and the gateway read. Every assertion below is about what the screen does with
@@ -31,6 +32,15 @@ const getEventPrivate = vi.fn<(args: { eventId: string }) => Promise<{ venue?: s
 vi.mock('../../shared/api/functions', async (orig) => ({
   ...(await orig<typeof import('../../shared/api/functions')>()),
   api: { getSignupStatus, getEventPrivate },
+}));
+
+// The detail screen draws a ticket-art hero, which reads `eventArt/{eventId}` through `loadEventArt`
+// — real Firestore in jsdom. One shared mock (test/mocks/eventArt.ts) stands in for every
+// EventDetail test: it answers "no stored art" by default, so the hero falls back the way most
+// events do, and a test that wants a picture arms it with `mockResolvedValueOnce`.
+vi.mock('../../shared/api/firestore', async (orig) => ({
+  ...(await orig<typeof import('../../shared/api/firestore')>()),
+  loadEventArt,
 }));
 
 const { setSession } = await import('../../shared/session');
@@ -832,5 +842,43 @@ describe('EventDetail · the sticky primary (visual R1-5)', () => {
     const link = await screen.findByRole('link', { name: '티켓 받기' });
     expect(link).toHaveAttribute('href', '/claim/1');
     expect(link.closest('.sticky-bar')).not.toBeNull();
+  });
+});
+
+/**
+ * visual R1-7 — the detail screen leads with the event's face instead of text on white. The hero
+ * is the ticket art an organiser chose (`eventArt/{eventId}`) first, the pinned poster next, and a
+ * plain brand-colour block last. `loadEventArt` is the shared mock (test/mocks/eventArt.ts), so
+ * only the test that wants a picture arms it.
+ */
+describe('EventDetail · the ticket art hero (visual R1-7)', () => {
+  it('leads with the ticket art when the event has some, the title laid over it', async () => {
+    gql.mockResolvedValue({ Event: [EVENT_ONE], Tier: TIERS });
+    loadEventArt.mockResolvedValueOnce([{ preset: 'b' }]);
+    const { container } = renderDetail();
+    await screen.findByRole('heading', { name: '재즈 나이트' });
+    const art = await screen.findByRole('img', { name: /재즈 나이트/ });
+    expect(container.querySelector('.event-hero-art')).toContainElement(art);
+    // The ticket art stands in for the poster, so no <img> hero is drawn beside it.
+    expect(container.querySelector('img.event-hero')).toBeNull();
+  });
+
+  it('falls back to a brand-colour placeholder when there is neither art nor poster', async () => {
+    gql.mockResolvedValue({ Event: [EVENT_ONE], Tier: TIERS });
+    // META_A carries no image and the shared mock answers no stored art.
+    const { container } = renderDetail();
+    await screen.findByRole('heading', { name: '재즈 나이트' });
+    expect(container.querySelector('.event-hero--placeholder')).not.toBeNull();
+    expect(container.querySelector('img.event-hero')).toBeNull();
+  });
+
+  it('shows the pinned poster when there is one but no ticket art', async () => {
+    gql.mockResolvedValue({ Event: [EVENT_ONE], Tier: TIERS });
+    fetchEventMetadata.mockResolvedValue({ ...META_A, image: 'https://cdn.example/poster.jpg' });
+    const { container } = renderDetail();
+    await screen.findByRole('heading', { name: '재즈 나이트' });
+    const poster = container.querySelector('img.event-hero') as HTMLImageElement | null;
+    expect(poster?.getAttribute('src')).toBe('https://cdn.example/poster.jpg');
+    expect(container.querySelector('.event-hero--placeholder')).toBeNull();
   });
 });

@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Alert, Button, Card, KycBadge, Screen, Spinner, StickyBar } from '../../shared/ui';
+import { Alert, Button, Card, KycBadge, Screen, Spinner, StickyBar, TicketArt } from '../../shared/ui';
+import type { TicketArtSource } from '../../shared/ui';
 import { AnimatePresence } from '../../shared/motion';
 import { ClaimFlow } from '../claim/ClaimFlow';
 import { fmt, useCopy, useLocale } from '../../shared/i18n';
@@ -11,6 +12,7 @@ import { describeFailure } from '../../shared/errors';
 import { EVENT_QUERY, type EnvioEvent, type EnvioTier } from '../../shared/envio/queries';
 import { fetchEventMetadata, type EventMetadata } from '../../shared/envio/ipfs';
 import { api } from '../../shared/api/functions';
+import { loadEventArt } from '../../shared/api/firestore';
 import { useSession } from '../../shared/session';
 import { useKycLevel } from '../me/useKycLevel';
 import { useMyTickets } from '../tickets/useTickets';
@@ -64,6 +66,31 @@ function usePrivateDetails(eventId: string, wanted: boolean) {
   });
 }
 
+/**
+ * The event's face at the top of the screen, sized for a 390px phone (visual R1-7). First choice is
+ * the ticket picture an organiser chose for the first tier (`eventArt/{eventId}`), drawn as the same
+ * premium ticket a holder carries with the event name laid over it; with none, the pinned poster;
+ * with neither, a plain brand-colour block so the screen is never text on white. The ticket art
+ * animates and, like every animation, freezes under reduced motion through the global killswitch in
+ * theme.css — nothing here has to ask.
+ */
+function EventHero({ art, poster, title, tierName }: {
+  art: TicketArtSource | undefined;
+  poster: string;
+  title: string;
+  tierName: string;
+}) {
+  if (art) {
+    return (
+      <div className="event-hero-art">
+        <TicketArt art={art} title={title} tierName={tierName} animated />
+      </div>
+    );
+  }
+  if (poster !== '') return <img className="event-hero" src={poster} alt="" />;
+  return <div className="event-hero event-hero--placeholder" aria-hidden="true" />;
+}
+
 export function EventDetail() {
   const copy = useCopy();
   const locale = useLocale();
@@ -95,6 +122,16 @@ export function EventDetail() {
     },
   });
 
+  // The ticket picture an organiser chose for this event, for the hero (visual R1-7). Keyed by the
+  // event so it shares the answer with the ticket screens' `useEventArt` — opening a ticket from
+  // here reads nothing again. A missing document or a failed read is just "no art", and the hero
+  // falls back to the poster, so the failure is swallowed here the way that screen swallows it.
+  const { data: eventArt } = useQuery({
+    queryKey: ['eventArt', eventId],
+    queryFn: () => loadEventArt(eventId).catch(() => [] as TicketArtSource[]),
+    enabled: eventId !== '',
+  });
+
   const metadata: EventMetadata | null = data?.metadata ?? null;
   const hidden = metadata !== null && (metadata.venueHidden || metadata.timeHidden);
   const priv = usePrivateDetails(eventId, hidden);
@@ -118,6 +155,8 @@ export function EventDetail() {
   }
 
   const { event, tiers } = data;
+  // The first tier's picture is the event's face; most events have none and fall through below.
+  const heroArt = eventArt?.[0];
   const canShare = canOpenShareSheet();
   // 로그인했고 이 행사 티켓이 목록에 있으면 보유자다 — eventId 는 Event.id 와 같은 텍스트 키다.
   const held = signedIn ? (myTickets ?? []).find((ticket) => ticket.eventId === event.id) : undefined;
@@ -131,7 +170,12 @@ export function EventDetail() {
 
   return (
     <Screen title={metadata?.title || copy.discover.untitled}>
-      {metadata?.image ? <img className="event-hero" src={metadata.image} alt="" /> : null}
+      <EventHero
+        art={heroArt}
+        poster={metadata?.image ?? ''}
+        title={metadata?.title || copy.discover.untitled}
+        tierName={tiers[0]?.name ?? ''}
+      />
       <Card>
         <KycBadge required={event.requireKyc} level={kycLevel} signedIn={signedIn} />
         {metadata && metadata.tags.length > 0 ? (
