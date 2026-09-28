@@ -595,7 +595,7 @@ describe('EventDetail · 받기 시트 (B1)', () => {
     renderDetail();
     await userEvent.click(await screen.findByRole('button', { name: '티켓 받기' }));
     const sheet = await screen.findByRole('dialog', { name: '티켓 받기' });
-    expect(within(sheet).getByText('무료예요 · 돈 안 들어요')).toBeInTheDocument();
+    expect(within(sheet).getByText('무료예요')).toBeInTheDocument();
   });
 
   it('keeps the /claim route as the entry for a visitor who is not signed in yet', async () => {
