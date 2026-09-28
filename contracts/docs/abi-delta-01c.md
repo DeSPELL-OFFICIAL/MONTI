@@ -180,3 +180,54 @@ limit; EIP-170 not enforced here).
 (`getDepositInfo` = `(1e18, true, 1e18, 86400, 0)` — unlock not started). Recovery:
 `withdrawPlatform(to, 1e18)` for the deposit now (deployer-only), and `unlockStake()` → wait 24 h →
 `withdrawStake(to)` for the stake. Both are deployer-only and safe to run any time.
+
+## 11. Deployed 2026-09-28 — full redeploy (chain 10143)
+
+전체 재배포다. 01c 부분 재배포(§10)는 Ticket·Paymaster 만 새로 올리고 Identity·Organizers 를
+유지했지만, kept Organizers 의 `setTicket` 은 한 번만 호출 가능하고 이미 옛 Ticket 에 묶여 있어
+**새 행사가 자기 게이트를 등록할 수 없다**. 실제 스태프 게이트가 나중에 앱의 pendingGates 흐름으로
+등록되려면 fresh Organizers 가 필요하므로 네 계약을 모두 새로 배포했다. **ABI 는 그대로다**(01c 가 이미
+소비자에 반영됨) — 주소 4개만 바뀐다.
+
+새 주소:
+
+| | Address |
+|---|---|
+| `identity` (**new**) | `0xa2914cA1F78DbBb872f5093587AC3c51c219fc80` |
+| `organizers` (**new**) | `0x5D8Ed32AE39Fa8b1d0F9870485FC259c64FFDc11` |
+| `ticket` (**new**) | `0x6046e51B3127a4f8F71d83A83b2d265d25A3CfE5` |
+| `paymaster` (**new**) | `0xe8dD86534453Ff512ECF6252D7a4DFAB265a9EF3` |
+| gate account (seed, **placeholder**, reused) | `0xDe2F7cf570Fe27308CC8256F033376aF2683b8dA` |
+| `attester`/`entryPoint`/`coinbaseFactory` (reused) | `0x6af898aA…C4Ed` / `0x5FF137D4…2789` / `0xBA5ED110…5842` |
+
+`block` = **66320553** (Deploy 가 기록한 시뮬레이션 시점 값, 인덱서 `start_block` 의 하한).
+`deployments/10143.json` 의 `previous[]` 에 09-26 세트(identity/organizers/ticket/paymaster,
+block 65856800)와 09-23 세트(ticket/paymaster, block 64921775)를 순서대로 보존했다.
+
+**예치금.** `Deploy.s.sol` 이 stake 1 MON + deposit 1 MON(EntryPoint) 을 넣은 뒤, deployer 가
+`EntryPoint.depositTo(paymaster)` 로 **4 MON 을 추가 예치**했다(페르소나 harness 예산). 플랫폼 슬롯은
+내부 카운터가 아니라 `budgetOf(PLATFORM) = entryPoint.balanceOf(paymaster)` 를 직접 읽으므로 depositTo
+가 그대로 플랫폼 예산이 된다. 확인: `budgetOf(0) = 5e18`, `EntryPoint.balanceOf(pm) = 5e18`.
+
+**허용 목록.** 생성자가 29개(§10 / abi-delta-01b §10)를 심고, 배포 후 deployer 가 `setAllowed` 로
+01c 4개를 추가해 **33개**. 4개는 `argKindOf/argWordOf = EventId(2) / word 0` 로 확인:
+`requestClaim 0x85563044`, `approveClaims 0x0b177ad6`, `rejectClaims 0x2c261b04`,
+`cancelRequest 0xd586d2e4`. 브리핑이 확인 요청한 셀렉터(createEvent·updateEventMeta·claim·checkIn·
+checkInLate·transfer/offer·cancelRotation·createOrganizer·setAdmin·승인 4개) 전부 `allowedSelector = true`,
+attester 전용(`register 0x2ddda87f`·`rotateAccount 0xda8c1ce8`)은 의도대로 `false`.
+
+**시드(실제 스태프 폰 없음 → 플레이스홀더 게이트).** fresh Organizers 라 `SEED_REUSE_ORG` 는 끈 채:
+`createOrganizer`(org 1, owner=deployer) → `createEvent`/`publishEvent`(event 1, "MONTI Demo Night",
+approvalRequired=false) → `registerGate`+`openGate`(gate 1, 2026-09-23 플레이스홀더 KX/KY) → 데모 멤버
+3명 `register`(attester)+`claim` → 토큰 1/2/3. `isOpenGate(1, gate) = true`. `seed-10143.json` 은 id 가
+그대로여서(org/event/gate = 1/1/1, tokens 1/2/3, 결정적 멤버 키) 이전 파일과 바이트 동일. 실제 스태프
+게이트는 나중에 앱 pendingGates 로 event 1 에 `registerGate`+`openGate` 하면 된다(재시드 불필요).
+
+**비용.** deployer `0x509ed82E…BCf3` **11.893 → 4.038 MON**(−7.855, 이 중 stake 1 MON 은 `unlockStake`
+→24h→`withdrawStake` 로 회수 가능, deposit 5 MON 은 gas 예산으로 소진). attester `0x6af898aA…C4Ed`
+**3.551 → 3.463 MON**(−0.088, 데모 멤버 3명 `register` 가스). 가스가 203 gwei 로 09-26(102 gwei)보다
+높아 절대 비용이 커졌다.
+
+**옛 페이마스터 자금(이월).** `0xf73220B0…858dE4`(01c) 와 `0xBDDBDaA9…0928B2`(01b) 는 여전히 각
+1 MON deposit + 1 MON stake 를 들고 있다. `withdrawPlatform` 은 즉시, `unlockStake`→24h→`withdrawStake`
+로 회수 가능(모두 deployer 전용).
