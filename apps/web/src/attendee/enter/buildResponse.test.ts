@@ -341,3 +341,22 @@ describe('tapFailure — the QR is a fallback, never the default', () => {
     expect(tapFailure(new GateRefused('wrongEvent'), true)).toEqual({ phase: 'failed', error: 'wrongEvent' });
   });
 });
+
+/**
+ * D2 regression guard (relayed-actions plan). Task D1 moves the ticket *claim* onto the MONTI
+ * relayer, and task E moves the gate's *submission* onto it, but the attendee's check-in signature
+ * does not change — the same seven-word v2 device digest, signed raw, the same r‖s on the wire.
+ * This pins that: the claim work signs a *different* digest (`claimAuthDigest`, domain-separated by
+ * its CLAIM_AUTH_TAG), and it must never quietly shift the check-in one.
+ */
+describe('D2 · the check-in device digest is unchanged by the relay switch', () => {
+  it('still hashes the seven-word v2 digest, byte for byte', () => {
+    expect(deviceSigDigest({ tokenId: TOKEN_ID, gateCode: GATE_CODE })).toBe(V2_DIGEST);
+  });
+
+  it('still signs it raw and puts r‖s (0x + 128 hex) on the wire', async () => {
+    const wire = await buildGateResponse(TOKEN_ID, GATE_CODE);
+    expect(signWithDeviceKey).toHaveBeenCalledWith(V2_DIGEST, { alias: ATTENDEE_KEY_ALIAS });
+    expect(wire.deviceSig).toHaveLength(2 + 128);
+  });
+});
