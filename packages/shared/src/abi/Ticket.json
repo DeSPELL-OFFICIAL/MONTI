@@ -249,7 +249,7 @@
   },
   {
     "type": "function",
-    "name": "checkIn",
+    "name": "checkInFor",
     "inputs": [
       {
         "name": "tokenId",
@@ -282,6 +282,11 @@
             "internalType": "bytes32"
           }
         ]
+      },
+      {
+        "name": "gateSig",
+        "type": "bytes",
+        "internalType": "bytes"
       },
       {
         "name": "deviceSig",
@@ -294,7 +299,7 @@
   },
   {
     "type": "function",
-    "name": "checkInLate",
+    "name": "checkInForLate",
     "inputs": [
       {
         "name": "tokenId",
@@ -327,6 +332,11 @@
             "internalType": "bytes32"
           }
         ]
+      },
+      {
+        "name": "gateSig",
+        "type": "bytes",
+        "internalType": "bytes"
       },
       {
         "name": "deviceSig",
@@ -385,20 +395,88 @@
   },
   {
     "type": "function",
-    "name": "claim",
+    "name": "claimAuthDigest",
     "inputs": [
       {
-        "name": "eventId",
-        "type": "uint256",
-        "internalType": "uint256"
+        "name": "a",
+        "type": "tuple",
+        "internalType": "struct Ticket.ClaimAuth",
+        "components": [
+          {
+            "name": "eventId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "tier",
+            "type": "uint8",
+            "internalType": "uint8"
+          },
+          {
+            "name": "account",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "nonce",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "deadline",
+            "type": "uint64",
+            "internalType": "uint64"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "claimFor",
+    "inputs": [
+      {
+        "name": "a",
+        "type": "tuple",
+        "internalType": "struct Ticket.ClaimAuth",
+        "components": [
+          {
+            "name": "eventId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "tier",
+            "type": "uint8",
+            "internalType": "uint8"
+          },
+          {
+            "name": "account",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "nonce",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "deadline",
+            "type": "uint64",
+            "internalType": "uint64"
+          }
+        ]
       },
       {
-        "name": "tier",
-        "type": "uint8",
-        "internalType": "uint8"
-      },
-      {
-        "name": "voucher",
+        "name": "deviceSig",
         "type": "bytes",
         "internalType": "bytes"
       }
@@ -411,6 +489,30 @@
       }
     ],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "claimNonce",
+    "inputs": [
+      {
+        "name": "eventId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -814,7 +916,7 @@
         "internalType": "uint256"
       }
     ],
-    "stateMutability": "view"
+    "stateMutability": "pure"
   },
   {
     "type": "function",
@@ -1127,17 +1229,44 @@
   },
   {
     "type": "function",
-    "name": "requestClaim",
+    "name": "requestClaimFor",
     "inputs": [
       {
-        "name": "eventId",
-        "type": "uint256",
-        "internalType": "uint256"
+        "name": "a",
+        "type": "tuple",
+        "internalType": "struct Ticket.ClaimAuth",
+        "components": [
+          {
+            "name": "eventId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "tier",
+            "type": "uint8",
+            "internalType": "uint8"
+          },
+          {
+            "name": "account",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "nonce",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "deadline",
+            "type": "uint64",
+            "internalType": "uint64"
+          }
+        ]
       },
       {
-        "name": "tier",
-        "type": "uint8",
-        "internalType": "uint8"
+        "name": "deviceSig",
+        "type": "bytes",
+        "internalType": "bytes"
       }
     ],
     "outputs": [
@@ -1308,7 +1437,7 @@
         "internalType": "uint8"
       }
     ],
-    "stateMutability": "view"
+    "stateMutability": "pure"
   },
   {
     "type": "function",
@@ -1558,6 +1687,25 @@
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "usedAt",
+    "inputs": [
+      {
+        "name": "tokenId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint32",
+        "internalType": "uint32"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "event",
@@ -2069,12 +2217,27 @@
   },
   {
     "type": "error",
+    "name": "AuthExpired",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "BadAttesterSig",
     "inputs": []
   },
   {
     "type": "error",
     "name": "BadDeviceSignature",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "BadGateSignature",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "BadNonce",
     "inputs": []
   },
   {
@@ -2234,6 +2397,11 @@
   },
   {
     "type": "error",
+    "name": "EventIdOverflow",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "EventNotPublished",
     "inputs": []
   },
@@ -2325,6 +2493,11 @@
   {
     "type": "error",
     "name": "SaleClosed",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "SerialOverflow",
     "inputs": []
   },
   {

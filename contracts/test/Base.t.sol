@@ -175,7 +175,10 @@ abstract contract MontiTest is Test {
     }
 
     /// @dev 승인제 신청을 실제로 쏜다(permissionless). 성공 경로 픽스처용. requestId 를 돌려준다.
-    function _requestClaimForFixture(address account, uint256 eventId, uint8 tier) internal returns (uint256 requestId) {
+    function _requestClaimForFixture(address account, uint256 eventId, uint8 tier)
+        internal
+        returns (uint256 requestId)
+    {
         (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(account, eventId, tier);
         requestId = ticket.requestClaimFor(a, sig);
     }

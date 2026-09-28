@@ -66,16 +66,19 @@ contract TicketClaimForTest is MontiTest {
     /// @dev 직접 claim/requestClaim 심볼은 사라졌다. 옛 selector 로의 호출은 매칭되는 함수가 없어
     ///      실패한다(fallback 없음).
     function test_directClaimAndRequestClaimSymbolsAreGone() public {
-        (bool ok1,) = address(ticket).call(abi.encodeWithSelector(bytes4(keccak256("claim(uint256,uint8,bytes)")), eventId, uint8(0), bytes("")));
+        (bool ok1,) = address(ticket)
+            .call(abi.encodeWithSelector(bytes4(keccak256("claim(uint256,uint8,bytes)")), eventId, uint8(0), bytes("")));
         assertFalse(ok1, "direct claim(uint256,uint8,bytes) no longer exists");
-        (bool ok2,) = address(ticket).call(abi.encodeWithSelector(bytes4(keccak256("requestClaim(uint256,uint8)")), eventId, uint8(0)));
+        (bool ok2,) = address(ticket)
+            .call(abi.encodeWithSelector(bytes4(keccak256("requestClaim(uint256,uint8)")), eventId, uint8(0)));
         assertFalse(ok2, "direct requestClaim(uint256,uint8) no longer exists");
     }
 
     // --- signature / auth failures -------------------------------------------------------------
 
     function test_badNonceRejected() public {
-        (Ticket.ClaimAuth memory a, bytes memory sig) = _auth(ALICE, eventId, 0, 7, uint64(block.timestamp + 10 minutes));
+        (Ticket.ClaimAuth memory a, bytes memory sig) =
+            _auth(ALICE, eventId, 0, 7, uint64(block.timestamp + 10 minutes));
         vm.expectRevert(Ticket.BadNonce.selector);
         ticket.claimFor(a, sig);
     }
