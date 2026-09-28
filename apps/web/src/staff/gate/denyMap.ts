@@ -20,7 +20,7 @@ import { toFunctionSelector, type Hex } from 'viem';
 
 import { ticketAbi } from '@monti/shared';
 
-import { CHECK_IN_ERRORS, type CheckInError, type DenyCode } from '../types';
+import { CHECK_IN_ERRORS, isGateDenyCode, type CheckInError, type DenyCode } from '../types';
 
 /** The short line the screen shows. One per DENY code, and every one of them reachable. */
 export const DENY_LABELS: Record<DenyCode, string> = {
@@ -106,19 +106,30 @@ export interface DenyVerdict {
   detail: string;
 }
 
+/**
+ * Each contract error name to the screen it becomes — the shared core both maps below are built
+ * from, so a selector lookup and a name lookup can never come to disagree. A name with no screen is
+ * a red test (`denyMap.test.ts` holds the two sets equal); at runtime it degrades to `UNKNOWN_REVERT`
+ * with the reason named, so the field report says which error to write a screen for.
+ */
+export const DENY_BY_NAME: Record<string, DenyVerdict> = Object.fromEntries(
+  CHECK_IN_ERRORS.map((name): [string, DenyVerdict] => {
+    const code = CHECK_IN_DENY[name];
+    if (!code) {
+      return [name, { code: 'UNKNOWN_REVERT', detail: `${DENY_LABELS.UNKNOWN_REVERT} (${name})` }];
+    }
+    return [name, { code, detail: DENY_DETAILS[name] ?? DENY_LABELS[code] }];
+  }),
+);
+
 const TABLE: Record<string, DenyVerdict> = Object.fromEntries(
   CHECK_IN_ERRORS.flatMap((name) => {
     const selector = SELECTOR_BY_NAME.get(name);
+    const verdict = DENY_BY_NAME[name];
     // Cannot happen — the names come from the same ABI these selectors do — but the list is
     // derived now, so this is a skipped row rather than a crash at a door.
-    if (!selector) return [];
-    const code = CHECK_IN_DENY[name];
-    // A name with no screen is a red test. At runtime it is still read as far as it can be: the
-    // reason is named in the detail so the field report says which error to write a screen for.
-    if (!code) {
-      return [[selector, { code: 'UNKNOWN_REVERT', detail: `${DENY_LABELS.UNKNOWN_REVERT} (${name})` }] as const];
-    }
-    return [[selector, { code, detail: DENY_DETAILS[name] ?? DENY_LABELS[code] }] as const];
+    if (!selector || !verdict) return [];
+    return [[selector, verdict] as const];
   }),
 );
 
@@ -149,4 +160,44 @@ export function mapRevertToDenyCode(
   // No reason bytes at all: the op never produced a revert — it was dropped, timed out, or
   // failed at the EntryPoint before the call ran. Different from an unreadable reason.
   return { code: 'TX_FAILED', detail: message ?? '원인 미상' };
+}
+
+/** The two fields a `CallableError` carries that decide a check-in refusal: the server's own
+ *  `details.code`, and its short `message`. Read structurally so a plain object stands in for the
+ *  error in a test, and so a rejection from somewhere else falls through to `TX_FAILED`. */
+function callableReason(error: unknown): { code?: string; message?: string } {
+  if (typeof error !== 'object' || error === null) return {};
+  const { message, details } = error as { message?: unknown; details?: unknown };
+  const detailCode = typeof details === 'object' && details !== null ? (details as { code?: unknown }).code : undefined;
+  return {
+    code: typeof detailCode === 'string' && detailCode.length > 0 ? detailCode : undefined,
+    message: typeof message === 'string' && message.length > 0 && message !== 'UNKNOWN' ? message : undefined,
+  };
+}
+
+/**
+ * The relayer's refusal, turned into a screen — the callable counterpart to
+ * {@link mapRevertToDenyCode}. There are no reason bytes here: the relayer ran the `eth_call`
+ * simulation and mapped the contract's revert to a `details.code` before it ever charged gas, so
+ * this side reads a name rather than a selector.
+ *
+ * `details.code` is a DENY code (`GATE_CLOSED`, `EXPIRED_CODE`, …) — the same vocabulary the claim
+ * path uses for its own — so it is used as it stands. A contract error **name** (`GateNotOpen`) is
+ * accepted too, mapped through {@link DENY_BY_NAME}, so this survives whichever spelling the backend
+ * settles on. Anything else is a refusal with no screen (`UNKNOWN_REVERT`), and a rejection that was
+ * not a callable failure at all — a dropped connection — is `TX_FAILED`. **Never an admit**, like
+ * every path out of this file.
+ *
+ * `AlreadyCheckedIn` is deliberately absent: the backend answers `confirmed` for it, so it reaches
+ * the gate as success, never here. A cross-gate duplicate is refused earlier, by the pending table.
+ */
+export function mapCallableDeny(error: unknown): DenyVerdict {
+  const { code, message } = callableReason(error);
+  if (code) {
+    if (isGateDenyCode(code)) return { code, detail: DENY_LABELS[code] };
+    const byName = DENY_BY_NAME[code];
+    if (byName) return byName;
+    return { code: 'UNKNOWN_REVERT', detail: `${DENY_LABELS.UNKNOWN_REVERT} (${code})` };
+  }
+  return { code: 'TX_FAILED', detail: message ?? DENY_LABELS.TX_FAILED };
 }
