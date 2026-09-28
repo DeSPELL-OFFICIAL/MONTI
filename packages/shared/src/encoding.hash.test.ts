@@ -28,9 +28,9 @@ const ISSUED_AT = 1_789_862_400n; // 2026-09-20T00:00:00Z
 /** abi-delta-01b §7 의 가상 배포. 컨트랙트 쪽 고정 벡터와 같은 fixture 를 쓴다. */
 const FIXTURE_CHAIN_ID = 31337;
 const FIXTURE_TICKET = '0x7111111111111111111111111111111111111111' as Hex;
-/** 2026-09-23 Monad 테스트넷(10143)에 실제로 올라간 Ticket. */
+/** 2026-09-29 Monad 테스트넷(10143)에 실제로 올라간 Ticket. */
 const LIVE_CHAIN_ID = 10143;
-const LIVE_TICKET = '0x4B8353C9F3503Cdbd011E8f35da0a955D95b1367' as Hex;
+const LIVE_TICKET = '0x86550c0408A9Bb6da1766b0ed4e57b3ec914A671' as Hex;
 const RECIPIENT = '0x0000000000000000000000000000000000000001' as Hex;
 
 describe('gateCodeHash', () => {
@@ -142,9 +142,9 @@ describe('deviceDigestV2', () => {
  * - 위 `V2_INPUT` 은 컨트랙트 테스트가 쓰는 가상의 배포본(chain 31337, Ticket 0x7111…1111)이라
  *   Solidity 쪽 고정 벡터(`P256Vectors.SHARED_DIGEST`)와 1:1 로 맞춰 볼 수 있다. 존재하지
  *   않는 주소이므로 체인에 물어볼 수는 없다.
- * - 아래 `LIVE_INPUT` 은 2026-09-23 에 실제로 올라간 Ticket 이 `deviceDigest(...)` 뷰로
- *   되돌려준 값이다(abi-delta-01b §10). 다섯 개의 caller 입력은 위와 똑같고, 앞의 두 워드
- *   —`chainid` 와 `address(this)`— 만 다르다.
+ * - 아래 `LIVE_INPUT` 은 2026-09-29 에 올라간 Ticket 이 `deviceDigest(...)` 뷰로
+ *   되돌려주는 값이다(deviceDigest.parity.test.ts 가 라이브 컨트랙트로 대조). 다섯 개의 caller
+ *   입력은 위와 똑같고, 앞의 두 워드 —`chainid` 와 `address(this)`— 만 다르다.
  *
  * 그 두 워드가 바로 클라이언트가 고를 수 없는 입력이고, 로컬 재구현이 틀리는 곳도 정확히
  * 거기다. 한쪽만 남기면 "도메인 워드가 정말 다이제스트를 바꾸는가"와 "그 바꾸는 방식이
@@ -153,7 +153,7 @@ describe('deviceDigestV2', () => {
 describe('deviceDigestV2 against the deployed Ticket', () => {
   const LIVE_INPUT = {
     chainId: 10143n,
-    ticket: '0x4B8353C9F3503Cdbd011E8f35da0a955D95b1367' as Hex,
+    ticket: '0x86550c0408A9Bb6da1766b0ed4e57b3ec914A671' as Hex,
     tokenId: 7n,
     gateId: 3n,
     eventId: 11n,
@@ -163,7 +163,7 @@ describe('deviceDigestV2 against the deployed Ticket', () => {
 
   it('reproduces what the live deviceDigest(...) view returned on 10143', () => {
     expect(deviceDigestV2(LIVE_INPUT)).toBe(
-      '0xec0c84e899cdacfab3dc560fc6ad89a3db7800cd07154b5ad3f24d0d4f46f8e9',
+      '0xe9d423f26873e3562d5665f22f9c8ecaca290b6aeeb4d63e2dd787f1dc0775cc',
     );
   });
 

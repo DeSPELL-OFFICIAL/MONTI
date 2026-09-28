@@ -77,6 +77,16 @@ export const NON_GATE_ERRORS = [
   'ApprovalNotRequired',
   'ApprovalRequired',
   'RequestNotPending',
+  // The 2026-09-29 relayed-claim reverts. `_verifyClaimAuth` checks the ClaimAuth deadline
+  // (`AuthExpired`) and `nonce == claimNonce` (`BadNonce`) inside `claimFor`/`requestClaimFor` —
+  // the attendee path (abi-delta-relayed.md §6). A door tap carries no ClaimAuth, so neither can
+  // reach a gate; `claimFor`'s BadNonce is D1's claim flow, not a check-in screen.
+  'AuthExpired',
+  'BadNonce',
+  // Slim-storage tokenId packing guards (abi-delta-relayed.md §8): raised only while `claimFor`
+  // mints and encodes a tokenId, never by a check-in that reads one back.
+  'EventIdOverflow',
+  'SerialOverflow',
   'BadAttesterSig',
   'ECDSAInvalidSignature',
   'ECDSAInvalidSignatureLength',

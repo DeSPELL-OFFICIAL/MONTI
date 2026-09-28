@@ -46,12 +46,13 @@ export const DENY_LABELS: Record<DenyCode, string> = {
  * equal in both directions: a name the contracts add with no screen here is a red test, and a
  * name here the contracts no longer declare is a screen nobody can reach.
  *
- * The last three are not about the attendee at all. `EventNotPublished` is an event still in
+ * The last four are not about the attendee at all. `EventNotPublished` is an event still in
  * draft, `NotMember` a terminal the organizer has not put on their team, `Unauthorized` a call
- * this account is not allowed to make — three configuration mistakes, none of them a bad
- * ticket. They map to `TX_FAILED` and earn their own sentence below, because showing a red
- * refusal to a ticket-holder whose only problem is somebody else's setup sends a paying
- * customer away while the fix is one action on another phone.
+ * this account is not allowed to make, and `BadGateSignature` a terminal whose gate key does not
+ * match the one registered on chain — four configuration mistakes, none of them a bad ticket.
+ * They map to `TX_FAILED` and earn their own sentence below, because showing a red refusal to a
+ * ticket-holder whose only problem is somebody else's setup sends a paying customer away while
+ * the fix is one action on another phone.
  */
 export const CHECK_IN_DENY: Record<CheckInError, DenyCode> = {
   AlreadyCheckedIn: 'ALREADY_USED',
@@ -68,6 +69,10 @@ export const CHECK_IN_DENY: Record<CheckInError, DenyCode> = {
   EventNotPublished: 'TX_FAILED',
   NotMember: 'TX_FAILED',
   Unauthorized: 'TX_FAILED',
+  // The relayed check-in now verifies the gate's own P-256 signature over the code on chain
+  // (abi-delta-relayed.md §7); a key that does not match the registered `(kx, ky)` reverts
+  // `BadGateSignature`. Like the other three it is a terminal-setup mistake, not the ticket.
+  BadGateSignature: 'TX_FAILED',
 };
 
 /**
@@ -82,6 +87,7 @@ const DENY_DETAILS: Partial<Record<CheckInError, string>> = {
   DeviceLocked: '관객 기기 키가 잠겨 있습니다. 관객에게 앱 재설정을 안내하세요.',
   NotMember: '이 단말기가 주최 팀에 등록돼 있지 않습니다. 관객 잘못이 아니니 주최자에게 문의하세요.',
   Unauthorized: '이 단말기에게 그 권한이 없습니다. 관객 잘못이 아니니 주최자에게 문의하세요.',
+  BadGateSignature: '이 단말기의 게이트 서명 키가 등록된 키와 다릅니다. 관객 잘못이 아니니 주최자에게 문의하세요.',
 };
 
 /** `name` → 4-byte selector, computed from the generated ABI's own parameter types. */
