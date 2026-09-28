@@ -341,9 +341,10 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
   padding: 0 var(--s-3);
   border-radius: var(--r-md);
   border: 1px solid var(--glass-hairline);
-  background: var(--glass-bg-strong);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
+  /* Fields are solid, not glass: a translucent field inside a glass .scene-section stacked two
+     blur layers and washed the input out. The section stays glass; the field reads as a real
+     input on top of it (visual R1-12). */
+  background: var(--glass-solid);
   color: var(--ink);
   font: inherit; font-size: var(--t-input);
   transition: border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
