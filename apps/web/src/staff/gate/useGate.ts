@@ -73,9 +73,9 @@ import {
 } from '../snapshot/store';
 import type { GateContext, OverrideOutcome, OverrideReason, PreflightResult } from '../types';
 import { overrideNotice } from '../components/overrideText';
-import { sendCheckIn } from './checkInOp';
+import { relayCheckIn } from './checkInOp';
 import { matchIssuedCode } from './decodeResponse';
-import { DENY_LABELS, mapRevertToDenyCode } from './denyMap';
+import { DENY_LABELS, mapCallableDeny, mapRevertToDenyCode } from './denyMap';
 import { startGateEmitter, type GateEmitter, type GateTap } from './emitter';
 import {
   createGateMachine,
@@ -84,17 +84,20 @@ import {
   type TapId,
   type TapRefusal,
 } from './machine';
-import { preflight } from './preflight';
-import { watchCheckedIn, watchManualOverride } from './verdict';
+import { admissionsDuplicate, preflight } from './preflight';
+import { watchRelay } from './relayStatus';
+import { watchManualOverride } from './verdict';
 
 export interface UseGateParams {
   gateId: bigint;
   eventId: bigint;
   orgId: bigint;
   /**
-   * The gate's smart account address. It goes to both callables so the server can check that
-   * this terminal really is a registered gate of this event — it grants nothing by itself; the
-   * authenticated party is the staff member's own Firebase session.
+   * The gate's account address. It goes to the snapshot and photo callables so the server can check
+   * that this terminal really is a registered gate of this event before it decrypts a face — it
+   * grants nothing by itself; the authenticated party is the staff member's own Firebase session.
+   * The relayed check-in does not take it: the gate's authority there is the P-256 signature on the
+   * code, verified on chain against `Organizers.gateInfo`.
    */
   gateAccount: Address;
   /**
@@ -193,8 +196,10 @@ export function useGate(params: UseGateParams): UseGateResult {
     gateId,
     eventId,
     orgId,
-    watch: watchCheckedIn,
-    // A filed `requestOverride` writes no check-in, so the tap watch above can never answer it.
+    // No `watch`: the check-in no longer confirms from an on-chain `CheckedIn` log this phone
+    // reads. `onSent` only moves the screen to `confirming`; the verdict comes from `relayCheckIn`'s
+    // own answer and, on `sent`, the `relays/{relayId}` document (design §7). The override watch
+    // stays — `requestOverride` writes no check-in, so nothing else can answer a filed request.
     watchOverride: watchManualOverride,
   });
   const machine = machineRef.current;
@@ -222,6 +227,12 @@ export function useGate(params: UseGateParams): UseGateResult {
   /** The QR fallback's way in, and `retry`'s way to the watcher, across renders. */
   const handlerRef = useRef<(response: GateResponseWire) => Promise<void>>(async () => {});
   const clearTapPendingRef = useRef<() => void>(() => {});
+  /**
+   * The open `relays/{relayId}` subscription for the tap on screen, or a no-op. One at a time, the
+   * same as the machine's chain watch used to be: it is replaced when the next tap opens its own,
+   * stopped on `retry`, and torn down on unmount, so a settled answer can never land on a later tap.
+   */
+  const relayStopRef = useRef<() => void>(() => {});
 
   /**
    * Both halves of the permission. `gateOpen === undefined` is "not told", not "told no", so the
@@ -371,32 +382,63 @@ export function useGate(params: UseGateParams): UseGateResult {
           return;
         }
 
-        const handle = await sendCheckIn({ code, response, orgId });
+        // The ~1 s cross-gate window (design §6): another online gate already admitting this ticket
+        // is a duplicate the chain would refuse a second later, refused here now. A read that fails
+        // is not a duplicate — the relayer's simulation is the authority, and this only saves the
+        // round trip.
+        const duplicate = await admissionsDuplicate({ eventId: eventId.toString(), tokenId: response.tokenId });
         if (!alive) return;
-        // Opens the chain watch for this tap and starts the two §7.3 clocks. Nothing green.
-        machine.onSent({ ...tap, userOpHash: handle.userOpHash });
-        watcher.setTapPending(true);
-
-        const receipt = await handle.wait(CHECK_IN_WAIT_MS);
-        if (!alive) return;
-        if (receipt.revertReason === 'TIMEOUT') {
-          // Not a failure. The operation is still out there and the watch is still open, so a
-          // `CheckedIn` at thirty seconds still admits; the screen only stops promising speed.
-          machine.onTimeout(tap.nonce);
+        if (duplicate) {
+          machine.onVerdict(localDeny(tap, duplicate.deny));
           return;
         }
-        if (!receipt.success) {
-          const mapped = mapRevertToDenyCode(receipt.revertReason);
+
+        // Into the relayer. The screen goes `confirming` and the two §7.3 clocks start; no chain
+        // watch is opened (the machine has none), because the verdict is the callable's own answer
+        // and, on `sent`, the `relays/{relayId}` document — not a log this phone reads.
+        machine.onSent(tap);
+        watcher.setTapPending(true);
+
+        let relay;
+        try {
+          relay = await relayCheckIn({ code, response });
+        } catch (error) {
+          // A simulated revert is a DENY the relayer named (`details.code`); a dropped connection is
+          // `TX_FAILED`. Either way it is decided here, before the screen ever turned green.
+          if (!alive) return;
+          const mapped = mapCallableDeny(error);
           machine.onVerdict({ kind: 'deny', nonce: tap.nonce, code: mapped.code, detail: mapped.detail });
           return;
         }
-        // Landed. The verdict is the `CheckedIn` log, not this receipt: only the log carries the
-        // nonce that says which tap was admitted, and a screen that turned green here would turn
-        // green for whoever happens to be standing in front of the phone.
+        if (!alive) return;
+
+        if (relay.status === 'confirmed') {
+          // Mined already, or an idempotent `AlreadyCheckedIn` the backend answers as success: a
+          // settled PASS, no document to wait on.
+          machine.onVerdict({ kind: 'admit', nonce: tap.nonce, finalized: true });
+          return;
+        }
+
+        // `sent`: PASS now ("기록 중"), settled from the relayer's document. `confirmed` hardens the
+        // card; a `failed` after PASS is dropped by the machine — a person who has walked in on a
+        // simulation-checked broadcast is not un-admitted — which is the post-hoc behaviour a late
+        // revert always had.
+        machine.onVerdict({ kind: 'admit', nonce: tap.nonce, finalized: false });
+        relayStopRef.current();
+        relayStopRef.current = watchRelay(relay.relayId, (status) => {
+          if (!alive) return;
+          if (status === 'confirmed') {
+            machine.onVerdict({ kind: 'admit', nonce: tap.nonce, finalized: true });
+          } else {
+            machine.onVerdict({ kind: 'deny', nonce: tap.nonce, code: 'TX_FAILED', detail: DENY_LABELS.TX_FAILED });
+          }
+          relayStopRef.current();
+          relayStopRef.current = () => {};
+        });
       } catch (error) {
         warn('gate', 'check-in failed', error);
         if (!alive) return;
-        const mapped = mapRevertToDenyCode(undefined, (error as Error).message);
+        const mapped = mapCallableDeny(error);
         machine.onVerdict({ kind: 'deny', nonce: tap.nonce, code: mapped.code, detail: mapped.detail });
       } finally {
         if (alive) watcher.setTapPending(false);
@@ -458,6 +500,8 @@ export function useGate(params: UseGateParams): UseGateResult {
       watcher.stop();
       void emitter?.stop();
       stopRefresh();
+      relayStopRef.current();
+      relayStopRef.current = () => {};
       machine.stop();
       unsubscribe();
     };
@@ -732,6 +776,8 @@ export function useGate(params: UseGateParams): UseGateResult {
     setDeviceChangedRecently(false);
     setCanApprove(false);
     clearTapPendingRef.current();
+    relayStopRef.current();
+    relayStopRef.current = () => {};
     machine.reset();
   }, [machine]);
 

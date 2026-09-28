@@ -289,3 +289,19 @@ export const STRUCT_SHAPES = {
   Organizers: { gateInfo: GATE_INFO_FIELDS, managerOf: MANAGER_FIELDS },
   Identity: { activeDevice: ACTIVE_DEVICE_FIELDS },
 } as const;
+
+/**
+ * `Ticket.claimNonce(eventId, account) -> uint256`: the (event, account) claim nonce a relayed
+ * `ClaimAuth` must carry (design §12). The 2026-09-29 redeploy exports this view, so it reads
+ * through the generated `ticketAbi` like every other Ticket read. It stays a standalone helper
+ * rather than a `readTicket` entry because it takes an `(eventId, account)` argument pair no other
+ * read here does.
+ */
+export function readClaimNonce(eventId: bigint, account: Hex): Promise<bigint> {
+  return getPublicClient().readContract({
+    address: getConfig().addresses.ticket,
+    abi: ABI_BY_CONTRACT.Ticket,
+    functionName: 'claimNonce',
+    args: [eventId, account],
+  }) as Promise<bigint>;
+}

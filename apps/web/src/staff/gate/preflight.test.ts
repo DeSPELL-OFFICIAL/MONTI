@@ -1,8 +1,21 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { GateCodeWire, GateResponseWire, SnapshotTicket, SnapshotWire } from '@monti/shared';
 
-import { isUnknownToSnapshot, preflight, recognisedTicket, stubSnapshotStore } from './preflight';
+// The pending-table read reaches Firestore. Only that reach is replaced; the rest of preflight is
+// the shipped pure code.
+const getDoc = vi.fn();
+vi.mock('firebase/firestore', () => ({ doc: (...args: unknown[]) => args, getDoc }));
+vi.mock('../../shared/api/firebase', () => ({ getDb: () => ({}) }));
+
+const {
+  ADMISSION_DUPLICATE_WINDOW_MS,
+  admissionsDuplicate,
+  isUnknownToSnapshot,
+  preflight,
+  recognisedTicket,
+  stubSnapshotStore,
+} = await import('./preflight');
 
 const ticket: SnapshotTicket = {
   tokenId: '123',
@@ -134,5 +147,41 @@ describe('what preflight refuses to do', () => {
       expect(result.ok).toBe(false);
       expect(result.deny).toBeDefined();
     }
+  });
+});
+
+/**
+ * The ~1 s cross-gate window (design §6): the pending table read that refuses a ticket another
+ * online gate is already admitting, before this gate spends the round trip.
+ */
+describe('the pending-admission read across gates', () => {
+  const NOW = 1_700_000_000_000;
+  const withDoc = (data: Record<string, unknown> | undefined) =>
+    getDoc.mockResolvedValueOnce({ data: () => data });
+
+  beforeEach(() => getDoc.mockReset());
+
+  it('refuses a ticket a confirmed mark already carries', async () => {
+    withDoc({ status: 'confirmed', gateId: '9' });
+    expect(await admissionsDuplicate({ eventId: '42', tokenId: '123', now: NOW })).toEqual({ deny: 'ALREADY_USED' });
+  });
+
+  it('refuses a passing mark that is still inside the window', async () => {
+    withDoc({ status: 'passing', gateId: '9', passedAt: { toMillis: () => NOW - 2_000 } });
+    expect(await admissionsDuplicate({ eventId: '42', tokenId: '123', now: NOW })).toEqual({ deny: 'ALREADY_USED' });
+  });
+
+  it('lets a stale passing mark through — that check-in never landed', async () => {
+    withDoc({ status: 'passing', gateId: '9', passedAt: { toMillis: () => NOW - ADMISSION_DUPLICATE_WINDOW_MS - 1 } });
+    expect(await admissionsDuplicate({ eventId: '42', tokenId: '123', now: NOW })).toBeUndefined();
+  });
+
+  it('is not a duplicate for a failed mark, a missing document, or an unreadable one', async () => {
+    withDoc({ status: 'failed' });
+    expect(await admissionsDuplicate({ eventId: '42', tokenId: '123', now: NOW })).toBeUndefined();
+    withDoc(undefined);
+    expect(await admissionsDuplicate({ eventId: '42', tokenId: '123', now: NOW })).toBeUndefined();
+    getDoc.mockRejectedValueOnce(new Error('offline'));
+    expect(await admissionsDuplicate({ eventId: '42', tokenId: '123', now: NOW })).toBeUndefined();
   });
 });

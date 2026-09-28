@@ -37,15 +37,15 @@ function sentCall(index = 0) {
 describe('ticketOp', () => {
   it('encodes the call against the ticket address and returns the receipt', async () => {
     landed();
-    await expect(ticketOp({ account, orgId: 9n, functionName: 'claim', args: [5n, 0, '0x'] }))
+    await expect(ticketOp({ account, orgId: 9n, functionName: 'cancelRequest', args: [5n, 3n] }))
       .resolves.toMatchObject({ success: true, blockNumber: 7n });
     const sent = sentCall();
     expect(sent.orgId).toBe(9n);
     expect(sent.to).toBe(`0x${'33'.repeat(20)}`);
     // The real selector, written out here rather than read back from the same ABI.
-    expect(sent.data.slice(0, 10)).toBe(toFunctionSelector('claim(uint256,uint8,bytes)'));
+    expect(sent.data.slice(0, 10)).toBe(toFunctionSelector('cancelRequest(uint256,uint256)'));
     expect(decodeFunctionData({ abi: ticketAbi, data: sent.data }))
-      .toMatchObject({ functionName: 'claim', args: [5n, 0, '0x'] });
+      .toMatchObject({ functionName: 'cancelRequest', args: [5n, 3n] });
   });
 
   it('picks the three-argument safeTransferFrom overload, not the one that takes data', async () => {
@@ -66,7 +66,7 @@ describe('ticketOp', () => {
     sendSponsoredOp.mockResolvedValueOnce({
       userOpHash: '0x1', wait: async () => ({ success: false, txHash: '0x2', blockNumber: 7n, revertReason: '0xdead' }),
     });
-    await expect(ticketOp({ account, orgId: 9n, functionName: 'claim', args: [5n, 0, '0x'] }))
+    await expect(ticketOp({ account, orgId: 9n, functionName: 'cancelRequest', args: [5n, 3n] }))
       .rejects.toBeInstanceOf(OpReverted);
   });
 });
@@ -93,7 +93,7 @@ describe('a revert the bundler caught while estimating', () => {
     const invalidSchedule = toFunctionSelector('InvalidSchedule()');
     expect(invalidSchedule).toBe('0xdba16ce8');
     sendSponsoredOp.mockRejectedValueOnce(estimateReverted(invalidSchedule));
-    const thrown: unknown = await ticketOp({ account, orgId: 9n, functionName: 'claim', args: [5n, 0, '0x'] })
+    const thrown: unknown = await ticketOp({ account, orgId: 9n, functionName: 'cancelRequest', args: [5n, 3n] })
       .catch((cause: unknown) => cause);
     expect(thrown).toBeInstanceOf(OpReverted);
     expect((thrown as InstanceType<typeof OpReverted>).revertReason).toBe(invalidSchedule);
@@ -105,14 +105,14 @@ describe('a revert the bundler caught while estimating', () => {
   it('leaves a paymaster refusal alone — that is sponsorship, not a rule anybody broke', async () => {
     const refusal = estimateReverted(toFunctionSelector('SelectorNotAllowed()'), 'AA33 reverted');
     sendSponsoredOp.mockRejectedValueOnce(refusal);
-    await expect(ticketOp({ account, orgId: 9n, functionName: 'claim', args: [5n, 0, '0x'] }))
+    await expect(ticketOp({ account, orgId: 9n, functionName: 'cancelRequest', args: [5n, 3n] }))
       .rejects.toBe(refusal);
   });
 
   it('rethrows a rejection that carries no revert data untouched', async () => {
     const offline = new Error('fetch failed');
     sendSponsoredOp.mockRejectedValueOnce(offline);
-    await expect(ticketOp({ account, orgId: 9n, functionName: 'claim', args: [5n, 0, '0x'] }))
+    await expect(ticketOp({ account, orgId: 9n, functionName: 'cancelRequest', args: [5n, 3n] }))
       .rejects.toBe(offline);
   });
 });

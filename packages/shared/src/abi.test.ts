@@ -70,8 +70,11 @@ describe('Ticket ABI', () => {
     expect(names(ticketAbi, 'function')).toEqual(
       expect.arrayContaining(['ownerOf', 'balanceOf', 'eventOf', 'tierOf', 'eventOrg', 'checkInOf',
         'balanceOfEvent', 'eventMeta', 'eventStatus', 'tiers', 'createOffer', 'cancelOffer', 'acceptOffer', 'offerOf',
-        // 01b: 오프라인 큐 flush, EIP-712 오퍼 다이제스트, 7워드 기기 다이제스트, 두 상수, 계정 회전 이관
-        'checkInLate', 'offerDigest', 'eip712Domain', 'deviceDigest', 'LATE_WINDOW', 'MIGRATE_DELAY', 'migrate']),
+        // 2026-09-29 재배포: 발급·체크인은 릴레이어가 대신 제출한다 — claimFor/requestClaimFor/
+        // checkInFor/checkInForLate 와 (event, account) claim nonce 뷰. EIP-712 오퍼 다이제스트,
+        // 7워드 기기 다이제스트, 늦은 체크인 창 상수, 계정 회전 이관은 그대로.
+        'claimFor', 'requestClaimFor', 'checkInFor', 'checkInForLate', 'claimNonce',
+        'offerDigest', 'eip712Domain', 'deviceDigest', 'LATE_WINDOW', 'MIGRATE_DELAY', 'migrate']),
     );
     expect(names(ticketAbi, 'event')).toEqual(
       expect.arrayContaining(['EventCreated', 'EventStatusChanged', 'Claimed', 'Transfer', 'CheckedIn',

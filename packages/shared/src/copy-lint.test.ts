@@ -97,11 +97,12 @@ describe('scanFolder', () => {
   });
 
   /**
-   * `staff` 는 한때 `organizer` 와 나란히 건너뛰는 폴더였다. 게이트 화면을 관객이 스태프 어깨
-   * 너머로 같이 읽는다는 이유로 그 면제가 걷혔으니, 걷혔다는 사실 자체에 테스트를 건다 —
-   * 이름이 `staff` 인 폴더가 다시 조용히 건너뛰어지면 스태프 화면의 금지어가 CI를 통과한다.
+   * `staff` 와 `organizer` 는 한때 나란히 건너뛰는 폴더였다. 게이트 화면을 관객이 스태프 어깨
+   * 너머로 같이 읽고, 주최자 화면의 정산·수수료 안내도 평범한 말로 옮길 수 있었으므로(스펙 §3.2,
+   * 창업자 규칙: 주최자도 web3 용어를 보지 않는다) 두 면제가 모두 걷혔다 — 두 폴더가 다시 조용히
+   * 건너뛰어지면 그 화면들의 금지어가 CI를 통과하므로, 둘 다 훑는다는 사실 자체에 테스트를 건다.
    */
-  it('walks staff folders and still skips organizer ones', async () => {
+  it('walks both staff and organizer folders', async () => {
     const root = await mkdtemp(join(tmpdir(), 'monti-copy-dirs-'));
     await mkdir(join(root, 'staff'), { recursive: true });
     await mkdir(join(root, 'organizer'), { recursive: true });
@@ -109,8 +110,9 @@ describe('scanFolder', () => {
     await writeFile(join(root, 'organizer', 'payout.tsx'), '<p>토큰을 확인하세요</p>', 'utf8');
 
     const hits = await scanFolder(root);
-    expect(hits).toHaveLength(1);
-    expect(hits[0]!.file.includes('staff')).toBe(true);
+    expect(hits).toHaveLength(2);
+    expect(hits.some((hit) => hit.file.includes('staff'))).toBe(true);
+    expect(hits.some((hit) => hit.file.includes('organizer'))).toBe(true);
   });
 
   it('ignores *.test.* files', async () => {

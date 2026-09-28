@@ -25,17 +25,12 @@
 // settles `confirmed`. Re-sending on anything weaker than that read — a timer, an attempt count,
 // a staff member's hunch — would read our own success as a double-entry conflict, filing a clean
 // check-in as a security incident.
-import { ticketAbi } from '../../shared/chain/abis';
-import type { SponsoredOpReceipt } from '../../shared/chain/sendSponsoredOp';
-import { sendCheckIn, type CheckInFunction } from '../gate/checkInOp';
-import { warn } from '../log';
+import { relayCheckIn, type RelayCheckInResult } from '../gate/checkInOp';
 import { staffDb } from '../snapshot/store';
 import {
-  DRY_RUN_MARK,
   LATE_WINDOW_ELAPSED,
   type GateCodeWire,
   type GateResponseWire,
-  type Hex,
   type QueueEntry,
 } from '../types';
 
@@ -82,28 +77,6 @@ export const MAX_ATTEMPTS = 20;
 export const LATE_WINDOW_SECONDS = 43_200;
 
 /**
- * How long the drain waits on one op before moving to the next entry. Longer than the online
- * path's 15 s default because nobody is standing at the door for a queued entry, and every
- * second of waiting here is a second of *not* leaving the entry in the `sent` limbo that only
- * Task 29 can resolve.
- */
-export const QUEUE_WAIT_TIMEOUT_MS = 20_000;
-
-/** The 01b entry point the queue drains through. */
-export const LATE_CHECK_IN_FUNCTION = 'checkInLate' as const;
-
-/**
- * The name, typed for `sendCheckIn`. It is a plain annotation now: the 2026-09-23 01b redeploy
- * put `checkInLate` in the generated ABI and `USED_ABI.Ticket` declares it, so `CheckInFunction`
- * admits the name and the cast that used to mark that gap is gone.
- *
- * {@link hasLateCheckIn} still guards the send at runtime, because the manifest says what this
- * build intends to call and the generated ABI says what the deployment actually carries — and a
- * gate reading an older bundle is a real thing, not a hypothetical.
- */
-const CHECK_IN_LATE: CheckInFunction = LATE_CHECK_IN_FUNCTION;
-
-/**
  * One queued entry as it is stored. `seq` is the only addition to Task 14's {@link QueueEntry}:
  * the tap order, assigned inside the enqueue transaction so two taps in the same millisecond
  * still come out in the order they were taken — `createdAt` cannot do that, and at a gate the
@@ -128,18 +101,6 @@ export interface StoredQueueEntry extends QueueEntry {
 /** `1 s, 2 s, 4 s …` up to {@link BACKOFF_CAP_MS}. `attempts` is the count *already* made. */
 export function backoffMs(attempts: number): number {
   return Math.min(BACKOFF_CAP_MS, BACKOFF_BASE_MS * 2 ** attempts);
-}
-
-/**
- * Whether the ABI this build was compiled against carries `checkInLate`.
- *
- * It is read from the generated ABI rather than a feature flag for the same reason
- * `eventTopic()` is: a flag can be right while the deployment is not, and then the queue sends
- * an op the contract cannot decode. Until sub-plan 01b redeploys this answers `false` and the
- * drain is a dry run that keeps every entry.
- */
-export function hasLateCheckIn(): boolean {
-  return ticketAbi.some((entry) => entry.type === 'function' && entry.name === LATE_CHECK_IN_FUNCTION);
 }
 
 export interface EnqueueParams {
@@ -263,10 +224,10 @@ export interface DrainParams {
 /**
  * The pass that is running, if one is.
  *
- * **There is exactly one writer.** A row stays `pending` in IndexedDB across `sendCheckIn` and
- * `wait()` — up to {@link QUEUE_WAIT_TIMEOUT_MS} of it — so two overlapping passes would each
- * read it as unsent and each send the same sponsored operation, then each write back its own
- * stale copy of the row with last-write-wins. That is a double check-in on the chain and a
+ * **There is exactly one writer.** A row stays `pending` in IndexedDB across the `relayCheckIn`
+ * call, so two overlapping passes would each read it as unsent and each submit the same relayed
+ * operation, then each write back its own stale copy of the row with last-write-wins. That is a
+ * double check-in on the chain and a
  * `confirmed` row overwritten by the loser's `failed`. There are two entry points into this loop
  * — Task 26's connectivity watcher and the queue screen's "지금 맞춰 보기" — so the overlap is
  * the normal case, not a corner.
@@ -306,9 +267,7 @@ async function drainPass(params: DrainParams): Promise<StoredQueueEntry[]> {
   if (params.isOnline && !params.isOnline()) return allEntries();
 
   const db = await staffDb();
-  const lateAvailable = hasLateCheckIn();
   const pastDeadline = params.endsAt !== undefined && now > (params.endsAt + LATE_WINDOW_SECONDS) * 1000;
-  let announced = false;
 
   for (const entry of await allEntries()) {
     if (entry.status !== 'pending') continue;
@@ -322,32 +281,14 @@ async function drainPass(params: DrainParams): Promise<StoredQueueEntry[]> {
 
     if (entry.nextAttemptAt > now) continue;
 
-    if (!lateAvailable) {
-      if (!announced) {
-        announced = true;
-        warn(
-          'queue',
-          `${DRY_RUN_MARK}: the deployed Ticket ABI has no ${LATE_CHECK_IN_FUNCTION}; ` +
-            'entries are kept and will flush after the 01b redeploy.',
-        );
-      }
-      // Marked once. Re-writing an unchanged row on every drain is a whole queue rewritten per
-      // pass for no state change.
-      if (entry.lastError !== DRY_RUN_MARK) await db.put(QUEUE_STORE, { ...entry, lastError: DRY_RUN_MARK });
-      continue;
-    }
-
+    // The relayer submits `checkInForLate` from its own EOA (design §4-5); the gate signature on the
+    // stored code carries the authority even now that the gate is not the sender. There is no ABI
+    // gate any more — what the deployment carries is the relayer's concern, not this bundle's.
     try {
-      const handle = await sendCheckIn({
-        code: entry.gateCode,
-        response: entry.response,
-        orgId: params.orgId,
-        functionName: CHECK_IN_LATE,
-      });
-      const receipt = await handle.wait(QUEUE_WAIT_TIMEOUT_MS);
-      await db.put(QUEUE_STORE, settled(entry, handle.userOpHash, receipt, now));
+      const relay = await relayCheckIn({ code: entry.gateCode, response: entry.response, late: true });
+      await db.put(QUEUE_STORE, settledRelay(entry, relay, now));
     } catch (cause) {
-      await db.put(QUEUE_STORE, retried(entry, cause, now));
+      await db.put(QUEUE_STORE, afterFailure(entry, cause, now));
     }
   }
 
@@ -355,35 +296,47 @@ async function drainPass(params: DrainParams): Promise<StoredQueueEntry[]> {
 }
 
 /**
- * What one answered send does to the entry.
+ * What one relayer answer does to the entry.
  *
- * The `'TIMEOUT'` sentinel is the branch worth reading twice: it is a `success: false` that is
- * **not** a verdict — `wait()` stopped looking, the op did not stop existing. It becomes `sent`,
- * which this loop skips forever, and Task 29 asks the chain what became of it. `sentAt` is
- * stamped here because that is the moment the silence starts being worth measuring.
+ * `confirmed` — the transaction mined, or an idempotent `AlreadyCheckedIn` the relayer answers as
+ * success — settles the row. `sent` is a broadcast whose receipt this drain does not wait for: it
+ * becomes `sent`, which this loop skips forever, and `reconcileQueue` (Task 29) settles it against
+ * the chain. `sentAt` is stamped here because that is the moment the silence starts being worth
+ * measuring.
  */
-function settled(
-  entry: StoredQueueEntry,
-  userOpHash: Hex,
-  receipt: SponsoredOpReceipt,
-  now: number,
-): StoredQueueEntry {
+function settledRelay(entry: StoredQueueEntry, relay: RelayCheckInResult, now: number): StoredQueueEntry {
   const attempts = entry.attempts + 1;
-  if (receipt.success) return { ...entry, attempts, userOpHash, status: 'confirmed', lastError: undefined };
-  if (receipt.revertReason === 'TIMEOUT') {
-    return { ...entry, attempts, userOpHash, status: 'sent', sentAt: now, lastError: 'TIMEOUT' };
-  }
-  return { ...entry, attempts, userOpHash, status: 'failed', lastError: receipt.revertReason };
+  if (relay.status === 'confirmed') return { ...entry, attempts, status: 'confirmed', lastError: undefined };
+  return { ...entry, attempts, status: 'sent', sentAt: now, lastError: undefined };
 }
 
 /**
- * A send that never got as far as an answer: back off, or park once {@link MAX_ATTEMPTS} sends
- * have failed. Parked is `failed`, which is where Task 29 looks — never deleted, because the
- * person it records walked through the door whatever the bundler thinks.
+ * A send that did not return an answer.
+ *
+ * A revert the relayer's simulation caught is deterministic — a `failed-precondition` with a
+ * `details.code` — so it parks as `failed` at once rather than spending twenty sends on a certain
+ * refusal. Anything else is transport: back off, or park once {@link MAX_ATTEMPTS} sends have
+ * failed. Parked is `failed`, which is where Task 29 looks — never deleted, because the person it
+ * records walked through the door whatever the relayer thinks.
  */
-function retried(entry: StoredQueueEntry, cause: unknown, now: number): StoredQueueEntry {
+function afterFailure(entry: StoredQueueEntry, cause: unknown, now: number): StoredQueueEntry {
   const attempts = entry.attempts + 1;
+  const deterministic = deterministicReason(cause);
+  if (deterministic) return { ...entry, attempts, status: 'failed', lastError: deterministic };
   const lastError = cause instanceof Error ? cause.message : String(cause);
   if (attempts >= MAX_ATTEMPTS) return { ...entry, attempts, status: 'failed', lastError };
   return { ...entry, attempts, nextAttemptAt: now + backoffMs(attempts), lastError };
+}
+
+/**
+ * A `CallableError` the relayer's simulation produced carries `details.code`; a transport failure
+ * does not. The former is a certain refusal, so the row parks on it; the latter is worth another
+ * send. `AlreadyCheckedIn` never arrives here — the relayer answers `confirmed` for it.
+ */
+function deterministicReason(cause: unknown): string | undefined {
+  if (typeof cause !== 'object' || cause === null) return undefined;
+  const { code, details } = cause as { code?: unknown; details?: unknown };
+  const detailCode = typeof details === 'object' && details !== null ? (details as { code?: unknown }).code : undefined;
+  if (code === 'failed-precondition' && typeof detailCode === 'string' && detailCode.length > 0) return detailCode;
+  return undefined;
 }

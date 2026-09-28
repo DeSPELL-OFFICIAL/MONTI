@@ -161,6 +161,8 @@ export const ko = {
     limitReached: '이 행사에서 받을 수 있는 티켓을 이미 다 받았어요.',
     alreadyHave: '이미 받았어요 · 내 티켓에서 확인하세요',
     soldOut: '이 종류는 마감됐어요. 다른 종류를 골라 주세요.',
+    notOnSale: '지금은 받을 수 없어요. 판매 기간을 확인해 주세요.',
+    deviceLocked: '이 휴대폰으로는 지금 받을 수 없어요. 다시 로그인해 주세요.',
     requestCta: '신청하기', requesting: '신청하는 중이에요',
     approvalOnly: '이 행사는 주최자 승인 후 받을 수 있어요.',
     pending: '신청 완료 · 승인을 기다리고 있어요',

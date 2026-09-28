@@ -12,10 +12,13 @@
 // attendee could have been issued the ticket after the last sync. So an unknown token is sent
 // to the chain anyway and the chain decides. Offline there is no chain to ask and no device key
 // to verify against, so there the same answer is a refusal — see `isUnknownToSnapshot`.
+import { doc, getDoc } from 'firebase/firestore';
+
 import type { GateCodeWire, GateResponseWire, SnapshotWire } from '@monti/shared';
 
+import { getDb } from '../../shared/api/firebase';
 import { snapshotDeny } from '../snapshot/lookup';
-import type { PreflightResult, SnapshotTicket } from '../types';
+import type { DenyCode, PreflightResult, SnapshotTicket } from '../types';
 
 /**
  * The slice of Task 25's snapshot store this module needs, declared here so preflight can be
@@ -92,4 +95,59 @@ export function isUnknownToSnapshot(result: PreflightResult): boolean {
 /** The ticket a passed preflight recognised, for the screen to draw. `undefined` if unknown. */
 export function recognisedTicket(result: PreflightResult): SnapshotTicket | undefined {
   return result.ok ? result.ticket : undefined;
+}
+
+/**
+ * The ~1 s cross-gate window (design §6). Two online gates can both start admitting one ticket
+ * before either check-in is mined; the chain's one-time entry closes that window about a second
+ * later, and the pending table closes it now. A gate whose `passing` mark is older than this is a
+ * check-in that never confirmed, and blocking on it would turn a real attendee away for good.
+ */
+export const ADMISSION_DUPLICATE_WINDOW_MS = 8_000;
+
+/** A Firestore `Timestamp` (or a millis number) to millis; 0 for a value that has not settled. */
+function toMillis(value: unknown): number {
+  if (typeof value === 'number') return value;
+  const stamp = value as { toMillis?: () => number } | null;
+  return typeof stamp?.toMillis === 'function' ? stamp.toMillis() : 0;
+}
+
+export interface AdmissionsDuplicateParams {
+  /** Decimal, as the code carries it: `code.eventId`. */
+  eventId: string;
+  /** The token the answer names: `response.tokenId`. */
+  tokenId: string;
+  now?: number;
+}
+
+/**
+ * Whether another gate is already admitting this ticket, read from
+ * `admissions/{eventId}/tokens/{tokenId}` before PASS. A `confirmed` mark is a check-in the chain
+ * has recorded — always a duplicate. A `passing` mark is one in flight, so it only counts inside
+ * {@link ADMISSION_DUPLICATE_WINDOW_MS}: past it the check-in never landed and the mark is stale.
+ * Either way the refusal reuses `ALREADY_USED` ("이미 입장"), the same word the chain's own
+ * `AlreadyCheckedIn` becomes.
+ *
+ * It is a latency optimisation, never the boundary. A read that fails or a document that is not
+ * there is **not** a duplicate — `undefined` — because the chain's one-time entry is the authority
+ * and a Firestore blip must not turn a real attendee away. The offline path never calls it: an
+ * offline gate cannot read the table, and its own snapshot/queue check stands unchanged.
+ */
+export async function admissionsDuplicate(
+  params: AdmissionsDuplicateParams,
+): Promise<{ deny: DenyCode } | undefined> {
+  try {
+    const snapshot = await getDoc(doc(getDb(), 'admissions', params.eventId, 'tokens', params.tokenId));
+    const data = snapshot.data() as { status?: string; passedAt?: unknown } | undefined;
+    if (!data) return undefined;
+    if (data.status === 'confirmed') return { deny: 'ALREADY_USED' };
+    if (data.status !== 'passing') return undefined;
+    const now = params.now ?? Date.now();
+    const passedAt = toMillis(data.passedAt);
+    if (passedAt > 0 && now - passedAt > ADMISSION_DUPLICATE_WINDOW_MS) return undefined;
+    return { deny: 'ALREADY_USED' };
+  } catch {
+    // Unreadable is not a duplicate: send it, the chain decides.
+    return undefined;
+  }
 }

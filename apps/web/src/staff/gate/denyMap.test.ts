@@ -4,7 +4,14 @@ import { describe, expect, it } from 'vitest';
 import { ticketAbi } from '@monti/shared';
 
 import { CHECK_IN_ERRORS, DENY_CODES, type DenyCode } from '../types';
-import { CHECK_IN_DENY, DENY_LABELS, MAPPED_SELECTORS, mapRevertToDenyCode } from './denyMap';
+import {
+  CHECK_IN_DENY,
+  DENY_BY_NAME,
+  DENY_LABELS,
+  MAPPED_SELECTORS,
+  mapCallableDeny,
+  mapRevertToDenyCode,
+} from './denyMap';
 
 /** The selector of a zero-argument custom error, spelled the way the chain returns it. */
 const revert = (signature: string, tail = '00'.repeat(32)) =>
@@ -156,6 +163,64 @@ describe('the map is pinned to the generated ABI and covers every screen', () =>
   it('leaves the offer errors out — no tap can raise them', () => {
     for (const signature of ['OfferExpired()', 'BadAttesterSig(bytes)']) {
       expect(MAPPED_SELECTORS).not.toContain(toFunctionSelector(signature as `${string}(${string})`).toLowerCase());
+    }
+  });
+});
+
+/**
+ * The relay path's mapper. The relayer runs the `eth_call` simulation and maps the contract's revert
+ * to a `details.code` before it ever charges gas, so this side reads a name, not a selector — but it
+ * ends at the same screens, and never at an admit.
+ */
+describe('the relayer’s refusal to a DENY (relayCheckIn)', () => {
+  /** A `CallableError` as `shared/api/functions` builds one: a status `code` and a `details.code`. */
+  const failure = (detailsCode?: string, message = 'REASON') =>
+    ({ code: 'failed-precondition', message, details: detailsCode ? { code: detailsCode } : undefined }) as const;
+
+  it('takes a DENY code the backend already speaks and shows its label', () => {
+    for (const code of ['GATE_CLOSED', 'EXPIRED_CODE', 'DEVICE_LOCKED', 'WRONG_EVENT', 'REVOKED'] as const) {
+      expect(mapCallableDeny(failure(code))).toEqual({ code, detail: DENY_LABELS[code] });
+    }
+  });
+
+  /**
+   * And a contract error **name**, mapped through the same table the selector map uses, so this
+   * survives whichever spelling the backend settles on. These are the names design §5 lists.
+   */
+  it.each([
+    ['GateNotOpen', 'GATE_CLOSED'],
+    ['CodeExpired', 'EXPIRED_CODE'],
+    ['DeviceLocked', 'DEVICE_LOCKED'],
+    ['BadDeviceSignature', 'DEVICE_MISMATCH'],
+    ['TicketRevoked', 'REVOKED'],
+    ['WrongEvent', 'WRONG_EVENT'],
+  ])('maps the contract name %s to %s', (name, expected) => {
+    expect(mapCallableDeny(failure(name)).code).toBe(expected);
+    expect(mapCallableDeny(failure(name))).toEqual(DENY_BY_NAME[name]);
+  });
+
+  it('is UNKNOWN_REVERT for a code this build has no screen for, and shows it', () => {
+    const result = mapCallableDeny(failure('SomethingNew'));
+    expect(result.code).toBe('UNKNOWN_REVERT');
+    expect(result.detail).toContain('SomethingNew');
+  });
+
+  it('is TX_FAILED for a transport failure that carries no details.code', () => {
+    // The opaque rejection `shared/api/functions` builds for a dropped connection.
+    expect(mapCallableDeny({ code: 'internal', message: 'UNKNOWN' })).toEqual({
+      code: 'TX_FAILED',
+      detail: DENY_LABELS.TX_FAILED,
+    });
+    expect(mapCallableDeny(new Error('Failed to fetch')).code).toBe('TX_FAILED');
+    expect(mapCallableDeny(undefined).code).toBe('TX_FAILED');
+  });
+
+  it('never invents an admit — every path out is a DENY with a sentence', () => {
+    const inputs = [undefined, null, 'boom', new Error('x'), failure(), failure('GATE_CLOSED'), failure('Nope')];
+    for (const input of inputs) {
+      const result = mapCallableDeny(input);
+      expect(DENY_CODES).toContain(result.code);
+      expect(result.detail.length).toBeGreaterThan(0);
     }
   });
 });

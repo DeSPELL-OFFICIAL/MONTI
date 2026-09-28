@@ -1,36 +1,23 @@
-import { decodeFunctionData, type AbiFunction } from 'viem';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ticketAbi, type GateCodeWire, type GateResponseWire } from '@monti/shared';
+import type { GateCodeWire, GateResponseWire } from '@monti/shared';
 
-const TICKET = `0x${'33'.repeat(20)}` as const;
-const GATE_ACCOUNT = `0x${'aa'.repeat(20)}` as const;
-
-vi.mock('../../shared/config', () => ({
-  getConfig: () => ({
-    chainId: 10143,
-    addresses: { identity: `0x${'11'.repeat(20)}`, organizers: `0x${'22'.repeat(20)}`, ticket: TICKET, paymaster: `0x${'44'.repeat(20)}` },
-  }),
-}));
-
-const sendSponsoredOp = vi.fn(async () => ({
-  userOpHash: '0xfeed' as const,
-  wait: async () => ({ success: true, blockNumber: 1n, txHash: '0xabc' as const }),
-}));
-/** Only the send is replaced: `MIN_VERIFICATION_GAS` below is the real constant, so a test
- *  asserting the gate's floor equals it cannot pass against a stub. */
-vi.mock('../../shared/chain/sendSponsoredOp', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../shared/chain/sendSponsoredOp')>()),
-  sendSponsoredOp,
-}));
-
-const getGateSmartAccount = vi.fn(async () => ({ address: GATE_ACCOUNT }));
-vi.mock('../../shared/chain/gateAccount', () => ({ getGateSmartAccount }));
-
-const { CHECK_IN_GAS_FLOORS, GateNotRegisteredError, encodeCheckInCall, sendCheckIn } = await import(
-  './checkInOp'
+// Only the callable is replaced. `relayCheckIn` (checkInOp) shapes the wire payload and hands it to
+// `api.relayCheckIn`, so the mock is what the payload assertions read back.
+type RelayWire = {
+  tokenId: string;
+  code: { gateId: string; eventId: string; issuedAt: string; nonce: string };
+  gateSig: string;
+  deviceSig: string;
+  late: boolean;
+};
+type RelayResult = { relayId: string; status: 'sent' | 'confirmed'; txHash?: string; usedAt?: number };
+const relayCheckIn = vi.fn(
+  async (_req: RelayWire): Promise<RelayResult> => ({ relayId: '42:123', status: 'sent' }),
 );
-const { MIN_VERIFICATION_GAS } = await import('../../shared/chain/sendSponsoredOp');
+vi.mock('../../shared/api/functions', () => ({ relayCheckIn }));
+
+const { relayCheckIn: submitCheckIn } = await import('./checkInOp');
 
 const NONCE = `0x${'11'.repeat(32)}` as const;
 
@@ -53,150 +40,65 @@ const response: GateResponseWire = {
 };
 
 beforeEach(() => {
-  sendSponsoredOp.mockClear();
-  getGateSmartAccount.mockClear();
+  relayCheckIn.mockClear();
+  relayCheckIn.mockResolvedValue({ relayId: '42:123', status: 'sent' });
 });
 
-/** The request `sendSponsoredOp` was handed, typed the way this module builds it. */
-function request(): {
-  orgId: bigint;
-  account: { address: string };
-  calls: Array<{ to: string; data: string }>;
-  gasFloors?: { callGasLimit?: bigint; verificationGasLimit?: bigint; preVerificationGas?: bigint };
-} {
-  return (sendSponsoredOp.mock.calls[0] as unknown[] | undefined)?.[0] as never;
+/** The request `api.relayCheckIn` was handed. */
+function request() {
+  return relayCheckIn.mock.calls[0]?.[0] as {
+    tokenId: string;
+    code: { gateId: string; eventId: string; issuedAt: string; nonce: string };
+    gateSig: string;
+    deviceSig: string;
+    late: boolean;
+  };
 }
 
-describe('encoding the call', () => {
-  it('is checkIn(tokenId, GateCode, deviceSig) with the struct field order from the ABI', () => {
-    const { functionName, args } = decodeFunctionData({
-      abi: ticketAbi,
-      data: encodeCheckInCall({ code, response }),
-    });
-    expect(functionName).toBe('checkIn');
-    expect(args?.[0]).toBe(123n);
-    expect(args?.[1]).toEqual({ gateId: 7n, eventId: 42n, issuedAt: 1_700_000_000n, nonce: NONCE });
-    expect(args?.[2]).toBe(response.deviceSig);
+describe('shaping the relay payload', () => {
+  it('carries the tap, the gate signature and the attendee signature the contract verifies', async () => {
+    await submitCheckIn({ code, response });
+
+    const sent = request();
+    expect(sent.tokenId).toBe('123');
+    // The four signed code fields, `issuedAt` spelled as the decimal string the wire takes.
+    expect(sent.code).toEqual({ gateId: '7', eventId: '42', issuedAt: '1700000000', nonce: NONCE });
+    // The gate's own P-256 signature over the code digest — `gateCode.ts`'s `sig`, unchanged.
+    expect(sent.gateSig).toBe(code.sig);
+    // The attendee's device signature, straight off the response.
+    expect(sent.deviceSig).toBe(response.deviceSig);
   });
 
-  /**
-   * The chain recomputes the digest from these exact five values, so the struct's declared order
-   * in `Ticket.json` is the contract. A field reordered upstream would silently re-hash and every
-   * check-in would revert `BadDeviceSignature`.
-   */
-  it('keeps the four GateCode fields in the order the generated ABI declares', () => {
-    const entry = ticketAbi.find(
-      (item): item is AbiFunction => item.type === 'function' && item.name === 'checkIn',
-    );
-    const struct = entry?.inputs[1] as { components?: Array<{ name?: string }> };
-    expect(struct.components?.map((component) => component.name)).toEqual([
-      'gateId',
-      'eventId',
-      'issuedAt',
-      'nonce',
-    ]);
+  it('is an on-time check-in by default, and a late one for the offline queue', async () => {
+    await submitCheckIn({ code, response });
+    expect(request().late).toBe(false);
+
+    relayCheckIn.mockClear();
+    await submitCheckIn({ code, response, late: true });
+    expect(request().late).toBe(true);
   });
 
-  it('takes the function name as a parameter so checkInLate slots in after the 01b redeploy', () => {
-    // `checkIn` is what `USED_ABI` declares today; the type admits `checkInLate` the moment the
-    // redeploy adds it, and nothing else in this module has to change.
-    expect(encodeCheckInCall({ code, response, functionName: 'checkIn' })).toBe(
-      encodeCheckInCall({ code, response }),
-    );
-  });
-
-  it('refuses to build a call from a code and an answer that are not a pair', () => {
-    expect(() =>
-      encodeCheckInCall({ code, response: { ...response, nonce: `0x${'ee'.repeat(32)}` } }),
-    ).toThrow('CHECK_IN_CODE_MISMATCH');
+  it('hands back the relayer’s answer untouched — relayId and status decide the screen', async () => {
+    relayCheckIn.mockResolvedValueOnce({ relayId: '42:123', status: 'confirmed', txHash: '0xabc', usedAt: 1_700_000_500 });
+    const result = await submitCheckIn({ code, response });
+    expect(result).toEqual({ relayId: '42:123', status: 'confirmed', txHash: '0xabc', usedAt: 1_700_000_500 });
   });
 });
 
-describe('sending it', () => {
-  it('sends from the gate account, to Ticket, with the event org as sponsor', async () => {
-    await sendCheckIn({ code, response, orgId: 5n });
-
-    const sent = request();
-    expect(getGateSmartAccount).toHaveBeenCalledTimes(1);
-    expect(sent.account.address).toBe(GATE_ACCOUNT);
-    expect(sent.orgId).toBe(5n);
-    expect(sent.calls).toHaveLength(1);
-    expect(sent.calls[0]?.to.toLowerCase()).toBe(TICKET.toLowerCase());
-    expect(sent.calls[0]?.data).toBe(encodeCheckInCall({ code, response }));
-  });
-
-  /**
-   * Monad bills the limit rather than the usage, so these are the measured numbers with the one
-   * shortfall the estimate cannot see, and nothing more. 01b measured `checkIn` at 123,800 and
-   * `checkInLate` at 132,607.
-   */
-  it('passes the two gas floors and leaves preVerificationGas to the bundler', async () => {
-    await sendCheckIn({ code, response, orgId: 5n });
-
-    expect(request().gasFloors).toEqual({ callGasLimit: 200_000n, verificationGasLimit: 150_000n });
-    expect(CHECK_IN_GAS_FLOORS.callGasLimit).toBe(200_000n);
-    expect(CHECK_IN_GAS_FLOORS.verificationGasLimit).toBe(MIN_VERIFICATION_GAS);
-    expect(CHECK_IN_GAS_FLOORS.preVerificationGas).toBeUndefined();
-  });
-
-  it('returns the handle without waiting — the verdict is the CheckedIn event', async () => {
-    const handle = await sendCheckIn({ code, response, orgId: 5n });
-    expect(handle.userOpHash).toBe('0xfeed');
-    // Nothing in this module waits: a `wait()` that times out is "still confirming" (Task 23),
-    // and a module that awaited here could only report it as a failure.
-    expect(typeof handle.wait).toBe('function');
-  });
-
-  /**
-   * `gateOf(account) == 0` — the terminal was never registered for this event. The paymaster
-   * refuses the sender, and that is a setup problem, not a verdict about this attendee.
-   */
-  it('turns the paymaster’s UnknownSender into a typed setup error, never a DENY', async () => {
-    sendSponsoredOp.mockRejectedValueOnce(new Error('AA33 reverted: UnknownSender()'));
-    const failure = await sendCheckIn({ code, response, orgId: 5n }).catch((error: unknown) => error);
-
-    expect(failure).toBeInstanceOf(GateNotRegisteredError);
-    expect((failure as InstanceType<typeof GateNotRegisteredError>).gateAccount).toBe(GATE_ACCOUNT);
-    expect((failure as Error).cause).toBeInstanceOf(Error);
-  });
-
-  it('finds the revert name however viem wrapped it', async () => {
-    const wrapped = Object.assign(new Error('UserOperation reverted during simulation'), {
-      cause: Object.assign(new Error('execution reverted'), {
-        details: 'AA33 reverted: UnknownSender()',
-      }),
-    });
-    sendSponsoredOp.mockRejectedValueOnce(wrapped);
-    await expect(sendCheckIn({ code, response, orgId: 5n })).rejects.toBeInstanceOf(
-      GateNotRegisteredError,
-    );
-
-    // And on `shortMessage`, which is where viem's own errors usually put it.
-    sendSponsoredOp.mockRejectedValueOnce(
-      Object.assign(new Error('wrapped'), { shortMessage: 'reverted with UnknownSender()' }),
-    );
-    await expect(sendCheckIn({ code, response, orgId: 5n })).rejects.toBeInstanceOf(
-      GateNotRegisteredError,
-    );
-  });
-
-  it('does not hang on an error chain that points at itself', async () => {
-    const cyclic: { message: string; cause?: unknown } = { message: 'boom' };
-    cyclic.cause = cyclic;
-    sendSponsoredOp.mockRejectedValueOnce(cyclic);
-    await expect(sendCheckIn({ code, response, orgId: 5n })).rejects.toBe(cyclic);
-  });
-
-  it('lets every other send failure through untouched', async () => {
-    const original = new Error('AA23 reverted (or OOG)');
-    sendSponsoredOp.mockRejectedValueOnce(original);
-    await expect(sendCheckIn({ code, response, orgId: 5n })).rejects.toBe(original);
-  });
-
-  it('never sends a call it could not build', async () => {
+describe('what it refuses to send', () => {
+  it('never submits a code and an answer that are not a pair', async () => {
     await expect(
-      sendCheckIn({ code, response: { ...response, nonce: `0x${'ee'.repeat(32)}` }, orgId: 5n }),
+      submitCheckIn({ code, response: { ...response, nonce: `0x${'ee'.repeat(32)}` } }),
     ).rejects.toThrow('CHECK_IN_CODE_MISMATCH');
-    expect(sendSponsoredOp).not.toHaveBeenCalled();
+    expect(relayCheckIn).not.toHaveBeenCalled();
+  });
+
+  it('lets a callable failure through untouched, for the caller to map to a DENY', async () => {
+    const failure = Object.assign(new Error('GATE_CLOSED'), {
+      code: 'failed-precondition',
+      details: { code: 'GATE_CLOSED' },
+    });
+    relayCheckIn.mockRejectedValueOnce(failure);
+    await expect(submitCheckIn({ code, response })).rejects.toBe(failure);
   });
 });

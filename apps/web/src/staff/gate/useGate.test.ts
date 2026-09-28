@@ -108,12 +108,42 @@ const issueSnapshot = vi.fn(async () => {
 const getPhotoForGate = vi.fn(async () => ({ photoJpegB64: 'FETCHED', displayName: '김입장' }));
 vi.mock('../../shared/api/functions', () => ({ issueSnapshot, getPhotoForGate }));
 
+// --- the relayed check-in (design §4-5) and the reads around it ---------------------------------
+// One mock covers both the online tap (useGate → `./checkInOp`) and the offline drain (opQueue →
+// `../gate/checkInOp`): they resolve to the same file.
+type RelayResult = { relayId: string; status: 'sent' | 'confirmed'; txHash?: string; usedAt?: number };
+const relayCheckIn = vi.fn(
+  async (_params: { code: unknown; response: { tokenId: string }; late?: boolean }): Promise<RelayResult> => ({
+    relayId: '42:1042',
+    status: 'confirmed',
+  }),
+);
+vi.mock('./checkInOp', () => ({ relayCheckIn }));
+
+// The `relays/{relayId}` subscription. The test captures the callback and drives it.
+const stopRelay = vi.fn();
+let relaySettle: ((status: 'confirmed' | 'failed', usedAt?: number) => void) | undefined;
+const watchRelay = vi.fn(
+  (_relayId: string, onSettled: (status: 'confirmed' | 'failed', usedAt?: number) => void) => {
+    relaySettle = onSettled;
+    return stopRelay;
+  },
+);
+vi.mock('./relayStatus', () => ({ watchRelay }));
+
+// The pending-admission read is a Firestore round trip; only it is replaced, and it answers "no
+// duplicate" unless a test says otherwise. `preflight` itself stays the shipped pure code.
+const admissionsDuplicate = vi.fn(async (): Promise<{ deny: string } | undefined> => undefined);
+vi.mock('./preflight', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./preflight')>()),
+  admissionsDuplicate,
+}));
+
 const { decodeGateCodeMessage, encodeGateResponseMessage } = await import('../../shared/nfc/ndef');
 const { fromBase64, toBase64 } = await import('@monti/hce-android');
 const { checkInDigest } = await import('../offline/offlineVerify');
 const { staffDb } = await import('../snapshot/store');
 const { allEntries } = await import('../queue/opQueue');
-const { nonceHashOf } = await import('./verdict');
 const { useGate } = await import('./useGate');
 const { GATE_CODE_ROTATE_MS, GATE_OPEN_RECHECK_MS, GATE_OPEN_STALE_MS, GATE_STATUS_POLL_MS } =
   await import('../constants');
@@ -227,7 +257,6 @@ function tapWith(code: ReturnType<typeof servedCode>, tokenId = TOKEN_ID): void 
   onWrite({ ndef: toBase64(encodeGateResponseMessage(wire)) });
 }
 
-const CHECKED_IN = toEventSelector('CheckedIn(uint256,uint256,uint256,bytes32,uint64)');
 const MANUAL_OVERRIDE = toEventSelector('ManualOverride(uint256,uint256,address,uint8,uint8)');
 
 /** `ManualOverride` as the node reports it: approver in topic 3, role and reason in the body. */
@@ -246,32 +275,6 @@ function manualOverrideLog(approver: Hex, role: number, reason: number) {
   };
 }
 
-/** A `CheckedIn` exactly as `monadLogs` reports it — quantities as hex strings, not bigints. */
-function checkedInLog(nonce: Hex, stage: 'speculative' | 'finalized') {
-  return {
-    address: TICKET_ADDRESS,
-    topics: [
-      CHECKED_IN,
-      numberToHex(BigInt(TOKEN_ID), { size: 32 }),
-      numberToHex(EVENT_ID, { size: 32 }),
-      numberToHex(GATE_ID, { size: 32 }),
-    ],
-    data: encodeAbiParameters(
-      [{ type: 'bytes32' }, { type: 'uint64' }],
-      [nonceHashOf(nonce), 1_790_000_000n],
-    ),
-    blockNumber: '0x63',
-    stage,
-  };
-}
-
-/** Hands the log to the watch the machine opened when the operation went out. */
-function feedVerdict(log: unknown): void {
-  const opened = subscribeLogs.mock.calls.at(-1)?.[0] as { onLog: (l: unknown) => void } | undefined;
-  if (!opened) throw new Error('no chain watch was opened for this tap');
-  opened.onLog(log);
-}
-
 function setRadio(online: boolean): void {
   Object.defineProperty(navigator, 'onLine', { value: online, configurable: true });
 }
@@ -281,6 +284,9 @@ beforeEach(async () => {
   wait.mockResolvedValue(OK);
   sendSponsoredOp.mockResolvedValue({ userOpHash: `0x${'88'.repeat(32)}`, wait });
   subscribeLogs.mockReturnValue(stopLogs);
+  relayCheckIn.mockResolvedValue({ relayId: '42:1042', status: 'confirmed' });
+  admissionsDuplicate.mockResolvedValue(undefined);
+  relaySettle = undefined;
   readContract.mockImplementation(async ({ functionName }: { functionName: string }) => {
     switch (functionName) {
       case 'isOpenGate':
@@ -345,8 +351,16 @@ async function seedQueueRow(over: { nextAttemptAt?: number } = {}): Promise<void
   });
 }
 
+/** A relayer whose answer the test controls, so `confirming` can be observed before it lands. */
+function deferRelay(): (answer: RelayResult) => void {
+  let settle!: (answer: RelayResult) => void;
+  relayCheckIn.mockImplementationOnce(() => new Promise<RelayResult>((resolve) => { settle = resolve; }));
+  return (answer) => settle(answer);
+}
+
 describe('one tap, online', () => {
-  it('goes received → confirming → admit, and only the chain turns it green', async () => {
+  it('goes received → confirming → PASS, hardening when the relayer confirms', async () => {
+    const answer = deferRelay();
     const { result } = await openGate();
     const code = servedCode();
 
@@ -354,59 +368,54 @@ describe('one tap, online', () => {
       tapWith(code);
     });
 
-    // The guest list recognised the ticket and said nothing against it, so the tap was sent.
+    // The guest list recognised the ticket and said nothing against it, so it went to the relayer.
     await waitFor(() => expect(result.current.state).toBe('confirming'));
     expect(result.current.precheck?.ok).toBe(true);
-    expect(sendSponsoredOp).toHaveBeenCalledTimes(1);
-    // The operation is sent by the gate's own account against the organizer's budget — a
-    // check-in signed by the staff member's passkey reverts `GateMismatch`.
-    expect(sendSponsoredOp.mock.calls[0]?.[0]).toMatchObject({ orgId: ORG_ID });
+    expect(relayCheckIn).toHaveBeenCalledTimes(1);
+    // An on-time check-in — the offline queue's drain is the only caller that sets `late`.
+    expect(relayCheckIn.mock.calls[0]?.[0]?.late).not.toBe(true);
+    expect(relayCheckIn.mock.calls[0]?.[0]).toMatchObject({ response: { tokenId: TOKEN_ID } });
 
-    // A successful receipt is NOT the verdict: the screen is still confirming.
+    // While the relayer works, nothing is green.
     expect(result.current.state).toBe('confirming');
 
+    // `sent`: PASS now, but "기록 중" — the relay document has not confirmed yet.
     await act(async () => {
-      feedVerdict(checkedInLog(code.nonce, 'speculative'));
+      answer({ relayId: '42:1042', status: 'sent' });
     });
     await waitFor(() => expect(result.current.state).toBe('admit'));
     expect(result.current.finalized).toBe(false);
-    expect(result.current.blockNumber).toBe(0x63n);
+    expect(watchRelay).toHaveBeenCalledWith('42:1042', expect.any(Function));
 
-    // The same log, repeated at the finalized stage, hardens the card rather than re-admitting.
+    // The relayer's document confirms, and the card hardens rather than re-admitting.
     await act(async () => {
-      feedVerdict(checkedInLog(code.nonce, 'finalized'));
+      relaySettle?.('confirmed');
     });
     await waitFor(() => expect(result.current.finalized).toBe(true));
 
     expect(result.current.entriesCount).toBe(1);
     expect(result.current.admittedAt).toBeGreaterThan(0);
     expect(result.current.photo).toBe('FROM-LIST');
-    // Online, nothing was written down: the chain is the record.
+    // Online, nothing was written down: the relay is the record.
     expect(await allEntries()).toHaveLength(0);
   });
 
-  it('drops a verdict that names another tap', async () => {
+  it('admits straight to settled when the relayer already mined it', async () => {
+    relayCheckIn.mockResolvedValueOnce({ relayId: '42:1042', status: 'confirmed' });
     const { result } = await openGate();
-    const code = servedCode();
     await act(async () => {
-      tapWith(code);
+      tapWith(servedCode());
     });
-    await waitFor(() => expect(result.current.state).toBe('confirming'));
-
-    await act(async () => {
-      feedVerdict(checkedInLog(`0x${'ee'.repeat(32)}`, 'finalized'));
-    });
-    expect(result.current.state).toBe('confirming');
+    await waitFor(() => expect(result.current.state).toBe('admit'));
+    expect(result.current.finalized).toBe(true);
+    // Confirmed already: no relay document to wait on.
+    expect(watchRelay).not.toHaveBeenCalled();
   });
 
-  it('turns a revert into the DENY the contract named, without asking the chain twice', async () => {
-    wait.mockResolvedValue({
-      success: false,
-      txHash: `0x${'77'.repeat(32)}`,
-      blockNumber: 99n,
-      // `AlreadyCheckedIn()`, the selector `Ticket.json` actually declares.
-      revertReason: '0xc98289f0',
-    });
+  it('turns the relayer’s refusal into the DENY it named', async () => {
+    relayCheckIn.mockRejectedValueOnce(
+      Object.assign(new Error('ALREADY_USED'), { code: 'failed-precondition', details: { code: 'ALREADY_USED' } }),
+    );
     const { result } = await openGate();
     await act(async () => {
       tapWith(servedCode());
@@ -415,26 +424,32 @@ describe('one tap, online', () => {
     expect(result.current.deny).toBe('ALREADY_USED');
   });
 
-  it('stays confirming when the bundler stops answering — a timeout is not a refusal', async () => {
-    wait.mockResolvedValue({
-      success: false,
-      txHash: `0x${'77'.repeat(32)}`,
-      blockNumber: 0n,
-      revertReason: 'TIMEOUT',
-    });
+  it('refuses a ticket already admitting at another gate, before sending anything', async () => {
+    // The pending table says this ticket is passing at another gate inside the ~1 s window.
+    admissionsDuplicate.mockResolvedValueOnce({ deny: 'ALREADY_USED' });
     const { result } = await openGate();
-    const code = servedCode();
     await act(async () => {
-      tapWith(code);
+      tapWith(servedCode());
     });
-    await waitFor(() => expect(result.current.waitHint).toBe(true));
+    await waitFor(() => expect(result.current.state).toBe('deny'));
+    expect(result.current.deny).toBe('ALREADY_USED');
+    expect(relayCheckIn).not.toHaveBeenCalled();
+  });
+
+  it('stays confirming while the relayer is slow — nothing green until it answers', async () => {
+    const answer = deferRelay();
+    const { result } = await openGate();
+    await act(async () => {
+      tapWith(servedCode());
+    });
+    await waitFor(() => expect(result.current.state).toBe('confirming'));
     expect(result.current.state).toBe('confirming');
 
-    // And the late log still admits, which is the whole reason the hint is not a state.
     await act(async () => {
-      feedVerdict(checkedInLog(code.nonce, 'finalized'));
+      answer({ relayId: '42:1042', status: 'confirmed' });
     });
     await waitFor(() => expect(result.current.state).toBe('admit'));
+    expect(result.current.finalized).toBe(true);
   });
 
   it('refuses a ticket the guest list already knows about, before spending anything', async () => {
@@ -445,19 +460,15 @@ describe('one tap, online', () => {
     });
     await waitFor(() => expect(result.current.state).toBe('deny'));
     expect(result.current.deny).toBe('ALREADY_USED');
-    expect(sendSponsoredOp).not.toHaveBeenCalled();
+    expect(relayCheckIn).not.toHaveBeenCalled();
   });
 
   it('asks the server for a face the guest list does not carry', async () => {
     await seedSnapshot(snapshot({ tickets: [ticket({ photoJpegB64: '' })] }));
+    relayCheckIn.mockResolvedValueOnce({ relayId: '42:1042', status: 'confirmed' });
     const { result } = await openGate();
-    const code = servedCode();
     await act(async () => {
-      tapWith(code);
-    });
-    await waitFor(() => expect(result.current.state).toBe('confirming'));
-    await act(async () => {
-      feedVerdict(checkedInLog(code.nonce, 'finalized'));
+      tapWith(servedCode());
     });
     await waitFor(() => expect(result.current.photo).toBe('FETCHED'));
     expect(getPhotoForGate).toHaveBeenCalledWith({ tokenId: TOKEN_ID, gateAccount: GATE_ACCOUNT });
@@ -467,16 +478,12 @@ describe('one tap, online', () => {
     await seedSnapshot(
       snapshot({ requireKyc: false, tickets: [ticket({ photoJpegB64: '', tierName: '자유석', seat: '' })] }),
     );
+    relayCheckIn.mockResolvedValueOnce({ relayId: '42:1042', status: 'confirmed' });
     const { result } = await openGate();
     await waitFor(() => expect(result.current.requireKyc).toBe(false));
     expect(result.current.eventTitle).toBe('가을 밤 콘서트');
-    const code = servedCode();
     await act(async () => {
-      tapWith(code);
-    });
-    await waitFor(() => expect(result.current.state).toBe('confirming'));
-    await act(async () => {
-      feedVerdict(checkedInLog(code.nonce, 'finalized'));
+      tapWith(servedCode());
     });
     await waitFor(() => expect(result.current.state).toBe('admit'));
     expect(result.current.photo).toBe('');
@@ -484,6 +491,7 @@ describe('one tap, online', () => {
   });
 
   it('refuses a second attendee while the first is still confirming', async () => {
+    const answer = deferRelay();
     const { result } = await openGate();
     const code = servedCode();
     await act(async () => {
@@ -495,9 +503,13 @@ describe('one tap, online', () => {
       tapWith(code);
     });
     await waitFor(() => expect(result.current.refusal).toBe('CONFIRMING'));
-    // One tap, one operation. The refused tap must not have been sent.
-    expect(sendSponsoredOp).toHaveBeenCalledTimes(1);
+    // One tap, one relay call. The refused tap must not have been sent.
+    expect(relayCheckIn).toHaveBeenCalledTimes(1);
     expect(result.current.state).toBe('confirming');
+
+    await act(async () => {
+      answer({ relayId: '42:1042', status: 'confirmed' });
+    });
   });
 });
 
@@ -515,7 +527,7 @@ describe('one tap, offline', () => {
 
     await waitFor(() => expect(result.current.state).toBe('offlineAdmit'));
     // Nothing was sent, and nothing pretended the chain had answered.
-    expect(sendSponsoredOp).not.toHaveBeenCalled();
+    expect(relayCheckIn).not.toHaveBeenCalled();
     expect(result.current.finalized).toBe(false);
 
     // The record of the person who walked in survived the card being drawn.
@@ -581,12 +593,13 @@ describe('one tap, offline', () => {
       window.dispatchEvent(new Event('online'));
     });
 
-    // The header follows the one watcher this screen owns, and the drain reads that same
-    // answer. Since the 01b redeploy the proof is the send itself: the row goes out through
-    // `checkInLate` and comes back `confirmed`, where before it could only be marked.
+    // The header follows the one watcher this screen owns, and the drain reads that same answer.
+    // The proof is the send itself: the row goes out through the relayer (late) and comes back
+    // `confirmed`, which only a pass that actually ran can do.
     await waitFor(() => expect(result.current.online).toBe(true));
     await waitFor(async () => expect((await allEntries())[0]?.status).toBe('confirmed'));
     expect((await allEntries())[0]?.lastError).toBeUndefined();
+    expect(relayCheckIn.mock.calls.every(([p]) => p.late === true)).toBe(true);
   });
 });
 
@@ -645,7 +658,7 @@ describe('the door’s own permission', () => {
     await act(async () => {
       tapWith(code);
     });
-    expect(sendSponsoredOp).not.toHaveBeenCalled();
+    expect(relayCheckIn).not.toHaveBeenCalled();
     expect(await allEntries()).toHaveLength(0);
     expect(result.current.state).not.toBe('confirming');
     await act(async () => {
@@ -689,7 +702,7 @@ describe('what the gate still owes the chain', () => {
     await seedQueueRow();
     await openGate();
     await waitFor(async () => expect((await allEntries())[0]?.status).toBe('confirmed'));
-    expect(sendSponsoredOp).toHaveBeenCalled();
+    expect(relayCheckIn).toHaveBeenCalled();
   });
 
   it('drains again on every status tick, without waiting for a disconnection', async () => {
@@ -723,15 +736,17 @@ describe('unmount', () => {
    * the guest-list refresh — which is also what erases the faces — and three intervals. The
    * cleanup reads correct; this is what keeps it correct.
    */
-  it('releases the tag, the watch, the probes, the faces and every timer', async () => {
+  it('releases the tag, the relay watch, the probes, the faces and every timer', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
+    // `sent` opens a `relays/{relayId}` subscription for the tap on screen, the handle unmount owns.
+    relayCheckIn.mockResolvedValueOnce({ relayId: '42:1042', status: 'sent' });
     const { result, unmount } = await openGate();
     const code = servedCode();
     await act(async () => {
       tapWith(code);
     });
-    await waitFor(() => expect(result.current.state).toBe('confirming'));
-    expect(subscribeLogs).toHaveBeenCalled();
+    await waitFor(() => expect(result.current.state).toBe('admit'));
+    expect(watchRelay).toHaveBeenCalled();
 
     const served = hce.setPayload.mock.calls.length;
     const asked = readContract.mock.calls.length;
@@ -741,9 +756,9 @@ describe('unmount', () => {
       unmount();
     });
 
-    // The tag and the tap's chain watch.
+    // The tag and the tap's relay-document subscription.
     await waitFor(() => expect(hce.stop).toHaveBeenCalled());
-    expect(stopLogs).toHaveBeenCalled();
+    expect(stopRelay).toHaveBeenCalled();
     // The faces went with the guest list — `startSnapshotRefresh`'s disposer is what erases them.
     await waitFor(async () => expect(await (await staffDb()).get('snapshots', EVENT_ID.toString())).toBeUndefined());
 
@@ -757,11 +772,11 @@ describe('unmount', () => {
     expect(request.mock.calls.length).toBe(probed);
 
     // And a write dispatched after the teardown is a tap at a gate that is already closed.
-    const sent = sendSponsoredOp.mock.calls.length;
+    const sent = relayCheckIn.mock.calls.length;
     await act(async () => {
       tapWith(code);
     });
-    expect(sendSponsoredOp.mock.calls.length).toBe(sent);
+    expect(relayCheckIn.mock.calls.length).toBe(sent);
   });
 });
 
@@ -785,8 +800,8 @@ describe('the QR fallback', () => {
       });
     });
 
-    await waitFor(() => expect(result.current.state).toBe('confirming'));
-    expect(sendSponsoredOp).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(result.current.state).toBe('admit'));
+    expect(relayCheckIn).toHaveBeenCalledTimes(1);
   });
 
   it('says nothing and stays ready when the code is not one this gate served', async () => {
@@ -800,7 +815,7 @@ describe('the QR fallback', () => {
       });
     });
     expect(result.current.state).toBe('ready');
-    expect(sendSponsoredOp).not.toHaveBeenCalled();
+    expect(relayCheckIn).not.toHaveBeenCalled();
   });
 });
 
@@ -832,8 +847,10 @@ describe('manual approval', () => {
   /** The other way in: a tap that was answered, and a staff member who overrides the answer. */
   async function afterRefusal() {
     const rendered = await ready();
-    // The check-in reverts, so the tap settles and the screen is free for an override.
-    wait.mockResolvedValueOnce({ success: false, txHash: `0x${'00'.repeat(32)}`, blockNumber: 0n });
+    // The relayer refuses, so the tap settles and the screen is free for an override.
+    relayCheckIn.mockRejectedValueOnce(
+      Object.assign(new Error('ALREADY_USED'), { code: 'failed-precondition', details: { code: 'ALREADY_USED' } }),
+    );
     await act(async () => {
       tapWith(servedCode());
     });
@@ -977,6 +994,7 @@ describe('manual approval', () => {
    * `CheckedIn` watch for an operation that is running and already paid for.
    */
   it('refuses to open while a check-in is confirming, and that check-in still lands', async () => {
+    const answer = deferRelay();
     const { result } = await ready();
     const code = servedCode();
     await act(async () => {
@@ -990,9 +1008,9 @@ describe('manual approval', () => {
     expect(result.current.state).toBe('confirming');
     expect(result.current.refusal).toBe('CONFIRMING');
 
-    // The watch was never closed, so the verdict still arrives and still admits.
+    // The tap was not interrupted, so the relayer's answer still arrives and still admits.
     await act(async () => {
-      feedVerdict(checkedInLog(code.nonce, 'finalized'));
+      answer({ relayId: '42:1042', status: 'confirmed' });
     });
     await waitFor(() => expect(result.current.state).toBe('admit'));
   });

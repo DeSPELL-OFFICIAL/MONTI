@@ -2,23 +2,16 @@
 // to be the first import in the file.
 import 'fake-indexeddb/auto';
 
-import type { Abi } from 'viem';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const sendCheckIn = vi.fn();
-vi.mock('../gate/checkInOp', () => ({ sendCheckIn }));
+// Only the relayer callable is replaced. `relayCheckIn` (checkInOp) is what the queue drains
+// through since the 01b relay switch — no bundler, no gate account, no on-device `checkInLate` ABI.
+const relayCheckIn = vi.fn();
+vi.mock('../gate/checkInOp', () => ({ relayCheckIn }));
 
 // The database comes from Task 25's store, which reaches the network to refresh snapshots.
 // Only that reach is replaced — `staffDb()` below is the real IndexedDB the gate uses.
 vi.mock('../../shared/api/functions', () => ({ issueSnapshot: vi.fn(), getPhotoForGate: vi.fn() }));
-
-/**
- * The ABI the queue's gate reads, made mutable so both branches can be exercised in one file.
- * The array identity never changes — the module under test reads `ticketAbi` at drain time, so
- * pushing the fragment in turns the real send path on and emptying it turns the dry run on.
- */
-const ticketAbi: unknown[] = [];
-vi.mock('../../shared/chain/abis', () => ({ ticketAbi }));
 
 // Imported after the mocks, as the rest of this sub-plan's tests do: a static import would be
 // hoisted above the `vi.fn()`s the factories close over.
@@ -30,22 +23,11 @@ const {
   backoffMs,
   drainQueue,
   enqueueCheckIn,
-  hasLateCheckIn,
   parkedCount,
   pendingCount,
 } = await import('./opQueue');
 const { staffDb } = await import('../snapshot/store');
-const { DRY_RUN_MARK, LATE_WINDOW_ELAPSED } = await import('../types');
-
-/** 01b's `checkInLate(uint256,(uint256,uint256,uint64,bytes32),bytes)`, name only — the gate
- *  looks the name up and nothing else. */
-const CHECK_IN_LATE_FRAGMENT = {
-  type: 'function',
-  name: 'checkInLate',
-  stateMutability: 'nonpayable',
-  inputs: [],
-  outputs: [],
-};
+const { LATE_WINDOW_ELAPSED } = await import('../types');
 
 const NOW = 1_700_000_000_000;
 /** Codes are issued in seconds; this one is one minute old at {@link NOW}. */
@@ -74,10 +56,12 @@ const tap = (tokenId: string, nonce: string, issuedAt?: number) =>
 
 const HOUR = 3_600_000;
 
-const landed = () => ({
-  userOpHash: '0xfeed' as const,
-  wait: async () => ({ success: true, blockNumber: 9n, txHash: '0xabc' as const }),
-});
+/** A relayer answer that mined. `sent` is the other one and the queue treats it differently. */
+const confirmed = () => ({ relayId: '42:x', status: 'confirmed' as const });
+
+/** A `CallableError` the relayer's simulation produced — deterministic, so the row parks at once. */
+const reverted = (detailsCode: string) =>
+  Object.assign(new Error(detailsCode), { code: 'failed-precondition', details: { code: detailsCode } });
 
 describe('durable check-in queue', () => {
   beforeEach(async () => {
@@ -86,9 +70,7 @@ describe('durable check-in queue', () => {
     // is what these tests need deterministic, not the event loop.
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(NOW);
-    sendCheckIn.mockReset();
-    ticketAbi.length = 0;
-    ticketAbi.push(CHECK_IN_LATE_FRAGMENT);
+    relayCheckIn.mockReset();
     await (await staffDb()).clear(QUEUE_STORE);
   });
 
@@ -158,77 +140,81 @@ describe('durable check-in queue', () => {
   });
 
   describe('draining', () => {
-    it('flushes in tap order through checkInLate', async () => {
+    it('flushes in tap order, each as a late relay submission', async () => {
       await tap('900', 'ff');
       await tap('100', 'aa');
-      sendCheckIn.mockResolvedValue(landed());
+      relayCheckIn.mockResolvedValue(confirmed());
 
       await drainQueue({ orgId: 5n });
 
-      expect(sendCheckIn.mock.calls.map(([p]) => p.response.tokenId)).toEqual(['900', '100']);
-      expect(sendCheckIn.mock.calls.every(([p]) => p.functionName === 'checkInLate')).toBe(true);
-      expect(sendCheckIn.mock.calls.every(([p]) => p.orgId === 5n)).toBe(true);
+      expect(relayCheckIn.mock.calls.map(([p]) => p.response.tokenId)).toEqual(['900', '100']);
+      // Every drain is a late submission: the relayer submits `checkInForLate`.
+      expect(relayCheckIn.mock.calls.every(([p]) => p.late === true)).toBe(true);
     });
 
-    it('marks an entry confirmed when the op lands', async () => {
+    it('marks an entry confirmed when the relayer mined it', async () => {
       const entry = await tap('777', 'cc');
-      sendCheckIn.mockResolvedValueOnce(landed());
+      relayCheckIn.mockResolvedValueOnce(confirmed());
 
       const after = await drainQueue({ orgId: 5n, now: entry.nextAttemptAt });
 
-      const row = after.find((e) => e.id === entry.id);
-      expect(row?.status).toBe('confirmed');
-      expect(row?.userOpHash).toBe('0xfeed');
+      expect(after.find((e) => e.id === entry.id)?.status).toBe('confirmed');
       expect(await pendingCount()).toBe(0);
     });
 
-    it('leaves a send failure pending with a longer wait', async () => {
+    it('leaves a transport failure pending with a longer wait', async () => {
       const entry = await tap('778', 'dd');
-      sendCheckIn.mockRejectedValueOnce(new Error('bundler unreachable'));
+      relayCheckIn.mockRejectedValueOnce(new Error('relayer unreachable'));
 
       const after = await drainQueue({ orgId: 5n, now: entry.nextAttemptAt });
 
       const row = after.find((e) => e.id === entry.id);
       expect(row?.status).toBe('pending');
       expect(row?.attempts).toBe(1);
-      expect(row?.lastError).toBe('bundler unreachable');
+      expect(row?.lastError).toBe('relayer unreachable');
       expect(row?.nextAttemptAt).toBe(entry.nextAttemptAt + 2000);
     });
 
     it('does not retry before the backoff has elapsed', async () => {
       const entry = await tap('779', 'ee');
-      sendCheckIn.mockRejectedValueOnce(new Error('bundler unreachable'));
+      relayCheckIn.mockRejectedValueOnce(new Error('relayer unreachable'));
       await drainQueue({ orgId: 5n, now: entry.nextAttemptAt });
 
       await drainQueue({ orgId: 5n, now: entry.nextAttemptAt + 1999 });
 
-      expect(sendCheckIn).toHaveBeenCalledTimes(1);
+      expect(relayCheckIn).toHaveBeenCalledTimes(1);
     });
 
-    it('records a revert as failed, with the reason Task 29 reconciles on', async () => {
+    it('parks a simulated revert at once, with the reason the queue screen reads', async () => {
       const entry = await tap('780', 'bb');
-      sendCheckIn.mockResolvedValueOnce({
-        userOpHash: '0xfeed',
-        wait: async () => ({ success: false, blockNumber: 9n, txHash: '0xabc', revertReason: '0xdeadbeef' }),
-      });
+      // The relayer caught the revert in its `eth_call`; retrying it twenty times cannot change it.
+      relayCheckIn.mockRejectedValueOnce(reverted('GATE_CLOSED'));
 
       const after = await drainQueue({ orgId: 5n, now: entry.nextAttemptAt });
 
-      expect(after.find((e) => e.id === entry.id)).toMatchObject({ status: 'failed', lastError: '0xdeadbeef' });
+      expect(after.find((e) => e.id === entry.id)).toMatchObject({ status: 'failed', lastError: 'GATE_CLOSED', attempts: 1 });
+    });
+
+    it('counts an AlreadyCheckedIn as done — the relayer answers it as confirmed', async () => {
+      const entry = await tap('791', '9a');
+      // The backend maps `AlreadyCheckedIn` to success, so a late replay of a tap another gate (or
+      // an earlier drain) already landed comes back confirmed, not as a revert.
+      relayCheckIn.mockResolvedValueOnce({ relayId: '42:791', status: 'confirmed', usedAt: NOW / 1000 });
+
+      const after = await drainQueue({ orgId: 5n, now: entry.nextAttemptAt });
+
+      expect(after.find((e) => e.id === entry.id)?.status).toBe('confirmed');
     });
 
     it('runs one pass at a time, so two callers cannot send the same op twice', async () => {
       const entry = await tap('782', '2b');
-      // The row stays `pending` in the store for the whole of this await, which is exactly the
-      // window a second caller would read it as unsent in. The gate is built before the mock so
-      // `release` exists whether or not the send has been reached yet.
       let release!: () => void;
       const held = new Promise<void>((resolve) => {
         release = resolve;
       });
-      sendCheckIn.mockImplementationOnce(async () => {
+      relayCheckIn.mockImplementationOnce(async () => {
         await held;
-        return landed();
+        return confirmed();
       });
 
       const first = drainQueue({ orgId: 5n, now: entry.nextAttemptAt });
@@ -236,15 +222,13 @@ describe('durable check-in queue', () => {
       release();
       const [a, b] = await Promise.all([first, second]);
 
-      expect(sendCheckIn).toHaveBeenCalledTimes(1);
-      // The joining caller gets the pass it joined, not a second answer.
+      expect(relayCheckIn).toHaveBeenCalledTimes(1);
       expect(b).toEqual(a);
       expect(a.find((e) => e.id === entry.id)).toMatchObject({ status: 'confirmed' });
     });
 
     it('lets the next pass run after one throws', async () => {
       const entry = await tap('783', '3c');
-      // `allEntries()` is the first thing a pass does; failing its read fails the pass itself.
       const originalGetAll = IDBObjectStore.prototype.getAll;
       IDBObjectStore.prototype.getAll = function throwing(this: IDBObjectStore) {
         throw new Error('store gone');
@@ -252,21 +236,19 @@ describe('durable check-in queue', () => {
       await expect(drainQueue({ orgId: 5n, now: entry.nextAttemptAt })).rejects.toThrow('store gone');
       IDBObjectStore.prototype.getAll = originalGetAll;
 
+      relayCheckIn.mockResolvedValueOnce(confirmed());
       await expect(drainQueue({ orgId: 5n, now: entry.nextAttemptAt })).resolves.toHaveLength(1);
-      expect(sendCheckIn).toHaveBeenCalledTimes(1);
+      expect(relayCheckIn).toHaveBeenCalledTimes(1);
     });
 
-    it('treats a wait timeout as sent, never as a failure to re-send', async () => {
+    it('treats a broadcast without a receipt as sent, never as a failure to re-send', async () => {
       const entry = await tap('781', '1a');
-      sendCheckIn.mockResolvedValueOnce({
-        userOpHash: '0xbeef',
-        wait: async () => ({ success: false, blockNumber: 0n, txHash: '0x', revertReason: 'TIMEOUT' }),
-      });
+      // `status: 'sent'` — the relayer broadcast but did not wait for the receipt.
+      relayCheckIn.mockResolvedValueOnce({ relayId: '42:781', status: 'sent' });
 
       const after = await drainQueue({ orgId: 5n, now: entry.nextAttemptAt });
       expect(after.find((e) => e.id === entry.id)).toMatchObject({
         status: 'sent',
-        userOpHash: '0xbeef',
         // Stamped here and nowhere else — Task 29 measures its ten minutes of silence from it.
         sentAt: entry.nextAttemptAt,
       });
@@ -274,7 +256,7 @@ describe('durable check-in queue', () => {
       // This loop never sends it again on its own. Only Task 29 may, and only after the chain
       // has answered that nothing is recorded for ten minutes.
       await drainQueue({ orgId: 5n, now: entry.nextAttemptAt + BACKOFF_CAP_MS });
-      expect(sendCheckIn).toHaveBeenCalledTimes(1);
+      expect(relayCheckIn).toHaveBeenCalledTimes(1);
 
       // Still counted: nothing has reached the chain yet.
       expect(await pendingCount()).toBe(1);
@@ -285,7 +267,7 @@ describe('durable check-in queue', () => {
 
       const after = await drainQueue({ orgId: 5n, isOnline: () => false });
 
-      expect(sendCheckIn).not.toHaveBeenCalled();
+      expect(relayCheckIn).not.toHaveBeenCalled();
       expect(after[0]?.status).toBe('pending');
     });
   });
@@ -293,7 +275,7 @@ describe('durable check-in queue', () => {
   describe('parking', () => {
     it('stops retrying after the attempt limit and leaves the entry for reconciliation', async () => {
       const entry = await tap('783', '3c');
-      sendCheckIn.mockRejectedValue(new Error('bundler unreachable'));
+      relayCheckIn.mockRejectedValue(new Error('relayer unreachable'));
 
       let at = entry.nextAttemptAt;
       for (let i = 0; i < MAX_ATTEMPTS; i += 1) {
@@ -301,27 +283,25 @@ describe('durable check-in queue', () => {
         at = (after.find((e) => e.id === entry.id)?.nextAttemptAt ?? at) + 1;
       }
 
-      expect(sendCheckIn).toHaveBeenCalledTimes(MAX_ATTEMPTS);
+      expect(relayCheckIn).toHaveBeenCalledTimes(MAX_ATTEMPTS);
       const parked = (await allEntries()).find((e) => e.id === entry.id);
       expect(parked).toMatchObject({ status: 'failed', attempts: MAX_ATTEMPTS });
 
       await drainQueue({ orgId: 5n, now: at + BACKOFF_CAP_MS });
-      expect(sendCheckIn).toHaveBeenCalledTimes(MAX_ATTEMPTS);
+      expect(relayCheckIn).toHaveBeenCalledTimes(MAX_ATTEMPTS);
     });
 
-    it('parks the whole queue once the chain\'s deadline — event end + 12 h — has passed', async () => {
+    it("parks the whole queue once the chain's deadline — event end + 12 h — has passed", async () => {
       const endsAt = NOW / 1000;
       const due = await tap('784', '4d');
       const notDue = await tap('785', '4e');
-      // One of the two is not even due for a retry. The deadline is the event's, not the
-      // entry's, so it is just as dead.
-      sendCheckIn.mockRejectedValueOnce(new Error('bundler unreachable'));
+      relayCheckIn.mockRejectedValueOnce(new Error('relayer unreachable'));
       await drainQueue({ orgId: 5n, now: due.nextAttemptAt });
-      sendCheckIn.mockReset();
+      relayCheckIn.mockReset();
 
       const after = await drainQueue({ orgId: 5n, now: NOW + 12 * HOUR + 1, endsAt });
 
-      expect(sendCheckIn).not.toHaveBeenCalled();
+      expect(relayCheckIn).not.toHaveBeenCalled();
       for (const id of [due.id, notDue.id]) {
         expect(after.find((e) => e.id === id)).toMatchObject({ status: 'failed', lastError: LATE_WINDOW_ELAPSED });
       }
@@ -330,32 +310,29 @@ describe('durable check-in queue', () => {
     });
 
     it('still flushes a code far older than 12 h while that deadline has not passed', async () => {
-      // Taps at 20:00, event ends at 23:00, the gate reconnects at 09:00 the next morning. The
-      // code is thirteen hours old and `Ticket.sol:437` does not care — it anchors on the event
-      // start — while `Ticket.sol:419` takes the submission until 11:00.
       const endsAt = NOW / 1000 + 3 * 3600;
       const entry = await tap('786', '5f');
-      sendCheckIn.mockResolvedValueOnce(landed());
+      relayCheckIn.mockResolvedValueOnce(confirmed());
 
       const after = await drainQueue({ orgId: 5n, now: NOW + 13 * HOUR, endsAt });
 
-      expect(sendCheckIn).toHaveBeenCalledTimes(1);
+      expect(relayCheckIn).toHaveBeenCalledTimes(1);
       expect(after.find((e) => e.id === entry.id)?.status).toBe('confirmed');
     });
 
     it('parks nothing pre-emptively when the event end is not known', async () => {
       const entry = await tap('787', '6a');
-      sendCheckIn.mockResolvedValueOnce(landed());
+      relayCheckIn.mockResolvedValueOnce(confirmed());
 
       const after = await drainQueue({ orgId: 5n, now: NOW + 100 * 24 * HOUR });
 
-      expect(sendCheckIn).toHaveBeenCalledTimes(1);
+      expect(relayCheckIn).toHaveBeenCalledTimes(1);
       expect(after.find((e) => e.id === entry.id)?.status).toBe('confirmed');
     });
 
     it('counts parked entries separately from the ones still on their way', async () => {
       const parked = await tap('788', '6b');
-      sendCheckIn.mockRejectedValue(new Error('bundler unreachable'));
+      relayCheckIn.mockRejectedValue(new Error('relayer unreachable'));
       let at = parked.nextAttemptAt;
       for (let i = 0; i < MAX_ATTEMPTS; i += 1) {
         const after = await drainQueue({ orgId: 5n, now: at });
@@ -365,63 +342,6 @@ describe('durable check-in queue', () => {
 
       expect(await parkedCount()).toBe(1);
       expect(await pendingCount()).toBe(1);
-    });
-  });
-
-  describe('the ABI gate', () => {
-    it('dry-runs and keeps the entry while the deployed ABI has no checkInLate', async () => {
-      ticketAbi.length = 0;
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      const entry = await tap('785', '5e');
-
-      const after = await drainQueue({ orgId: 5n, now: entry.nextAttemptAt });
-
-      expect(hasLateCheckIn()).toBe(false);
-      expect(sendCheckIn).not.toHaveBeenCalled();
-      expect(after.find((e) => e.id === entry.id)).toMatchObject({
-        status: 'pending',
-        attempts: 0,
-        lastError: DRY_RUN_MARK,
-      });
-      expect(warn).toHaveBeenCalledTimes(1);
-      warn.mockRestore();
-    });
-
-    it('marks a dry run once instead of rewriting the queue on every drain', async () => {
-      ticketAbi.length = 0;
-      const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      const entry = await tap('790', '7f');
-
-      const originalPut = IDBObjectStore.prototype.put;
-      let puts = 0;
-      IDBObjectStore.prototype.put = function patched(this: IDBObjectStore, ...args: Parameters<IDBObjectStore['put']>) {
-        puts += 1;
-        return originalPut.apply(this, args);
-      } as IDBObjectStore['put'];
-      try {
-        await drainQueue({ orgId: 5n, now: entry.nextAttemptAt });
-        expect(puts).toBe(1);
-        // Nothing about the row changed, so nothing is written again.
-        await drainQueue({ orgId: 5n, now: entry.nextAttemptAt + 1 });
-        expect(puts).toBe(1);
-      } finally {
-        IDBObjectStore.prototype.put = originalPut;
-      }
-
-      expect(warned).toHaveBeenCalledTimes(2);
-      warned.mockRestore();
-    });
-
-    /**
-     * The gate is the generated ABI and never a flag, which is what let the drain switch itself
-     * on: 01b redeployed on 2026-09-23, `checkInLate` is in `Ticket.json`, and the dry run above
-     * is now reachable only by emptying the ABI the way those two tests do. It reads `false`
-     * again the day somebody ships a bundle built against an older export — which is the case
-     * the runtime guard is still there for.
-     */
-    it('is the generated ABI and not a flag: 01b redeployed, so this reads true', async () => {
-      const shared = await vi.importActual<{ ticketAbi: Abi }>('@monti/shared');
-      expect(shared.ticketAbi.some((e) => e.type === 'function' && e.name === 'checkInLate')).toBe(true);
     });
   });
 });
