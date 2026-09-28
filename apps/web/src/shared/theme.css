@@ -379,7 +379,7 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
   line-height: normal;
 }
 .field-pair { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-2); }
-.filters { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s-2); }
+.filters { display: flex; flex-direction: column; gap: var(--s-2); }
 .filters .field { margin: var(--s-2) 0; }
 .filters .field span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 

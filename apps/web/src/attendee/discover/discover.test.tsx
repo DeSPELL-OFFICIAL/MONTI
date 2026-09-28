@@ -203,11 +203,11 @@ describe('Discover', () => {
     renderDiscover();
     expect(await screen.findByText('재즈 나이트')).toBeInTheDocument();
 
-    await userEvent.selectOptions(screen.getByLabelText('날짜'), 'week');
+    await userEvent.click(screen.getByRole('button', { name: '이번 주' }));
     expect(screen.queryByText('개발자 모임')).toBeNull();
     expect(screen.getByText('재즈 나이트')).toBeInTheDocument();
 
-    await userEvent.selectOptions(screen.getByLabelText('날짜'), 'all');
+    await userEvent.click(screen.getByRole('button', { name: '전체' }));
     await userEvent.selectOptions(screen.getByLabelText('지역'), 'KR-26');
     expect(screen.queryByText('재즈 나이트')).toBeNull();
     expect(screen.getByText('개발자 모임')).toBeInTheDocument();

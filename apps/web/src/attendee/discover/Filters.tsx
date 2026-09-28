@@ -25,31 +25,36 @@ export function Filters({
 
   return (
     <div className="filters">
-      <Field label={copy.discover.filterDate}>
-        <select
-          value={value.range}
-          onChange={(event) => onChange({ ...value, range: event.target.value as DateRange })}
-        >
-          {RANGES.map((range) => (
-            <option key={range} value={range}>
-              {rangeLabels[range]}
-            </option>
-          ))}
-        </select>
-      </Field>
+      {/* 날짜는 가장 자주 쓰는 필터라 칩 한 줄로 늘 보이게 두고, 지역·테마는 접어 첫 화면을
+          점유하지 않게 한다(visual R1-10). */}
+      <div className="chip-row" role="group" aria-label={copy.discover.filterDate}>
+        {RANGES.map((range) => (
+          <button
+            key={range}
+            type="button"
+            className={value.range === range ? 'chip chip--on' : 'chip'}
+            aria-pressed={value.range === range}
+            onClick={() => onChange({ ...value, range })}
+          >
+            {rangeLabels[range]}
+          </button>
+        ))}
+      </div>
 
-      <Field label={copy.discover.filterRegion}>
-        <select value={value.region} onChange={(event) => onChange({ ...value, region: event.target.value })}>
-          <option value="">{copy.discover.categoryAll}</option>
-          {REGION_CODES.map((region) => (
-            <option key={region} value={region}>
-              {copy.discover.regions[region]}
-            </option>
-          ))}
-        </select>
-      </Field>
+      <details className="more">
+        <summary>{copy.discover.moreFilters}</summary>
+        <Field label={copy.discover.filterRegion}>
+          <select value={value.region} onChange={(event) => onChange({ ...value, region: event.target.value })}>
+            <option value="">{copy.discover.categoryAll}</option>
+            {REGION_CODES.map((region) => (
+              <option key={region} value={region}>
+                {copy.discover.regions[region]}
+              </option>
+            ))}
+          </select>
+        </Field>
 
-      <Field label={copy.discover.filterCategory}>
+        <Field label={copy.discover.filterCategory}>
         <select
           value={String(value.category)}
           onChange={(event) =>
@@ -66,7 +71,8 @@ export function Filters({
             </option>
           ))}
         </select>
-      </Field>
+        </Field>
+      </details>
     </div>
   );
 }

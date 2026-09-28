@@ -87,7 +87,7 @@ export const en: typeof ko = {
   },
   discover: {
     title: 'Explore', searchPlaceholder: 'Search events', create: 'Create an event',
-    filterDate: 'Date', filterRegion: 'Region', filterCategory: 'Theme',
+    filterDate: 'Date', filterRegion: 'Region', filterCategory: 'Theme', moreFilters: 'Region & theme',
     dateToday: 'Today', dateWeek: 'This week', dateMonth: 'This month', datePick: 'Pick a date',
     categoryAll: 'All',
     // See the Korean block: shared/eventThemes.ts owns the list and the order, this owns names.

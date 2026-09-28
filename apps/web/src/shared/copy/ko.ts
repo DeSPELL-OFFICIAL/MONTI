@@ -90,7 +90,7 @@ export const ko = {
   },
   discover: {
     title: '탐색', searchPlaceholder: '행사 이름 검색', create: '행사 만들기',
-    filterDate: '날짜', filterRegion: '지역', filterCategory: '테마',
+    filterDate: '날짜', filterRegion: '지역', filterCategory: '테마', moreFilters: '지역·테마',
     dateToday: '오늘', dateWeek: '이번 주', dateMonth: '이번 달', datePick: '직접 선택',
     categoryAll: '전체',
     // 테마 = 행사 카테고리. 목록과 순서는 shared/eventThemes.ts 가 갖고, 이름만 여기 있다.
