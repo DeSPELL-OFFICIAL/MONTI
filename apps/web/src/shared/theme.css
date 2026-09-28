@@ -402,6 +402,12 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
   display: block; width: 100%; border-radius: var(--r-lg); margin-bottom: var(--s-3);
   box-shadow: var(--glass-shadow);
 }
+/* visual R1-7 — the detail screen leads with the event's face. The poster keeps the rule above;
+   the ticket-art hero is the portrait ticket capped short of full width so the card and the sticky
+   primary stay in reach, and the placeholder is a plain brand-colour band for an event with neither
+   a picture nor a poster, so the screen is never text on white. */
+.event-hero-art { max-width: 240px; margin: 0 auto var(--s-3); }
+.event-hero--placeholder { aspect-ratio: 3 / 2; background: var(--brand-grad); }
 /* A grouped inset list: the enclosing card is the rounded-20 group with the 16px gutter, and the
    rows inside it are told apart by a hairline rather than by a gap — iOS's own list, with the last
    row flush to the card's foot and no rule under it. */
