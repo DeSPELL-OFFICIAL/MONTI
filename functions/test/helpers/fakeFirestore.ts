@@ -43,6 +43,8 @@ function matches(data: Record<string, unknown>, [name, op, value]: Filter): bool
   const actual = field(data, name);
   if (op === '==') return actual === value;
   if (op === '<=') return (actual as number) <= (value as number);
+  if (op === '<') return (actual as number) < (value as number);
+  if (op === 'in') return Array.isArray(value) && value.includes(actual);
   throw new Error(`UNSUPPORTED_OP:${op}`);
 }
 
