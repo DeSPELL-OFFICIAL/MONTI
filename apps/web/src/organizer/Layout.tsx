@@ -158,9 +158,13 @@ function OrganizerHome() {
         </Button>
       </details>
 
+      {/* While the organisations are still loading the button stays live rather than greyed out:
+          a half-transparent FAB over a spinner reads as "you may not", when the real answer is
+          "not known yet" (visual R1-8). The session guard (S5) and a resolved "no permission"
+          are the only two states that actually disable it. */}
       <Fab
         label={copy.home.create}
-        disabled={sessionLoading || selected === undefined || !selected.canCreateEvent}
+        disabled={sessionLoading || (!orgsLoading && (selected === undefined || !selected.canCreateEvent))}
         onClick={() => navigate(selected === undefined ? '/org/new' : `/org/new?org=${selected.orgId}`)}
       />
     </Screen>
