@@ -16,6 +16,7 @@ import {
   db,
 } from '../lib/db.js';
 import { sendSetKycLevel } from '../lib/kycLevel.js';
+import { predeployAccount } from '../lib/predeployAccount.js';
 
 const ZERO = '0x0000000000000000000000000000000000000000';
 /** 이보다 오래 그대로인 문서만 본다. 살아 있는 호출이 마무리 중인 문서는 건드리지 않는다. */
@@ -31,6 +32,12 @@ const SWEEP_LIMIT = 200;
  * 미룬 문서는 `updatedAt` 을 건드리지 않으므로 다음 5분 틱이 이들을 가장 먼저 집는다.
  */
 const MAX_KYC_RESENDS_PER_RUN = 20;
+/**
+ * 한 실행이 다시 배포할 스마트 계정 수. registerIdentity 의 사전 배포가 실패하면
+ * `chain.accountDeployPending` 딱지가 남고, 이 스윕이 주워 createAccount 를 다시 보낸다.
+ * 상한이 없으면 밀린 딱지가 어테스터 잔액을 한 번에 태우고 300초 예산을 넘긴다.
+ */
+const MAX_PREDEPLOYS_PER_RUN = 50;
 /**
  * 승인 없이 이만큼 지난 게이트 제안은 만료로 내린다. 스태프가 단말기를 설치하고 주최자가
  * 승인하기까지 걸리는 시간은 길어야 공연 준비 기간이다 — 일주일이면 그 제안은 버려진 것이고,
@@ -301,10 +308,12 @@ async function reconcileRegistration(
     else error('reconcile.claims.noAccount', { personId });
 
     assertStatusTransition(status, 'active');
+    // 사전 배포 딱지를 붙인다 — 여기까지 온 사람은 registerIdentity 가 죽어 사전 배포를 못 거친
+    // 경우라 계정 코드가 없을 수 있다. `sweepPredeployAccounts` 가 확인하고 필요하면 배포한다.
     await doc.ref.set(
       {
         status: 'active',
-        chain: { block: Number(receipt.blockNumber) },
+        chain: { block: Number(receipt.blockNumber), accountDeployPending: true },
         updatedAt: FieldValue.serverTimestamp(),
       },
       { merge: true },
@@ -323,7 +332,14 @@ async function reconcileRegistration(
   // 계정 주소의 원본은 체인이다 — DB 에 `account` 가 없어도 세션을 살릴 수 있다.
   await mintClaimsForPerson(personId, onChain);
   assertStatusTransition(status, 'active');
-  await doc.ref.set({ status: 'active', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  await doc.ref.set(
+    {
+      status: 'active',
+      chain: { accountDeployPending: true },
+      updatedAt: FieldValue.serverTimestamp(),
+    },
+    { merge: true },
+  );
 }
 
 /** 2분 넘게 `pending`·`kyc_ok` 에 멈춘 사람을 체인과 대조해 고친다(스펙 §10.4 규칙 3). */
@@ -487,6 +503,45 @@ async function sweepAbandonedKyc(): Promise<void> {
 }
 
 /**
+ * `account` 는 있는데 스마트 계정이 아직 체인에 없는 사람에게 createAccount 를 다시 보낸다.
+ *
+ * registerIdentity 의 사전 배포가 실패하면 `chain.accountDeployPending` 딱지가 남고
+ * (인스턴스 사망으로 대사 승격을 거친 사람도 이 딱지를 단다), 여기서 그 딱지를 질의로 집어
+ * `predeployAccount` 에 넘긴다 — 그 함수가 코드 유무를 확인해 이미 있으면 딱지를 걷고, 없으면
+ * 배포한다(멱등). 질의를 `MAX_PREDEPLOYS_PER_RUN` 로 잘라 한 실행의 어테스터 전송과 RPC 를
+ * 함께 묶는다. 남은 딱지는 `updatedAt` 을 앞당기지 않으므로 다음 틱이 그대로 이어 집는다.
+ *
+ * 딱지가 붙은 계정 주소가 없으면 배포할 것이 없으니 딱지만 걷어 창을 비운다.
+ */
+async function sweepPredeployAccounts(): Promise<void> {
+  const snapshot = await db
+    .collection(PERSONS)
+    .where('chain.accountDeployPending', '==', true)
+    .limit(MAX_PREDEPLOYS_PER_RUN)
+    .get();
+  if (snapshot.empty) return;
+
+  for (const doc of snapshot.docs) {
+    try {
+      const account = doc.get('account') as Hex | undefined;
+      if (!account) {
+        await doc.ref.set(
+          {
+            chain: { accountDeployPending: FieldValue.delete() },
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        );
+        continue;
+      }
+      await predeployAccount({ personRef: doc.ref, personId: doc.id as Hex, account });
+    } catch (cause) {
+      error('reconcile.predeploy', { personId: doc.id, reason: (cause as Error).message });
+    }
+  }
+}
+
+/**
  * 5분마다 도는 대사(對査) 함수. 체인과 DB 를 함께 건드리다 중간에 죽은 작업을 주워 고친다
  * (스펙 §10.4 규칙 3의 "주기적 대사 함수").
  *
@@ -504,6 +559,7 @@ export const reconcilePending = onSchedule(
       ['authChallenges', sweepAuthChallenges],
       ['pendingGates', sweepPendingGates],
       ['abandonedKyc', sweepAbandonedKyc],
+      ['predeployAccounts', sweepPredeployAccounts],
     ] as const;
 
     for (const [name, sweep] of sweeps) {

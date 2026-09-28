@@ -12,10 +12,28 @@ const DIGITS_RE = /^[0-9]+$/;
 export const MAX_ART_TIERS = 8;
 
 /**
- * 웹이 번들로 들고 있는 기본 그림 넷. 값은 **키 한 글자**다 — 그림 자체는 순수 SVG
+ * 웹이 번들로 들고 있는 기본 그림 열둘. 값은 **키 한 글자**다 — 그림 자체는 순수 SVG
  * 컴포넌트라 핀도 CID 도 업로드도 없고, Firestore 에 들어가는 것은 1바이트뿐이다.
+ *
+ * 이 목록은 `firestore.rules` 의 `artOk` 와 **같아야 한다**. 규칙 파일은 TS 를 읽지 못해
+ * 글자 목록이 두 벌로 존재할 수밖에 없고, 여기만 넓히면 새 글자를 고른 순간부터 초안
+ * 자동저장이 문서 단위 권한 오류로 통째로 죽는다. 두 벌의 대조는 `eventArt.test.ts` 가
+ * 규칙 파일을 직접 읽어 배포 전에 잡는다.
  */
-export const ART_PRESETS = ['a', 'b', 'c', 'd'] as const;
+export const ART_PRESETS = [
+  'a',
+  'b',
+  'c',
+  'd',
+  'e',
+  'f',
+  'g',
+  'h',
+  'i',
+  'j',
+  'k',
+  'l',
+] as const;
 export type ArtPreset = (typeof ART_PRESETS)[number];
 
 /** 종류 한 칸의 그림. 기본 넷 중 하나이거나 주최자가 직접 올린 그림 하나다 — **둘 중 하나뿐**이다. */

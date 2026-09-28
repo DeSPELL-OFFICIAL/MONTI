@@ -433,6 +433,7 @@ Ticket.EventCreated.handler(async ({ event, context }) => {
     creator: addr(event.params.creator),
     ...metaColumns(meta),
     status: 'Draft',
+    pendingRequests: 0,
   });
   await writeTiers(context, eventId, tiers);
 });
@@ -679,4 +680,78 @@ Ticket.OfferAccepted.handler(async ({ event, context }) => {
   const current = await context.Offer.get(event.params.tokenId.toString());
   if (!current) return;
   context.Offer.set({ ...current, status: 'accepted' });
+});
+
+// ─────────────────────── Ticket: 승인제 클레임(01c) ───────────────────────
+
+/**
+ * `Event.pendingRequests` 를 하나 내린다. **0 밑으로는 내려가지 않는다.**
+ * 카운터는 오직 Pending 을 떠날 때만 낮춘다(아래 두 핸들러의 status 검사) — 이미
+ * 결정된 요청에 종결 이벤트가 다시 재생돼도 여기까지 오지 않으므로 재생·중복에 안전하다.
+ */
+async function decrementPending(context: handlerContext, eventId: bigint): Promise<void> {
+  const evt = await context.Event.get(eventId.toString());
+  if (!evt) return;
+  context.Event.set({ ...evt, pendingRequests: Math.max(0, evt.pendingRequests - 1) });
+}
+
+/**
+ * `requestClaim` → `ClaimRequested(eventId, requestId, requester, tier)`. Pending 행을
+ * 열고 그 공연의 `pendingRequests` 를 +1 한다. id 는 `eventId-requestId` — requestId 는
+ * `requestClaim` 이 돌려주는 공연별 순번이다. 공연을 못 본 경우(구독 시작 전)에도 요청
+ * 행은 남기되 카운터는 올리지 않는다.
+ */
+Ticket.ClaimRequested.handler(async ({ event, context }) => {
+  const eventId = event.params.eventId;
+  context.ClaimRequest.set({
+    id: `${eventId}-${event.params.requestId}`,
+    eventId,
+    requestId: event.params.requestId,
+    requester: addr(event.params.requester),
+    tier: Number(event.params.tier),
+    status: 'Pending',
+    tokenId: undefined,
+    requestedAt: BigInt(event.block.timestamp),
+    decidedAt: undefined,
+    txHash: event.transaction.hash,
+  });
+  const evt = await context.Event.get(eventId.toString());
+  if (evt) context.Event.set({ ...evt, pendingRequests: evt.pendingRequests + 1 });
+});
+
+/**
+ * `approveClaims` → `ClaimApproved(eventId, requestId, tokenId)`. 요청을 Approved 로
+ * 닫고 민팅된 tokenId 를 싣는다 — 짝이 되는 `Claimed` 가 **먼저** 와서 `Ticket` 행은
+ * 이미 만들어져 있다(Ticket.sol). 카운터는 이 요청이 Pending 이었을 때만 내린다.
+ */
+Ticket.ClaimApproved.handler(async ({ event, context }) => {
+  const id = `${event.params.eventId}-${event.params.requestId}`;
+  const current = await context.ClaimRequest.get(id);
+  if (!current) return;
+  context.ClaimRequest.set({
+    ...current,
+    status: 'Approved',
+    tokenId: event.params.tokenId,
+    decidedAt: BigInt(event.block.timestamp),
+  });
+  if (current.status === 'Pending') await decrementPending(context, event.params.eventId);
+});
+
+/**
+ * `rejectClaims` **와** `cancelRequest` 가 모두 `ClaimRejected(eventId, requestId)` 를 낸다.
+ * 취소 전용 이벤트가 없고(actor 가 로그에 없으며 페이마스터가 msg.sender 를 가린다),
+ * 컨트랙트의 `claimRequest` 뷰도 reject 와 cancel 을 상태 2 로 합치므로(Ticket.sol),
+ * 요청자 본인 취소도 주최자 거절과 구분되지 않고 **Rejected** 로 떨어진다. 카운터는
+ * 이 요청이 Pending 이었을 때만 내려 재생·중복에 안전하다.
+ */
+Ticket.ClaimRejected.handler(async ({ event, context }) => {
+  const id = `${event.params.eventId}-${event.params.requestId}`;
+  const current = await context.ClaimRequest.get(id);
+  if (!current) return;
+  context.ClaimRequest.set({
+    ...current,
+    status: 'Rejected',
+    decidedAt: BigInt(event.block.timestamp),
+  });
+  if (current.status === 'Pending') await decrementPending(context, event.params.eventId);
 });

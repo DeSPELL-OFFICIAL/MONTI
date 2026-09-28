@@ -162,6 +162,13 @@ vi.mock('../src/lib/chain.js', () => ({
   deployment: () => ({ identity: IDENTITY }),
 }));
 
+/**
+ * 계정 사전 배포는 그 자체 테스트(predeployAccount.test.ts)가 있으므로 여기서는 스파이로 둔다 —
+ * 이 파일은 "등록이 끝난 뒤에만, 그리고 등록을 막지 않고 불린다" 만 확인한다.
+ */
+const predeployAccount = vi.fn(async (_params: unknown) => {});
+vi.mock('../src/lib/predeployAccount.js', () => ({ predeployAccount }));
+
 const { registerIdentity } = await import('../src/functions/registerIdentity.js');
 const functionsTest = (await import('firebase-functions-test')).default();
 const wrapped = functionsTest.wrap(registerIdentity);
@@ -189,6 +196,7 @@ beforeEach(() => {
   waitForTransactionReceipt.mockClear();
   awaitFinalized.mockClear();
   setCustomUserClaims.mockClear();
+  predeployAccount.mockClear();
   seedCaller();
   seedPerson();
 });
@@ -325,13 +333,17 @@ describe('registerIdentity — idempotency (spec §10.4 rule 3)', () => {
 });
 
 describe('registerIdentity — the attester is a single key', () => {
-  it('refuses to send while another attester transaction holds the lease', async () => {
-    write('system/attester', { holder: 'someone-else', lockedUntil: Date.now() + 10_000 });
-    await expect(call()).rejects.toThrow('ATTESTER_BUSY');
-    expect(sendAttesterTx).not.toHaveBeenCalled();
-    // 잠금 실패로 끝난 자리에 pending 딱지가 남으면 이 사람은 영원히 가입을 못 한다.
-    expect(snapshot(`persons/${PERSON_ID}`).get('chain.registerPending')).toBeUndefined();
-    expect(field(docs.get('system/attester'), 'holder')).toBe('someone-else');
+  it('waits for a held lease to free instead of failing fast, then sends once', async () => {
+    // 예전에는 리스가 잡혀 있으면 바로 429(ATTESTER_BUSY) 였다. 이제는 풀릴 때까지 기다린다 —
+    // 어테스터 EOA 가 하나라 동시 가입이 겹치면 경합은 일상이고, 바로 떨어뜨리면 멀쩡한 가입이 실패한다.
+    write('system/attester', { holder: 'someone-else', lockedUntil: Date.now() + 60_000 });
+    // 다른 트랜잭션이 잠깐 들고 있다가 첫 폴링(500ms) 전에 놓는다.
+    setTimeout(() => write('system/attester', { holder: null, lockedUntil: 0 }), 200);
+    await expect(call()).resolves.toEqual({ txHash: TX, claimsUpdated: true });
+    expect(sendAttesterTx).toHaveBeenCalledTimes(1);
+    expect(snapshot(`persons/${PERSON_ID}`).get('status')).toBe('active');
+    // 기다린 뒤 우리가 리스를 잡았다가 반납했다.
+    expect(field(docs.get('system/attester'), 'lockedUntil')).toBe(0);
   });
 
   it('takes an expired lease over', async () => {
@@ -524,5 +536,50 @@ describe('registerIdentity — the session claims follow the chain', () => {
       'PERSON_MISMATCH',
     );
     expect(setCustomUserClaims).not.toHaveBeenCalled();
+  });
+});
+
+describe('registerIdentity — pre-deploys the smart account (so later ops carry no initCode)', () => {
+  it('pre-deploys the account after a fresh register, keyed on the same person and account', async () => {
+    await call();
+    expect(predeployAccount).toHaveBeenCalledTimes(1);
+    const arg = predeployAccount.mock.calls[0]![0] as {
+      personRef: { path: string };
+      personId: string;
+      account: string;
+    };
+    expect(arg.personId).toBe(PERSON_ID);
+    expect(arg.account).toBe(ACCOUNT);
+    expect(arg.personRef.path).toBe(`persons/${PERSON_ID}`);
+    // 등록이 실제로 나간 뒤에만 불린다.
+    expect(sendAttesterTx).toHaveBeenCalledTimes(1);
+  });
+
+  it('pre-deploys on the already-a-member short circuit too', async () => {
+    readContract.mockResolvedValueOnce(true as never);
+    await expect(call()).resolves.toEqual({ alreadyRegistered: true, claimsUpdated: true });
+    expect(predeployAccount).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not pre-deploy again on the finalized short circuit', async () => {
+    // 이미 완료된 재호출이다. 원래 호출(또는 대사 스윕)이 배포를 맡았으므로 다시 부르지 않는다.
+    write(`persons/${PERSON_ID}`, { chain: { registerTx: OTHER_TX, block: 12 } }, { merge: true });
+    await call();
+    expect(predeployAccount).not.toHaveBeenCalled();
+  });
+
+  it('never pre-deploys when the register transaction reverted', async () => {
+    waitForTransactionReceipt.mockResolvedValueOnce({
+      status: 'reverted',
+      blockNumber: 100n,
+    } as never);
+    await expect(call()).rejects.toThrow('REGISTER_REVERTED');
+    expect(predeployAccount).not.toHaveBeenCalled();
+  });
+
+  it('stays a successful signup even when the pre-deploy step throws', async () => {
+    predeployAccount.mockRejectedValueOnce(new Error('RPC down'));
+    await expect(call()).resolves.toEqual({ txHash: TX, claimsUpdated: true });
+    expect(snapshot(`persons/${PERSON_ID}`).get('status')).toBe('active');
   });
 });

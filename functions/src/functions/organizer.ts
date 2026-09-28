@@ -37,7 +37,7 @@ export const MAX_IMAGE_EDGE_PX = 4000;
  * 초안을 쓰는 사람은 아직 주최사가 없기 때문이다. 그 자리를 열어 두면 로그인한
  * 아무나 우리 Pinata 저장 공간을 채울 수 있으므로, 사람 단위 일일 한도가 유일한 문지기다.
  */
-export const MAX_PINS_PER_DAY = 20;
+export const MAX_PINS_PER_DAY = 60; // 60 per person per day — Pinata free tier is ample for the MVP
 
 /** 선택 칸 하나의 상한. 탐색 화면의 한 줄에 들어갈 만큼만 받는다. */
 export const MAX_META_FIELD_CHARS = 200;
