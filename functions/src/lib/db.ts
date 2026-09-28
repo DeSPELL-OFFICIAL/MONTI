@@ -2,6 +2,7 @@ import { getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 import type { PersonStatus } from '@monti/shared';
+import { ADMISSIONS, ADMISSION_TOKENS, RELAYS } from './relayTypes.js';
 
 if (getApps().length === 0) initializeApp();
 
@@ -66,6 +67,12 @@ export const RECOVERY_QUOTA = 'recoveryQuota';
 export const SYSTEM = 'system';
 
 /**
+ * 릴레이 상태·대기 테이블 컬렉션 이름. 정의는 `relayTypes.ts` 한 곳이고(웹과 공유), 여기서
+ * 다시 내보내 정적 일관성 스캔(허용 목록)이 `db.ts` 상수로 해석할 수 있게 한다.
+ */
+export { ADMISSIONS, ADMISSION_TOKENS, RELAYS };
+
+/**
  * Functions가 쓸 수 있는 컬렉션의 전부. 스펙 §10.4 규칙 1에 따라
  * 티켓 상태·권한·입장 기록 컬렉션은 여기에 없고, Task 31이 소스를 스캔해 강제한다.
  */
@@ -89,6 +96,9 @@ export const ALLOWED_COLLECTIONS = [
   PIN_QUOTA,
   RECOVERY_QUOTA,
   SYSTEM,
+  RELAYS,
+  ADMISSIONS,
+  ADMISSION_TOKENS,
   'members',
   'messages',
 ] as const;

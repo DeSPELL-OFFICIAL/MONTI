@@ -52,6 +52,8 @@ beforeEach(async () => {
     await db.doc('eventChats/11/members/uid-1').set({ account: ACCOUNT, joinedAt: 1 });
     await db.doc('eventChats/12').set({ closed: true, endsAt: 1, orgId: '1' });
     await db.doc('eventChats/12/members/uid-1').set({ account: ACCOUNT, joinedAt: 1 });
+    await db.doc('relays/r1').set({ personId: '0xaa', account: ACCOUNT, kind: 'claim', status: 'sent' });
+    await db.doc('admissions/7/tokens/42').set({ status: 'passing', gateId: 'g1', relayId: 'r1' });
   });
 });
 
@@ -594,5 +596,47 @@ describe('eventDrafts/{uid}/drafts/{draftId}', () => {
     const db = owner();
     await assertSucceeds(db.doc(MINE).update({ description: 'x'.repeat(5000) }));
     await assertFails(db.doc(MINE).update({ description: 'x'.repeat(5001) }));
+  });
+});
+
+describe('relays/{relayId}', () => {
+  // 소유자 판정은 토큰의 personId 클레임과 문서의 personId 다(mintSessionClaims 와 같은 모양).
+  function attendee() {
+    return env.authenticatedContext('uid-1', { account: ACCOUNT, personId: '0xaa' }).firestore();
+  }
+
+  it('lets the owning person read their own relay', async () => {
+    await assertSucceeds(attendee().doc('relays/r1').get());
+  });
+
+  it("blocks reading another person's relay", async () => {
+    const other = env.authenticatedContext('uid-2', { account: '0x02', personId: '0xbb' }).firestore();
+    await assertFails(other.doc('relays/r1').get());
+  });
+
+  it('blocks an anonymous read', async () => {
+    await assertFails(env.unauthenticatedContext().firestore().doc('relays/r1').get());
+  });
+
+  it('blocks client writes even by the owner (server-only)', async () => {
+    await assertFails(attendee().doc('relays/r1').set({ status: 'confirmed' }, { merge: true }));
+    await assertFails(attendee().doc('relays/r2').set({ personId: '0xaa', status: 'pending' }));
+  });
+});
+
+describe('admissions/{eventId}/tokens/{tokenId}', () => {
+  it('lets any signed-in session read an admission token (staff/gate)', async () => {
+    await assertSucceeds(owner().doc('admissions/7/tokens/42').get());
+    const staff = env.authenticatedContext('uid-2', { account: '0x02', personId: '0xbb' }).firestore();
+    await assertSucceeds(staff.doc('admissions/7/tokens/42').get());
+  });
+
+  it('blocks an anonymous read', async () => {
+    await assertFails(env.unauthenticatedContext().firestore().doc('admissions/7/tokens/42').get());
+  });
+
+  it('blocks client writes (server-only)', async () => {
+    await assertFails(owner().doc('admissions/7/tokens/42').set({ status: 'confirmed' }, { merge: true }));
+    await assertFails(owner().doc('admissions/7/tokens/99').set({ status: 'passing' }));
   });
 });

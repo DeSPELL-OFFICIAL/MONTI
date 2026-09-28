@@ -17,6 +17,7 @@ import {
 } from '../lib/db.js';
 import { sendSetKycLevel } from '../lib/kycLevel.js';
 import { predeployAccount } from '../lib/predeployAccount.js';
+import { sweepRelays } from './reconcileRelays.js';
 
 const ZERO = '0x0000000000000000000000000000000000000000';
 /** 이보다 오래 그대로인 문서만 본다. 살아 있는 호출이 마무리 중인 문서는 건드리지 않는다. */
@@ -560,6 +561,7 @@ export const reconcilePending = onSchedule(
       ['pendingGates', sweepPendingGates],
       ['abandonedKyc', sweepAbandonedKyc],
       ['predeployAccounts', sweepPredeployAccounts],
+      ['relays', sweepRelays],
     ] as const;
 
     for (const [name, sweep] of sweeps) {
