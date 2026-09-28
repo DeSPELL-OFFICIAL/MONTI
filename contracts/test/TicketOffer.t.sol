@@ -26,8 +26,7 @@ contract TicketOfferTest is MontiTest {
         _member(BOB, 0xB0B0);
         orgId = _org();
         eventId = _freeEvent(orgId, 1, 2, true);
-        vm.prank(ALICE);
-        tokenId = ticket.claim(eventId, 0, "");
+        tokenId = _claimForFixture(ALICE, eventId, 0);
     }
 
     function _sig(uint256 tokenId_, bytes32 commitment, address to) internal view returns (bytes memory) {
@@ -107,8 +106,7 @@ contract TicketOfferTest is MontiTest {
 
     function test_acceptOfferBlockedForLevelZeroOnAKycEvent() public {
         uint256 kycEventId = _kycEvent(orgId);
-        vm.prank(ALICE);
-        uint256 kycToken = ticket.claim(kycEventId, 0, "");
+        uint256 kycToken = _claimForFixture(ALICE, kycEventId, 0);
         _memberWithLevel(address(0xD0), 0xD0D0, 0);
 
         vm.prank(ALICE);
@@ -163,7 +161,7 @@ contract TicketOfferTest is MontiTest {
 
         uint256 gateId;
         vm.startPrank(ORG_OWNER);
-        gateId = organizers.registerGate(eventId, GATE_A, bytes32(uint256(0x6A01)), bytes32(uint256(0x6A02)));
+        gateId = organizers.registerGate(eventId, GATE_A, GATE_KX, GATE_KY);
         organizers.openGate(gateId);
         vm.stopPrank();
 
@@ -171,11 +169,8 @@ contract TicketOfferTest is MontiTest {
         Ticket.GateCode memory code = Ticket.GateCode({
             gateId: gateId, eventId: P256Vectors.EVENT_ID, issuedAt: P256Vectors.ISSUED_AT, nonce: P256Vectors.NONCE
         });
-        // 서명을 먼저 만든다. _deviceSig 는 sha256 프리컴파일과 치트코드를 부르므로 prank 뒤에
-        // 두면 그 prank 를 먹어 치운다(Task 9 가 _sig 에서 겪은 것과 같은 함정이다).
-        bytes memory deviceSig = _deviceSig(tokenId, code);
-        vm.prank(GATE_A);
-        ticket.checkIn(tokenId, code, deviceSig);
+        // 릴레이 입장: 게이트 서명 + 관객 기기 서명을 임의 RELAYER 가 대신 제출한다.
+        _checkInFor(tokenId, code);
 
         assertEq(ticket.offerOf(tokenId).from, address(0));
         bytes memory sig = _sig(tokenId, COMMITMENT, BOB);

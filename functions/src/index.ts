@@ -18,6 +18,7 @@ export { reconcilePending } from './functions/reconcilePending.js';
 export { registerIdentity } from './functions/registerIdentity.js';
 export { saveEventArt } from './functions/eventArt.js';
 export { registerPasskey } from './functions/registerPasskey.js';
+export { recoverAccess } from './functions/recoverAccess.js';
 export { resolveRecipient } from './functions/resolveRecipient.js';
 export { startKyc } from './functions/startKyc.js';
 export { startSignup } from './functions/startSignup.js';
