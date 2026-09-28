@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FIREBASE_REGION } from '@monti/shared';
 import type { CloudEvent, CloudFunction } from 'firebase-functions/v2';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 
 process.env.GCP_PROJECT_ID = 'monti-dev';
 
@@ -133,6 +136,7 @@ describe('EXPORT_ENTITIES', () => {
     expect(EXPORT_ENTITIES.map((e) => e.entity).sort()).toEqual([
       'Admin',
       'CheckIn',
+      'ClaimRequest',
       'Event',
       'Gate',
       'IdentityAccount',
@@ -275,5 +279,45 @@ describe('dailyExport', () => {
     // 열한 테이블을 통째로 페이징한다 — 기본 60초·512MiB 로는 못 끝낸다.
     expect(endpoint.timeoutSeconds).toBe(540);
     expect(endpoint.availableMemoryMb).toBe(1024);
+  });
+});
+
+/**
+ * schema.graphql 을 파싱해 내보내는 모든 필드가 실제 스키마에 있는지 검증한다.
+ * 인덱서가 필드를 rename/삭제하면 Hasura 가 질의 전체를 거절해 그 엔티티 백업이 조용히
+ * 빈다 — 하드코딩한 단언만으로는 다음 rename 을 놓친다.
+ */
+function schemaTypeFields(): Map<string, Set<string>> {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const source = readFileSync(join(here, '../../indexer/schema.graphql'), 'utf8');
+  const types = new Map<string, Set<string>>();
+  const typeBlock = /type\s+(\w+)\s*\{([^}]*)\}/g;
+  for (let m = typeBlock.exec(source); m; m = typeBlock.exec(source)) {
+    const fields = new Set<string>();
+    for (const line of m[2]!.split('\n')) {
+      const field = line.match(/^\s*(\w+)\s*:/);
+      if (field) fields.add(field[1]!);
+    }
+    types.set(m[1]!, fields);
+  }
+  return types;
+}
+
+describe('EXPORT_ENTITIES matches indexer/schema.graphql', () => {
+  const types = schemaTypeFields();
+
+  it('names only types the schema defines', () => {
+    for (const { entity } of EXPORT_ENTITIES) {
+      expect(types.has(entity), entity).toBe(true);
+    }
+  });
+
+  it('selects only fields the schema defines on that type', () => {
+    for (const { entity, fields } of EXPORT_ENTITIES) {
+      const defined = types.get(entity)!;
+      for (const field of fields.split(' ')) {
+        expect(defined.has(field), `${entity}.${field}`).toBe(true);
+      }
+    }
   });
 });

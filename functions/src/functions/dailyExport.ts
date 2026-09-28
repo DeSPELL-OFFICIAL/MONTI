@@ -26,6 +26,10 @@ export const EXPORT_ENTITIES = [
   },
   { entity: 'Tier', fields: 'id eventId idx name priceUsdCents supply minted maxPerWallet seated' },
   { entity: 'Ticket', fields: 'id eventId tier owner transfers revoked' },
+  {
+    entity: 'ClaimRequest',
+    fields: 'id eventId requestId requester tier status tokenId requestedAt decidedAt txHash',
+  },
   { entity: 'CheckIn', fields: 'id gateId ts nonceHash manual late txHash block' },
   { entity: 'Override', fields: 'id tokenId gateId approver role reason requested' },
   {
