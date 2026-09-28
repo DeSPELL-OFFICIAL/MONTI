@@ -2,6 +2,7 @@ import { createPublicClient, createWalletClient, defineChain, http, type Abi, ty
 import { loadDeployment, withGasMargin, MONAD_MAINNET_CHAIN_ID, type Deployment } from '@monti/shared';
 import { getAttesterAccount } from './attester.js';
 import { CHAIN_ID, RPC_URL } from '../config.js';
+import type { PrivateKeyAccount } from 'viem/accounts';
 
 /** 체인 id 는 로직에 박지 않는다. CHAIN_ID / RPC_URL 두 파라미터로 메인넷으로 넘어간다. */
 export function monadChain() {
@@ -78,4 +79,41 @@ export async function awaitFinalized(blockNumber: bigint, timeoutMs = 20_000): P
     if (Date.now() > deadline) throw new Error('FINALITY_TIMEOUT');
     await new Promise((resolve) => setTimeout(resolve, 300));
   }
+}
+
+export interface RelayerTx {
+  account: PrivateKeyAccount;
+  to: Hex;
+  data: Hex;
+  gas: bigint;
+  nonce: number;
+  maxFeePerGas: bigint;
+  maxPriorityFeePerGas: bigint;
+}
+
+/**
+ * 릴레이어 EOA 로 서명된 승인서를 담은 **일반 트랜잭션**을 보낸다. 어테스터 전송과 달리
+ * 컨트랙트 함수가 아니라 raw `to/data` 를 받는다 — C2 의 콜러블이 claimFor/checkInFor 를
+ * 인코딩해 넘기고, 릴레이어는 서명된 필드를 못 바꾼다(설계 §5 "릴레이어가 할 수 없는 것").
+ *
+ * 가스 한도·수수료·nonce 를 **모두 호출자가 명시한다**(설계 §5). 리스 밖에서 estimate·시뮬로
+ * 정한 값을 리스 안에서 이 함수로 브로드캐스트만 한다. 해시만 돌려주고 finality 는 기다리지
+ * 않는다 — `waitRelayed` 가 따로 본다. Monad 는 gas_limit 기준 과금이라 `gas` 는 반드시 명시한다.
+ */
+export async function sendRelayerTx(tx: RelayerTx): Promise<Hex> {
+  const client = createWalletClient({
+    account: tx.account,
+    chain: monadChain(),
+    transport: http(RPC_URL.value()),
+  });
+  return client.sendTransaction({
+    account: tx.account,
+    to: tx.to,
+    data: tx.data,
+    gas: tx.gas,
+    nonce: tx.nonce,
+    maxFeePerGas: tx.maxFeePerGas,
+    maxPriorityFeePerGas: tx.maxPriorityFeePerGas,
+    chain: monadChain(),
+  });
 }
