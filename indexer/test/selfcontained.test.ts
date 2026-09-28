@@ -26,29 +26,33 @@ describe('indexer/ is self-contained', () => {
 /**
  * 생성물이 **어느 배포**를 가리키는지 못 박는다. 드리프트 검사(위)는 커밋된 것과 다시
  * 뽑은 것이 같은지만 보므로, 배포 파일이 통째로 옛것이면 둘 다 옛것이라 통과한다.
- * 01c 재배포(commit c97887a: 새 Ticket·paymaster, Identity/Organizers 는 유지)의 숫자를
- * 여기 적어 두고, 다음 재배포 때 이 한 줄을 같이 고치게 한다.
+ *
+ * 기대값은 손으로 적은 상수가 아니라 **배포 파일에서 읽는다**(../src/vendored/deployment.json,
+ * config.yaml 과 같은 원본). 그래서 다음 재배포 때 이 테스트가 저절로 따라오고, 주소·블록을
+ * 여기서 손으로 고칠 일이 없다.
  *
  * `start_block` 은 특히 되돌릴 수 없다 — 호스티드 인덱서는 이어받지 말고 **처음부터
  * 다시** 돌려야 새 컨트랙트의 로그를 본다.
  */
 describe('config.yaml pins the current deployment', () => {
-  it('starts at the earliest block and watches the 01c contracts', async () => {
+  it('starts at the earliest block and watches the current contracts', async () => {
     const config = await readFile(join(process.cwd(), 'config.yaml'), 'utf8');
-    expect(config).toContain('start_block: 64921775');
-    expect(config).toContain('"0x40D90AF3a3B22542AEeF0ec3E6a66F1EAb6f7AFA"'); // Ticket (01c)
-    expect(config).toContain('"0x961a895b47Cf200C14acf38F5689979FF5bd8133"'); // Identity (유지)
-    expect(config).toContain('"0xa88C8D110Ca8f0c925A781AB8042bA012d7281F0"'); // Organizers (유지)
-    // 은퇴한 01b Ticket 주소가 어디든 남아 있으면 인덱서는 그 계약을 스캔하다 조용히
-    // 0건을 낸다. 그 주소가 config 어디에도 없어야 한다.
-    expect(config).not.toContain('0x4B8353C9F3503Cdbd011E8f35da0a955D95b1367');
+
+    // 현재 배포의 세 계약 주소는 config 에 반드시 있어야 한다.
+    expect(config).toContain(`"${deployment.identity}"`);
+    expect(config).toContain(`"${deployment.organizers}"`);
+    expect(config).toContain(`"${deployment.ticket}"`);
+
+    // 은퇴한 Ticket 주소가 어디든 남아 있으면 인덱서는 그 계약을 스캔하다 조용히 0건을
+    // 낸다. previous[] 의 어떤 Ticket 주소도 config 에 없어야 한다.
+    for (const past of deployment.previous) {
+      expect(config).not.toContain(past.ticket);
+    }
 
     // start_block 은 손으로 적은 상수가 아니라 규칙의 산물이다: 현재 블록과 previous[].block
-    // 중 **가장 이른** 값(scripts/gen-config.mjs). Identity/Organizers 를 유지하는 01c 는
-    // 옛 배포 블록부터 그 계약들의 과거 이벤트를 다시 봐야 하므로 previous[0].block 이 이긴다.
-    const previousBlocks = deployment.previous.map((p) => p.block);
-    const earliest = Math.min(deployment.block, ...previousBlocks);
-    expect(earliest).toBe(64921775);
+    // 중 **가장 이른** 값(scripts/gen-config.mjs). 계약을 유지하는 재배포는 옛 배포 블록부터
+    // 그 계약들의 과거 이벤트를 다시 봐야 하므로 이전 블록이 이긴다.
+    const earliest = Math.min(deployment.block, ...deployment.previous.map((p) => p.block));
     expect(earliest).toBeLessThan(deployment.block); // 현재 블록이 아니라 이전 블록이 이긴다
     expect(config).toContain(`start_block: ${earliest}`);
 
