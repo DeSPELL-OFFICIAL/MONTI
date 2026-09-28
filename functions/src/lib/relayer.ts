@@ -2,10 +2,25 @@ import type { Hex } from '@monti/shared';
 import type { TransactionReceipt } from 'viem';
 import { privateKeyToAccount, type PrivateKeyAccount } from 'viem/accounts';
 import { RELAYER_PK } from '../config.js';
-import { gasLimitFor, publicClient, sendRelayerTx } from './chain.js';
+import { publicClient, sendRelayerTx } from './chain.js';
 import { withLease } from './txLease.js';
 
 const PRIVATE_KEY_RE = /^0x[0-9a-fA-F]{64}$/;
+/**
+ * 릴레이 한도 마진 = +3 %. Monad 는 한도로 과금하므로 어테스터 경로의 +7.5 %(shared `withGasMargin`)
+ * 보다 좁게 잡는다. 근거는 실측(F2, 2026-09-29): 같은 상태에서 견적한 직후 보내므로 cold/warm 차이가
+ * 끼어들 틈이 없고, estimate×1.03 으로 claimFor/checkInFor 7/7 성공. 100명 행사 기준 7.5 % → 3 % 는
+ * 약 0.2 MON 차이다.
+ */
+const RELAY_GAS_MARGIN_BPS = 10_300n;
+const BPS = 10_000n;
+
+/** 릴레이 전송의 최종 가스 한도. 견적보다 작아지지 않는다. */
+export function relayGasLimitFor(estimate: bigint): bigint {
+  if (estimate < 0n) throw new Error('NEGATIVE_GAS_ESTIMATE');
+  const limit = (estimate * RELAY_GAS_MARGIN_BPS) / BPS;
+  return limit < estimate ? estimate : limit;
+}
 /** 영수증을 기다리는 상한. registerIdentity 와 동일하게 맞춘다. */
 const RECEIPT_TIMEOUT_MS = 30_000;
 /** 재전송해도 안전한 유일한 거절. 우리 트랜잭션이 거절됐다는 뜻이라 다시 보내도 쓰기는 한 번이다. */
@@ -65,7 +80,7 @@ export function getRelayerAccount(privateKey?: string): PrivateKeyAccount {
 export interface RelayedRequest {
   to: Hex;
   data: Hex;
-  /** eth_estimateGas 원값(리스 밖에서 추정). +7.5% Monad 마진은 여기서 gasLimitFor 로 얹는다. */
+  /** eth_estimateGas 원값(리스 밖에서 추정). +3% 릴레이 마진은 여기서 relayGasLimitFor 로 얹는다. */
   gasLimit: bigint;
 }
 
@@ -74,7 +89,7 @@ export interface SentRelayed {
   hash: Hex;
   /** 이 전송에 배정한 nonce. relays 문서 `nonce`. */
   nonce: number;
-  /** 실제로 보낸, +7.5% 마진을 얹은 최종 가스 한도. */
+  /** 실제로 보낸, +3% 마진을 얹은 최종 가스 한도. */
   gasLimit: bigint;
   /** 브로드캐스트 시각(ms). */
   sentAt: number;
@@ -83,20 +98,20 @@ export interface SentRelayed {
 /**
  * 서명된 승인서(raw `to`/`data`)를 릴레이어 EOA 로 **일반 트랜잭션 1건**으로 보낸다(설계 §5).
  *
- * 리스 밖에서 느린 준비(수수료용 base fee 읽기, +7.5% 마진)를 끝내고, 리스 안에서는
+ * 리스 밖에서 느린 준비(수수료용 base fee 읽기, +3% 마진)를 끝내고, 리스 안에서는
  * **pending nonce 명시 읽기 + 서명 + 브로드캐스트**만 한다 — 임계구역이 짧을수록 버스트
  * (~50건/10초)를 큐잉으로 흡수한다. 브로드캐스트가 끝나면 finality 를 기다리지 않고 반납한다.
  *
  * `nonce too low` 는 직전 전송이 아직 풀에 있어 우리 nonce 가 밀린 경우라 pending nonce 를
  * 다시 읽어 **1회만** 재시도한다(기존 `sendSerialized` 규약).
  *
- * gasLimit 은 raw estimate 를 받아 `gasLimitFor`(+7.5%)로 얹는다 — Monad 는 한도로 과금하므로
+ * gasLimit 은 raw estimate 를 받아 `relayGasLimitFor`(+3%)로 얹는다 — Monad 는 한도로 과금하므로
  * 한도를 이보다 더 부풀리지 않는다. `to`/`data` 는 C2 가 claimFor/checkInFor 로 인코딩해 넘긴다.
  */
 export async function sendRelayed(req: RelayedRequest): Promise<SentRelayed> {
   const account = getRelayerAccount();
   const pc = publicClient();
-  const gas = gasLimitFor(req.gasLimit);
+  const gas = relayGasLimitFor(req.gasLimit);
 
   // 리스 밖: 느린 RPC 를 임계구역에서 뺀다(설계 §5).
   const block = await pc.getBlock({ blockTag: 'latest' });

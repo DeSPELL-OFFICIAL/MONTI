@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseTransaction } from 'viem';
-import { MONAD_TESTNET_CHAIN_ID, MONAD_TESTNET_RPC_URL, withGasMargin } from '@monti/shared';
+import { MONAD_TESTNET_CHAIN_ID, MONAD_TESTNET_RPC_URL } from '@monti/shared';
 import type { Hex } from '@monti/shared';
 
 process.env.GCP_PROJECT_ID = 'monti-dev';
@@ -155,12 +155,12 @@ describe('sendRelayed', () => {
 
     expect(sent.hash).toBe(TX_HASH);
     expect(sent.nonce).toBe(5);
-    expect(sent.gasLimit).toBe(withGasMargin(estimate)); // +7.5% Monad 마진
+    expect(sent.gasLimit).toBe(206_000n); // +3% 릴레이 마진(relayGasLimitFor) — 어테스터의 +7.5% 와 다르다
     expect(sent.sentAt).toBeGreaterThan(0);
 
     const tx = parseTransaction(raw as Hex);
     expect(tx.nonce).toBe(5); // nonce 는 명시된다(설계 §5)
-    expect(tx.gas).toBe(withGasMargin(estimate));
+    expect(tx.gas).toBe(206_000n);
     expect(tx.maxPriorityFeePerGas).toBe(2n * GWEI);
     expect(tx.maxFeePerGas).toBe(202n * GWEI);
     expect(tx.to?.toLowerCase()).toBe(TICKET.toLowerCase());
