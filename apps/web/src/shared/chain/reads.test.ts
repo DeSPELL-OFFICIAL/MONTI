@@ -117,13 +117,15 @@ describe('reads', () => {
       // 01b: the recovery undo and the ticket hand-over. Both go out through ops.ts
       // (`identityOp` / `ticketOp`), so neither belongs on a read helper.
       'cancelRotation', 'migrate',
-      // The gate's two writes and manual approval (04). `checkInLate` is the offline queue's
-      // flush target and takes `checkIn`'s three arguments; both go out through `checkInOp`.
-      'checkIn', 'checkInLate', 'requestOverride', 'manualOverride',
-      'claim', 'safeTransferFrom', 'createOffer', 'cancelOffer', 'acceptOffer',
-      // 01c approval mode. The attendee's request/cancel and the organiser's approve/reject all
-      // go out through `ticketOp`, never a read helper.
-      'requestClaim', 'cancelRequest', 'approveClaims', 'rejectClaims',
+      // Manual approval (04) goes out from the staff member's own passkey account through
+      // `ticketOp`. The gate's check-in is relayed since the 2026-09-29 redeploy — `checkIn`/
+      // `checkInLate` are no longer in the ABI or the manifest, so neither is listed here.
+      'requestOverride', 'manualOverride',
+      'safeTransferFrom', 'createOffer', 'cancelOffer', 'acceptOffer',
+      // 01c approval mode. The attendee's claim and request are relayed now; what stays a
+      // sponsored op through `ticketOp` is the request cancel and the organiser's approve/reject,
+      // never a read helper.
+      'cancelRequest', 'approveClaims', 'rejectClaims',
       'createEvent', 'publishEvent', 'cancelEvent', 'updateEventMeta',
       'setAdmin', 'setManager', 'registerGate', 'openGate', 'closeGate', 'revokeGate',
     ];

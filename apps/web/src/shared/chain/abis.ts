@@ -45,24 +45,18 @@ export const USED_ABI = {
   Ticket: {
     eventOf: 1, eventOrg: 1, tierOf: 1, eventStatus: 1, isRevoked: 1, transfersOf: 1, balanceOfEvent: 2,
     checkInOf: 1, eventMeta: 1, tiers: 1, offerOf: 1,
-    checkIn: 3,
-    // 01b. The offline queue's flush target: the same three arguments as `checkIn` and the same
-    // twelve reverts, but it accepts a code issued up to `LATE_WINDOW` (12 h) before doors and a
-    // submission up to `LATE_WINDOW` after the event ended (abi-delta-01b.md §2).
-    // `hasLateCheckIn()` in `staff/queue/opQueue.ts` reads the generated ABI rather than a flag,
-    // and `CheckInFunction` reads this manifest — so listing the name here is the whole of what
-    // turns the drain from a dry run into real sends.
-    checkInLate: 3,
     // Manual approval (04 T32). Both are sent from the staff member's OWN passkey account and
     // never from the gate account: the chain records `msg.sender` as the approver, and a gate
     // terminal is a device rather than a person who can stand behind letting somebody in.
     requestOverride: 3, manualOverride: 3,
-    claim: 3, safeTransferFrom: 3,
-    // 01c approval mode. On an `approvalRequired` event `claim` reverts, so the attendee asks with
-    // `requestClaim` (no mint) and can take it back with `cancelRequest`; the organiser's
-    // `approveClaims`/`rejectClaims` share this manifest, added by the 신청 관리 screen. All four
-    // put `eventId` in the first word, which is what the paymaster reads to pick the sponsor slot.
-    requestClaim: 2, cancelRequest: 2, approveClaims: 2, rejectClaims: 2,
+    safeTransferFrom: 3,
+    // 01c approval mode. The attendee's claim and the gate's check-in are relayed now: the
+    // 2026-09-29 redeploy dropped the direct `claim`/`requestClaim`/`checkIn`/`checkInLate`
+    // selectors (the MONTI relayer submits `claimFor`/`requestClaimFor`/`checkInFor` from its own
+    // EOA), so none of those four are in the generated ABI or this manifest any more. What stays a
+    // sponsored op is the request cancel and the organiser's approve/reject; all put `eventId` in
+    // the first word, which is what the paymaster reads to pick the sponsor slot.
+    cancelRequest: 2, approveClaims: 2, rejectClaims: 2,
     createOffer: 3, cancelOffer: 1, acceptOffer: 2,
     createEvent: 2,
     // The event lifecycle. `updateEventMeta` reverts `NotDraft` once the event is published,
