@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, ContactLink, Screen, Spinner } from '../../shared/ui';
+import { Alert, Button, Card, ContactLink, Screen, Spinner, StickyBar } from '../../shared/ui';
 import { useCopy } from '../../shared/i18n';
 import { api, callableFailure } from '../../shared/api/functions';
 import { safeReturnTo } from '../../shared/returnTo';
@@ -142,6 +142,19 @@ export function VerifyIdentity() {
   return (
     <Screen title={copy.kyc.title}>
       <p>{copy.kyc.body}</p>
+      {/* 상단에 버튼만 있고 화면 대부분이 비어 미완성처럼 보이던 자리를, 무엇을 하는지 한 줄씩으로
+          채운다(visual R1-6). 확인 중에는 스피너가 주인공이라 접는다. */}
+      {polling ? null : (
+        <Card>
+          <ul className="tier-list">
+            {copy.kyc.points.map((point) => (
+              <li key={point}>
+                <span>{point}</span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
       {error ? <Alert tone="error">{error}</Alert> : null}
       {/* A refused check is the one place in the app a person cannot help themselves out of:
           the verdict came from the vendor and no button on this screen can change it. */}
@@ -156,12 +169,15 @@ export function VerifyIdentity() {
       {inFlight ? (
         <Button variant="ghost" onClick={() => void start()}>{copy.common.retry}</Button>
       ) : null}
-      <Button onClick={start} disabled={polling}>{copy.kyc.cta}</Button>
       {/* An explicit way out to wherever they came from (returnTo). A deep-link landing may have no
           history for the global back bar to pop, so verification is never a place a person is stuck. */}
       {polling ? null : (
         <Button variant="ghost" onClick={() => navigate(returnTo)}>{copy.kyc.later}</Button>
       )}
+      {/* 주행동은 하단 바로 내려가 화면 아래 절반이 비지 않게 한다(visual R1-5). 확인 중에는 잠긴 채로. */}
+      <StickyBar>
+        <Button onClick={start} disabled={polling}>{copy.kyc.cta}</Button>
+      </StickyBar>
     </Screen>
   );
 }

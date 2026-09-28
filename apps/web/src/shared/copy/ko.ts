@@ -15,7 +15,7 @@ export const ko = {
     // 티켓 받기 버튼 근처 안심 문구. 돈도 안 들고, 어려운 건 MONTI가 대신 한다는 약속.
     montiHandles: '무료예요 · MONTI가 대신 처리해요',
     // 상세 인라인 받기 시트의 버튼 아래 안심 문구(계획 C 여정 A).
-    free: '무료예요 · 돈 안 들어요',
+    free: '무료예요',
   },
   // 온체인 대기 확정형 진행 UI(OpProgress) 공용 카피(계획 §2c). '저장'·'확인'만 쓰고 web3 낱말은 없다.
   op: {
@@ -75,6 +75,7 @@ export const ko = {
   },
   kyc: {
     title: '신분증과 얼굴을 확인할게요', body: '30초면 끝나요. 확인 화면이 열렸다가 돌아와요.',
+    points: ['신분증을 카메라에 비춰요', '얼굴을 한 번 맞춰요', '한 번만 하면 다음 행사에선 건너뛰어요'],
     cta: '본인인증 하기', later: '나중에 하기', waiting: '확인하고 있어요. 잠시만 기다려 주세요.',
     duplicate: '이미 계정이 있어요. 기존 계정으로 로그인해 주세요.',
     rejected: '본인 확인에 실패했어요. 다시 시도해 주세요.',
@@ -89,7 +90,7 @@ export const ko = {
   },
   discover: {
     title: '탐색', searchPlaceholder: '행사 이름 검색', create: '행사 만들기',
-    filterDate: '날짜', filterRegion: '지역', filterCategory: '테마',
+    filterDate: '날짜', filterRegion: '지역', filterCategory: '테마', moreFilters: '지역·테마',
     dateToday: '오늘', dateWeek: '이번 주', dateMonth: '이번 달', datePick: '직접 선택',
     categoryAll: '전체',
     // 테마 = 행사 카테고리. 목록과 순서는 shared/eventThemes.ts 가 갖고, 이름만 여기 있다.
@@ -103,7 +104,7 @@ export const ko = {
     // 필터로만 0건 → emptyFiltered + clearFilters. 인덱서 다운은 errors.ts 의 serviceDown 이 맡는다.
     emptyFiltered: '조건에 맞는 행사가 없어요.', emptyHostCta: '첫 행사를 만들어 보세요',
     emptySoon: '곧 행사가 올라와요', clearFilters: '필터 지우기',
-    getTicket: '티켓 받기', requestTicket: '신청하기', share: '공유',
+    getTicket: '티켓 받기', requestTicket: '신청하기', viewMyTicket: '내 티켓 보기', share: '공유',
     map: '지도로 보기', soldOut: '마감됨', cancelled: '취소된 행사예요.',
     untitled: '제목을 불러오지 못했어요', remaining: '{{count}}자리 남음',
     // 탐색 카드에 다 못 들어간 태그의 수. 상세 화면은 전부 보여준다(계획 B-2).

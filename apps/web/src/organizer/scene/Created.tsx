@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
-import { Alert, Button, Card, OpProgress, Screen, Steps, SuccessCheck, posterUrl } from '../../shared/ui';
+import { Alert, Button, Card, OpProgress, Screen, StickyBar, Steps, SuccessCheck, posterUrl } from '../../shared/ui';
 import { useCopy } from '../../shared/i18n';
 import { gql } from '../../shared/envio/client';
 import { EVENT_QUERY, type EnvioEvent } from '../../shared/envio/queries';
@@ -188,9 +188,6 @@ export function Created() {
             <Alert tone="info">{copy.nowPublic}</Alert>
             <Card title={copy.link}>
               <p className="event-link">{link}</p>
-              <Button variant="ghost" onClick={() => void copyLink()}>
-                {copy.copy}
-              </Button>
               {copied !== '' ? <p className="muted">{copied}</p> : null}
               {dataUrl !== '' ? <img className="event-qr" src={dataUrl} alt={copy.qr} /> : null}
             </Card>
@@ -202,15 +199,15 @@ export function Created() {
           <>
             {/* Before it is public the link and the QR are deliberately absent: an address nobody
                 can open yet is a false promise, and `claim` refuses anything but Published. */}
-            <Alert tone="info">{copy.notYetPublic}</Alert>
+            {/* 공개 전 상태는 입력창처럼 보이던 info 박스가 아니라 상태 칩으로 읽힌다(visual R1-9). */}
+            <p>
+              <span className="badge">{copy.notYetPublic}</span>
+            </p>
             {publishing === 'saving' || publishing === 'confirming' ? (
               <OpProgress phase={publishing === 'confirming' ? 'confirming' : 'saving'} />
             ) : (
-              <>
-                <Button onClick={() => void goPublic()}>{copy.publishNow}</Button>
-                {/* 안심어: 공개도 무료고, 어려운 건 MONTI가 대신 처리한다(T-SIMP-6). */}
-                <p className="muted">{common.montiHandles}</p>
-              </>
+              // 안심어: 공개도 무료고, 어려운 건 MONTI가 대신 처리한다(T-SIMP-6). 주행동은 하단 바로.
+              <p className="muted">{common.montiHandles}</p>
             )}
             {unsponsored ? <UnsponsoredNotice /> : null}
             {problem !== '' ? <Alert tone="error">{life[problem]}</Alert> : null}
@@ -223,6 +220,21 @@ export function Created() {
         <p>
           <Link to="/org">{copy.home}</Link>
         </p>
+
+        {/* 주행동은 하단 바로 내려가 화면 아래 절반이 비지 않게 한다(visual R1-5): 공개 전에는 지금
+            공개하기(공개 중에는 잠김), 공개 뒤에는 링크 복사. */}
+        <StickyBar>
+          {published ? (
+            <Button onClick={() => void copyLink()}>{copy.copy}</Button>
+          ) : (
+            <Button
+              onClick={() => void goPublic()}
+              disabled={publishing === 'saving' || publishing === 'confirming'}
+            >
+              {copy.publishNow}
+            </Button>
+          )}
+        </StickyBar>
       </div>
     </Screen>
   );

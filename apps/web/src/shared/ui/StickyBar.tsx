@@ -7,7 +7,7 @@ import type { ReactNode } from 'react';
  *
  * The scene pads its own foot by `--sticky-bar-h`; this part only draws the bar.
  */
-export function StickyBar({ status, children }: { status: ReactNode; children: ReactNode }) {
+export function StickyBar({ status, children }: { status?: ReactNode; children: ReactNode }) {
   return (
     <div className="sticky-bar">
       <div className="sticky-bar__status">{status}</div>

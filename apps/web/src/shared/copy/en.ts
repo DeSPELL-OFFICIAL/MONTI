@@ -15,7 +15,7 @@ export const en: typeof ko = {
     contactHelp: 'Need a hand? Email us.',
     contactEmail: 'info@despell.io',
     montiHandles: "It's free · MONTI handles it for you",
-    free: "It's free · No cost",
+    free: "It's free",
   },
   // See the Korean block: the shared on-chain wait progress copy (plan §2c).
   op: {
@@ -72,6 +72,7 @@ export const en: typeof ko = {
   },
   kyc: {
     title: 'Let us check your ID and face', body: 'It takes 30 seconds. A verification page opens and returns here.',
+    points: ['Point your ID at the camera', 'Line up your face once', 'Do it once and skip it next time'],
     cta: 'Verify my identity', later: 'Do this later', waiting: 'Checking. Please wait a moment.',
     duplicate: 'You already have an account. Please sign in instead.',
     rejected: 'Verification failed. Please try again.',
@@ -86,7 +87,7 @@ export const en: typeof ko = {
   },
   discover: {
     title: 'Explore', searchPlaceholder: 'Search events', create: 'Create an event',
-    filterDate: 'Date', filterRegion: 'Region', filterCategory: 'Theme',
+    filterDate: 'Date', filterRegion: 'Region', filterCategory: 'Theme', moreFilters: 'Region & theme',
     dateToday: 'Today', dateWeek: 'This week', dateMonth: 'This month', datePick: 'Pick a date',
     categoryAll: 'All',
     // See the Korean block: shared/eventThemes.ts owns the list and the order, this owns names.
@@ -98,7 +99,7 @@ export const en: typeof ko = {
     // See the Korean block: the three empty states, plus the clear-filters action.
     emptyFiltered: 'No events match your filters.', emptyHostCta: 'Create your first event',
     emptySoon: 'Events are coming soon', clearFilters: 'Clear filters',
-    getTicket: 'Get a ticket', requestTicket: 'Request a ticket', share: 'Share',
+    getTicket: 'Get a ticket', requestTicket: 'Request a ticket', viewMyTicket: 'View my ticket', share: 'Share',
     map: 'Open in maps', soldOut: 'Sold out', cancelled: 'This event was cancelled.',
     untitled: 'Title unavailable', remaining: '{{count}} left',
     // How many tags a card could not fit; the detail screen shows every one.

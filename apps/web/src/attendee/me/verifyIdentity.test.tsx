@@ -301,6 +301,12 @@ describe('VerifyIdentity', () => {
     await userEvent.click(await screen.findByRole('button', { name: ko.kyc.later }));
     expect(navigate).toHaveBeenCalledWith('/tickets/42');
   });
+
+  /** visual R1-5 — the primary check button now anchors the bottom sticky bar. */
+  it('anchors 본인인증 하기 in the bottom sticky bar (visual R1-5)', () => {
+    renderScreen();
+    expect(cta().closest('.sticky-bar')).not.toBeNull();
+  });
 });
 
 describe('useKycLevel', () => {

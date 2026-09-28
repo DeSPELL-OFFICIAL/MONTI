@@ -302,6 +302,14 @@ describe('organiser home', () => {
     expect(screen.getByRole('button', { name: copy.create })).toBeDisabled();
   });
 
+  it('keeps the create action live while the organisations are still loading (visual R1-8)', () => {
+    // A signed-in reload whose organisations have not landed yet: the FAB stays enabled rather
+    // than greying out over the spinner, which read as a permission refusal.
+    withOrgs([], { isLoading: true });
+    open();
+    expect(screen.getByRole('button', { name: copy.create })).toBeEnabled();
+  });
+
   it('holds the create action while the session is still re-hydrating (S5)', () => {
     // Even with an organisation to hand, a reload's unresolved session keeps 만들기 disabled until
     // the session is known, rather than offering it as if nobody were signed in.

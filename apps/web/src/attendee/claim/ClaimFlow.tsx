@@ -478,14 +478,14 @@ export function ClaimFlow({ eventId, present }: ClaimFlowProps) {
   };
 
   // The one seam between the two entries: the route paints a full 화면, the detail entry a 시트 in
-  // place. Everything above this line is identical for both. The sheet also carries an explicit
-  // 닫기 for a phone with no fling and a desktop with no gesture at all.
+  // place. Everything above this line is identical for both. The sheet's own grab bar and its
+  // scrim are the way out now, so it no longer stacks a full-width 닫기 under the primary where the
+  // two competed for the eye (visual R1-11).
   const reassurance = present.kind === 'sheet' ? copy.common.free : copy.common.montiHandles;
   const frame = (heading: string, body: ReactNode): ReactNode =>
     present.kind === 'sheet' ? (
       <Sheet label={heading} onDismiss={present.onClose}>
         {body}
-        <Button variant="ghost" onClick={present.onClose}>{copy.common.close}</Button>
       </Sheet>
     ) : (
       <Screen title={heading}>{body}</Screen>
@@ -547,13 +547,18 @@ export function ClaimFlow({ eventId, present }: ClaimFlowProps) {
       </>
     ) : (
       <>
-        <Field label={copy.claim.tierLabel}>
-          <select value={tier} onChange={(changed) => setTier(Number(changed.target.value))}>
-            {tiers.map((entry, index) => (
-              <option key={entry.id} value={index}>{entry.name}</option>
-            ))}
-          </select>
-        </Field>
+        {tiers.length > 1 ? (
+          <Field label={copy.claim.tierLabel}>
+            <select value={tier} onChange={(changed) => setTier(Number(changed.target.value))}>
+              {tiers.map((entry, index) => (
+                <option key={entry.id} value={index}>{entry.name}</option>
+              ))}
+            </select>
+          </Field>
+        ) : selected !== undefined ? (
+          // 티어가 하나뿐이면 드롭다운은 군더더기다: 종류를 그냥 보여준다(visual R1-11).
+          <p>{copy.claim.tierLabel}: {selected.name}</p>
+        ) : null}
         {status === 'Rejected' ? <Alert tone="warn">{copy.claim.rejected}</Alert> : null}
         {limitReached ? (
           held > 0 ? (
