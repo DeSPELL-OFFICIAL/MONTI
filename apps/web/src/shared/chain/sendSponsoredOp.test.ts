@@ -28,8 +28,10 @@ const account = {
   signUserOperation: vi.fn(async () => '0xsig' as const),
 } as never;
 
-const { MIN_VERIFICATION_GAS, applyGasBuffer, encodePaymasterAndData, readOpLogs, sendSponsoredOp } =
-  await import('./sendSponsoredOp');
+const {
+  MIN_VERIFICATION_GAS, applyGasBuffer, encodePaymasterAndData, readOpLogs, revertDataOf, sendSponsoredOp,
+  isTransientPrecheck, PRECHECK_RETRY_DELAYS_MS,
+} = await import('./sendSponsoredOp');
 
 // restoreMocks only restores spies; a bare vi.fn() keeps its call history between tests.
 beforeEach(() => {
@@ -122,6 +124,58 @@ describe('sendSponsoredOp', () => {
         success: true, userOpHash: '0xflaky', txHash: '0xtx',
         blockNumber: 42n, revertReason: undefined, logs: [],
       });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps polling past the soft timeout up to the extended cap before declaring TIMEOUT', async () => {
+    // An op the bundler includes a little late must not park the caller at the 15s mark: given an
+    // extended cap, wait() keeps the same poll running to 45s and only then gives up.
+    vi.useFakeTimers();
+    try {
+      bundlerRequest
+        .mockResolvedValueOnce({ callGasLimit: '0x1', verificationGasLimit: '0x1', preVerificationGas: '0x1' })
+        .mockResolvedValueOnce('0xlate')
+        .mockResolvedValue(null); // every receipt poll: not landed yet
+      const handle = await sendSponsoredOp({ account, orgId: 1n, calls: [{ to: `0x${'33'.repeat(20)}`, data: '0x01' }] });
+      const waited = handle.wait(15_000, 45_000);
+
+      const receiptPolls = () =>
+        bundlerRequest.mock.calls.filter(([method]) => method === 'eth_getUserOperationReceipt').length;
+
+      await vi.advanceTimersByTimeAsync(15_000);
+      const atSoftTimeout = receiptPolls();
+      expect(atSoftTimeout).toBeGreaterThan(0);
+      // Past the first (15s) horizon the poll has NOT stopped.
+      await vi.advanceTimersByTimeAsync(15_000); // 30s total
+      expect(receiptPolls()).toBeGreaterThan(atSoftTimeout);
+      // Only the 45s cap ends it — as a TIMEOUT, never a revert.
+      await vi.advanceTimersByTimeAsync(15_000); // 45s total
+      await expect(waited).resolves.toEqual({
+        success: false, userOpHash: '0xlate', txHash: '0x',
+        blockNumber: 0n, revertReason: 'TIMEOUT', logs: [],
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('returns a receipt that lands after the soft timeout but before the extended cap', async () => {
+    vi.useFakeTimers();
+    try {
+      bundlerRequest
+        .mockResolvedValueOnce({ callGasLimit: '0x1', verificationGasLimit: '0x1', preVerificationGas: '0x1' })
+        .mockResolvedValueOnce('0xlate')
+        .mockResolvedValue(null);
+      const handle = await sendSponsoredOp({ account, orgId: 1n, calls: [{ to: `0x${'33'.repeat(20)}`, data: '0x01' }] });
+      const waited = handle.wait(15_000, 45_000);
+      // Past the soft 15s timeout with still no receipt…
+      await vi.advanceTimersByTimeAsync(20_000);
+      // …then the op finally lands, and the still-running poll returns it.
+      bundlerRequest.mockResolvedValue({ success: true, receipt: { transactionHash: '0xtx', blockNumber: '0x2a' } });
+      await vi.advanceTimersByTimeAsync(1_000);
+      await expect(waited).resolves.toMatchObject({ success: true, userOpHash: '0xlate', blockNumber: 42n });
     } finally {
       vi.useRealTimers();
     }
@@ -236,5 +290,106 @@ describe('the logs one operation emitted', () => {
     expect(readOpLogs(undefined)).toEqual([]);
     expect(readOpLogs({})).toEqual([]);
     expect(readOpLogs({ logs: 'nope' })).toEqual([]);
+  });
+});
+
+describe('the reason a simulated operation reverted with', () => {
+  it('reads it out of the bundler rejection, however deep viem wrapped it', () => {
+    expect(revertDataOf({ data: { revertData: '0xdba16ce8' } })).toBe('0xdba16ce8');
+    expect(revertDataOf({ cause: { cause: { data: { revertData: '0xDBA16CE8' } } } })).toBe('0xDBA16CE8');
+    // A revert with arguments is longer than a selector, and is kept whole.
+    expect(revertDataOf({ data: { revertData: `0x08c379a0${'00'.repeat(32)}` } }))
+      .toBe(`0x08c379a0${'00'.repeat(32)}`);
+  });
+
+  it('yields nothing for anything that is not one', () => {
+    expect(revertDataOf(new Error('fetch failed'))).toBeUndefined();
+    expect(revertDataOf({ data: 'execution reverted' })).toBeUndefined();
+    expect(revertDataOf({ data: { revertData: '0x' } })).toBeUndefined();
+    expect(revertDataOf({ data: { revertData: 42 } })).toBeUndefined();
+    expect(revertDataOf(null)).toBeUndefined();
+    // A cycle deeper than the walk goes is not found, and does not hang.
+    expect(revertDataOf({ cause: { cause: { cause: { cause: { cause: { data: { revertData: '0xdba16ce8' } } } } } } }))
+      .toBeUndefined();
+  });
+});
+
+
+/**
+ * The second attendee's claim was rejected at *send*, before any hash existed, by rundler's
+ * paymaster-deposit precheck (-32000). It clears the instant the first op mines, so the fix is a
+ * short backoff resend of the same signed op at the send layer — where both claim and requestClaim
+ * pass through (task-claim-failure report §5a).
+ */
+describe('a transient precheck rejection at send', () => {
+  const precheck = () =>
+    Object.assign(new Error('precheck failed: paymaster deposit is 1 but must be at least 2'), { code: -32000 });
+
+  it('recognises only the -32000 precheck rejection, however deeply it is wrapped', () => {
+    expect(isTransientPrecheck(precheck())).toBe(true);
+    expect(isTransientPrecheck({ code: -32000, cause: { message: 'precheck failed: ...' } })).toBe(true);
+    // The code without the message, or the message without the code, is a genuine failure.
+    expect(isTransientPrecheck(Object.assign(new Error('some -32000 thing'), { code: -32000 }))).toBe(false);
+    expect(isTransientPrecheck(Object.assign(new Error('precheck failed'), { code: -32521 }))).toBe(false);
+    expect(isTransientPrecheck(new Error('fetch failed'))).toBe(false);
+    expect(isTransientPrecheck(null)).toBe(false);
+    // Three tries, at 2s / 5s / 10s.
+    expect(PRECHECK_RETRY_DELAYS_MS).toEqual([2_000, 5_000, 10_000]);
+  });
+
+  it('retries the precheck rejection with backoff, then resolves the eventual hash', async () => {
+    vi.useFakeTimers();
+    try {
+      const onSendRetry = vi.fn();
+      bundlerRequest
+        .mockResolvedValueOnce({ callGasLimit: '0x1', verificationGasLimit: '0x1', preVerificationGas: '0x1' })
+        .mockRejectedValueOnce(precheck()) // send #1
+        .mockRejectedValueOnce(precheck()) // send #2
+        .mockResolvedValueOnce('0xafterretry'); // send #3 clears once the earlier op freed the deposit
+      const promise = sendSponsoredOp({
+        account, orgId: 7n, calls: [{ to: `0x${'33'.repeat(20)}`, data: '0x01' }], onSendRetry,
+      });
+      await vi.runAllTimersAsync();
+      const handle = await promise;
+      expect(handle.userOpHash).toBe('0xafterretry');
+      expect(onSendRetry).toHaveBeenCalledTimes(2);
+      const sends = bundlerRequest.mock.calls.filter(([method]) => method === 'eth_sendUserOperation');
+      expect(sends).toHaveLength(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not swallow a rejection that is not a -32000 precheck failure', async () => {
+    const refusal = Object.assign(new Error('AA33 reverted'), { code: -32521 });
+    bundlerRequest
+      .mockResolvedValueOnce({ callGasLimit: '0x1', verificationGasLimit: '0x1', preVerificationGas: '0x1' })
+      .mockRejectedValueOnce(refusal);
+    await expect(
+      sendSponsoredOp({ account, orgId: 7n, calls: [{ to: `0x${'33'.repeat(20)}`, data: '0x01' }] }),
+    ).rejects.toBe(refusal);
+    const sends = bundlerRequest.mock.calls.filter(([method]) => method === 'eth_sendUserOperation');
+    expect(sends).toHaveLength(1);
+  });
+
+  it('gives up after three retries and throws the last precheck rejection', async () => {
+    vi.useFakeTimers();
+    try {
+      const last = precheck();
+      bundlerRequest
+        .mockResolvedValueOnce({ callGasLimit: '0x1', verificationGasLimit: '0x1', preVerificationGas: '0x1' })
+        .mockRejectedValueOnce(precheck())
+        .mockRejectedValueOnce(precheck())
+        .mockRejectedValueOnce(precheck())
+        .mockRejectedValueOnce(last);
+      const promise = sendSponsoredOp({ account, orgId: 7n, calls: [{ to: `0x${'33'.repeat(20)}`, data: '0x01' }] });
+      const settled = promise.then(() => 'ok', (error: unknown) => error);
+      await vi.runAllTimersAsync();
+      expect(await settled).toBe(last);
+      const sends = bundlerRequest.mock.calls.filter(([method]) => method === 'eth_sendUserOperation');
+      expect(sends).toHaveLength(4); // the first send plus three retries
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -2,7 +2,9 @@ import { randomBytes } from 'node:crypto';
 import { verifyAuthenticationResponse } from '@simplewebauthn/server';
 import type { AuthenticationResponseJSON, AuthenticatorTransportFuture } from '@simplewebauthn/server';
 import { FieldValue } from 'firebase-admin/firestore';
+import { warn } from 'firebase-functions/logger';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
+import type { FunctionsErrorCode } from 'firebase-functions/v2/https';
 import { getAddress } from 'viem';
 import { AUTH_CHALLENGE_TTL_SECONDS, type Hex } from '@monti/shared';
 import { RP_ID, expectedOrigins } from '../config.js';
@@ -18,12 +20,25 @@ const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 const CREDENTIAL_ID_RE = /^[A-Za-z0-9_-]{1,255}$/;
 
 /**
+ * 거절을 **로그에 남기고** 던진다(`createOrganizer` 의 `reject` 와 같은 규칙).
+ *
+ * 로그인 실패는 여러 원인이 같은 HTTP 코드(400/403/404)로 내려가므로, 코드 하나만 보고는
+ * 어디서 막혔는지 알 수 없다. gRPC 코드와 짧은 기계용 사유를 한 줄로 남겨 두면 그 한 줄로
+ * 경로를 짚는다. 남기는 것은 코드와 사유뿐이다 — 전화번호는 물론, credential id 도 로그에
+ * 통째로 넣지 않는다(NO-PII). 사유 문자열은 그대로 클라이언트로도 나가는 값이라 이미 개인정보가 없다.
+ */
+function reject(code: FunctionsErrorCode, reason: string): never {
+  warn('login.verify.rejected', { code, reason });
+  throw new HttpsError(code, reason);
+}
+
+/**
  * 어설션은 전적으로 클라이언트가 만든 값이다. 모양이 깨진 입력을 라이브러리까지 흘려보내면
  * 클라이언트가 INTERNAL 만 보게 되므로 여기서 `invalid-argument` 로 끝낸다(Task 18 과 같은 방식).
  */
 function requireAssertion(value: unknown): AuthenticationResponseJSON {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new HttpsError('invalid-argument', 'BAD_ASSERTION');
+    reject('invalid-argument', 'BAD_ASSERTION');
   }
   const candidate = value as Partial<AuthenticationResponseJSON>;
   const response = candidate.response;
@@ -36,7 +51,7 @@ function requireAssertion(value: unknown): AuthenticationResponseJSON {
     typeof response.authenticatorData !== 'string' ||
     typeof response.signature !== 'string'
   ) {
-    throw new HttpsError('invalid-argument', 'BAD_ASSERTION');
+    reject('invalid-argument', 'BAD_ASSERTION');
   }
   return candidate as AuthenticationResponseJSON;
 }
@@ -76,30 +91,30 @@ export const loginVerify = onCall(
     try {
       challenge = challengeFromClientData(authentication.response.clientDataJSON);
     } catch {
-      throw new HttpsError('invalid-argument', 'BAD_ASSERTION');
+      reject('invalid-argument', 'BAD_ASSERTION');
     }
     // 숫자·배열 challenge 는 `RegExp.test` 가 문자열로 강제 변환해 통과시킨 뒤 문서 id 에서 터진다.
     if (typeof challenge !== 'string' || !CHALLENGE_RE.test(challenge)) {
-      throw new HttpsError('invalid-argument', 'BAD_CHALLENGE');
+      reject('invalid-argument', 'BAD_CHALLENGE');
     }
 
     // 챌린지를 한 번만 쓰도록 트랜잭션으로 소비한다. 검증이 실패해도 이미 태워진 상태다.
     const challengeRef = db.collection(AUTH_CHALLENGES).doc(challenge);
     await db.runTransaction(async (tx) => {
       const doc = await tx.get(challengeRef);
-      if (!doc.exists) throw new HttpsError('failed-precondition', 'CHALLENGE_NOT_FOUND');
-      if (doc.get('usedAt')) throw new HttpsError('failed-precondition', 'CHALLENGE_USED');
+      if (!doc.exists) reject('failed-precondition', 'CHALLENGE_NOT_FOUND');
+      if (doc.get('usedAt')) reject('failed-precondition', 'CHALLENGE_USED');
       // 등록용 챌린지를 로그인에 돌려쓰지 못하게 한다(교차 프로토콜 재사용).
-      if (doc.get('purpose') !== 'login') throw new HttpsError('permission-denied', 'BAD_CHALLENGE');
+      if (doc.get('purpose') !== 'login') reject('permission-denied', 'BAD_CHALLENGE');
       if ((doc.get('expiresAt') as number) < Math.floor(Date.now() / 1000)) {
-        throw new HttpsError('failed-precondition', 'CHALLENGE_EXPIRED');
+        reject('failed-precondition', 'CHALLENGE_EXPIRED');
       }
       tx.update(challengeRef, { usedAt: FieldValue.serverTimestamp() });
     });
 
     const credentialRef = db.collection(PASSKEYS).doc(authentication.id);
     const credential = await credentialRef.get();
-    if (!credential.exists) throw new HttpsError('not-found', 'CREDENTIAL_NOT_FOUND');
+    if (!credential.exists) reject('not-found', 'CREDENTIAL_NOT_FOUND');
     const storedCounter = (credential.get('counter') as number) ?? 0;
 
     /**
@@ -121,12 +136,12 @@ export const loginVerify = onCall(
         transports: credential.get('transports') as AuthenticatorTransportFuture[] | undefined,
       },
     }).catch(() => ({ verified: false }) as const);
-    if (!verification.verified) throw new HttpsError('permission-denied', 'ASSERTION_REJECTED');
+    if (!verification.verified) reject('permission-denied', 'ASSERTION_REJECTED');
 
     const newCounter = verification.authenticationInfo.newCounter;
     // 인증기가 카운터를 쓰지 않으면 항상 0이다. 0이 아닌데 늘지 않았으면 복제 신호다.
     if (newCounter !== 0 && newCounter <= storedCounter) {
-      throw new HttpsError('permission-denied', 'COUNTER_REPLAY');
+      reject('permission-denied', 'COUNTER_REPLAY');
     }
 
     const personId = credential.get('personId') as Hex;
@@ -137,16 +152,16 @@ export const loginVerify = onCall(
      */
     const status = person.get('status') as string | undefined;
     if (status === 'rotated' || status === 'rejected') {
-      throw new HttpsError('failed-precondition', 'BAD_SIGNUP_STATE');
+      reject('failed-precondition', 'BAD_SIGNUP_STATE');
     }
     const stored = person.get('account') as string | undefined;
-    if (!stored || !ADDRESS_RE.test(stored)) throw new HttpsError('failed-precondition', 'NO_ACCOUNT');
+    if (!stored || !ADDRESS_RE.test(stored)) reject('failed-precondition', 'NO_ACCOUNT');
     const account = getAddress(stored) as Hex;
 
     // uid 는 전화번호 가입 때 만들어진 그대로 쓴다. 로그인은 새 uid 를 만들지 않는다.
     const users = await db.collection(USERS).where('personId', '==', personId).limit(1).get();
     const userDoc = users.docs[0];
-    if (!userDoc) throw new HttpsError('not-found', 'USER_NOT_FOUND');
+    if (!userDoc) reject('not-found', 'USER_NOT_FOUND');
     const uid = userDoc.id;
 
     /**

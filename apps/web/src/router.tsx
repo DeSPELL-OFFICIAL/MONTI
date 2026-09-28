@@ -1,17 +1,47 @@
-import { Navigate, Outlet, type RouteObject, useLocation } from 'react-router-dom';
+import { Navigate, Outlet, type RouteObject, useLocation, useOutlet } from 'react-router-dom';
 import { BottomTabs } from './shared/ui';
 import { useRegistration } from './shared/registration';
 import { useSession } from './shared/session';
 import { Spinner } from './shared/ui';
+import { AnimatePresence, m, useReducedMotion } from './shared/motion';
+import { TAB_PATHS } from './shared/tabRoots';
 
-const TAB_PATHS = ['/', '/tickets', '/chats', '/me'];
-
+/**
+ * The screen slides in from the right and the one it replaces slides out to the left — 240ms of
+ * transform and opacity, nothing that reflows. `mode="wait"` keeps the two from overlapping, so
+ * only one screen is ever laid out; keying on the path is what tells `AnimatePresence` a screen
+ * has actually changed. `body` already has `overflow-x: hidden`, so the 24px the entering screen
+ * starts offset by never becomes a horizontal scrollbar.
+ *
+ * Under reduced motion the whole apparatus is skipped: the outlet is rendered straight, with no
+ * wrapper and no transform, so a person who asked for stillness gets an instant cut. The tab bar
+ * lives outside the animated region on purpose — it is chrome, not a screen, and must not slide
+ * with the content under it (and, being outside the transformed element, keeps its fixed
+ * position anchored to the viewport).
+ */
 function TabShell() {
   const location = useLocation();
+  const outlet = useOutlet();
+  const reduce = useReducedMotion();
   const showTabs = TAB_PATHS.includes(location.pathname);
   return (
     <>
-      <Outlet />
+      {reduce ? (
+        outlet
+      ) : (
+        <AnimatePresence mode="wait" initial={false}>
+          <m.div
+            key={location.pathname}
+            className="route-view"
+            initial={{ opacity: 0, x: 24 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -24 }}
+            transition={{ duration: 0.24, ease: [0.22, 0.61, 0.36, 1] }}
+          >
+            {outlet}
+          </m.div>
+        </AnimatePresence>
+      )}
       {showTabs ? <BottomTabs /> : null}
     </>
   );
@@ -38,7 +68,17 @@ function FinishSignupFirst() {
   const location = useLocation();
   if (registration !== 'pending') return <Outlet />;
   const returnTo = encodeURIComponent(`${location.pathname}${location.search}`);
-  return <Navigate to={`/signup/device?returnTo=${returnTo}`} replace />;
+  return <Navigate to={`/signup/register?returnTo=${returnTo}`} replace />;
+}
+
+/**
+ * The two screens `/signup/register` replaced. Links to them are already in the wild — an old
+ * tab, a text somebody sent themselves — and the query travels with them, because `returnTo` is
+ * what tells the register screen this is an account being finished rather than a fresh signup.
+ */
+function ToRegister() {
+  const { search } = useLocation();
+  return <Navigate to={`/signup/register${search}`} replace />;
 }
 
 // 각 화면은 뒤 태스크에서 실제 구현으로 교체된다. 여기서는 라우트 표를 확정한다.
@@ -49,8 +89,7 @@ import { Phone } from './attendee/signup/Phone';
 import { Verify } from './attendee/signup/Verify';
 import { VerifyIdentity } from './attendee/me/VerifyIdentity';
 import { KycCallback } from './attendee/me/KycCallback';
-import { PasskeyStep } from './attendee/signup/Passkey';
-import { DeviceStep } from './attendee/signup/Device';
+import { Register } from './attendee/signup/Register';
 import { Done } from './attendee/signup/Done';
 import { Claim } from './attendee/claim/Claim';
 import { TicketList } from './attendee/tickets/List';
@@ -76,8 +115,9 @@ export const routes: RouteObject[] = [
       { path: '/login', element: <Login /> },
       { path: '/signup/phone', element: <Phone /> },
       { path: '/signup/verify', element: <Verify /> },
-      { path: '/signup/passkey', element: <PasskeyStep /> },
-      { path: '/signup/device', element: <DeviceStep /> },
+      { path: '/signup/register', element: <Register /> },
+      { path: '/signup/passkey', element: <ToRegister /> },
+      { path: '/signup/device', element: <ToRegister /> },
       { path: '/signup/done', element: <Done /> },
       // Where the link in an invite text lands. Public on purpose: the person it was sent to
       // is usually not signed in yet, and this screen is what starts their signup.

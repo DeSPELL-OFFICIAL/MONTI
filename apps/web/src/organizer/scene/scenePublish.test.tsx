@@ -5,6 +5,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { encodeErrorResult, encodeEventTopics, keccak256, numberToHex, toBytes } from 'viem';
 import { ticketAbi } from '../../shared/chain/abis';
 import type { EventDraft, StoredEventDraft } from '../../shared/api/firestore';
+import { ko as sharedKo } from '../../shared/copy/index';
 
 let store: StoredEventDraft[] = [];
 const listEventDrafts = vi.fn(async () => [...store].sort((a, b) => b.updatedAt - a.updatedAt));
@@ -12,7 +13,20 @@ const saveEventDraft = vi.fn(async (_id: string, _draft: EventDraft) => undefine
 const deleteEventDraft = vi.fn(async (id: string) => {
   store = store.filter((row) => row.id !== id);
 });
-vi.mock('../../shared/api/firestore', () => ({ listEventDrafts, saveEventDraft, deleteEventDraft }));
+const loadMyProfile = vi.fn(async () => ({ displayName: '김태완' }));
+vi.mock('../../shared/api/firestore', () => ({
+  listEventDrafts, saveEventDraft, deleteEventDraft, loadMyProfile,
+}));
+/** The indexer's answer about this person as an organiser, which the scene now reads too. */
+const orgRefetch = vi.fn(async () => [] as { orgId: string; canCreateEvent: boolean }[]);
+const orgsListed = vi.fn(() => [] as { orgId: string; canCreateEvent: boolean }[]);
+vi.mock('../useMyOrgs', () => ({
+  useMyOrgs: () => ({
+    orgs: orgsListed(), canCreateEvent: false, isLoading: false, isError: false,
+    error: null, refetch: orgRefetch,
+  }),
+}));
+
 
 interface PinCall {
   orgId: string;
@@ -50,8 +64,8 @@ const OP_HASH = `0x${'22'.repeat(32)}` as const;
 const ticketOp = vi.fn(async (_options: SentOp) => ({
   success: true, userOpHash: OP_HASH, logs: [CREATED_LOG],
 }));
-const resolveSubmittedOp = vi.fn(async (_hash: string) => ({
-  state: 'pending' as 'pending' | 'landed' | 'failed',
+const resolveSubmittedOp = vi.fn(async (_hash: string, _submittedAt?: number) => ({
+  state: 'pending' as 'pending' | 'landed' | 'failed' | 'stale',
   logs: [] as unknown[],
 }));
 vi.mock('../../shared/chain/ops', async (orig) => ({
@@ -68,8 +82,15 @@ vi.mock('../../shared/config', async (orig) => ({
   getConfig: () => ({ addresses: { ticket: TICKET }, ipfsGateway: 'https://gw.test/' }),
 }));
 
+// The default-poster rasteriser needs a canvas jsdom does not have, so it is stubbed to raw
+// base64; that the create path renders and pins it is what is under test (T-SIMP-9).
+vi.mock('./autoPoster', () => ({
+  renderAutoPoster: vi.fn(async () => 'AUTO64'),
+  buildPosterSvg: () => '<svg/>',
+}));
+
 const { OpReverted } = await import('../../shared/chain/ops');
-const { TicketSettings } = await import('./TicketSettings');
+const { CreateEvent } = await import('./CreateEvent');
 const { emptyEventDraft, emptyEventDraftTier } = await import('../useEventDraft');
 const { organizerCopy } = await import('../copy');
 const copy = organizerCopy.ko.scene;
@@ -91,7 +112,7 @@ const READY: EventDraft = {
   ...emptyEventDraft,
   orgId: '9',
   title: '  재즈 나이트  ',
-  description: '한남동 라이브',
+  description: '한남동 재즈 라이브 공연',
   posterCid: 'bafkposter',
   category: 2,
   tags: [' #재즈 ', '라이브', '재즈'],
@@ -111,9 +132,9 @@ const READY: EventDraft = {
 function open(draft: EventDraft = READY, id = 'd-42'): void {
   store = [{ id, updatedAt: 1_000, data: draft }];
   render(
-    <MemoryRouter initialEntries={[`/org/new/${id}/tickets`]}>
+    <MemoryRouter initialEntries={[`/org/new/${id}`]}>
       <Routes>
-        <Route path="/org/new/:draftId/tickets" element={<TicketSettings />} />
+        <Route path="/org/new/:draftId" element={<CreateEvent />} />
         <Route path="*" element={<Probe />} />
       </Routes>
     </MemoryRouter>,
@@ -152,7 +173,7 @@ describe('the publish path', () => {
       orgId: '9',
       meta: {
         name: '재즈 나이트',
-        description: '한남동 라이브',
+        description: '한남동 재즈 라이브 공연',
         imageCid: 'bafkposter',
         category: 2,
         region: 'KR-11',
@@ -201,6 +222,30 @@ describe('the publish path', () => {
 
     // 5. the draft is gone — one that outlived its event is a second event waiting to happen.
     expect(deleteEventDraft).toHaveBeenCalledWith('d-42');
+  });
+
+  /**
+   * The end time is behind `더 설정하기` and most organisers never open it (plan section B-3),
+   * so the number that reaches `Ticket.EventMeta` is almost always the derived one. `EventMeta`
+   * is written once and `updateEventMeta` closes at publish: an `endsAt` of 0 here would be an
+   * event that ended in 1970, with sign-ups closed before they opened, and nothing could repair
+   * it. Every reader goes through `endsAtOf`, and this is the one that proves the chain does.
+   */
+  it('sends the derived end, and closes sign-ups on it, when nobody opened the fold', async () => {
+    open({ ...READY, endsAt: 0 });
+    await create();
+    await waitFor(() => expect(screen.getByText('landed:/org/new/done/12')).toBeInTheDocument());
+
+    const derived = BigInt(READY.startsAt + 7_200);
+    const meta = ticketOp.mock.calls[0]?.[0].args[0] as {
+      startsAt: bigint; endsAt: bigint; saleStart: bigint; saleEnd: bigint;
+    };
+    expect(meta.endsAt).toBe(derived);
+    // `Ticket.createEvent` only asks that `saleStart < saleEnd`; the derived end is what makes
+    // that true without a second date field ever being shown.
+    expect(meta.saleEnd).toBe(derived);
+    expect(meta.saleStart).toBeLessThan(meta.saleEnd);
+    expect(meta.startsAt).toBeLessThan(meta.endsAt);
   });
 
   it('keeps a hidden venue out of the pin and puts it behind the callable instead', async () => {
@@ -259,6 +304,20 @@ describe('the publish path', () => {
     expect(ticketOp).not.toHaveBeenCalled();
     expect(pinEventMetadata).not.toHaveBeenCalled();
   });
+
+  /**
+   * The poster is optional (plan B-2): a draft with an empty `posterCid` gets a default A4 poster
+   * synthesised from its title and theme backdrop, pinned through the same `pinEventImage` path an
+   * uploaded one takes — so the readable metadata still carries an `imageCid`.
+   */
+  it('auto-generates and pins a default poster when the draft has none (T-SIMP-9)', async () => {
+    open({ ...READY, posterCid: '' });
+    await create();
+    await waitFor(() => expect(screen.getByText('landed:/org/new/done/12')).toBeInTheDocument());
+    expect(pinEventImage).toHaveBeenCalledWith({ bytesBase64: 'AUTO64', kind: 'poster' });
+    const pinned = pinEventMetadata.mock.calls.at(-1)?.[0];
+    expect(pinned?.meta.imageCid).toBe('bafkposter');
+  });
 });
 
 describe('when it does not land', () => {
@@ -267,12 +326,15 @@ describe('when it does not land', () => {
     ticketOp.mockRejectedValue(new OpReverted('createEvent', 'TIMEOUT', SUBMITTED));
     open();
     await create();
-    expect(await screen.findByText(copy.publish.confirming)).toBeInTheDocument();
+    // The scene shows the determinate wait's 확인 중 step, not an info-alert stacked on it (계획 §2a).
+    await waitFor(() => expect(
+      document.querySelector('.op-progress .steps__step--current .steps__label')?.textContent,
+    ).toBe(sharedKo.op.confirming));
     expect(ticketOp).toHaveBeenCalledTimes(1);
 
     // Pressing again asks the bundler what became of the first one. It is still pending.
     await user.click(screen.getByRole('button', { name: copy.tiers.create }));
-    await waitFor(() => expect(resolveSubmittedOp).toHaveBeenCalledWith(SUBMITTED));
+    await waitFor(() => expect(resolveSubmittedOp).toHaveBeenCalledWith(SUBMITTED, expect.any(Number)));
     expect(ticketOp).toHaveBeenCalledTimes(1);
   });
 
@@ -283,6 +345,37 @@ describe('when it does not land', () => {
     await waitFor(() => expect(screen.getByText('landed:/org/new/done/12')).toBeInTheDocument());
     expect(ticketOp).not.toHaveBeenCalled();
     expect(saveEventArt).toHaveBeenCalled();
+  });
+
+  /**
+   * A recorded op that will never land — dropped, reverted, or stuck in the mempool underpriced
+   * or too old (task-create-failure-4). The guard clears it and sends one fresh createEvent with
+   * the corrected fees; the undeployed account's deployment nonce keeps the two mutually
+   * exclusive, so exactly one event is ever made.
+   */
+  it('clears a stale op and sends one fresh createEvent, naming the resend', async () => {
+    resolveSubmittedOp.mockResolvedValue({ state: 'stale', logs: [] });
+    let releasePin = (): void => undefined;
+    pinEventMetadata.mockReturnValueOnce(
+      new Promise((resolve) => { releasePin = () => resolve({ metadataCid: 'bafyMeta' }); }),
+    );
+    open({ ...READY, submittedOpHash: SUBMITTED });
+    await create();
+    // The organiser is told the earlier request expired while the resend is on its way.
+    expect(await screen.findByText(copy.publishProblems.opExpired)).toBeInTheDocument();
+    releasePin();
+    await waitFor(() => expect(screen.getByText('landed:/org/new/done/12')).toBeInTheDocument());
+    expect(resolveSubmittedOp).toHaveBeenCalledWith(SUBMITTED, expect.any(Number));
+    expect(ticketOp).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears a failed op and sends one fresh createEvent, with no resend notice', async () => {
+    resolveSubmittedOp.mockResolvedValue({ state: 'failed', logs: [] });
+    open({ ...READY, submittedOpHash: SUBMITTED });
+    await create();
+    await waitFor(() => expect(screen.getByText('landed:/org/new/done/12')).toBeInTheDocument());
+    expect(ticketOp).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(copy.publishProblems.opExpired)).toBeNull();
   });
 
   it('shows the organiser notice when nothing agreed to pay for the operation', async () => {
@@ -336,7 +429,7 @@ describe('when it does not land', () => {
     // The press the copy asks for. It resolves; it does not create.
     expect(screen.getByRole('button', { name: copy.tiers.create })).toBeEnabled();
     await user.click(screen.getByRole('button', { name: copy.tiers.create }));
-    await waitFor(() => expect(resolveSubmittedOp).toHaveBeenCalledWith(OP_HASH));
+    await waitFor(() => expect(resolveSubmittedOp).toHaveBeenCalledWith(OP_HASH, expect.any(Number)));
     expect(ticketOp).toHaveBeenCalledTimes(1);
     expect(pinEventMetadata).toHaveBeenCalledTimes(1);
   });
@@ -380,5 +473,90 @@ describe('when it does not land', () => {
     await create();
     expect(await screen.findByText(copy.publishProblems.badTags)).toBeInTheDocument();
     expect(ticketOp).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The day's pin cap: `pinEventImage`/`pinEventMetadata` answer `resource-exhausted` with a
+   * `PIN_QUOTA` reason past the twentieth picture (functions/src/functions/organizer.ts). It is
+   * not a draft the organiser can fix — the cap lifts tomorrow — so it earns its own inline
+   * sentence rather than the generic "행사를 만들지 못했어요".
+   */
+  it('names the daily image quota rather than the generic failure', async () => {
+    pinEventMetadata.mockRejectedValue({ code: 'resource-exhausted', message: 'PIN_QUOTA' });
+    open();
+    await create();
+    expect(await screen.findByText(copy.publishProblems.imageQuota)).toBeInTheDocument();
+    expect(screen.queryByText(copy.publishProblems.failed)).toBeNull();
+    expect(ticketOp).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The same cap, hit while the default poster is being pinned, and recognised by the
+   * `resource-exhausted` code alone — so a reason that is not literally `PIN_QUOTA` still maps.
+   */
+  it('names the quota when the auto-poster pin is the one that hits it', async () => {
+    pinEventImage.mockRejectedValueOnce({ code: 'resource-exhausted', message: '' });
+    open({ ...READY, posterCid: '' });
+    await create();
+    expect(await screen.findByText(copy.publishProblems.imageQuota)).toBeInTheDocument();
+    expect(pinEventMetadata).not.toHaveBeenCalled();
+    expect(ticketOp).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * expert-3 "minimum event": the founder's "동아리 공연, 내일 저녁, 무료 30명". With the batch-2/P1
+ * defaults in force (auto poster on publish, next-Saturday start, optional 소개, optional 장소,
+ * 수량 100, 서울, 종류 '일반') the only field still needing input on a fresh /org/new is the title;
+ * everything else is defaulted, so the minimum is title + one tap on 행사 만들기 — two actions.
+ */
+function openFresh(): void {
+  render(
+    <MemoryRouter initialEntries={['/org/new']}>
+      <Routes>
+        <Route path="/org/new" element={<CreateEvent />} />
+        <Route path="/org/new/:draftId" element={<CreateEvent />} />
+        <Route path="*" element={<Probe />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+describe('the minimum event', () => {
+  it('reaches a published event in two actions (title + 행사 만들기)', async () => {
+    // One team already exists, so no organiser-name tap is needed either.
+    orgsListed.mockReturnValue([{ orgId: '9', canCreateEvent: true }]);
+    const user = userEvent.setup();
+    openFresh();
+    await waitFor(() => expect(screen.getByLabelText(copy.titleLabel)).toBeInTheDocument());
+
+    // Count each field entry and the button press as one user action.
+    let actions = 0;
+    await user.type(screen.getByLabelText(copy.titleLabel), '동아리 공연'); actions += 1;
+    await user.click(screen.getByRole('button', { name: copy.tiers.create })); actions += 1;
+
+    await waitFor(() => expect(screen.getByText('landed:/org/new/done/12')).toBeInTheDocument());
+    // The default poster was synthesised and pinned — no poster upload tap was ever needed.
+    expect(pinEventImage).toHaveBeenCalledWith({ bytesBase64: 'AUTO64', kind: 'poster' });
+    // Measured minimum for the P1 form: 2 actions (title, 행사 만들기). 장소는 이제 선택이다.
+    expect(actions).toBe(2);
+  });
+
+  /**
+   * 장소는 이제 선택이다(P1): 제목만으로도 발행된다. 빈 장소는 빈 문자열로 핀되고 탐색 상세는
+   * 기본 라벨 "장소 미정"으로 읽으므로, 장소는 더 이상 세는 동작이 아니다.
+   */
+  it('publishes with the venue left blank (optional now)', async () => {
+    orgsListed.mockReturnValue([{ orgId: '9', canCreateEvent: true }]);
+    const user = userEvent.setup();
+    openFresh();
+    await waitFor(() => expect(screen.getByLabelText(copy.titleLabel)).toBeInTheDocument());
+
+    await user.type(screen.getByLabelText(copy.titleLabel), '동아리 공연');
+    await user.click(screen.getByRole('button', { name: copy.tiers.create }));
+
+    await waitFor(() => expect(screen.getByText('landed:/org/new/done/12')).toBeInTheDocument());
+    const pinned = pinEventMetadata.mock.calls.at(-1)?.[0];
+    expect(pinned?.meta).toMatchObject({ venue: '', venueHidden: false });
   });
 });

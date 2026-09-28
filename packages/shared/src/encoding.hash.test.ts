@@ -25,6 +25,13 @@ import type { Hex } from './types.js';
 
 const NONCE = ('0x' + '11'.repeat(32)) as Hex;
 const ISSUED_AT = 1_789_862_400n; // 2026-09-20T00:00:00Z
+/** abi-delta-01b §7 의 가상 배포. 컨트랙트 쪽 고정 벡터와 같은 fixture 를 쓴다. */
+const FIXTURE_CHAIN_ID = 31337;
+const FIXTURE_TICKET = '0x7111111111111111111111111111111111111111' as Hex;
+/** 2026-09-23 Monad 테스트넷(10143)에 실제로 올라간 Ticket. */
+const LIVE_CHAIN_ID = 10143;
+const LIVE_TICKET = '0x4B8353C9F3503Cdbd011E8f35da0a955D95b1367' as Hex;
+const RECIPIENT = '0x0000000000000000000000000000000000000001' as Hex;
 
 describe('gateCodeHash', () => {
   it('matches the fixed vector for gateId=3 eventId=11 issuedAt=1789862400 nonce=0x11*32', () => {
@@ -232,27 +239,34 @@ describe('transfer commitments', () => {
 });
 
 describe('offerDigest', () => {
-  it('matches the fixed vector the attester signs for acceptOffer', () => {
-    expect(
-      offerDigest({
-        tokenId: 7n,
-        recipientCommitment: ('0x' + '11'.repeat(32)) as Hex,
-        recipientAccount: '0x0000000000000000000000000000000000000001' as Hex,
-      }),
-    ).toBe('0x90244cd7dea2e76fcbe10bb1f52ca2fe9bf143d9f9943bc8f792e664d052ed0a');
+  const FIXTURE = {
+    chainId: FIXTURE_CHAIN_ID,
+    ticket: FIXTURE_TICKET,
+    tokenId: 7n,
+    recipientCommitment: NONCE,
+    recipientAccount: RECIPIENT,
+  };
+
+  it('matches the EIP-712 vector the attester signs for acceptOffer', () => {
+    expect(offerDigest(FIXTURE)).toBe(
+      '0x7171ab3831d8e0d4a58ce6d8076a10c080c5a97849229aecf84c801dcafbc88d',
+    );
   });
 
   it('changes when the recipient account changes', () => {
-    const a = offerDigest({
-      tokenId: 7n,
-      recipientCommitment: ('0x' + '11'.repeat(32)) as Hex,
-      recipientAccount: '0x0000000000000000000000000000000000000001' as Hex,
-    });
-    const b = offerDigest({
-      tokenId: 7n,
-      recipientCommitment: ('0x' + '11'.repeat(32)) as Hex,
-      recipientAccount: '0x0000000000000000000000000000000000000002' as Hex,
-    });
-    expect(a).not.toBe(b);
+    expect(
+      offerDigest({ ...FIXTURE, recipientAccount: '0x0000000000000000000000000000000000000002' as Hex }),
+    ).not.toBe(offerDigest(FIXTURE));
+  });
+
+  // 도메인 분리. 옛 배포본·다른 체인에서 만든 서명이 새 배포본에서 살아남지 않는다.
+  it('changes when the chain id or the Ticket address changes', () => {
+    const base = offerDigest(FIXTURE);
+    expect(offerDigest({ ...FIXTURE, chainId: LIVE_CHAIN_ID })).not.toBe(base);
+    expect(offerDigest({ ...FIXTURE, ticket: LIVE_TICKET })).not.toBe(base);
+  });
+
+  it('rejects a Ticket address that is not 20 bytes', () => {
+    expect(() => offerDigest({ ...FIXTURE, ticket: '0x71' as Hex })).toThrow('BAD_TICKET');
   });
 });

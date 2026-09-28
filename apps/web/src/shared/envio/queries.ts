@@ -30,6 +30,10 @@ export interface EnvioEvent {
   regionCode: string;
   status: string;
   requireKyc: boolean;
+  /** 01c approval mode. Optional only because a document pinned before the column existed would
+   *  not carry it; the deployed indexer holds it as `Boolean!`, so real rows always answer. A
+   *  reader defaults it to `false` — the ordinary 선착순 event. */
+  approvalRequired?: boolean;
 }
 
 export interface EnvioTier {
@@ -115,7 +119,7 @@ export interface EnvioManager {
 /** Every column the discovery list and the detail screen read, in one place. */
 const EVENT_FIELDS = `
       id orgId imageCid startsAt endsAt saleStart saleEnd transferable
-      transferCutoffSeconds maxTransfers category regionCode status requireKyc`;
+      transferCutoffSeconds maxTransfers category regionCode status requireKyc approvalRequired`;
 
 export const EVENTS_QUERY = `
   query Events($limit: Int!) {
@@ -166,5 +170,80 @@ export const MY_ORGS_QUERY = `
 export const ORG_EVENTS_QUERY = `
   query OrgEvents($orgIds: [numeric!]!) {
     Event(where: { orgId: { _in: $orgIds } }, order_by: { startsAt: desc }) {${EVENT_FIELDS}
+    }
+  }`;
+
+/** One account's chosen display name. The chain stores only `keccak256(nickname)`, so the indexer
+ *  is the single place the plaintext exists (the same source the chat and gate snapshot read). A
+ *  row with a null nickname is an account that never set one, shown by number instead. */
+export interface EnvioIdentityAccount {
+  id: string;
+  nickname: string | null;
+}
+
+/** Resolve a set of accounts to their nicknames, for a list that names requesters. Accounts travel
+ *  lowercase — the id column is stored that way and `_in` is exact, so a checksummed one misses. */
+export const IDENTITY_NAMES_QUERY = `
+  query IdentityNames($accounts: [String!]!) {
+    IdentityAccount(where: { id: { _in: $accounts } }) { id nickname }
+  }`;
+
+/** The status of one approval-mode request, as the indexer holds it — the enum's name, not a
+ *  number. A self-cancel lands on `Rejected` too: the contract emits the same `ClaimRejected`
+ *  for it, so the indexer cannot tell an attendee's cancel from an organiser's rejection. */
+export type EnvioClaimStatus = 'Pending' | 'Approved' | 'Rejected';
+
+/**
+ * `Ticket.ClaimRequested` / `ClaimApproved` / `ClaimRejected`, folded by the indexer into one row
+ * per request (task-ux3-4 report). `tokenId` — the ticket an approval minted — and `decidedAt`
+ * are filled only once the request leaves `Pending`, so both are nullable. Every `BigInt!` column
+ * is a decimal string, `tier` is the lone `Int!`, and `requester` is stored lowercase, so a
+ * checksummed address matches no row. `status` is left as `string`, not {@link EnvioClaimStatus},
+ * for the same reason every other status column is: a value the schema gains is data, not a crash.
+ */
+export interface EnvioClaimRequest {
+  id: string;
+  eventId: string;
+  requestId: string;
+  requester: string;
+  tier: number;
+  status: string;
+  tokenId: string | null;
+  requestedAt: string;
+  decidedAt: string | null;
+  txHash: string;
+}
+
+/** Every column the two request documents read, in one place. */
+const CLAIM_REQUEST_FIELDS = `
+      id eventId requestId requester tier status tokenId requestedAt decidedAt txHash`;
+
+/**
+ * One attendee's own requests for an event, newest first. `(eventId, requester)` can hold more
+ * than one row once a rejected or self-cancelled request is made again, so the caller reads the
+ * first row as the current one. `eventId` filters a `BigInt!` column (Hasura's `numeric`) and
+ * `requester` a `String!` one — sent lowercase, the way the row is stored.
+ */
+export const MY_REQUESTS_QUERY = `
+  query MyRequests($eventId: numeric!, $requester: String!) {
+    ClaimRequest(
+      where: { eventId: { _eq: $eventId }, requester: { _eq: $requester } }
+      order_by: { requestedAt: desc }
+    ) {${CLAIM_REQUEST_FIELDS}
+    }
+  }`;
+
+/**
+ * Every request an event has in one status, oldest first — the organiser's 신청 관리 list asks for
+ * `"Pending"`. The status is a variable, not baked in, so the same document reads any set; it is a
+ * `String!` column, so the variable is `String!`, while `eventId` is the `numeric` its `BigInt!`
+ * column takes.
+ */
+export const EVENT_REQUESTS_QUERY = `
+  query EventRequests($eventId: numeric!, $status: String!) {
+    ClaimRequest(
+      where: { eventId: { _eq: $eventId }, status: { _eq: $status } }
+      order_by: { requestedAt: asc }
+    ) {${CLAIM_REQUEST_FIELDS}
     }
   }`;

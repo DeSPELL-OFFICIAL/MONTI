@@ -71,6 +71,8 @@ type Event {
   transferCutoffSeconds: BigInt!
   maxTransfers: Int!
   approvalRequired: Boolean!
+  # ClaimRequested +1, ClaimApproved/ClaimRejected -1 (only approval-required events exceed 0).
+  pendingRequests: Int!
   category: Int!
   regionCode: String!
   # Draft | Published | Cancelled. `Ended` 는 **이벤트로 오지 않는다** — 어떤 함수도
@@ -109,13 +111,35 @@ type Ticket {
   identity: IdentityAccount
 }
 
+# Ticket.ClaimRequested(eventId, requestId, requester, tier) opens a row in
+# Pending. approveClaims -> ClaimApproved(eventId, requestId, tokenId) sets Approved
+# and the minted tokenId (the paired Claimed event creates the Ticket row).
+# rejectClaims AND cancelRequest BOTH emit ClaimRejected(eventId, requestId) ->
+# Rejected: the event carries no actor, the paymaster hides msg.sender, and the
+# contract's own claimRequest view collapses reject and cancel into status 2
+# (Ticket.sol), so a requester self-cancel is indistinguishable from an organizer
+# reject and lands as Rejected. requestId is the per-event sequence requestClaim
+# returns. Supply is reserved on the chain at request time and released on reject;
+# Tier.minted still counts Claimed only, so it is unaffected here.
+type ClaimRequest {
+  id: ID!               # eventId-requestId
+  eventId: BigInt! @index
+  requestId: BigInt!
+  requester: String! @index
+  tier: Int!
+  status: String! @index   # Pending | Approved | Rejected
+  tokenId: BigInt          # set on ClaimApproved
+  requestedAt: BigInt!
+  decidedAt: BigInt        # set when it leaves Pending
+  txHash: String!          # the ClaimRequested transaction
+}
+
 # Ticket.CheckedIn(tokenId, eventId, gateId, nonceHash, ts) — manual false;
 # Ticket.ManualOverride writes the same row with manual true and a zero nonceHash.
-# late 는 01b 번들(checkInLate)이 채운다. 01b 의
-# `CheckedInLate(tokenId, gateId, issuedAt, ts)` 는 `CheckedIn` 과 같은 트랜잭션에서
-# **먼저** 오고(01b Ticket.sol:468-469), `CheckedIn` 핸들러가 그 행에서 late 를
-# 이어받는 규칙은 **이미 들어 있다**. 이 브랜치의 ABI 에 그 이벤트가 없어 결과가
-# 늘 false 일 뿐이고, 재배포 때 스키마도 핸들러도 고칠 것이 없다.
+# late 는 01b 의 checkInLate 가 채운다. `CheckedInLate(tokenId, gateId, issuedAt, ts)`
+# 는 `CheckedIn` 과 같은 트랜잭션에서 **먼저** 오고(01b Ticket.sol:468-469),
+# `CheckedIn` 핸들러가 그 행에서 late 를 이어받는다. 2026-09-23 재배포로 그 이벤트가
+# ABI·config 에 들어와 실제로 true 가 찍힌다 — 스키마는 그대로다.
 type CheckIn {
   id: ID!            # tokenId
   gateId: BigInt!

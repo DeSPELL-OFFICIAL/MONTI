@@ -96,8 +96,8 @@ describe('useMyOrgs', () => {
     const { result } = renderMyOrgs();
 
     await waitFor(() => expect(result.current.orgs).toHaveLength(2));
-    expect(result.current.orgs.map((org) => org.name)).toEqual(['몬티 라이브', '주최사 #4']);
-    expect(organizerCopy.ko.home.orgFallback).toBe('주최사 #{{id}}');
+    expect(result.current.orgs.map((org) => org.name)).toEqual(['몬티 라이브', '팀 #4']);
+    expect(organizerCopy.ko.home.orgFallback).toBe('팀 #{{id}}');
   });
 
   it('offers event creation to an owner and to an admin holding the createEvent bit', async () => {
@@ -113,6 +113,20 @@ describe('useMyOrgs', () => {
     expect(result.current.orgs.map((org) => org.canCreateEvent)).toEqual([true, true, false, false]);
     expect(result.current.orgs.map((org) => org.bits)).toEqual([0, 1, 2, 0]);
     expect(result.current.canCreateEvent).toBe(true);
+  });
+
+  it('grants approval to an owner, an admin holding the bit, and a manager who may approve', async () => {
+    // bits 32 is PERM_APPROVE_CLAIM; bits 2 is manageGates, which says nothing about approving.
+    gql.mockResolvedValue({
+      Organizer: [organizer('1')],
+      Admin: [admin('2', '32'), admin('3', '2')],
+      Manager: [manager('4')],
+    });
+    const { result } = renderMyOrgs();
+
+    await waitFor(() => expect(result.current.orgs).toHaveLength(4));
+    // manager() sets canApprove: true, so org 4 passes on the manager row alone.
+    expect(result.current.orgs.map((org) => org.canApprove)).toEqual([true, true, false, true]);
   });
 
   it('offers no event creation to somebody who only manages and only holds other bits', async () => {

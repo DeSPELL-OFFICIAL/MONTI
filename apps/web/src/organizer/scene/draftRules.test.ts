@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { emptyEventDraft } from '../useEventDraft';
+import { emptyEventDraft, emptyEventDraftTier, normalizeEventDraft } from '../useEventDraft';
 import type { EventDraft } from '../../shared/api/firestore';
+import { TICKET_BACKDROPS } from '../../shared/ui/ticketArt/presets';
 import {
-  MAX_TAGS, MAX_TIER_NAME_CHARS, eventProblems, normalizeTags, paidTiers, saleWindow,
-  tierArt, tierProblems,
+  DEFAULT_EVENT_SECONDS, MAX_TAGS, MAX_TIER_NAME_CHARS, TICKET_ART_PRESETS, endsAtOf,
+  eventProblems, normalizeTags, paidTiers, saleWindow, tierArt, tierProblems,
 } from './draftRules';
 
 /** A draft with nothing left to fix, so each case below can break exactly one rule. */
@@ -11,12 +12,12 @@ const READY: EventDraft = {
   ...emptyEventDraft,
   orgId: '9',
   title: '재즈 나이트',
-  description: '한남동 라이브',
+  description: '한남동 재즈 라이브 공연',
   posterCid: 'bafkposter',
   regionCode: 'KR-11',
   venue: '서울 용산구 한남동',
-  startsAt: 1_790_000_000,
-  endsAt: 1_790_010_000,
+  startsAt: 1_900_000_000,
+  endsAt: 1_900_010_000,
 };
 
 describe('normalizeTags', () => {
@@ -35,8 +36,12 @@ describe('eventProblems', () => {
     expect(eventProblems(READY)).toEqual([]);
   });
 
+  /** 소개는 이제 선택이다(계획 B-4가 ≥10자 규칙을 뒤집음): 빈 소개는 더 이상 문제가 아니다. */
   it('names an empty draft section by section, in the order the scene asks', () => {
-    expect(eventProblems(emptyEventDraft)).toEqual(['poster', 'title', 'body', 'venue', 'startsAt', 'endsAt']);
+    expect(eventProblems(emptyEventDraft)).toEqual(
+      ['title', 'startsAt', 'endsAt'],
+    );
+    expect(eventProblems({ ...READY, description: '' })).toEqual([]);
   });
 
   /**
@@ -50,6 +55,13 @@ describe('eventProblems', () => {
     expect(eventProblems({ ...READY, title: 'ㄱ'.repeat(61) })).toEqual(['title']);
     expect(eventProblems({ ...READY, description: 'ㄱ'.repeat(2_000) })).toEqual([]);
     expect(eventProblems({ ...READY, description: 'ㄱ'.repeat(2_001) })).toEqual(['body']);
+  });
+
+  /** 소개는 선택이다(계획 B-4): 빈값도 아주 짧은 값도 통과한다 — 남은 규칙은 2000자 상한뿐이다. */
+  it('accepts an empty or very short description (plan section B-4)', () => {
+    expect(eventProblems({ ...READY, description: '' })).toEqual([]);
+    expect(eventProblems({ ...READY, description: 'ㄱ' })).toEqual([]);
+    expect(eventProblems({ ...READY, description: `  ${'ㄱ'.repeat(3)}  ` })).toEqual([]);
   });
 
   it('counts code points rather than UTF-16 units, as the server does', () => {
@@ -68,15 +80,58 @@ describe('eventProblems', () => {
     expect(eventProblems({ ...READY, regionCode: 'KR-99' })).toEqual(['region']);
   });
 
-  it('separates a missing venue from one that is merely too long', () => {
-    expect(eventProblems({ ...READY, venue: '  ' })).toEqual(['venue']);
+  it('allows an empty 장소 (optional now) but still caps its length', () => {
+    // P1 relaxation: 장소는 선택이다 — 빈값도 공백만도 통과한다(기본 라벨 "장소 미정"로 읽힘).
+    expect(eventProblems({ ...READY, venue: '' })).toEqual([]);
+    expect(eventProblems({ ...READY, venue: '  ' })).toEqual([]);
+    expect(eventProblems({ ...READY, venue: 'ㄱ'.repeat(200) })).toEqual([]);
     expect(eventProblems({ ...READY, venue: 'ㄱ'.repeat(201) })).toEqual(['venueTooLong']);
   });
 
   it('asks for each time on its own, and only then whether they are the right way round', () => {
     expect(eventProblems({ ...READY, startsAt: 0 })).toEqual(['startsAt']);
-    expect(eventProblems({ ...READY, endsAt: 0 })).toEqual(['endsAt']);
+    // An end nobody set is two hours after the start, so it is not a problem — an end with no
+    // start to derive it from still is.
+    expect(eventProblems({ ...READY, endsAt: 0 })).toEqual([]);
+    expect(eventProblems({ ...READY, startsAt: 0, endsAt: 0 })).toEqual(['startsAt', 'endsAt']);
     expect(eventProblems({ ...READY, endsAt: READY.startsAt })).toEqual(['schedule']);
+  });
+
+  /**
+   * The founder's "행사를 만들지 못했어요" (task-create-failure-2 report §0). The draft was
+   * written on the 24th and published on the 26th; every field on the screen was right, but
+   * `saleWindow` derives 지금 -> `endsAt`, so the sign-up window ran backwards and
+   * `Ticket.createEvent` reverted `InvalidSchedule()` — during the *estimate*, where there is
+   * no receipt and therefore no reason the app could read. It is a rule here now, checked
+   * against a `now` the caller passes rather than against the clock, so this test cannot
+   * itself go stale the way that draft did.
+   */
+  it('refuses a draft whose end time has already gone by', () => {
+    expect(eventProblems(READY, READY.endsAt - 1)).toEqual([]);
+    expect(eventProblems(READY, READY.endsAt)).toEqual(['eventPast']);
+    expect(eventProblems(READY, READY.endsAt + 86_400)).toEqual(['eventPast']);
+    // The derived end — two hours after the start — is measured exactly the same way.
+    const derived = { ...READY, endsAt: 0 };
+    expect(eventProblems(derived, READY.startsAt + DEFAULT_EVENT_SECONDS - 1)).toEqual([]);
+    expect(eventProblems(derived, READY.startsAt + DEFAULT_EVENT_SECONDS + 1)).toEqual(['eventPast']);
+    // One sentence at a time: a window that runs backwards is `schedule`, and only that.
+    expect(eventProblems({ ...READY, endsAt: READY.startsAt }, READY.endsAt + 1)).toEqual(['schedule']);
+  });
+});
+
+describe('endsAtOf', () => {
+  it('keeps the end the organiser set', () => {
+    expect(endsAtOf(READY)).toBe(READY.endsAt);
+  });
+
+  /** `더 설정하기` is closed by default, so most events never have one typed in. */
+  it('derives two hours after the start when nobody set one', () => {
+    expect(endsAtOf({ ...READY, endsAt: 0 })).toBe(READY.startsAt + DEFAULT_EVENT_SECONDS);
+    expect(DEFAULT_EVENT_SECONDS).toBe(7_200);
+  });
+
+  it('has nothing to derive from without a start', () => {
+    expect(endsAtOf({ ...READY, startsAt: 0, endsAt: 0 })).toBe(0);
   });
 });
 
@@ -88,6 +143,13 @@ describe('saleWindow', () => {
    */
   it('opens now and closes when the event ends', () => {
     expect(saleWindow(READY, 1_789_000_000)).toEqual({ saleStart: 1_789_000_000, saleEnd: READY.endsAt });
+  });
+
+  /** The derived end is the one the window closes on, so `saleStart < saleEnd` still holds. */
+  it('closes on the derived end when the organiser never set one', () => {
+    const { saleStart, saleEnd } = saleWindow({ ...READY, endsAt: 0 }, 1_789_000_000);
+    expect(saleEnd).toBe(READY.startsAt + DEFAULT_EVENT_SECONDS);
+    expect(saleStart).toBeLessThan(saleEnd);
   });
 });
 
@@ -154,5 +216,65 @@ describe('tierArt', () => {
 
   it('lets an uploaded picture win, and keeps the design the draft still remembers', () => {
     expect(tierArt({ ...tier, design: 'd', imageCid: 'bafkart' })).toEqual({ imageCid: 'bafkart' });
+  });
+});
+
+describe('the preset alphabet', () => {
+  /**
+   * Four places hold these letters — this list, the union `TicketArtPreset`, the validator in
+   * `shared/api/firestore.ts` and the drawings themselves — and the Firestore rule validates
+   * `^[a-l]$` on top of them. A letter this list offers that one of the others has never heard
+   * of does not draw a wrong picture: it fails the autosave for the **whole draft document**
+   * the moment somebody picks it, with nothing on screen saying which box did it.
+   */
+  it('is the twelve letters a to l, each once and in order', () => {
+    expect([...TICKET_ART_PRESETS]).toEqual(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l']);
+    expect(new Set(TICKET_ART_PRESETS).size).toBe(12);
+  });
+
+  /** A letter with no drawing behind it is a blank ticket, and nothing else would say so. */
+  it('has a drawing for every letter, and draws nothing that is not one', () => {
+    for (const preset of TICKET_ART_PRESETS) {
+      expect(TICKET_BACKDROPS[preset], preset).toBeTruthy();
+    }
+    expect(Object.keys(TICKET_BACKDROPS).sort()).toEqual([...TICKET_ART_PRESETS].sort());
+  });
+
+  /** The fold that reaches `saveEventArt`: every letter survives it as itself. */
+  it('keeps each of the twelve through the fold that reaches the callable', () => {
+    const tier = READY.tiers[0] as EventDraft['tiers'][number];
+    for (const preset of TICKET_ART_PRESETS) {
+      expect(tierArt({ ...tier, design: preset, imageCid: '' }), preset).toEqual({ preset });
+    }
+    // A thirteenth is not a letter anything downstream would accept, so it folds back.
+    expect(tierArt({ ...tier, design: 'm', imageCid: '' })).toEqual({ preset: 'a' });
+  });
+});
+
+describe('approvalRequired', () => {
+  /**
+   * The one event-wide switch the tier card's 받는 방식 control writes. It defaults off — every
+   * event issues on a first-come basis until an organiser chooses otherwise — and it is read
+   * back at its own type, so a hand-broken value falls back rather than reaching the chain as a
+   * string (plan section A-5).
+   */
+  it('defaults to false and round-trips through the draft normaliser', () => {
+    expect(emptyEventDraft.approvalRequired).toBe(false);
+    expect(normalizeEventDraft({ approvalRequired: true }).approvalRequired).toBe(true);
+    expect(normalizeEventDraft({ approvalRequired: 'yes' }).approvalRequired).toBe(false);
+    expect(normalizeEventDraft({}).approvalRequired).toBe(false);
+  });
+});
+
+describe('what a kind starts as', () => {
+  /**
+   * The founder opened the scene and found a required box with nothing in it (plan section
+   * B-3). A kind's name is the one thing `tierProblems` insists on, so it is filled in — and
+   * `일반` is what almost every first kind is called. A blank default would put a red line
+   * under a box nobody had touched the first time 만들기 was pressed.
+   */
+  it('is named 일반, so the one required field on it is already answered', () => {
+    expect(emptyEventDraftTier.name).toBe('일반');
+    expect(tierProblems(emptyEventDraft)).toEqual([]);
   });
 });

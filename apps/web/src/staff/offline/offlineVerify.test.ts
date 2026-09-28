@@ -88,7 +88,7 @@ describe('the digest the gate recomputes', () => {
 
   it('is the domain-separated form, because that is what is deployed today', () => {
     // Pinned to the deployment, not to a plan: 01b went out on 2026-09-23 (chain 10143, Ticket
-    // 0x4B8353C9F3503Cdbd011E8f35da0a955D95b1367) and its `_deviceDigest` is the seven-word
+    // 0x40D90AF3a3B22542AEeF0ec3E6a66F1EAb6f7AFA) and its `_deviceDigest` is the seven-word
     // form. The attendee app flipped the same day — the two halves of a tap have to agree on
     // the digest form or every check-in is refused `BadDeviceSignature`. This line moves again
     // only when a redeploy moves the contract.

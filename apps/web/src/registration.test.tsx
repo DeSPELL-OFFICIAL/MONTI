@@ -40,11 +40,11 @@ describe('the unfinished-signup guard', () => {
    * looks signed in, and is refused by `startKyc` with `NOT_ACTIVE`. Sending them to the one
    * screen that can fix it — and remembering where they were going — is the fix.
    */
-  it('sends a person who never finished signup to the device step, carrying where they were going', async () => {
+  it('sends a person who never finished signup to the register screen, carrying where they were going', async () => {
     getSignupStatus.mockResolvedValue({ status: 'pending', kycLevel: 0 });
     const router = routerAt('/me/verify');
 
-    await waitFor(() => expect(router.state.location.pathname).toBe('/signup/device'));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/signup/register'));
     expect(new URLSearchParams(router.state.location.search).get('returnTo')).toBe('/me/verify');
     // `replace`: the screen they could not use must not be one Back step away.
     expect(router.state.historyAction).toBe('REPLACE');

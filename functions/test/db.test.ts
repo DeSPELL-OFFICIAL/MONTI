@@ -23,7 +23,7 @@ describe('assertStatusTransition', () => {
   });
 
   it('covers every status in the union, so a new status cannot slip in untested', () => {
-    expect(STATUSES.sort()).toEqual(['active', 'kyc_ok', 'pending', 'rejected', 'rotated']);
+    expect(STATUSES.sort()).toEqual(['active', 'deleted', 'kyc_ok', 'pending', 'rejected', 'rotated']);
     expect(allowed.length + forbidden.length).toBe(STATUSES.length ** 2);
   });
 
@@ -34,6 +34,14 @@ describe('assertStatusTransition', () => {
   it('blocks going backwards and resurrecting a rotated person', () => {
     expect(() => assertStatusTransition('active', 'pending')).toThrow('BAD_STATUS_TRANSITION');
     expect(() => assertStatusTransition('rotated', 'active')).toThrow('BAD_STATUS_TRANSITION');
+  });
+
+  // 파기는 어디서든 닿을 수 있어야 하고(가입 도중에도 요청할 수 있다) 되돌아오는 길은 없어야 한다.
+  it('accepts deletion from every state and never lets a deleted person come back', () => {
+    for (const from of STATUSES) expect(() => assertStatusTransition(from, 'deleted')).not.toThrow();
+    for (const to of STATUSES.filter((status) => status !== 'deleted')) {
+      expect(() => assertStatusTransition('deleted', to)).toThrow('BAD_STATUS_TRANSITION');
+    }
   });
 
   it('is a no-op for an identical status (idempotent replays)', () => {

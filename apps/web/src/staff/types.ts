@@ -72,7 +72,11 @@ const TICKET_ERROR_NAMES: readonly string[] = ticketAbi.flatMap((entry) =>
  * exclusion is now excluding nothing, and something else may have quietly taken its place.
  */
 export const NON_GATE_ERRORS = [
-  'ApprovalRequiredNotSupported',
+  // The approval-claim reverts (01c): claim on a request event, requestClaim on a plain one,
+  // and deciding a request that is no longer pending — the 신청·승인 path, never a door tap.
+  'ApprovalNotRequired',
+  'ApprovalRequired',
+  'RequestNotPending',
   'BadAttesterSig',
   'ECDSAInvalidSignature',
   'ECDSAInvalidSignatureLength',

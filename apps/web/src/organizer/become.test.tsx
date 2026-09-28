@@ -162,7 +162,7 @@ describe('what the server refuses', () => {
 
     expect(await screen.findByText(copy.problems.notActive)).toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole('button', { name: copy.resume }));
-    expect(navigate).toHaveBeenCalledWith('/signup/device');
+    expect(navigate).toHaveBeenCalledWith('/signup/register');
   });
 
   it('sends somebody who never signed up to the first signup step', async () => {

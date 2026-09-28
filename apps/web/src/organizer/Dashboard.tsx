@@ -1,17 +1,20 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import type { AttendeeRow } from '@monti/shared';
-import { Alert, Button, Screen, Spinner } from '../shared/ui';
+import { Alert, Button, OpProgress, Screen, Sheet, Spinner } from '../shared/ui';
+import { fmt, useLocale } from '../shared/i18n';
 import { api } from '../shared/api/functions';
 import { readTicket } from '../shared/chain/reads';
 import { gql } from '../shared/envio/client';
 import { EVENT_QUERY, type EnvioEvent, type EnvioTier } from '../shared/envio/queries';
-import { fetchEventMetadata } from '../shared/envio/ipfs';
+import { fetchEventMetadata, type EventMetadata } from '../shared/envio/ipfs';
+import { useEventRequests } from '../shared/envio/claimRequests';
 import { Announce } from './Announce';
 import { useOrganizerCopy } from './copy';
 import { EventArt } from './EventArt';
 import { cancelEvent, publishEvent, type LifecycleResult } from './lifecycle';
 import { UnsponsoredNotice } from './Unsponsored';
+import { KR_REGIONS } from './scene/regions';
 
 /** Which confirmation is open, if any. Neither write happens without one. */
 type Pending = '' | 'publish' | 'cancel';
@@ -26,6 +29,9 @@ type Pending = '' | 'publish' | 'cancel';
  */
 type Outcome = LifecycleResult & { which: Exclude<Pending, ''> };
 
+/** How often a confirming publish/cancel asks the indexer whether it has landed (plan §2c). */
+const CONFIRM_POLL_MS = 3_000;
+
 /**
  * One event, from the indexer. Every number on this screen is a chain fact the indexer already
  * has — how many of each kind went out, how many came in — and the attendee list is
@@ -38,11 +44,18 @@ export function Dashboard() {
   const copy = useOrganizerCopy();
   const dash = copy.dashboard;
   const life = copy.lifecycle;
+  const locale = useLocale();
+  // The pending count beside the 신청 관리 link. Only an approvalRequired event has any, so an
+  // ordinary event's empty answer (or an indexer that has not caught up) simply hides the count.
+  const { requests: pendingRequests } = useEventRequests(eventId, 'Pending');
 
   const [event, setEvent] = useState<EnvioEvent | null>(null);
   const [tiers, setTiers] = useState<EnvioTier[]>([]);
   const [attendees, setAttendees] = useState<AttendeeRow[]>([]);
   const [title, setTitle] = useState('');
+  // The full metadata, kept for the publish summary sheet — venue, region and the two hide flags
+  // that decide what a summary may show before the event goes public (plan §2b).
+  const [meta, setMeta] = useState<EventMetadata | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [pending, setPending] = useState<Pending>('');
@@ -82,14 +95,50 @@ export function Dashboard() {
     if (imageCid === '') return undefined;
     let cancelled = false;
     void fetchEventMetadata(imageCid)
-      .then((meta) => {
-        if (!cancelled) setTitle(meta.title);
+      .then((loaded) => {
+        if (!cancelled) {
+          setMeta(loaded);
+          setTitle(loaded.title);
+        }
       })
       .catch(() => undefined);
     return () => {
       cancelled = true;
     };
   }, [imageCid]);
+
+  // While a publish or cancel is confirming, poll the indexer for the event until it shows the
+  // status the write was for — no manual refresh (plan §2c). The refetch is silent: it never sets
+  // `loading`, so the screen keeps the determinate progress rather than blinking to a full spinner.
+  useEffect(() => {
+    if (outcome?.state !== 'confirming') return undefined;
+    let live = true;
+    const poll = async (): Promise<void> => {
+      const indexed = await gql<{ Event: EnvioEvent[]; Tier: EnvioTier[] }>(
+        EVENT_QUERY,
+        { id: eventId, eventId },
+      ).catch(() => null);
+      if (!live || indexed === null) return;
+      const next = indexed.Event[0] ?? null;
+      if (next !== null) {
+        setEvent(next);
+        setTiers(indexed.Tier ?? []);
+      }
+    };
+    const timer = setInterval(() => void poll(), CONFIRM_POLL_MS);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [outcome, eventId]);
+
+  // The confirming write is done the instant the indexer shows the status it was for — the screen
+  // turns to 발행했어요 / 취소했어요 on its own, with no refresh.
+  useEffect(() => {
+    if (outcome?.state !== 'confirming') return;
+    const target = outcome.which === 'publish' ? 'Published' : 'Cancelled';
+    if (event?.status === target) setOutcome({ state: 'done', which: outcome.which });
+  }, [event?.status, outcome]);
 
   async function run(which: Exclude<Pending, ''>): Promise<void> {
     setBusy(true);
@@ -124,6 +173,19 @@ export function Dashboard() {
   const entered = attendees.filter((row) => row.checkedIn).length;
   const status = event?.status ?? '';
 
+  // The publish summary, best-effort from what the indexer and the gateway gave. It is the
+  // organiser's own view, so it shows the full start time; place follows the hide flag — the
+  // region alone when the venue is for ticket holders (plan §2b).
+  const startsAtMs = Number(event?.startsAt ?? 0) * 1000;
+  const publishDate = Number.isFinite(startsAtMs) && startsAtMs > 0
+    ? new Date(startsAtMs).toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' })
+    : '';
+  const region = KR_REGIONS.find((entry) => entry.code === meta?.region);
+  const regionLabel = region ? (locale === 'en' ? region.labelEn : region.labelKo) : (meta?.region ?? '');
+  const publishPlace = meta?.venueHidden
+    ? fmt(life.summary.placeRegionOnly, { region: regionLabel })
+    : (meta?.venue || regionLabel);
+
   return (
     <Screen title={dash.title}>
       {failed ? <Alert tone="error">{dash.failed}</Alert> : null}
@@ -133,7 +195,11 @@ export function Dashboard() {
       {!failed && event === null ? <Alert tone="warn">{dash.notIndexed}</Alert> : null}
 
       {outcome?.state === 'unsponsored' ? <UnsponsoredNotice /> : null}
-      {outcome?.state === 'confirming' ? <Alert tone="info">{life.confirming}</Alert> : null}
+      {/* A timed-out write is not a failure and not a dead end: the determinate wait stays up while
+          the poll above confirms it, so there is no "다시 열어/새로고침" to do (plan §2c). */}
+      {outcome?.state === 'confirming'
+        ? <OpProgress phase="confirming" onRetry={() => setReload((count) => count + 1)} />
+        : null}
       {outcome?.state === 'refused' ? <Alert tone="error">{life[outcome.problem]}</Alert> : null}
       {/* The sentence comes from the write that ran, not from an indexer that may be behind. */}
       {outcome?.state === 'done' ? (
@@ -157,10 +223,40 @@ export function Dashboard() {
             </Button>
           ) : null}
         </>
+      ) : pending === 'publish' ? (
+        // 발행 요약 시트: 무엇을 공개하는지 먼저 보여주고, 그 뒤에 되돌릴 수 없다는 확인(계획 §2b).
+        <Sheet label={life.summary.heading}>
+          <h2>{life.summary.heading}</h2>
+          <dl className="publish-summary">
+            <div>
+              <dt>{life.summary.title}</dt>
+              <dd>{title === '' ? dash.art.untitled : title}</dd>
+            </div>
+            <div>
+              <dt>{life.summary.date}</dt>
+              <dd>{publishDate}</dd>
+            </div>
+            <div>
+              <dt>{life.summary.place}</dt>
+              <dd>{publishPlace}</dd>
+            </div>
+            <div>
+              <dt>{life.summary.tiers}</dt>
+              <dd>{fmt(life.summary.tiersValue, { count: tiers.length })}</dd>
+            </div>
+            <div>
+              <dt>{life.summary.kyc}</dt>
+              <dd>{event?.requireKyc ? life.summary.kycOn : life.summary.kycOff}</dd>
+            </div>
+          </dl>
+          <p>{life.publishConfirm}</p>
+          <Button disabled={busy} onClick={() => void run('publish')}>{life.confirm}</Button>
+          <Button variant="ghost" disabled={busy} onClick={() => setPending('')}>{life.back}</Button>
+        </Sheet>
       ) : (
         <Alert tone="warn">
-          {pending === 'publish' ? life.publishConfirm : life.cancelConfirm}
-          <Button disabled={busy} onClick={() => void run(pending)}>
+          {life.cancelConfirm}
+          <Button disabled={busy} onClick={() => void run('cancel')}>
             {life.confirm}
           </Button>
           <Button variant="ghost" disabled={busy} onClick={() => setPending('')}>
@@ -202,13 +298,28 @@ export function Dashboard() {
 
       {/* Shown whatever the status is: the picture is the one part of a ticket that stays
           editable once the event is public, which is exactly why it is not on the chain. */}
-      <EventArt eventId={eventId} tiers={tiers} title={title === '' ? dash.art.untitled : title} />
+      <EventArt
+        eventId={eventId}
+        tiers={tiers}
+        title={title === '' ? dash.art.untitled : title}
+        startsAt={Number(event?.startsAt ?? 0)}
+      />
 
       <Announce eventId={eventId} />
 
       <p>
         <Link to={`/org/events/${eventId}/gates`}>{dash.gates}</Link>
       </p>
+
+      {/* Only an approvalRequired event has a request queue; the count rides along when there is one. */}
+      {event?.approvalRequired ? (
+        <p>
+          <Link to={`/org/events/${eventId}/requests`}>
+            {dash.requests}
+            {pendingRequests.length > 0 ? ` (${pendingRequests.length})` : ''}
+          </Link>
+        </p>
+      ) : null}
     </Screen>
   );
 }

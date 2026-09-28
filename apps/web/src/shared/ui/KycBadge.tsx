@@ -8,6 +8,10 @@ const VERIFIED_LEVEL = 1;
  * where they stand. One part, because they used to be two vocabularies for one idea — the event
  * said `KYC 필요` and the profile said `미인증`.
  *
+ * The two are told apart by colour as well as by their words, because on a card they sit side
+ * by side and read as one phrase otherwise: what the event asks is purple, standing is green
+ * once it is met and amber while it is not.
+ *
  * An event that asks for nothing gets no badge at all: telling somebody they are unverified on
  * an event that never cared is noise. A signed-out visitor sees only what the event asks —
  * `/` and `/events/:id` are public routes and there is nobody yet to have a status.
@@ -25,9 +29,9 @@ export function KycBadge({
   if (!required) return null;
   return (
     <>
-      <span className="badge">{copy.kyc.requiredBadge}</span>
+      <span className="badge badge--ask">{copy.kyc.requiredBadge}</span>
       {signedIn ? (
-        <span className="badge">
+        <span className={`badge ${level >= VERIFIED_LEVEL ? 'badge--ok' : 'badge--todo'}`}>
           {level >= VERIFIED_LEVEL ? copy.kyc.mineVerified : copy.kyc.mineUnverified}
         </span>
       ) : null}

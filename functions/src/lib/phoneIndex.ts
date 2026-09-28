@@ -33,3 +33,12 @@ export async function upsertPhoneIndex(
   else await ref.set({ personId }, { merge: true });
   return ref.id;
 }
+
+/**
+ * 번호 → personId. 읽는 문서는 `phoneIndex/{hmacPhone(번호, 키)}` 하나뿐이다.
+ * 평문 번호는 어디에도 저장돼 있지 않으므로 이 색인 말고는 번호로 사람을 찾는 길이 없다.
+ */
+export async function personIdByPhone(phoneE164: string, key: string): Promise<Hex | undefined> {
+  const doc = await phoneIndexRef(phoneE164, key).get();
+  return doc.exists ? (doc.get('personId') as Hex) : undefined;
+}

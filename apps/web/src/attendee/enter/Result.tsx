@@ -17,6 +17,7 @@
 // contract reverts emits no event and triggers no webhook, so a door that says no is silence,
 // and silence is what the deadline reports.
 import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { numberToHex, type Hex } from 'viem';
 // `CheckInPush` is the wire shape of the webhook's FCM payload and lives in `@monti/shared`
 // with the other shapes the backend and this app both have to agree on. `late` is live as of
@@ -178,6 +179,7 @@ export function Result({ tokenId }: { tokenId: string }) {
     return (
       <div data-testid="entry-result" data-stage="failed">
         <Alert tone="error">{copy.enter.notConfirmed}</Alert>
+        <p><Link to="/tickets">{copy.enter.toTickets}</Link></p>
       </div>
     );
   }
@@ -186,6 +188,7 @@ export function Result({ tokenId }: { tokenId: string }) {
     <div data-testid="entry-result" data-stage={outcome.stage}>
       <Alert tone="info">{copy.enter.done}</Alert>
       {outcome.stage === 'speculative' ? <p>{copy.enter.resultSettling}</p> : null}
+      <p><Link to="/tickets">{copy.enter.toTickets}</Link></p>
     </div>
   );
 }

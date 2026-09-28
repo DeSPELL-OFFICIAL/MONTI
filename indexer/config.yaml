@@ -1,0 +1,68 @@
+# 생성 파일. 직접 고치지 말고 scripts/gen-config.mjs 를 고치세요.
+# 주소·start_block 은 contracts/deployments/10143.json, 이벤트 시그니처는
+# packages/shared/src/abi/*.json 에서 나온다. 갱신은 `pnpm indexer:config`.
+# 로컬 실행은 RPC_URL=… pnpm indexer:config 로 rpc 소스를 붙여 다시 만든다.
+name: monti
+description: MONTI on-chain index (Monad 10143)
+schema: schema.graphql
+# `CheckIn.txHash` 와 `Override.id`(= txHash-logIndex) 가 트랜잭션 해시를 쓴다.
+# field_selection 없이는 `event.transaction` 이 **빈 객체**라 해시를 읽을 수 없다
+# (Envio 기본값). 해시 하나만 고른다 — 고른 필드마다 동기화가 느려진다.
+field_selection:
+  transaction_fields:
+    - hash
+contracts:
+  - name: Identity
+    handler: src/EventHandlers.ts
+    events:
+      - event: Registered(bytes32 indexed personId, address indexed account)
+      - event: AccountRotated(bytes32 indexed personId, address indexed oldAccount, address indexed newAccount)
+      - event: RotationCancelled(bytes32 indexed personId, address indexed account)
+      - event: DeviceChanged(address indexed account, bytes32 x, bytes32 y)
+      - event: DeviceLocked(address indexed account, bool locked)
+      - event: NicknameSet(address indexed account, bytes32 indexed nicknameHash, string nickname)
+      - event: KycLevelSet(address indexed account, uint8 level)
+  - name: Organizers
+    handler: src/EventHandlers.ts
+    events:
+      - event: OrganizerCreated(uint256 indexed orgId, address indexed owner)
+      - event: AdminSet(uint256 indexed orgId, address indexed admin, uint32 bits)
+      - event: ManagerSet(uint256 indexed orgId, address indexed manager, bool exists, bool canApprove)
+      - event: OwnerTransferred(uint256 indexed orgId, address indexed from, address indexed to)
+      - event: GateRegistered(uint256 indexed gateId, uint256 indexed eventId, address indexed gateAccount, bytes32 kx, bytes32 ky)
+      - event: GateRevoked(uint256 indexed gateId)
+      - event: GateOpened(uint256 indexed gateId)
+      - event: GateClosed(uint256 indexed gateId)
+  - name: Ticket
+    handler: src/EventHandlers.ts
+    events:
+      - event: EventCreated(uint256 indexed eventId, uint256 indexed orgId, address indexed creator)
+      - event: EventStatusChanged(uint256 indexed eventId, uint8 status)
+      - event: EventMetaUpdated(uint256 indexed eventId)
+      - event: Claimed(uint256 indexed tokenId, uint256 indexed eventId, address indexed to, uint8 tier)
+      - event: ClaimRequested(uint256 indexed eventId, uint256 indexed requestId, address indexed requester, uint8 tier)
+      - event: ClaimApproved(uint256 indexed eventId, uint256 indexed requestId, uint256 tokenId)
+      - event: ClaimRejected(uint256 indexed eventId, uint256 indexed requestId)
+      - event: Transfer(address indexed from, address indexed to, uint256 indexed tokenId)
+      - event: CheckedIn(uint256 indexed tokenId, uint256 indexed eventId, uint256 indexed gateId, bytes32 nonceHash, uint64 ts)
+      - event: CheckedInLate(uint256 indexed tokenId, uint256 indexed gateId, uint64 issuedAt, uint64 ts)
+      - event: OverrideRequested(uint256 indexed tokenId, uint256 indexed gateId, address indexed requester, uint8 reason)
+      - event: ManualOverride(uint256 indexed tokenId, uint256 indexed gateId, address indexed approver, uint8 role, uint8 reason)
+      - event: Revoked(uint256 indexed tokenId, uint8 reason)
+      - event: Migrated(uint256 indexed tokenId, address indexed from, address indexed to)
+      - event: OfferCreated(uint256 indexed tokenId, address indexed from, bytes32 recipientCommitment, uint64 expiresAt)
+      - event: OfferCancelled(uint256 indexed tokenId)
+      - event: OfferAccepted(uint256 indexed tokenId, address indexed from, address indexed to)
+networks:
+  - id: 10143
+    start_block: 64921775
+    contracts:
+      - name: Identity
+        address:
+          - "0x961a895b47Cf200C14acf38F5689979FF5bd8133"
+      - name: Organizers
+        address:
+          - "0xa88C8D110Ca8f0c925A781AB8042bA012d7281F0"
+      - name: Ticket
+        address:
+          - "0x40D90AF3a3B22542AEeF0ec3E6a66F1EAb6f7AFA"

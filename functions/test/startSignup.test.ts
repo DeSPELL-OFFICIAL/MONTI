@@ -77,19 +77,7 @@ vi.mock('../src/lib/db.js', () => ({
   },
 }));
 
-/** DEK 를 'W' 한 바이트로 감싸는 가짜 KMS. 봉투 암호화 자체는 진짜 코드가 돈다. */
-vi.mock('@google-cloud/kms', () => ({
-  KeyManagementServiceClient: class {
-    async encrypt({ plaintext }: { plaintext: Buffer }) {
-      return [{ ciphertext: Buffer.concat([Buffer.from('W'), Buffer.from(plaintext)]) }];
-    }
-    async decrypt({ ciphertext }: { ciphertext: Buffer }) {
-      const buf = Buffer.from(ciphertext);
-      if (buf[0] !== 'W'.charCodeAt(0)) throw new Error('FAKE_KMS_BAD_WRAP');
-      return [{ plaintext: buf.subarray(1) }];
-    }
-  },
-}));
+vi.mock('@google-cloud/kms', async () => await import('./helpers/fakeKms.js'));
 
 const { PERSONS, PHONE_INDEX, USERS } = await import('../src/lib/db.js');
 const { decryptField, piiAad } = await import('../src/lib/kms.js');

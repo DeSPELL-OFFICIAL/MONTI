@@ -7,6 +7,7 @@ import {
   selectorOf,
 } from '../../shared/chain/revert';
 import { OpReverted, ticketOp } from '../../shared/chain/ops';
+import { MAX_WAIT_TIMEOUT_MS } from '../../shared/chain/sendSponsoredOp';
 import { getAttendeeAccount } from '../../shared/chain/accounts';
 import { readTicket } from '../../shared/chain/reads';
 import type { Copy } from '../../shared/copy/index';
@@ -93,6 +94,8 @@ export async function sendTransfer(from: Hex, to: Hex, tokenId: bigint, orgId: b
     orgId,
     functionName: 'safeTransferFrom',
     args: [from, to, tokenId],
+    // Wait to the 45s cap, so a late handover still lands instead of giving up at 15s (T-SIMP-7).
+    maxTimeoutMs: MAX_WAIT_TIMEOUT_MS,
   });
 }
 

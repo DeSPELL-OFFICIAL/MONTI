@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { numberToHex } from 'viem';
 import { getPublicClient, monadChain, resetChainClients } from './client';
 import { resetWebSocketClient, subscribeLogs } from './subscribeLogs';
 
@@ -91,6 +92,45 @@ describe('chain client', () => {
     expect(getPublicClient()).toBe(first);
     resetChainClients();
     expect(getPublicClient()).not.toBe(first);
+  });
+
+  it('prices a sponsored op at 2x the base fee, above rundler’s Monad bundling threshold', async () => {
+    // The multiplier is a property of the chain — viem 2.38 reads it there, not from a call arg.
+    expect(monadChain(10143, ['https://a.example/rpc'], 'wss://ws.example').fees?.baseFeeMultiplier)
+      .toBe(2);
+
+    const BASE = 100_000_000_000n; // Monad's fixed 100 gwei base fee
+    const PRIORITY = 2_000_000_000n; // 2 gwei
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as { id: number; method: string };
+        const reply = (result: unknown) =>
+          new Response(JSON.stringify({ jsonrpc: '2.0', id: body.id, result }), {
+            headers: { 'content-type': 'application/json' },
+          });
+        if (body.method === 'eth_maxPriorityFeePerGas') return reply(numberToHex(PRIORITY));
+        if (body.method === 'eth_getBlockByNumber') {
+          return reply({
+            baseFeePerGas: numberToHex(BASE),
+            number: '0x1', timestamp: '0x1', gasLimit: '0x1c9c380', gasUsed: '0x0',
+            hash: `0x${'ab'.repeat(32)}`, parentHash: `0x${'00'.repeat(32)}`,
+            nonce: '0x0000000000000000', miner: `0x${'00'.repeat(20)}`,
+            difficulty: '0x0', totalDifficulty: '0x0', size: '0x0', extraData: '0x',
+            logsBloom: `0x${'00'.repeat(256)}`, mixHash: `0x${'00'.repeat(32)}`,
+            receiptsRoot: `0x${'00'.repeat(32)}`, sha3Uncles: `0x${'00'.repeat(32)}`,
+            stateRoot: `0x${'00'.repeat(32)}`, transactionsRoot: `0x${'00'.repeat(32)}`,
+            transactions: [], uncles: [],
+          });
+        }
+        return reply('0x0');
+      }),
+    );
+
+    const fees = await getPublicClient().estimateFeesPerGas();
+    // 100 gwei × 2 + 2 gwei priority = 202 gwei — ≥ 1.6× base, clearing the 129–152 gwei rundler needs.
+    expect(fees.maxFeePerGas).toBe(BASE * 2n + PRIORITY);
+    expect(fees.maxFeePerGas).toBeGreaterThanOrEqual((BASE * 16n) / 10n);
   });
 });
 

@@ -81,7 +81,7 @@ describe('Inbox', () => {
   it('says so when nothing is waiting', async () => {
     pendingOffers.mockResolvedValue([]);
     renderInbox();
-    expect(await screen.findByText('받은 티켓이 없어요.')).toBeInTheDocument();
+    expect(await screen.findByText('친구가 보낸 티켓이 없어요.')).toBeInTheDocument();
   });
 
   it('names the event, because its reader has never seen it', async () => {
