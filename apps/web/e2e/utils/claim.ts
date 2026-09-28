@@ -1,6 +1,6 @@
 import { expect, type Page } from '@playwright/test';
 import { timed } from '../fixtures/timings';
-import { attachBundlerCapture } from './bundler-capture';
+import { attachRelayCapture } from './relay-capture';
 
 const C = {
   claimCta: '티켓 받기',
@@ -29,7 +29,7 @@ export type ClaimOutcome = 'claimed' | 'confirming' | 'limit' | 'soldout' | 'fai
  * on-chain revert the indexer had not yet reflected shows the generic failure.
  */
 export async function claimFree(page: Page, personaId: string, eventId: string): Promise<ClaimOutcome> {
-  const capture = attachBundlerCapture(page, { persona: personaId, eventId });
+  const capture = attachRelayCapture(page, { persona: personaId, eventId });
   try {
     const outcome = await timed(personaId, 'claim', async (): Promise<ClaimOutcome> => {
       await page.goto(`/claim/${eventId}`);
@@ -77,8 +77,9 @@ export async function claimFree(page: Page, personaId: string, eventId: string):
       }
       return 'failed';
     });
-    // A real failure: pull the bundler's eth_sendUserOperation error out of the page's network
-    // log into the artifacts and the friction log. Let the async response handler drain first.
+    // A real failure: pull the relayClaim callable's refusal out of the page's network log into the
+    // artifacts and the friction log (a `sent` relay that later fails leaves its reason only in the
+    // relays/{id} doc, so flushFailure records a bare breadcrumb then). Let the response handler drain.
     if (outcome === 'failed') {
       await page.waitForTimeout(500).catch(() => undefined);
       capture.flushFailure();
@@ -93,7 +94,12 @@ export type RequestOutcome = 'pending' | 'approved' | 'confirming' | 'failed';
 
 /** Approval-mode: request a ticket (flag-gated event). */
 export async function requestApproval(page: Page, personaId: string, eventId: string): Promise<RequestOutcome> {
-  return timed(personaId, 'request', async () => {
+  // A request is a relayClaim call with mode:'request', so the relay capture records this persona's
+  // account (request-only personas never claim, so this is the only place their account is seen) and
+  // any request refusal. Not for the reused-pending fast path, but harmless there — it sees no relay.
+  const capture = attachRelayCapture(page, { persona: personaId, eventId });
+  try {
+    return await timed(personaId, 'request', async () => {
     await page.goto(`/claim/${eventId}`);
     const pending = page.getByText(C.pending, { exact: true });
     const approved = page.getByText(C.approved, { exact: true });
@@ -129,7 +135,13 @@ export async function requestApproval(page: Page, personaId: string, eventId: st
       await page.waitForTimeout(4000);
     }
     throw new Error(`request for ${personaId} on ${eventId} never surfaced pending/approved/confirming`);
-  });
+    });
+  } catch (cause) {
+    capture.flushFailure('request');
+    throw cause;
+  } finally {
+    capture.detach();
+  }
 }
 
 /** Approval-mode: is this persona's request marked 승인됨/approved on the claim screen? */
