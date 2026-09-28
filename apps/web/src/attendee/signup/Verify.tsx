@@ -11,6 +11,7 @@ import {
   sendOtp,
 } from '../../shared/api/auth';
 import { safeReturnTo } from '../../shared/returnTo';
+import { api } from '../../shared/api/functions';
 import { finishSignup, isAlreadyRegistered, problemMessage, readSignup, writeSignup } from './useSignup';
 
 const CODE_LENGTH = 6;
@@ -60,6 +61,16 @@ export function Verify() {
       if (!spent) {
         await confirmOtp(signup.verificationId ?? '', code);
         confirmed.current = true;
+      }
+      // A returning person on a fresh phone already finished signup once; this device just has no
+      // passkey. `getSignupStatus` tells that apart from a first-time signup: an `active` person is
+      // sent to recover their account (a new passkey rotates the account's owner), because running
+      // signup again for them would only be refused. Anything else falls through to signup.
+      const status = await api.getSignupStatus();
+      if (status.status === 'active') {
+        if (status.personId) writeSignup({ personId: status.personId });
+        navigate('/recover');
+        return;
       }
       // Creates persons/{personId} and users/{uid} from the number in the phone session.
       await finishSignup();

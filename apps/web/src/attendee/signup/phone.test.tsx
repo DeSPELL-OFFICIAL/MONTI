@@ -13,7 +13,10 @@ vi.mock('../../shared/api/auth', async (importOriginal) => ({
   confirmOtp,
 }));
 const startSignup = vi.fn(async () => ({ personId: 'p1' }));
-vi.mock('../../shared/api/functions', () => ({ api: { startSignup } }));
+// A first-time signup: not an already-active person, so Verify falls through to the ordinary
+// startSignup path rather than branching to /recover (that branch has its own verify.test.tsx).
+const getSignupStatus = vi.fn(async () => ({ status: 'none', hasPasskey: false, hasAccount: false }));
+vi.mock('../../shared/api/functions', () => ({ api: { startSignup, getSignupStatus } }));
 const navigate = vi.fn();
 vi.mock('react-router-dom', async (orig) => ({
   ...(await orig<typeof import('react-router-dom')>()),

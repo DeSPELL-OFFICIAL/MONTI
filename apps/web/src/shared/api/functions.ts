@@ -31,11 +31,18 @@ const OPAQUE_FAILURE = { code: 'internal', message: 'UNKNOWN' } as const;
  */
 export class CallableError extends Error {
   readonly code: CallableErrorCode;
+  /**
+   * The structured `details` the server attached to the `HttpsError`, passed through untouched
+   * when there is any. Most callables carry none; the ones that do (recovery's cooldown, whose
+   * `details.allowedAt` is when it reopens) read it off here rather than off the raw rejection.
+   */
+  readonly details?: unknown;
 
-  constructor(code: CallableErrorCode, message: string) {
+  constructor(code: CallableErrorCode, message: string, details?: unknown) {
     super(message);
     this.name = 'CallableError';
     this.code = code;
+    this.details = details;
   }
 }
 
@@ -54,7 +61,7 @@ function toCallableError(error: unknown): CallableError {
     return new CallableError(OPAQUE_FAILURE.code, OPAQUE_FAILURE.message);
   }
   const message = error.message.length > 0 ? error.message : OPAQUE_FAILURE.message;
-  return new CallableError(code as CallableErrorCode, message);
+  return new CallableError(code as CallableErrorCode, message, (error as { details?: unknown }).details);
 }
 
 /**
@@ -269,6 +276,20 @@ export const api = {
   // `token` goes to signInWithCustomToken; its claims are exactly { personId, account },
   // which is where the session store reads the signed-in identity from.
   loginVerify: call<{ assertion: unknown }, { token: string; personId: Hex; account: Hex }>('loginVerify'),
+  // The lost-passkey path: a person on a fresh phone has proved the number (Firebase phone auth,
+  // same as signup) and hands over a new passkey and device key. The server rotates the account's
+  // owner on chain, waits for finality and mints a Firebase token, all inside this one call, so a
+  // single confirming phase covers the wait. `token` goes to signInWithCustomToken; its claims are
+  // { personId, account }, the same shape sign-in reads. `alreadyRotated` is a success, not a
+  // failure -- like registerIdentity's `alreadyRegistered`, it means the chain already held this
+  // owner and nothing was sent. Refusals worth their own sentence, by reason: `ROTATION_COOLDOWN`
+  // (failed-precondition, with `details.allowedAt` epoch seconds -- 7 days after the last
+  // register/rotation), `RECOVERY_RATE_LIMIT` (resource-exhausted, 3/day), `PHONE_REAUTH_REQUIRED`,
+  // `SAME_ACCOUNT`, `ACCOUNT_TAKEN`.
+  recoverAccess: call<
+    { personId: Hex; attestation: unknown; deviceX: Hex; deviceY: Hex; platform: 'ios' | 'android' | 'web' },
+    { token: string; personId: Hex; account: Hex; txHash?: Hex; alreadyRotated?: true }
+  >('recoverAccess'),
   // `alreadyLocked` is a success, not a failure: the chain was already locked, so nothing was
   // sent and there is no hash. A caller that read it as an error would show a locked attendee
   // a failure screen. See functions/src/functions/device.ts.
