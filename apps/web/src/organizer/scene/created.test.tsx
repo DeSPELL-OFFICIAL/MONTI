@@ -212,6 +212,16 @@ describe('the done screen — going public in place', () => {
     await user.click(screen.getByRole('button', { name: copy.publishNow }));
     expect(await screen.findByText(LINK)).toBeInTheDocument();
   });
+
+  /** visual R1-5 — the primary anchors the bottom sticky bar: 지금 공개하기 before, 링크 복사 after. */
+  it('anchors the primary in the bottom sticky bar (visual R1-5)', async () => {
+    const user = userEvent.setup();
+    open();
+    expect(screen.getByRole('button', { name: copy.publishNow }).closest('.sticky-bar')).not.toBeNull();
+    await user.click(screen.getByRole('button', { name: copy.publishNow }));
+    const copyBtn = await screen.findByRole('button', { name: copy.copy });
+    expect(copyBtn.closest('.sticky-bar')).not.toBeNull();
+  });
 });
 
 describe('the done screen — the follow-up retry', () => {

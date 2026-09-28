@@ -98,7 +98,7 @@ export const en: typeof ko = {
     // See the Korean block: the three empty states, plus the clear-filters action.
     emptyFiltered: 'No events match your filters.', emptyHostCta: 'Create your first event',
     emptySoon: 'Events are coming soon', clearFilters: 'Clear filters',
-    getTicket: 'Get a ticket', requestTicket: 'Request a ticket', share: 'Share',
+    getTicket: 'Get a ticket', requestTicket: 'Request a ticket', viewMyTicket: 'View my ticket', share: 'Share',
     map: 'Open in maps', soldOut: 'Sold out', cancelled: 'This event was cancelled.',
     untitled: 'Title unavailable', remaining: '{{count}} left',
     // How many tags a card could not fit; the detail screen shows every one.

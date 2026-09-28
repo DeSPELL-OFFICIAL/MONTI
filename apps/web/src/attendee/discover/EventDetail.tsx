@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Alert, Button, Card, KycBadge, Screen, Spinner } from '../../shared/ui';
+import { Alert, Button, Card, KycBadge, Screen, Spinner, StickyBar } from '../../shared/ui';
 import { AnimatePresence } from '../../shared/motion';
 import { ClaimFlow } from '../claim/ClaimFlow';
 import { fmt, useCopy, useLocale } from '../../shared/i18n';
@@ -13,6 +13,7 @@ import { fetchEventMetadata, type EventMetadata } from '../../shared/envio/ipfs'
 import { api } from '../../shared/api/functions';
 import { useSession } from '../../shared/session';
 import { useKycLevel } from '../me/useKycLevel';
+import { useMyTickets } from '../tickets/useTickets';
 import { formatEventDate, formatEventDay } from './useEvents';
 
 const CANCELLED = 'Cancelled';
@@ -72,6 +73,9 @@ export function EventDetail() {
   const { kycLevel } = useKycLevel();
   // 상세에 받기 흡수(plan B1): 티켓 받기를 누르면 라우트 홉 없이 이 화면 위 인라인 시트가 열린다.
   const [claiming, setClaiming] = useState(false);
+  // 내가 이미 이 행사 티켓을 들고 있는지 — 이른 리턴 앞에서 읽어야 바가 그 티켓으로 돌려보낼 수 있다
+  // (visual R1-5). enabled 가드가 걸려 있어 로그아웃 상태에서는 요청이 나가지 않는다.
+  const { data: myTickets } = useMyTickets();
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['event', eventId],
@@ -115,6 +119,8 @@ export function EventDetail() {
 
   const { event, tiers } = data;
   const canShare = canOpenShareSheet();
+  // 로그인했고 이 행사 티켓이 목록에 있으면 보유자다 — eventId 는 Event.id 와 같은 텍스트 키다.
+  const held = signedIn ? (myTickets ?? []).find((ticket) => ticket.eventId === event.id) : undefined;
   const region = metadata ? regionLabel(metadata.region, copy) : '';
   // The venue the organiser hid is not in the pinned document at all; it comes back from the
   // callable or it does not come back.
@@ -185,19 +191,7 @@ export function EventDetail() {
         </ul>
       </Card>
 
-      {event.status === CANCELLED ? (
-        <Alert tone="warn">{copy.discover.cancelled}</Alert>
-      ) : signedIn ? (
-        // 로그인한 사람은 이 자리에서 시트로 받는다 — 한 탭, 라우트 홉 없음(plan B1·여정 A).
-        <Button onClick={() => setClaiming(true)}>
-          {event.approvalRequired ? copy.discover.requestTicket : copy.discover.getTicket}
-        </Button>
-      ) : (
-        // 로그인 전에는 /claim 라우트로 보내 로그인을 먼저 마치게 하고, 그 뒤 라우트가 이어받는다.
-        <Link to={`/claim/${event.id}`} className="btn btn--primary btn--link">
-          {event.approvalRequired ? copy.discover.requestTicket : copy.discover.getTicket}
-        </Link>
-      )}
+      {event.status === CANCELLED ? <Alert tone="warn">{copy.discover.cancelled}</Alert> : null}
 
       {/* 같은 화면 위에서 도는 T-SIMP-1 상태머신(진행 → 완료, 내구 해시 재개, 자동 재전송). */}
       <AnimatePresence>
@@ -210,11 +204,34 @@ export function EventDetail() {
         ) : null}
       </AnimatePresence>
 
+      {/* 공유는 부차 행동이라 본문에 남는다 — 주행동만 하단 바로 내려간다(visual R1-5). */}
       {canShare ? (
         <Button variant="ghost" onClick={() => void shareThisPage()}>
           {copy.discover.share}
         </Button>
       ) : null}
+
+      {/* 주행동은 하단 바로 내려가 화면 아래 절반이 비지 않게 한다(visual R1-5): 이미 가진 사람은
+          내 티켓으로, 그 밖에는 받기/신청으로. 취소된 행사는 위의 안내만 있고 바는 없다. */}
+      {event.status === CANCELLED ? null : (
+        <StickyBar>
+          {held ? (
+            <Link to={`/tickets/${held.tokenId}`} className="btn btn--primary btn--link">
+              {copy.discover.viewMyTicket}
+            </Link>
+          ) : signedIn ? (
+            // 로그인한 사람은 이 자리에서 시트로 받는다 — 한 탭, 라우트 홉 없음(plan B1·여정 A).
+            <Button onClick={() => setClaiming(true)}>
+              {event.approvalRequired ? copy.discover.requestTicket : copy.discover.getTicket}
+            </Button>
+          ) : (
+            // 로그인 전에는 /claim 라우트로 보내 로그인을 먼저 마치게 하고, 그 뒤 라우트가 이어받는다.
+            <Link to={`/claim/${event.id}`} className="btn btn--primary btn--link">
+              {event.approvalRequired ? copy.discover.requestTicket : copy.discover.getTicket}
+            </Link>
+          )}
+        </StickyBar>
+      )}
     </Screen>
   );
 }

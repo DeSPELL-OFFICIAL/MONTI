@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, ContactLink, Screen, Spinner } from '../../shared/ui';
+import { Alert, Button, ContactLink, Screen, Spinner, StickyBar } from '../../shared/ui';
 import { useCopy } from '../../shared/i18n';
 import { api, callableFailure } from '../../shared/api/functions';
 import { safeReturnTo } from '../../shared/returnTo';
@@ -156,12 +156,15 @@ export function VerifyIdentity() {
       {inFlight ? (
         <Button variant="ghost" onClick={() => void start()}>{copy.common.retry}</Button>
       ) : null}
-      <Button onClick={start} disabled={polling}>{copy.kyc.cta}</Button>
       {/* An explicit way out to wherever they came from (returnTo). A deep-link landing may have no
           history for the global back bar to pop, so verification is never a place a person is stuck. */}
       {polling ? null : (
         <Button variant="ghost" onClick={() => navigate(returnTo)}>{copy.kyc.later}</Button>
       )}
+      {/* 주행동은 하단 바로 내려가 화면 아래 절반이 비지 않게 한다(visual R1-5). 확인 중에는 잠긴 채로. */}
+      <StickyBar>
+        <Button onClick={start} disabled={polling}>{copy.kyc.cta}</Button>
+      </StickyBar>
     </Screen>
   );
 }

@@ -781,3 +781,56 @@ describe('Discover · tags on a card', () => {
     expect(screen.queryByRole('link', { name: '재즈' })).toBeNull();
   });
 });
+
+/**
+ * visual R1-5 — the one primary action now lives in the bottom sticky bar, and which action it is
+ * depends on the state: a holder is sent back to their ticket, and a non-holder is offered 받기 or
+ * 신청 by whether the event needs approval. The ticket reads go through the same mocked `gql` the
+ * claim sheet already uses, so `useMyTickets` sees this address holding token 42.
+ */
+describe('EventDetail · the sticky primary (visual R1-5)', () => {
+  const HELD = { id: '42', eventId: '1', tier: 0, owner: ME.toLowerCase(), revoked: false };
+
+  function heldIndexer() {
+    gql.mockImplementation(async (query: string) => {
+      if (query.includes('OwnedTickets')) return { Ticket: [HELD], Offer: [] };
+      if (query.includes('TicketContext')) {
+        return {
+          CheckIn: [], Ticket: [HELD],
+          Event: [{ id: '1', status: 'Published', startsAt: IN_TWO_DAYS, imageCid: 'cid-a' }],
+          Tier: [{ eventId: '1', idx: 0, name: '일반' }],
+        };
+      }
+      return { Event: [EVENT_ONE], Tier: TIERS };
+    });
+  }
+
+  it('sends a holder back to their ticket, in the sticky bar', async () => {
+    heldIndexer();
+    setSession({ status: 'signedIn', account: ME });
+    renderDetail();
+    const link = await screen.findByRole('link', { name: '내 티켓 보기' });
+    expect(link).toHaveAttribute('href', '/tickets/42');
+    expect(link.closest('.sticky-bar')).not.toBeNull();
+    // A holder is not offered the claim at all.
+    expect(screen.queryByRole('button', { name: '티켓 받기' })).toBeNull();
+  });
+
+  it('offers 신청하기 in the sticky bar for a non-holder when the event needs approval', async () => {
+    gql.mockResolvedValue({ Event: [{ ...EVENT_ONE, approvalRequired: true }], Tier: TIERS });
+    setSession({ status: 'anonymous' });
+    renderDetail();
+    const link = await screen.findByRole('link', { name: '신청하기' });
+    expect(link).toHaveAttribute('href', '/claim/1');
+    expect(link.closest('.sticky-bar')).not.toBeNull();
+  });
+
+  it('offers 티켓 받기 in the sticky bar for a non-holder when no approval is needed', async () => {
+    gql.mockResolvedValue({ Event: [EVENT_ONE], Tier: TIERS });
+    setSession({ status: 'anonymous' });
+    renderDetail();
+    const link = await screen.findByRole('link', { name: '티켓 받기' });
+    expect(link).toHaveAttribute('href', '/claim/1');
+    expect(link.closest('.sticky-bar')).not.toBeNull();
+  });
+});

@@ -103,7 +103,7 @@ export const ko = {
     // 필터로만 0건 → emptyFiltered + clearFilters. 인덱서 다운은 errors.ts 의 serviceDown 이 맡는다.
     emptyFiltered: '조건에 맞는 행사가 없어요.', emptyHostCta: '첫 행사를 만들어 보세요',
     emptySoon: '곧 행사가 올라와요', clearFilters: '필터 지우기',
-    getTicket: '티켓 받기', requestTicket: '신청하기', share: '공유',
+    getTicket: '티켓 받기', requestTicket: '신청하기', viewMyTicket: '내 티켓 보기', share: '공유',
     map: '지도로 보기', soldOut: '마감됨', cancelled: '취소된 행사예요.',
     untitled: '제목을 불러오지 못했어요', remaining: '{{count}}자리 남음',
     // 탐색 카드에 다 못 들어간 태그의 수. 상세 화면은 전부 보여준다(계획 B-2).
