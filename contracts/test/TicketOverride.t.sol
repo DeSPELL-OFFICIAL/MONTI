@@ -34,14 +34,13 @@ contract TicketOverrideTest is MontiTest {
         _memberWithDeviceKey(ALICE, 0xA1A1);
         orgId = _org();
         eventId = _freeEvent(orgId, 1, 1, true);
-        vm.prank(ALICE);
-        tokenId = ticket.claim(eventId, 0, "");
+        tokenId = _claimForFixture(ALICE, eventId, 0);
 
         vm.startPrank(ORG_OWNER);
         organizers.setAdmin(orgId, ADMIN, organizers.PERM_APPROVE_OVERRIDE());
         organizers.setManager(orgId, MANAGER_YES, true, true);
         organizers.setManager(orgId, MANAGER_NO, true, false);
-        gateId = organizers.registerGate(eventId, GATE_A, bytes32(uint256(0x6A01)), bytes32(uint256(0x6A02)));
+        gateId = organizers.registerGate(eventId, GATE_A, GATE_KX, GATE_KY);
         organizers.openGate(gateId);
         // Left closed on purpose: an override is not a tap, so it does not need an open door.
         closedGateId = organizers.registerGate(eventId, GATE_B, bytes32(uint256(0x6B01)), bytes32(uint256(0x6B02)));

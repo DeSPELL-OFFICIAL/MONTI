@@ -18,8 +18,7 @@ contract TicketMigrateTest is MontiTest {
         _memberWithDeviceKey(ALICE, 0xA1A1);
         orgId = _org();
         eventId = _freeEvent(orgId, 1, 0, true);
-        vm.prank(ALICE);
-        tokenId = ticket.claim(eventId, 0, "");
+        tokenId = _claimForFixture(ALICE, eventId, 0);
     }
 
     /// @dev 회전에는 7일 쿨다운이, migrate 에는 그 뒤로 MIGRATE_DELAY(24시간)가 더 걸린다(C3).
@@ -39,8 +38,7 @@ contract TicketMigrateTest is MontiTest {
     ///      event that permits exactly one.
     function _offerableTicket() internal returns (uint256 otherTokenId) {
         uint256 otherEventId = _freeEvent(orgId, 1, 1, true);
-        vm.prank(ALICE);
-        otherTokenId = ticket.claim(otherEventId, 0, "");
+        otherTokenId = _claimForFixture(ALICE, otherEventId, 0);
     }
 
     function _attesterSig(uint256 tokenId_, bytes32 commitment, address to) internal view returns (bytes memory) {
@@ -381,8 +379,7 @@ contract TicketRotationQuarantineTest is MontiTest {
         eventId = _lateEvent();
 
         vm.warp(ROTATED);
-        vm.prank(CAROL);
-        carolToken = ticket.claim(eventId, 0, "");
+        carolToken = _claimForFixture(CAROL, eventId, 0);
     }
 
     function _lateEvent() internal returns (uint256 id) {
@@ -421,10 +418,11 @@ contract TicketRotationQuarantineTest is MontiTest {
     ///      참이다) 아직 확정된 계정이 아니다.
     function test_theNewAccountTakesNoTicketWhileTheUndoWindowIsOpen() public {
         _rotateAliceTo(BOB);
+        _giveDeviceKey(BOB);
 
-        vm.prank(BOB);
+        (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(BOB, eventId, 0);
         vm.expectRevert(Ticket.RotationPending.selector);
-        ticket.claim(eventId, 0, "");
+        ticket.claimFor(a, sig);
 
         vm.prank(CAROL);
         vm.expectRevert(Ticket.RotationPending.selector);
@@ -437,17 +435,17 @@ contract TicketRotationQuarantineTest is MontiTest {
     /// @dev 경계는 양끝을 다 못박는다. 창이 닫히는 그 순간부터 새 계정은 평범한 계정이다.
     function test_theQuarantineLiftsExactlyWhenTheWindowCloses() public {
         _rotateAliceTo(BOB);
+        _giveDeviceKey(BOB);
         uint256 opened = uint256(identity.rotatedAt(ALICE_PERSON));
         uint256 closes = opened + identity.ROTATION_UNDO_WINDOW();
 
         vm.warp(closes - 1);
-        vm.prank(BOB);
+        (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(BOB, eventId, 0);
         vm.expectRevert(Ticket.RotationPending.selector);
-        ticket.claim(eventId, 0, "");
+        ticket.claimFor(a, sig);
 
         vm.warp(closes);
-        vm.prank(BOB);
-        uint256 fresh = ticket.claim(eventId, 0, "");
+        uint256 fresh = _claimForFixture(BOB, eventId, 0);
         assertEq(ticket.ownerOf(fresh), BOB, "the window is closed; the new account is just an account");
 
         vm.prank(CAROL);
@@ -466,14 +464,14 @@ contract TicketRotationQuarantineTest is MontiTest {
         assertGt(identity.rotatedAt(ALICE_PERSON), 0, "the cooldown stamp deliberately survives the undo");
         assertEq(identity.rotatedFrom(ALICE_PERSON), address(0), "but there is no rotation left to undo");
 
-        vm.prank(ALICE);
-        uint256 fresh = ticket.claim(eventId, 0, "");
+        _giveDeviceKey(ALICE);
+        uint256 fresh = _claimForFixture(ALICE, eventId, 0);
         assertEq(ticket.ownerOf(fresh), ALICE, "the restored account is not quarantined by its own stamp");
 
         // 쫓겨난 새 계정은 격리가 아니라 멤버십으로 막힌다 — 그게 취소의 의미다.
-        vm.prank(BOB);
+        (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(BOB, eventId, 0);
         vm.expectRevert(Ticket.NotMember.selector);
-        ticket.claim(eventId, 0, "");
+        ticket.claimFor(a, sig);
     }
 
     /// @dev 남의 회전은 남의 일이다. 그리고 `register` 도 `rotatedAt` 을 찍으므로(Identity:77),
@@ -484,8 +482,7 @@ contract TicketRotationQuarantineTest is MontiTest {
         assertGt(identity.rotatedAt(bytes32(uint256(0xCA401))), 0, "register stamps rotatedAt too");
         assertEq(identity.rotatedFrom(bytes32(uint256(0xCA401))), address(0), "but CAROL rotated nothing");
 
-        vm.prank(CAROL);
-        uint256 fresh = ticket.claim(eventId, 0, "");
+        uint256 fresh = _claimForFixture(CAROL, eventId, 0);
         assertEq(ticket.ownerOf(fresh), CAROL);
 
         _member(address(0xD00D), 0xD00D);

@@ -201,10 +201,21 @@ contract Seed is Script {
         }
         vm.stopBroadcast();
 
-        // Tier 0, and no voucher: the MVP mints free tiers only (spec 5.2).
+        // Tier 0, and no voucher: the MVP mints free tiers only (spec 5.2). 릴레이 전환(설계 §3)
+        // 후 발급은 관객 기기 P-256 서명(ClaimAuth)이 증명한다 — 데모 멤버는 모두 공개 데모 기기
+        // 키(P256Vectors.DEVICE_*)로 등록돼 있으므로, 그 개인키(DEVICE_PRIV)로 승인서에 서명하면
+        // 누구든(여기서는 멤버 자신) 대신 제출할 수 있다. **메인넷 금지** — 공개 키 픽스처다.
         for (uint256 i; i < members.length; ++i) {
+            Ticket.ClaimAuth memory auth = Ticket.ClaimAuth({
+                eventId: eventId,
+                tier: 0,
+                account: members[i],
+                nonce: ticket.claimNonce(eventId, members[i]),
+                deadline: uint64(block.timestamp + 1 hours)
+            });
+            (bytes32 r, bytes32 s) = vm.signP256(P256Vectors.DEVICE_PRIV, ticket.claimAuthDigest(auth));
             vm.startBroadcast(memberKey(i));
-            tokenIds.push(ticket.claim(eventId, 0, ""));
+            tokenIds.push(ticket.claimFor(auth, abi.encode(r, s)));
             vm.stopBroadcast();
         }
     }

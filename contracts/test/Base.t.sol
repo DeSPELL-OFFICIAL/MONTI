@@ -21,6 +21,9 @@ abstract contract MontiTest is Test {
     address internal constant CAROL = address(0xCA);
     address internal constant GATE_A = address(0x6A7E);
     address internal constant GATE_B = address(0x6A7F);
+    /// @dev 게이트도 관객도 아닌 임의의 릴레이 제출자 EOA. claimFor/checkInFor 가 permissionless
+    ///      임을(msg.sender 를 인가에 쓰지 않음을) 증명하려고 입장을 이 계정으로 제출한다.
+    address internal constant RELAYER = address(0x9E1A);
 
     /// @dev 릴레이 전환 후 게이트 권한은 msg.sender 가 아니라 게이트 키(kx,ky)의 서명이 증명한다.
     ///      게이트 코드 다이제스트를 이 키로 서명하려면 게이트를 진짜 P-256 키로 등록해야 하므로,
@@ -141,6 +144,60 @@ abstract contract MontiTest is Test {
     /// @dev 티어 0 편의 오버로드.
     function _claimForFixture(address account, uint256 eventId) internal returns (uint256 tokenId) {
         return _claimForFixture(account, eventId, 0);
+    }
+
+    /// @dev claimFor/requestClaimFor 의 (승인서, 기기서명) 쌍만 만든다 — 호출은 하지 않는다.
+    ///      expectRevert/expectEmit 직전에 불러 두면, 승인서 nonce 를 읽는 뷰 콜과 vm.signP256 이
+    ///      그 치트코드 창을 먹어 치우지 않는다(발급을 실제로 쏘는 것은 테스트 본문이다).
+    function _signClaimAuth(address account, uint256 eventId, uint8 tier)
+        internal
+        view
+        returns (Ticket.ClaimAuth memory a, bytes memory sig)
+    {
+        a = Ticket.ClaimAuth({
+            eventId: eventId,
+            tier: tier,
+            account: account,
+            nonce: ticket.claimNonce(eventId, account),
+            deadline: uint64(block.timestamp + 10 minutes)
+        });
+        (bytes32 r, bytes32 s) = vm.signP256(P256Vectors.DEVICE_PRIV, ticket.claimAuthDigest(a));
+        sig = abi.encode(r, s);
+    }
+
+    /// @dev 회전으로 새 계정이 된 뒤 그 계정에 관객 기기 키(DEVICE 벡터)를 심는다. rotateAccount 는
+    ///      새 계정의 기기 키를 세우지 않으므로(Identity), 릴레이 발급이 검증하는 관객 기기 서명이
+    ///      새 계정에서 통과하려면 정상 경로(setActiveDevice, 새 패스키 등록에 해당)로 한 번 심어야
+    ///      한다. 회전 격리(_update)의 발급 경로를 그대로 검증하기 위한 것이다.
+    function _giveDeviceKey(address account) internal {
+        vm.prank(account);
+        identity.setActiveDevice(P256Vectors.DEVICE_X, P256Vectors.DEVICE_Y);
+    }
+
+    /// @dev 승인제 신청을 실제로 쏜다(permissionless). 성공 경로 픽스처용. requestId 를 돌려준다.
+    function _requestClaimForFixture(address account, uint256 eventId, uint8 tier) internal returns (uint256 requestId) {
+        (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(account, eventId, tier);
+        requestId = ticket.requestClaimFor(a, sig);
+    }
+
+    // --- relayed check-in (checkInFor / checkInForLate) ------------------------------------------
+
+    /// @dev 릴레이 입장(현장). 게이트 서명 + 관객 기기 서명을 먼저 만든 뒤, 게이트도 관객도 아닌
+    ///      임의 RELAYER EOA 가 제출한다(permissionless). 게이트는 _openRealGate 로 진짜 P-256
+    ///      키(GATE_KX/GATE_KY)로 등록돼 있어야 _gateSig 가 통과한다.
+    function _checkInFor(uint256 tokenId_, Ticket.GateCode memory g) internal {
+        bytes memory gs = _gateSig(g);
+        bytes memory ds = _deviceSig(tokenId_, g);
+        vm.prank(RELAYER);
+        ticket.checkInFor(tokenId_, g, gs, ds);
+    }
+
+    /// @dev 릴레이 입장(오프라인 큐 플러시).
+    function _checkInForLate(uint256 tokenId_, Ticket.GateCode memory g) internal {
+        bytes memory gs = _gateSig(g);
+        bytes memory ds = _deviceSig(tokenId_, g);
+        vm.prank(RELAYER);
+        ticket.checkInForLate(tokenId_, g, gs, ds);
     }
 
     function _org() internal returns (uint256 orgId) {

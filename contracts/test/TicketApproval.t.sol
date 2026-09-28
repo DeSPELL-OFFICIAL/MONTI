@@ -4,8 +4,12 @@ pragma solidity 0.8.31;
 import {MontiTest} from "./Base.t.sol";
 import {Ticket} from "../src/Ticket.sol";
 
-/// @notice 승인제(01c) — requestClaim / approveClaims / rejectClaims / cancelRequest.
-///         선례는 TicketOverride.t.sol(권한 축)과 TicketClaim.t.sol(자격 검사)이다.
+/// @notice 승인제(01c) — requestClaimFor / approveClaims / rejectClaims / cancelRequest.
+///         선례는 TicketOverride.t.sol(권한 축)과 TicketClaimFor.t.sol(자격 검사)이다.
+///
+///         릴레이 전환(설계 §3) 후 신청은 관객 기기 P-256 서명(ClaimAuth)이 증명한다 —
+///         msg.sender 는 인가에 쓰이지 않으므로, 신청을 쏘는 트랜잭션에는 prank 가 없다.
+///         승인/거절은 여전히 주최자 권한이므로 그쪽은 prank 를 유지한다.
 contract TicketApprovalTest is MontiTest {
     uint256 internal orgId;
     uint256 internal eventId;
@@ -38,10 +42,10 @@ contract TicketApprovalTest is MontiTest {
     // --- request -------------------------------------------------------------------------------
 
     function test_requestClaimStoresPendingAndReservesSupplyWithoutMinting() public {
+        (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, eventId, 0);
         vm.expectEmit(true, true, true, true);
         emit Ticket.ClaimRequested(eventId, 1, ALICE, 0);
-        vm.prank(ALICE);
-        uint256 rid = ticket.requestClaim(eventId, 0);
+        uint256 rid = ticket.requestClaimFor(a, sig);
 
         assertEq(rid, 1);
         Ticket.ClaimRequest memory r = ticket.claimRequest(eventId, rid);
@@ -55,48 +59,54 @@ contract TicketApprovalTest is MontiTest {
     }
 
     function test_requestIdIncrementsPerEvent() public {
-        vm.prank(ALICE);
-        assertEq(ticket.requestClaim(eventId, 0), 1);
-        vm.prank(BOB);
-        assertEq(ticket.requestClaim(eventId, 0), 2);
+        assertEq(_requestClaimForFixture(ALICE, eventId, 0), 1);
+        assertEq(_requestClaimForFixture(BOB, eventId, 0), 2);
         assertEq(ticket.pendingCount(eventId), 2);
     }
 
     function test_claimRevertsApprovalRequired() public {
-        vm.prank(ALICE);
+        (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, eventId, 0);
         vm.expectRevert(Ticket.ApprovalRequired.selector);
-        ticket.claim(eventId, 0, "");
+        ticket.claimFor(a, sig);
     }
 
     function test_requestClaimRevertsOnFirstComeEvent() public {
         uint256 openId = _freeEvent(orgId, 1, 1, true); // approvalRequired == false
-        vm.prank(ALICE);
+        (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, openId, 0);
         vm.expectRevert(Ticket.ApprovalNotRequired.selector);
-        ticket.requestClaim(openId, 0);
+        ticket.requestClaimFor(a, sig);
     }
 
     function test_requestClaimEligibilityMirrorsClaim() public {
         // non-member
-        vm.prank(address(0xDEAD));
-        vm.expectRevert(Ticket.NotMember.selector);
-        ticket.requestClaim(eventId, 0);
+        {
+            (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(address(0xDEAD), eventId, 0);
+            vm.expectRevert(Ticket.NotMember.selector);
+            ticket.requestClaimFor(a, sig);
+        }
 
         // unknown tier
-        vm.prank(ALICE);
-        vm.expectRevert(Ticket.UnknownTier.selector);
-        ticket.requestClaim(eventId, 5);
+        {
+            (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, eventId, 5);
+            vm.expectRevert(Ticket.UnknownTier.selector);
+            ticket.requestClaimFor(a, sig);
+        }
 
         // outside sale window
         vm.warp(T0 + 1 days + 1);
-        vm.prank(ALICE);
-        vm.expectRevert(Ticket.SaleClosed.selector);
-        ticket.requestClaim(eventId, 0);
+        {
+            (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, eventId, 0);
+            vm.expectRevert(Ticket.SaleClosed.selector);
+            ticket.requestClaimFor(a, sig);
+        }
 
         // after end
         vm.warp(T0 + 2 days + 1);
-        vm.prank(ALICE);
-        vm.expectRevert(Ticket.EventEnded.selector);
-        ticket.requestClaim(eventId, 0);
+        {
+            (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, eventId, 0);
+            vm.expectRevert(Ticket.EventEnded.selector);
+            ticket.requestClaimFor(a, sig);
+        }
     }
 
     function test_requestClaimRejectsDraftPaidAndKyc() public {
@@ -105,29 +115,34 @@ contract TicketApprovalTest is MontiTest {
         Ticket.Tier[] memory t = ticket.tiers(eventId);
         vm.prank(ORG_OWNER);
         uint256 draftId = ticket.createEvent(m, t);
-        vm.prank(ALICE);
-        vm.expectRevert(Ticket.EventNotPublished.selector);
-        ticket.requestClaim(draftId, 0);
+        {
+            (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, draftId, 0);
+            vm.expectRevert(Ticket.EventNotPublished.selector);
+            ticket.requestClaimFor(a, sig);
+        }
 
         // paid tier on an approval event
         uint256 paidId = _paidApprovalEvent();
-        vm.prank(ALICE);
-        vm.expectRevert(Ticket.PaidTiersNotEnabled.selector);
-        ticket.requestClaim(paidId, 0);
+        {
+            (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, paidId, 0);
+            vm.expectRevert(Ticket.PaidTiersNotEnabled.selector);
+            ticket.requestClaimFor(a, sig);
+        }
 
         // kyc required, requester at level 0
         uint256 kycId = _approvalEvent(orgId, 100, 1, true);
         _memberWithLevel(address(0xD0), 0xD0D0, 0);
-        vm.prank(address(0xD0));
-        vm.expectRevert(Ticket.KycRequired.selector);
-        ticket.requestClaim(kycId, 0);
+        {
+            (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(address(0xD0), kycId, 0);
+            vm.expectRevert(Ticket.KycRequired.selector);
+            ticket.requestClaimFor(a, sig);
+        }
     }
 
     // --- approve -------------------------------------------------------------------------------
 
     function test_approveMintsViaSamePathAndEmitsClaimed() public {
-        vm.prank(ALICE);
-        uint256 rid = ticket.requestClaim(eventId, 0);
+        uint256 rid = _requestClaimForFixture(ALICE, eventId, 0);
 
         uint256[] memory ids = _ids(rid);
         vm.expectEmit(true, true, true, true);
@@ -149,12 +164,9 @@ contract TicketApprovalTest is MontiTest {
 
     function test_approveSkipsNonPendingWithoutRevertingBatch() public {
         // rid1 pending -> will be approved earlier; rid2 pending; rid3 rejected beforehand.
-        vm.prank(ALICE);
-        uint256 rid1 = ticket.requestClaim(eventId, 0);
-        vm.prank(BOB);
-        uint256 rid2 = ticket.requestClaim(eventId, 0);
-        vm.prank(CAROL);
-        uint256 rid3 = ticket.requestClaim(eventId, 0);
+        uint256 rid1 = _requestClaimForFixture(ALICE, eventId, 0);
+        uint256 rid2 = _requestClaimForFixture(BOB, eventId, 0);
+        uint256 rid3 = _requestClaimForFixture(CAROL, eventId, 0);
 
         // reject rid3 up front, approve rid1 up front.
         vm.prank(ORG_OWNER);
@@ -181,8 +193,7 @@ contract TicketApprovalTest is MontiTest {
     // --- reject / cancel -----------------------------------------------------------------------
 
     function test_rejectReleasesReservation() public {
-        vm.prank(ALICE);
-        uint256 rid = ticket.requestClaim(eventId, 0);
+        uint256 rid = _requestClaimForFixture(ALICE, eventId, 0);
         assertEq(ticket.tiers(eventId)[0].minted, 1);
 
         vm.expectEmit(true, true, false, true);
@@ -193,15 +204,14 @@ contract TicketApprovalTest is MontiTest {
         assertEq(ticket.claimRequest(eventId, rid).status, 2, "rejected");
         assertEq(ticket.pendingCount(eventId), 0);
         assertEq(ticket.tiers(eventId)[0].minted, 0, "supply released");
-        // 풀렸으니 다시 신청 가능(지갑 한도도 되돌아왔다).
-        vm.prank(ALICE);
-        ticket.requestClaim(eventId, 0);
+        // 풀렸으니 다시 신청 가능(지갑 한도도 되돌아왔다). nonce 는 첫 신청에서 이미 소비됐으므로
+        // 헬퍼가 현재 nonce 를 다시 읽어 채운다.
+        _requestClaimForFixture(ALICE, eventId, 0);
         assertEq(ticket.pendingCount(eventId), 1);
     }
 
     function test_cancelByRequesterReleasesAndGuards() public {
-        vm.prank(ALICE);
-        uint256 rid = ticket.requestClaim(eventId, 0);
+        uint256 rid = _requestClaimForFixture(ALICE, eventId, 0);
 
         // stranger cannot cancel
         vm.prank(BOB);
@@ -227,31 +237,35 @@ contract TicketApprovalTest is MontiTest {
 
     function test_capCountsPendingPlusMinted() public {
         // maxPerWallet == 1 on the shared fixture.
-        vm.prank(ALICE);
-        ticket.requestClaim(eventId, 0);
+        _requestClaimForFixture(ALICE, eventId, 0);
 
         // second request while first still pending -> cap hit.
-        vm.prank(ALICE);
-        vm.expectRevert(Ticket.MaxPerWalletExceeded.selector);
-        ticket.requestClaim(eventId, 0);
+        {
+            (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, eventId, 0);
+            vm.expectRevert(Ticket.MaxPerWalletExceeded.selector);
+            ticket.requestClaimFor(a, sig);
+        }
 
         // approve the first, still at cap (now via balance).
         vm.prank(ORG_OWNER);
         ticket.approveClaims(eventId, _ids(1));
-        vm.prank(ALICE);
-        vm.expectRevert(Ticket.MaxPerWalletExceeded.selector);
-        ticket.requestClaim(eventId, 0);
+        {
+            (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, eventId, 0);
+            vm.expectRevert(Ticket.MaxPerWalletExceeded.selector);
+            ticket.requestClaimFor(a, sig);
+        }
     }
 
     function test_reservationPreventsOversell() public {
         uint256 oneSeat = _approvalEvent(orgId, 1, 1, false); // supply 1
-        vm.prank(ALICE);
-        uint256 rid = ticket.requestClaim(oneSeat, 0);
+        uint256 rid = _requestClaimForFixture(ALICE, oneSeat, 0);
 
         // the single seat is reserved -> the next requester is turned away.
-        vm.prank(BOB);
-        vm.expectRevert(Ticket.SoldOut.selector);
-        ticket.requestClaim(oneSeat, 0);
+        {
+            (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(BOB, oneSeat, 0);
+            vm.expectRevert(Ticket.SoldOut.selector);
+            ticket.requestClaimFor(a, sig);
+        }
 
         // approving the held request mints exactly one; supply stays at 1.
         vm.prank(ORG_OWNER);
@@ -260,39 +274,37 @@ contract TicketApprovalTest is MontiTest {
         assertEq(ticket.balanceOfEvent(ALICE, oneSeat), 1);
 
         // still sold out for everyone else.
-        vm.prank(BOB);
-        vm.expectRevert(Ticket.SoldOut.selector);
-        ticket.requestClaim(oneSeat, 0);
+        {
+            (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(BOB, oneSeat, 0);
+            vm.expectRevert(Ticket.SoldOut.selector);
+            ticket.requestClaimFor(a, sig);
+        }
     }
 
     // --- permissions ---------------------------------------------------------------------------
 
     function test_ownerAdminBitAndManagerCanApprove() public {
         // owner
-        vm.prank(ALICE);
-        ticket.requestClaim(eventId, 0);
+        _requestClaimForFixture(ALICE, eventId, 0);
         vm.prank(ORG_OWNER);
         ticket.approveClaims(eventId, _ids(1));
         assertEq(ticket.balanceOfEvent(ALICE, eventId), 1);
 
         // admin holding PERM_APPROVE_CLAIM
-        vm.prank(BOB);
-        ticket.requestClaim(eventId, 0);
+        _requestClaimForFixture(BOB, eventId, 0);
         vm.prank(ADMIN_APPROVE);
         ticket.approveClaims(eventId, _ids(2));
         assertEq(ticket.balanceOfEvent(BOB, eventId), 1);
 
         // manager with canApprove
-        vm.prank(CAROL);
-        ticket.requestClaim(eventId, 0);
+        _requestClaimForFixture(CAROL, eventId, 0);
         vm.prank(MANAGER_YES);
         ticket.approveClaims(eventId, _ids(3));
         assertEq(ticket.balanceOfEvent(CAROL, eventId), 1);
     }
 
     function test_strangerManagerNoAndWrongAdminBitAllRejected() public {
-        vm.prank(ALICE);
-        uint256 rid = ticket.requestClaim(eventId, 0);
+        uint256 rid = _requestClaimForFixture(ALICE, eventId, 0);
         uint256[] memory ids = _ids(rid);
 
         // stranger
@@ -332,8 +344,7 @@ contract TicketApprovalTest is MontiTest {
         uint256 evA = _approvalEvent(orgId, 100, 1, false);
         address a0 = address(uint160(0x2000));
         _member(a0, 0x2000);
-        vm.prank(a0);
-        ticket.requestClaim(evA, 0);
+        _requestClaimForFixture(a0, evA, 0);
         uint256[] memory oneId = _ids(1);
 
         // event B: six pending requests, one per distinct member.
@@ -343,8 +354,7 @@ contract TicketApprovalTest is MontiTest {
         uint256[] memory sixIds = new uint256[](6);
         for (uint256 i; i < 6; ++i) {
             _member(accts[i], 0x30000 + i);
-            vm.prank(accts[i]);
-            sixIds[i] = ticket.requestClaim(evB, 0);
+            sixIds[i] = _requestClaimForFixture(accts[i], evB, 0);
         }
 
         vm.prank(ORG_OWNER);
