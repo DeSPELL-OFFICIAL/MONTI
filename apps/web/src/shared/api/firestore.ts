@@ -18,6 +18,48 @@ import { getDb, getFirebaseAuth } from './firebase';
  * Everything else goes through a callable in ./functions.
  */
 
+/**
+ * `relays/{relayId}` — one relayed submission's lifecycle (design §5, backend task C3). The rules
+ * open it to the submitting person alone, so this is the attendee's read path for a claim the MONTI
+ * relayer is sending. Statuses: `pending`/`sent` (still going), `confirmed` (landed), `failed`
+ * (with `error.code`). `tokenId` is filled on a confirmed claim.
+ */
+export type RelayStatus = 'pending' | 'sent' | 'confirmed' | 'failed';
+
+export interface RelayView {
+  status: RelayStatus;
+  txHash?: string;
+  tokenId?: string;
+  error?: { code: string; message: string };
+}
+
+/** The collection name the backend writes (relayTypes.ts `RELAYS`), kept in step by hand. */
+const RELAYS_COLLECTION = 'relays';
+
+/**
+ * Live-follows one relay doc. `null` is handed on for a doc that is not there (or not yet) so the
+ * caller keeps waiting rather than reading a missing status as a failure. A read that the rules
+ * refuse or a dropped listener goes to `onError`; the caller's 45s cap and 다시 시도 are the way out.
+ */
+export function watchRelay(
+  relayId: string,
+  onChange: (relay: RelayView | null) => void,
+  onError?: (error: unknown) => void,
+): () => void {
+  return onSnapshot(
+    doc(getDb(), RELAYS_COLLECTION, relayId),
+    (snapshot) => {
+      const data = snapshot.data() as Partial<RelayView> | undefined;
+      onChange(
+        data && typeof data.status === 'string'
+          ? { status: data.status, txHash: data.txHash, tokenId: data.tokenId, error: data.error }
+          : null,
+      );
+    },
+    (error) => onError?.(error),
+  );
+}
+
 export interface ChatMessage {
   id: string; uid: string; text: string; createdAt: number; reported: number;
   /** Server-only: set by the pinMessage callable, absent on freshly created messages. */

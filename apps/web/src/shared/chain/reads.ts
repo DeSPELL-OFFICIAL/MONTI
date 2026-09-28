@@ -1,3 +1,4 @@
+import { parseAbi } from 'viem';
 import type { Abi, Hex } from 'viem';
 import { getConfig } from '../config';
 import { getPublicClient } from './client';
@@ -289,3 +290,22 @@ export const STRUCT_SHAPES = {
   Organizers: { gateInfo: GATE_INFO_FIELDS, managerOf: MANAGER_FIELDS },
   Identity: { activeDevice: ACTIVE_DEVICE_FIELDS },
 } as const;
+
+/**
+ * `Ticket.claimNonce(eventId, account) -> uint256`: the (event, account) claim nonce a relayed
+ * `ClaimAuth` must carry (design §12). Read through a minimal one-item ABI fragment rather than the
+ * generated manifest, because the redeploy that adds this view has not been exported yet — B2 will
+ * swap in the generated ABI and this fragment goes away.
+ */
+const CLAIM_NONCE_ABI: Abi = parseAbi([
+  'function claimNonce(uint256 eventId, address account) view returns (uint256)',
+]);
+
+export function readClaimNonce(eventId: bigint, account: Hex): Promise<bigint> {
+  return getPublicClient().readContract({
+    address: getConfig().addresses.ticket,
+    abi: CLAIM_NONCE_ABI,
+    functionName: 'claimNonce',
+    args: [eventId, account],
+  }) as Promise<bigint>;
+}

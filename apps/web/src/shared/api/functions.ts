@@ -1,7 +1,7 @@
 import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
 import type { FunctionsErrorCodeCore } from 'firebase/functions';
-import type { AttendeeRow, Hex, PersonStatus, ResolveRecipientResult, SnapshotWire } from '@monti/shared';
+import type { AttendeeRow, ClaimAuthWire, Hex, PersonStatus, ResolveRecipientResult, SnapshotWire } from '@monti/shared';
 import type { TicketArtSource } from '../ui/TicketArt';
 import { getFirebaseFunctions } from './firebase';
 
@@ -231,7 +231,58 @@ export type PinMessageArgs =
   | { eventId: string; text: string }
   | { eventId: string; messageId: string; pinned: boolean };
 
+/**
+ * The relayed check-in the staff gate submits (design §4-5). The gate signs the code and hands the
+ * signed tuple over; the relayer simulates `checkInFor` (or `checkInForLate` when `late`), and, if
+ * the simulation passes, submits it from its own EOA. `code.issuedAt` is a decimal string here,
+ * `gateSig`/`deviceSig` are r‖s (64 bytes) hex. Authorisation is the signatures on chain, not this
+ * caller — the staff member's Firebase session only keeps the endpoint from being called anonymously.
+ */
+export interface RelayCheckInRequest {
+  tokenId: string;
+  code: { gateId: string; eventId: string; issuedAt: string; nonce: Hex };
+  gateSig: Hex;
+  deviceSig: Hex;
+  late: boolean;
+}
+
+/**
+ * What the relayer answers. `status: 'sent'` is broadcast (the simulation passed), `'confirmed'`
+ * one already mined — and the backend also answers `confirmed` for `AlreadyCheckedIn`, which is
+ * idempotent success rather than a refusal. A revert the simulation caught comes back instead as an
+ * `HttpsError('failed-precondition')` whose `details.code` is the contract's error name, which
+ * `denyMap.ts` turns into a DENY screen.
+ */
+export interface RelayCheckInResponse {
+  relayId: string;
+  status: 'sent' | 'confirmed';
+  txHash?: string;
+  usedAt?: number;
+}
+
 export const api = {
+  /**
+   * The relayed ticket claim (design §5). The attendee device key signed a `ClaimAuth` digest; the
+   * MONTI relayer submits `claimFor`/`requestClaimFor` and pays the gas, so nothing here touches a
+   * paymaster. `mode` is the event's approval flag — `claim` mints now, `request` files a request
+   * the organiser approves. The answer names the `relays/{relayId}` doc to subscribe to; a
+   * `confirmed` status means the relayer already saw the receipt, so no wait is needed.
+   *
+   * Refusals arrive as `HttpsError` with `details.code` — the web's own claim error names
+   * (`SOLD_OUT`, `LIMIT`, `NOT_ON_SALE`, `APPROVAL_REQUIRED`, `DEVICE_LOCKED`, `TOO_MANY_PENDING`,
+   * `NOT_MEMBER`, `NOT_YOUR_ACCOUNT`) — and `BAD_NONCE` carries `details.nonce`, the current
+   * on-chain nonce to rebuild the authorization with. The mapping lives in `claim/claimErrors.ts`.
+   */
+  relayClaim: call<
+    { mode: 'claim' | 'request'; auth: ClaimAuthWire; deviceSig: Hex },
+    { relayId: string; status: 'sent' | 'confirmed'; txHash?: Hex; tokenId?: string }
+  >('relayClaim'),
+  // The staff gate's relayed check-in (design §4-5). Refusals arrive as `HttpsError` with
+  // `details.code` — the web's own DENY code names from `staff/gate/denyMap.ts` (`ALREADY_USED`,
+  // `GATE_CLOSED`, `EXPIRED_CODE`, `DEVICE_LOCKED`, `DEVICE_MISMATCH`, `WRONG_EVENT`, `REVOKED`, …),
+  // which the backend maps the contract's revert names onto. `AlreadyCheckedIn` is not one of them:
+  // the backend answers `confirmed` for it, so a duplicate resolves as idempotent success.
+  relayCheckIn: call<RelayCheckInRequest, RelayCheckInResponse>('relayCheckIn'),
   startSignup: call<void, { personId: Hex }>('startSignup'),
   // Identity verification is per event, not part of signup. `startKyc` reuses the person's open
   // session when there is one and opens a fresh one otherwise. `callbackUrl` is optional and
@@ -557,3 +608,10 @@ export const submitPendingGate = api.submitPendingGate;
  */
 export const issueSnapshot = api.issueSnapshot;
 export const getPhotoForGate = api.getPhotoForGate;
+
+/**
+ * The gate's relayed check-in, named for the same reason as `issueSnapshot`: `staff/gate/checkInOp.ts`
+ * and the offline queue depend on this single callable, not on the whole surface, so their tests
+ * replace it alone. Same wrapper, not a copy.
+ */
+export const relayCheckIn = api.relayCheckIn;
