@@ -59,10 +59,10 @@ networks:
     contracts:
       - name: Identity
         address:
-          - "0x961a895b47Cf200C14acf38F5689979FF5bd8133"
+          - "0xa2914cA1F78DbBb872f5093587AC3c51c219fc80"
       - name: Organizers
         address:
-          - "0xa88C8D110Ca8f0c925A781AB8042bA012d7281F0"
+          - "0x5D8Ed32AE39Fa8b1d0F9870485FC259c64FFDc11"
       - name: Ticket
         address:
-          - "0x40D90AF3a3B22542AEeF0ec3E6a66F1EAb6f7AFA"
+          - "0x6046e51B3127a4f8F71d83A83b2d265d25A3CfE5"
