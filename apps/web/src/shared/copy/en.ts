@@ -72,6 +72,7 @@ export const en: typeof ko = {
   },
   kyc: {
     title: 'Let us check your ID and face', body: 'It takes 30 seconds. A verification page opens and returns here.',
+    points: ['Point your ID at the camera', 'Line up your face once', 'Do it once and skip it next time'],
     cta: 'Verify my identity', later: 'Do this later', waiting: 'Checking. Please wait a moment.',
     duplicate: 'You already have an account. Please sign in instead.',
     rejected: 'Verification failed. Please try again.',
