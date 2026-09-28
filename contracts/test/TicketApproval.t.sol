@@ -144,17 +144,19 @@ contract TicketApprovalTest is MontiTest {
     function test_approveMintsViaSamePathAndEmitsClaimed() public {
         uint256 rid = _requestClaimForFixture(ALICE, eventId, 0);
 
+        // tokenId 는 eventId<<96 | serial 로 인코딩된다(설계 §12-1). 첫 티켓 serial 은 1.
+        uint256 expectedId = (eventId << 96) | uint256(1);
         uint256[] memory ids = _ids(rid);
         vm.expectEmit(true, true, true, true);
-        emit Ticket.Claimed(1, eventId, ALICE, 0);
+        emit Ticket.Claimed(expectedId, eventId, ALICE, 0);
         vm.expectEmit(true, true, false, true);
-        emit Ticket.ClaimApproved(eventId, rid, 1);
+        emit Ticket.ClaimApproved(eventId, rid, expectedId);
         vm.prank(ORG_OWNER);
         ticket.approveClaims(eventId, ids);
 
-        assertEq(ticket.ownerOf(1), ALICE);
-        assertEq(ticket.eventOf(1), eventId);
-        assertEq(ticket.tierOf(1), 0);
+        assertEq(ticket.ownerOf(expectedId), ALICE);
+        assertEq(ticket.eventOf(expectedId), eventId);
+        assertEq(ticket.tierOf(expectedId), 0);
         assertEq(ticket.balanceOfEvent(ALICE, eventId), 1);
         assertEq(ticket.claimRequest(eventId, rid).status, 1, "approved");
         assertEq(ticket.pendingCount(eventId), 0);

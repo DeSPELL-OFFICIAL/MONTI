@@ -96,7 +96,7 @@ contract TicketURITest is MontiTest {
 
     function test_uriCarriesNameImageAndNotYetEnteredStatus() public view {
         string memory json = _json(tokenId);
-        assertTrue(LibString.contains(json, "MONTI Ticket #1"));
+        assertTrue(LibString.contains(json, string.concat("MONTI Ticket #", vm.toString(tokenId))));
         assertTrue(LibString.contains(json, "ipfs://bafyTestCid"));
         assertTrue(LibString.contains(json, "General"));
         assertTrue(LibString.contains(json, NOT_ENTERED));
@@ -108,7 +108,9 @@ contract TicketURITest is MontiTest {
         assertEq(
             _json(tokenId),
             string.concat(
-                '{"name":"MONTI Ticket #1",',
+                '{"name":"MONTI Ticket #',
+                vm.toString(tokenId),
+                '",',
                 '"description":"MONTI on-chain admission. The chain decides, not our server.",',
                 '"image":"ipfs://bafyTestCid",',
                 '"attributes":[',
