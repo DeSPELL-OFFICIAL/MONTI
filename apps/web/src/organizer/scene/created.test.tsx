@@ -23,6 +23,10 @@ vi.mock('../../shared/chain/ops', async (orig) => ({
   ticketOp,
 }));
 vi.mock('../../shared/chain/accounts', () => ({ getStaffAccount: async () => ({ address: `0x${'ab'.repeat(20)}` }) }));
+
+// The relayed publish is mocked at the module seam; lifecycle.test.ts covers the transport.
+const publishEvent = vi.fn(async () => ({ state: 'done' as const }));
+vi.mock('../lifecycle', () => ({ publishEvent }));
 const eventOrg = vi.fn(async () => 9n);
 vi.mock('../../shared/chain/reads', async (orig) => ({
   ...(await orig<typeof import('../../shared/chain/reads')>()),
@@ -79,6 +83,7 @@ beforeEach(() => {
   localStorage.clear();
   toDataURL.mockReset().mockResolvedValue('data:image/png;base64,QQ==');
   ticketOp.mockReset().mockResolvedValue({ success: true });
+  publishEvent.mockReset().mockResolvedValue({ state: 'done' });
   eventOrg.mockReset().mockResolvedValue(9n);
   gql.mockReset().mockResolvedValue({ Event: [{ status: 'Published' }] });
   saveEventArt.mockReset().mockResolvedValue({ ok: true });
@@ -133,9 +138,7 @@ describe('the done screen — going public in place', () => {
     open();
     await user.click(screen.getByRole('button', { name: copy.publishNow }));
 
-    await waitFor(() => expect(ticketOp).toHaveBeenCalledWith(
-      expect.objectContaining({ orgId: 9n, functionName: 'publishEvent', args: [12n] }),
-    ));
+    await waitFor(() => expect(publishEvent).toHaveBeenCalledWith(12n, 9n));
     expect(await screen.findByText(LINK)).toBeInTheDocument();
     expect(await screen.findByAltText(copy.qr)).toHaveAttribute('src', 'data:image/png;base64,QQ==');
     expect(screen.getByText(copy.nowPublic)).toBeInTheDocument();
@@ -146,8 +149,7 @@ describe('the done screen — going public in place', () => {
   /** Plan §2c: a publish whose wait gave up shows determinate progress and resolves itself. */
   it('shows progress on a slow publish and reveals the link once the indexer says it is public', async () => {
     const user = userEvent.setup();
-    const { OpReverted } = await import('../../shared/chain/ops');
-    ticketOp.mockRejectedValueOnce(new OpReverted('publishEvent', 'TIMEOUT'));
+    publishEvent.mockResolvedValueOnce({ state: 'confirming' });
     gql.mockResolvedValue({ Event: [{ status: 'Draft' }] });
     open();
     await user.click(screen.getByRole('button', { name: copy.publishNow }));
@@ -162,12 +164,7 @@ describe('the done screen — going public in place', () => {
 
   it('names the rule and keeps 지금 공개하기 when the chain refuses the publish', async () => {
     const user = userEvent.setup();
-    const { OpReverted } = await import('../../shared/chain/ops');
-    const { encodeErrorResult } = await import('viem');
-    const { ticketAbi } = await import('../../shared/chain/abis');
-    ticketOp.mockRejectedValueOnce(
-      new OpReverted('publishEvent', encodeErrorResult({ abi: ticketAbi, errorName: 'NotDraft' })),
-    );
+    publishEvent.mockResolvedValueOnce({ state: 'refused', problem: 'notDraft' });
     open();
     await user.click(screen.getByRole('button', { name: copy.publishNow }));
 

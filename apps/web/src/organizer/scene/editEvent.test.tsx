@@ -49,6 +49,10 @@ vi.mock('../../shared/chain/ops', async (orig) => ({
 const ACCOUNT = `0x${'ab'.repeat(20)}` as const;
 vi.mock('../../shared/chain/accounts', () => ({ getStaffAccount: async () => ({ address: ACCOUNT }) }));
 
+// The relayed draft save is mocked at the module seam; lifecycle.test.ts covers the transport.
+const saveDraft = vi.fn(async () => ({ state: 'done' as const }));
+vi.mock('../lifecycle', () => ({ saveDraft }));
+
 const gql = vi.fn(async () => ({ Event: [EVENT], Tier: TIERS }));
 vi.mock('../../shared/envio/client', () => ({ gql }));
 
@@ -122,6 +126,7 @@ beforeEach(() => {
   loadEventArt.mockResolvedValue([{ preset: 'c' }, { imageCid: 'bafkmine' }]);
   pinEventMetadata.mockResolvedValue({ metadataCid: 'bafyNew' });
   ticketOp.mockResolvedValue({ success: true, userOpHash: '0x', logs: [] });
+  saveDraft.mockReset().mockResolvedValue({ state: 'done' });
   saveEventArt.mockResolvedValue({ ok: true });
   setEventPrivate.mockResolvedValue({ ok: true });
 });
@@ -242,20 +247,20 @@ describe('saving an edit', () => {
     expect((pinEventMetadata.mock.calls[0]?.[0] as { meta: Record<string, unknown> }).meta.venue)
       .toBeUndefined();
 
-    // 2. `updateEventMeta`, never a second `createEvent`.
-    await waitFor(() => expect(ticketOp).toHaveBeenCalled());
-    const sent = ticketOp.mock.calls[0]?.[0] as SentOp;
-    expect(sent.functionName).toBe('updateEventMeta');
-    expect(sent.orgId).toBe(9n);
-    expect(sent.args[0]).toBe(7n);
-    expect(sent.args[1]).toMatchObject({
+    // 2. `updateEventMeta` via the ticket relay (saveDraft), never a second `createEvent`.
+    await waitFor(() => expect(saveDraft).toHaveBeenCalled());
+    const [savedEventId, savedOrgId, savedMeta] =
+      saveDraft.mock.calls[0] as unknown as [bigint, bigint, Record<string, unknown>, unknown];
+    expect(savedEventId).toBe(7n);
+    expect(savedOrgId).toBe(9n);
+    expect(savedMeta).toMatchObject({
       imageCid: 'bafyNew',
       titleHash: keccak256(toBytes('재즈 나이트!')),
       // Hidden or not, the hash on chain is of the real venue.
       venueHash: keccak256(toBytes('서울 용산구 한남동 12-3')),
       regionCode: keccak256(toBytes('KR-11')),
     });
-    expect(ticketOp.mock.calls.every(([call]) => call.functionName !== 'createEvent')).toBe(true);
+    expect(ticketOp).not.toHaveBeenCalled();
 
     // 3. the same two follow-ups, addressed at the event that already existed.
     await waitFor(() => expect(saveEventArt).toHaveBeenCalledWith({
@@ -286,12 +291,7 @@ describe('saving an edit', () => {
   });
 
   it('says the event has been published when the chain refuses the update', async () => {
-    const { OpReverted } = await import('../../shared/chain/ops');
-    const { encodeErrorResult } = await import('viem');
-    const { ticketAbi } = await import('../../shared/chain/abis');
-    ticketOp.mockRejectedValue(
-      new OpReverted('reverted', encodeErrorResult({ abi: ticketAbi, errorName: 'NotDraft' })),
-    );
+    saveDraft.mockResolvedValue({ state: 'refused', problem: 'notDraft' });
     const user = userEvent.setup();
     open();
     await waitFor(() => expect(saveEventDraft).toHaveBeenCalled());

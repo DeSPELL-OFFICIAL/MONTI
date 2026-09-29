@@ -14,6 +14,12 @@ vi.mock('../shared/chain/ops', async (orig) => ({
 const ACCOUNT = `0x${'ab'.repeat(20)}` as const;
 vi.mock('../shared/chain/accounts', () => ({ getStaffAccount: async () => ({ address: ACCOUNT }) }));
 
+// The relayed lifecycle writes are mocked at the module seam; lifecycle.test.ts covers the
+// transport (sendAction), so here the dashboard is judged on how it consumes the result.
+const publishEvent = vi.fn(async () => ({ state: 'done' as const }));
+const cancelEvent = vi.fn(async () => ({ state: 'done' as const }));
+vi.mock('./lifecycle', () => ({ publishEvent, cancelEvent }));
+
 const eventOrg = vi.fn(async () => 9n);
 vi.mock('../shared/chain/reads', async (orig) => ({
   ...(await orig<typeof import('../shared/chain/reads')>()),
@@ -85,6 +91,8 @@ beforeEach(() => {
   gql.mockResolvedValue({ Event: [DRAFT_EVENT], Tier: TIERS });
   eventOrg.mockResolvedValue(9n);
   ticketOp.mockResolvedValue({ success: true });
+  publishEvent.mockReset().mockResolvedValue({ state: 'done' });
+  cancelEvent.mockReset().mockResolvedValue({ state: 'done' });
 });
 
 describe('the organiser dashboard', () => {
@@ -112,14 +120,10 @@ describe('publishing and cancelling', () => {
     await user.click(await screen.findByRole('button', { name: life.publish }));
 
     expect(screen.getByText(life.publishConfirm)).toBeInTheDocument();
-    expect(ticketOp).not.toHaveBeenCalled();
+    expect(publishEvent).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole('button', { name: life.confirm }));
-    await waitFor(() =>
-      expect(ticketOp).toHaveBeenCalledWith(
-        expect.objectContaining({ orgId: 9n, functionName: 'publishEvent', args: [5n] }),
-      ),
-    );
+    await waitFor(() => expect(publishEvent).toHaveBeenCalledWith(5n, 9n));
   });
 
   /** Plan §2b: the summary sheet shows what goes public, and confirming publishes exactly once. */
@@ -137,15 +141,11 @@ describe('publishing and cancelling', () => {
     expect(screen.getByText(life.summary.kycOn)).toBeInTheDocument();
     expect(screen.getByText('1종')).toBeInTheDocument();
     expect(screen.getByText(life.publishConfirm)).toBeInTheDocument();
-    expect(ticketOp).not.toHaveBeenCalled();
+    expect(publishEvent).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole('button', { name: life.confirm }));
-    await waitFor(() =>
-      expect(ticketOp).toHaveBeenCalledWith(
-        expect.objectContaining({ functionName: 'publishEvent', args: [5n] }),
-      ),
-    );
-    expect(ticketOp).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(publishEvent).toHaveBeenCalledWith(5n, 9n));
+    expect(publishEvent).toHaveBeenCalledTimes(1);
   });
 
   /** Ruling 3: after sub-plan 01b a cancelled event blocks hand-overs — say so beforehand. */
@@ -155,12 +155,10 @@ describe('publishing and cancelling', () => {
     await user.click(await screen.findByRole('button', { name: life.cancel }));
 
     expect(screen.getByText(life.cancelConfirm)).toBeInTheDocument();
-    expect(ticketOp).not.toHaveBeenCalled();
+    expect(cancelEvent).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole('button', { name: life.confirm }));
-    await waitFor(() =>
-      expect(ticketOp).toHaveBeenCalledWith(expect.objectContaining({ functionName: 'cancelEvent', args: [5n] })),
-    );
+    await waitFor(() => expect(cancelEvent).toHaveBeenCalledWith(5n, 9n));
   });
 
   it('lets the organiser back out of the confirmation', async () => {
@@ -169,7 +167,7 @@ describe('publishing and cancelling', () => {
     await user.click(await screen.findByRole('button', { name: life.cancel }));
     await user.click(screen.getByRole('button', { name: life.back }));
     expect(screen.queryByText(life.cancelConfirm)).not.toBeInTheDocument();
-    expect(ticketOp).not.toHaveBeenCalled();
+    expect(cancelEvent).not.toHaveBeenCalled();
   });
 
   it('offers neither write on an event that is already cancelled', async () => {
@@ -207,12 +205,7 @@ describe('publishing and cancelling', () => {
 
   it('names the rule when the chain refuses the write', async () => {
     const user = userEvent.setup();
-    const { OpReverted } = await import('../shared/chain/ops');
-    const { encodeErrorResult } = await import('viem');
-    const { ticketAbi } = await import('../shared/chain/abis');
-    ticketOp.mockRejectedValueOnce(
-      new OpReverted('publishEvent', encodeErrorResult({ abi: ticketAbi, errorName: 'NotDraft' })),
-    );
+    publishEvent.mockResolvedValueOnce({ state: 'refused', problem: 'notDraft' });
     open();
     await user.click(await screen.findByRole('button', { name: life.publish }));
     await user.click(screen.getByRole('button', { name: life.confirm }));
@@ -222,8 +215,7 @@ describe('publishing and cancelling', () => {
   /** Plan §2c: a timed-out publish shows determinate progress and resolves itself — no refresh. */
   it('turns a timed-out publish into progress that auto-resolves when the indexer catches up', async () => {
     const user = userEvent.setup();
-    const { OpReverted } = await import('../shared/chain/ops');
-    ticketOp.mockRejectedValueOnce(new OpReverted('publishEvent', 'TIMEOUT'));
+    publishEvent.mockResolvedValueOnce({ state: 'confirming' });
     open();
     await user.click(await screen.findByRole('button', { name: life.publish }));
     await user.click(screen.getByRole('button', { name: life.confirm }));
