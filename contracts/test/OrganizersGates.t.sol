@@ -24,7 +24,7 @@ contract OrganizersGatesTest is Test {
     event GateRevoked(uint256 indexed gateId);
 
     function setUp() public {
-        orgs = new Organizers();
+        orgs = new Organizers(address(0));
         ticket = new MockTicket();
         orgs.setTicket(address(ticket));
         orgs.createOrganizer(OWNER);
@@ -71,7 +71,7 @@ contract OrganizersGatesTest is Test {
     }
 
     function test_registerGateNeedsTicketWired() public {
-        Organizers fresh = new Organizers();
+        Organizers fresh = new Organizers(address(0));
         fresh.createOrganizer(OWNER);
         vm.prank(OWNER);
         vm.expectRevert(Organizers.TicketNotSet.selector);

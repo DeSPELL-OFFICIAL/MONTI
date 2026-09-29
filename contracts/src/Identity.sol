@@ -3,12 +3,13 @@ pragma solidity 0.8.31;
 
 import {AttesterRole} from "./libs/AttesterRole.sol";
 import {IIdentity} from "./interfaces/IIdentity.sol";
+import {ERC2771Context} from "@openzeppelin/contracts/metatx/ERC2771Context.sol";
 
 /// @title Identity
 /// @notice personId is 32 random bytes (spec 10.2) — never a hash of anything. This contract is the
 ///         only on-chain link between a random personId, a smart account, and one active P-256
 ///         device key. No PII ever reaches this contract.
-contract Identity is IIdentity, AttesterRole {
+contract Identity is IIdentity, AttesterRole, ERC2771Context {
     struct Device {
         bytes32 x;
         bytes32 y;
@@ -33,6 +34,8 @@ contract Identity is IIdentity, AttesterRole {
     mapping(bytes32 => uint8) private _kycLevel;
     mapping(bytes32 => address) private _nicknameOwner;
     mapping(address => bytes32) private _nicknameOf;
+    /// @dev ERC-2771 trusted forwarder, wired once. Zero until setForwarder → _msgSender()==msg.sender.
+    address private _forwarder;
 
     event Registered(bytes32 indexed personId, address indexed account);
     event AccountRotated(bytes32 indexed personId, address indexed oldAccount, address indexed newAccount);
@@ -53,8 +56,23 @@ contract Identity is IIdentity, AttesterRole {
     error NicknameTaken();
     error NicknameHashMismatch();
     error NoRotationToCancel();
+    error ForwarderAlreadySet();
 
-    constructor(address attester_) AttesterRole(attester_) {}
+    constructor(address attester_) AttesterRole(attester_) ERC2771Context(address(0)) {}
+
+    /// @notice ERC-2771 trusted forwarder. Identity is deployed before the forwarder (the forwarder
+    ///         reads Identity), so it cannot be an immutable — the deployer wires it once, mirroring
+    ///         Organizers.setTicket (design §2).
+    function trustedForwarder() public view override returns (address) {
+        return _forwarder;
+    }
+
+    function setForwarder(address forwarder_) external {
+        if (msg.sender != deployer) revert NotDeployer();
+        if (_forwarder != address(0)) revert ForwarderAlreadySet();
+        if (forwarder_ == address(0)) revert ZeroAddress();
+        _forwarder = forwarder_;
+    }
 
     /// @dev Resolves the diamond between IIdentity.attester and AttesterRole.attester (spec 9.2).
     function attester() public view override(IIdentity, AttesterRole) returns (address) {
@@ -138,27 +156,27 @@ contract Identity is IIdentity, AttesterRole {
     ///         닉네임은 '지금 그 계정이 들고 있는 핸들'을 되가져온다. 새 계정이 그사이 이름을
     ///         바꿨다면 원래 핸들은 풀려 있으니 setNickname 을 한 번 더 누르면 된다.
     function cancelRotation() external {
-        bytes32 personId = _personOf[msg.sender];
+        bytes32 personId = _personOf[_msgSender()];
         if (personId == bytes32(0)) revert NotRegistered();
         // 자격 없음과 창 만료를 같은 에러로 둔다: 구분해 알려주면 어느 계정이 언제 회전했는지
         // 모르는 사람에게 흘리게 된다.
-        if (_rotatedFrom[personId] != msg.sender) revert NoRotationToCancel();
+        if (_rotatedFrom[personId] != _msgSender()) revert NoRotationToCancel();
         if (block.timestamp >= uint256(_rotatedAt[personId]) + ROTATION_UNDO_WINDOW) revert NoRotationToCancel();
 
         address current = _accountOf[personId];
-        _accountOf[personId] = msg.sender;
+        _accountOf[personId] = _msgSender();
         delete _personOf[current];
         delete _rotatedFrom[personId];
 
         bytes32 nick = _nicknameOf[current];
         if (nick != bytes32(0)) {
             delete _nicknameOf[current];
-            _nicknameOf[msg.sender] = nick;
-            _nicknameOwner[nick] = msg.sender;
+            _nicknameOf[_msgSender()] = nick;
+            _nicknameOwner[nick] = _msgSender();
         }
 
-        emit AccountRotated(personId, current, msg.sender);
-        emit RotationCancelled(personId, msg.sender);
+        emit AccountRotated(personId, current, _msgSender());
+        emit RotationCancelled(personId, _msgSender());
     }
 
     /// @notice Raises (or lowers) the verification level after a later Didit session. Attester only:
@@ -218,10 +236,10 @@ contract Identity is IIdentity, AttesterRole {
     ///         Spec 9.3: one active device per account, 7-day cooldown enforced by the contract.
     ///         Registering a fresh device also clears a lock — that is the on-chain recovery path.
     function setActiveDevice(bytes32 x, bytes32 y) external {
-        if (!isMember(msg.sender)) revert NotRegistered();
+        if (!isMember(_msgSender())) revert NotRegistered();
         if (x == bytes32(0) || y == bytes32(0)) revert InvalidDeviceKey();
 
-        Device storage d = _devices[msg.sender];
+        Device storage d = _devices[_msgSender()];
         if (d.updatedAt != 0 && block.timestamp < uint256(d.updatedAt) + DEVICE_COOLDOWN) revert CooldownActive();
 
         bool wasLocked = d.locked;
@@ -230,14 +248,14 @@ contract Identity is IIdentity, AttesterRole {
         d.updatedAt = uint64(block.timestamp);
         d.locked = false;
 
-        emit DeviceChanged(msg.sender, x, y);
-        if (wasLocked) emit DeviceLocked(msg.sender, false);
+        emit DeviceChanged(_msgSender(), x, y);
+        if (wasLocked) emit DeviceLocked(_msgSender(), false);
     }
 
     /// @notice Spec 5.5 / 9.3: the attendee (from any device or the web) or the attester can lock the
     ///         active device instantly. While locked, Ticket.checkIn refuses this account.
     function lockDevice(address account) external {
-        if (msg.sender != account && msg.sender != attester()) revert NotAccountOwner();
+        if (_msgSender() != account && msg.sender != attester()) revert NotAccountOwner();
         if (_personOf[account] == bytes32(0)) revert NotRegistered();
 
         _devices[account].locked = true;
@@ -248,20 +266,20 @@ contract Identity is IIdentity, AttesterRole {
     ///         Normalisation (lowercase, 3-20 chars of [a-z0-9_]) happens client-side; the chain only
     ///         enforces that the hash matches the string and that the handle is free.
     function setNickname(bytes32 nicknameHash, string calldata nickname) external {
-        if (!isMember(msg.sender)) revert NotRegistered();
+        if (!isMember(_msgSender())) revert NotRegistered();
         if (nicknameHash != keccak256(bytes(nickname))) revert NicknameHashMismatch();
 
         address holder = _nicknameOwner[nicknameHash];
-        if (holder == msg.sender) return;
+        if (holder == _msgSender()) return;
         if (holder != address(0)) revert NicknameTaken();
 
-        bytes32 previous = _nicknameOf[msg.sender];
+        bytes32 previous = _nicknameOf[_msgSender()];
         if (previous != bytes32(0)) delete _nicknameOwner[previous];
 
-        _nicknameOwner[nicknameHash] = msg.sender;
-        _nicknameOf[msg.sender] = nicknameHash;
+        _nicknameOwner[nicknameHash] = _msgSender();
+        _nicknameOf[_msgSender()] = nicknameHash;
 
-        emit NicknameSet(msg.sender, nicknameHash, nickname);
+        emit NicknameSet(_msgSender(), nicknameHash, nickname);
     }
 
     function nicknameOwner(bytes32 nicknameHash) external view returns (address) {

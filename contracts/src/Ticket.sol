@@ -2,6 +2,8 @@
 pragma solidity 0.8.31;
 
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import {Context} from "@openzeppelin/contracts/utils/Context.sol";
+import {ERC2771Context} from "@openzeppelin/contracts/metatx/ERC2771Context.sol";
 import {Base64} from "@openzeppelin/contracts/utils/Base64.sol";
 import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
@@ -26,7 +28,7 @@ import {ITicket} from "./interfaces/ITicket.sol";
 ///           비트 레이아웃: [96..256) eventId · [88..96) tier · [0..88) serial.
 ///         - (eventId, account) 당 슬롯 하나에 claim nonce + 보유 수 + 대기 수를 패킹한다(`Wallet`).
 ///         - 입장 시각은 티켓별 `uint32 usedAt` 으로, 한 슬롯에 8장씩 패킹한다(`_usedAtWords`).
-contract Ticket is ERC721, EIP712, ITicket {
+contract Ticket is ERC721, EIP712, ERC2771Context, ITicket {
     using Strings for uint256;
 
     struct EventMeta {
@@ -271,13 +273,17 @@ contract Ticket is ERC721, EIP712, ITicket {
     error NothingToMigrate();
     error RotationPending();
 
-    constructor(address identity_, address organizers_) ERC721("MONTI Ticket", "MONTI") EIP712("MONTI Ticket", "1") {
+    constructor(address identity_, address organizers_, address forwarder_)
+        ERC721("MONTI Ticket", "MONTI")
+        EIP712("MONTI Ticket", "1")
+        ERC2771Context(forwarder_)
+    {
         identity = IIdentity(identity_);
         organizers = IOrganizers(organizers_);
     }
 
     function createEvent(EventMeta calldata meta, Tier[] calldata tiers_) external returns (uint256 eventId) {
-        if (!organizers.hasPermission(meta.orgId, msg.sender, PERM_CREATE_EVENT)) revert Unauthorized();
+        if (!organizers.hasPermission(meta.orgId, _msgSender(), PERM_CREATE_EVENT)) revert Unauthorized();
         if (tiers_.length == 0 || tiers_.length > 8) revert InvalidTiers();
         if (meta.startsAt >= meta.endsAt || meta.saleStart >= meta.saleEnd) revert InvalidSchedule();
 
@@ -291,7 +297,7 @@ contract Ticket is ERC721, EIP712, ITicket {
             _tiers[eventId].push(t);
         }
 
-        emit EventCreated(eventId, meta.orgId, msg.sender);
+        emit EventCreated(eventId, meta.orgId, _msgSender());
         emit EventStatusChanged(eventId, uint8(EventStatus.Draft));
     }
 
@@ -496,7 +502,7 @@ contract Ticket is ERC721, EIP712, ITicket {
     ///         종료 이벤트(ClaimRejected)를 낸다. 대기 상태가 아니면(이미 승인·거절) 되돌릴 것이 없다.
     function cancelRequest(uint256 eventId, uint256 requestId) external {
         ClaimRequest storage r = _claimRequests[eventId][requestId];
-        if (r.requester != msg.sender) revert Unauthorized();
+        if (r.requester != _msgSender()) revert Unauthorized();
         if (r.status != 0) revert RequestNotPending();
         r.status = 2;
         _releaseReservation(eventId, r);
@@ -568,7 +574,7 @@ contract Ticket is ERC721, EIP712, ITicket {
     /// @notice Spec 5.4: the sender picks a recipient by phone number or nickname. The commitment is a
     ///         hash of that handle; the attester later signs "this account is that handle's owner".
     function createOffer(uint256 tokenId, bytes32 recipientCommitment, uint64 expiresAt) external {
-        if (ownerOf(tokenId) != msg.sender) revert Unauthorized();
+        if (ownerOf(tokenId) != _msgSender()) revert Unauthorized();
         EventMeta storage m = _events[_decodeEvent(tokenId)];
         if (_revoked[tokenId]) revert TicketRevoked();
         if (!m.transferable) revert TransfersDisabled();
@@ -579,12 +585,12 @@ contract Ticket is ERC721, EIP712, ITicket {
         if (_transfers[tokenId] >= m.maxTransfers) revert TransferLimitReached();
         if (expiresAt <= block.timestamp) revert OfferExpired();
 
-        _offers[tokenId] = Offer({from: msg.sender, recipientCommitment: recipientCommitment, expiresAt: expiresAt});
-        emit OfferCreated(tokenId, msg.sender, recipientCommitment, expiresAt);
+        _offers[tokenId] = Offer({from: _msgSender(), recipientCommitment: recipientCommitment, expiresAt: expiresAt});
+        emit OfferCreated(tokenId, _msgSender(), recipientCommitment, expiresAt);
     }
 
     function cancelOffer(uint256 tokenId) external {
-        if (ownerOf(tokenId) != msg.sender) revert Unauthorized();
+        if (ownerOf(tokenId) != _msgSender()) revert Unauthorized();
         if (_offers[tokenId].from == address(0)) revert NoOffer();
         delete _offers[tokenId];
         emit OfferCancelled(tokenId);
@@ -596,12 +602,12 @@ contract Ticket is ERC721, EIP712, ITicket {
         if (o.from != ownerOf(tokenId)) revert NoOffer();
         if (block.timestamp > o.expiresAt) revert OfferExpired();
 
-        bytes32 digest = offerDigest(tokenId, o.recipientCommitment, msg.sender);
+        bytes32 digest = offerDigest(tokenId, o.recipientCommitment, _msgSender());
         if (ECDSA.recover(digest, attesterSig) != identity.attester()) revert BadAttesterSig();
 
         delete _offers[tokenId];
-        _update(msg.sender, tokenId, address(0));
-        emit OfferAccepted(tokenId, o.from, msg.sender);
+        _update(_msgSender(), tokenId, address(0));
+        emit OfferAccepted(tokenId, o.from, _msgSender());
     }
 
     // --- 릴레이된 입장 (checkInFor / checkInForLate) -------------------------------------------------
@@ -739,8 +745,8 @@ contract Ticket is ERC721, EIP712, ITicket {
         uint256 eventId = _decodeEvent(tokenId);
         uint256 orgId = _events[eventId].orgId;
 
-        (bool exists,) = organizers.managerOf(orgId, msg.sender);
-        if (!exists && !organizers.hasPermission(orgId, msg.sender, PERM_APPROVE_OVERRIDE)) revert Unauthorized();
+        (bool exists,) = organizers.managerOf(orgId, _msgSender());
+        if (!exists && !organizers.hasPermission(orgId, _msgSender(), PERM_APPROVE_OVERRIDE)) revert Unauthorized();
 
         if (_revoked[tokenId]) revert TicketRevoked();
         // manualOverride 와 같은 기준이다: 승인할 수 없는 요청은 올라가지 않는다(Minor 5).
@@ -749,7 +755,7 @@ contract Ticket is ERC721, EIP712, ITicket {
         if (status == EventStatus.Cancelled) revert EventCancelled();
         (uint256 gateEventId,,,,,) = organizers.gateInfo(gateId);
         if (gateEventId != eventId) revert GateMismatch();
-        emit OverrideRequested(tokenId, gateId, msg.sender, reason);
+        emit OverrideRequested(tokenId, gateId, _msgSender(), reason);
     }
 
     /// @notice ROLE_APPROVER = admin (or owner) holding PERM_APPROVE_OVERRIDE, ROLE_MANAGER = manager
@@ -765,10 +771,10 @@ contract Ticket is ERC721, EIP712, ITicket {
         uint256 orgId = _events[eventId].orgId;
 
         uint8 role = ROLE_NONE;
-        if (organizers.hasPermission(orgId, msg.sender, PERM_APPROVE_OVERRIDE)) {
+        if (organizers.hasPermission(orgId, _msgSender(), PERM_APPROVE_OVERRIDE)) {
             role = ROLE_APPROVER;
         } else {
-            (bool exists, bool canApprove) = organizers.managerOf(orgId, msg.sender);
+            (bool exists, bool canApprove) = organizers.managerOf(orgId, _msgSender());
             if (exists && canApprove) role = ROLE_MANAGER;
         }
         if (role == ROLE_NONE) revert Unauthorized();
@@ -787,7 +793,7 @@ contract Ticket is ERC721, EIP712, ITicket {
             emit OfferCancelled(tokenId);
         }
 
-        emit ManualOverride(tokenId, gateId, msg.sender, role, reason);
+        emit ManualOverride(tokenId, gateId, _msgSender(), role, reason);
         emit CheckedIn(tokenId, eventId, gateId, bytes32(0), uint64(block.timestamp));
     }
 
@@ -817,7 +823,7 @@ contract Ticket is ERC721, EIP712, ITicket {
         bytes32 personId = identity.personOf(holder);
         if (personId == bytes32(0)) revert NotMember();
         address current = identity.accountOf(personId);
-        if (current != msg.sender) revert NotRotatedAccount();
+        if (current != _msgSender()) revert NotRotatedAccount();
         if (current == holder) revert NothingToMigrate();
         // 침해된 어테스터의 조용한 즉시 절도를, 눈에 보이고 되돌릴 수 있는 절도로 바꾼다(C3).
         if (block.timestamp < uint256(identity.rotatedAt(personId)) + MIGRATE_DELAY) revert RotationPending();
@@ -827,10 +833,10 @@ contract Ticket is ERC721, EIP712, ITicket {
 
         // _update clears any pending offer on the way through, so the old account's handoff dies here.
         _internalMove = true;
-        _update(msg.sender, tokenId, address(0));
+        _update(_msgSender(), tokenId, address(0));
         _internalMove = false;
 
-        emit Migrated(tokenId, holder, msg.sender);
+        emit Migrated(tokenId, holder, _msgSender());
     }
 
     /// @notice Everything the ticket shows comes from the chain (spec 10.2) — no server, no IPFS
@@ -889,7 +895,7 @@ contract Ticket is ERC721, EIP712, ITicket {
     function _requireEventPermission(uint256 eventId, uint32 bit) private view {
         uint256 orgId = _events[eventId].orgId;
         if (orgId == 0) revert UnknownEvent();
-        if (!organizers.hasPermission(orgId, msg.sender, bit)) revert Unauthorized();
+        if (!organizers.hasPermission(orgId, _msgSender(), bit)) revert Unauthorized();
     }
 
     /// @notice approveClaims/rejectClaims 의 권한 게이트(01c). 소유자와 PERM_APPROVE_CLAIM 를 가진
@@ -898,8 +904,8 @@ contract Ticket is ERC721, EIP712, ITicket {
     function _requireApprovalPermission(uint256 eventId) private view {
         uint256 orgId = _events[eventId].orgId;
         if (orgId == 0) revert UnknownEvent();
-        if (organizers.hasPermission(orgId, msg.sender, PERM_APPROVE_CLAIM)) return;
-        (bool exists, bool canApprove) = organizers.managerOf(orgId, msg.sender);
+        if (organizers.hasPermission(orgId, _msgSender(), PERM_APPROVE_CLAIM)) return;
+        (bool exists, bool canApprove) = organizers.managerOf(orgId, _msgSender());
         if (exists && canApprove) return;
         revert Unauthorized();
     }
@@ -1019,5 +1025,22 @@ contract Ticket is ERC721, EIP712, ITicket {
         if (from != address(0)) _wallet[eventId][from].held -= 1;
         if (to != address(0)) _wallet[eventId][to].held += 1;
         return previous;
+    }
+
+    // --- ERC-2771 context ------------------------------------------------------------------------
+
+    /// @notice ERC721 (approve/transfer internals) and this mixin both derive from Context, so the
+    ///         three accessors are merged here. A forwarded approval/transfer attributes to the
+    ///         appended sender (design §2, table row 13).
+    function _msgSender() internal view override(Context, ERC2771Context) returns (address) {
+        return ERC2771Context._msgSender();
+    }
+
+    function _msgData() internal view override(Context, ERC2771Context) returns (bytes calldata) {
+        return ERC2771Context._msgData();
+    }
+
+    function _contextSuffixLength() internal view override(Context, ERC2771Context) returns (uint256) {
+        return ERC2771Context._contextSuffixLength();
     }
 }
