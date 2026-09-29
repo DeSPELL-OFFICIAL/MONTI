@@ -1,13 +1,9 @@
 import { useCallback, useState } from 'react';
-import type { Hex } from 'viem';
+import { encodeFunctionData } from 'viem';
 import { ticketAbi } from '../../shared/chain/abis';
-import { getStaffAccount } from '../../shared/chain/accounts';
-import { createdEventId } from '../../shared/chain/createdEvent';
-import { OpReverted, resolveSubmittedOp, ticketOp } from '../../shared/chain/ops';
-import { MAX_WAIT_TIMEOUT_MS } from '../../shared/chain/sendSponsoredOp';
-import { revertMatch } from '../../shared/chain/revert';
-import { isUnsponsored } from '../../shared/chain/unsponsored';
-import { api, callableFailure } from '../../shared/api/functions';
+import { api, callableFailure, CallableError } from '../../shared/api/functions';
+import { followRelay, sendAction } from '../../shared/relay/sendAction';
+import { relayProblem } from '../../shared/relay/relayError';
 import type { EventDraft } from '../../shared/api/firestore';
 import type { MyOrg } from '../useMyOrgs';
 import { buildEventMeta, buildTiers, type ChainDraft } from './buildEventMeta';
@@ -112,8 +108,6 @@ export interface PublishState {
   phase: PublishPhase;
   /** One named rule the organiser can go back and fix, or `''`. */
   problem: PublishProblem | '';
-  /** True when nothing agreed to pay for the operation — the organiser banner, not a field. */
-  unsponsored: boolean;
   publish: () => Promise<void>;
 }
 
@@ -204,7 +198,8 @@ export interface PublishOptions {
  * `행사 만들기`: the whole of it, in the order plan section E lays out.
  *
  *   1. `pinEventMetadata` — the readable half, with the tags and the two visibility flags.
- *   2. `createEvent` as one sponsored operation, and the new id out of its own log.
+ *   2. `createEvent` as one relayed `MontiForwarder.execute` (via `sendAction`), and the new id
+ *      out of the settled relay document's `result.eventId`.
  *   3. `saveEventArt` — the ticket pictures, which the chain has no room for.
  *   4. `setEventPrivate` — the real venue, when it is hidden.
  *   5. the draft goes.
@@ -219,7 +214,6 @@ export function usePublish(
 ): PublishState {
   const [phase, setPhase] = useState<PublishPhase>('idle');
   const [problem, setProblem] = useState<PublishProblem | ''>('');
-  const [unsponsored, setUnsponsored] = useState(false);
 
   /**
    * Which organisation this event belongs to, making one if this person has none — four steps,
@@ -281,16 +275,6 @@ export function usePublish(
 
   const finish = useCallback(
     async (eventId: string, posterCid: string = draft.posterCid): Promise<void> => {
-      // The receipt landed but no `EventCreated` came out of its logs. The event exists and
-      // nothing here can address it, so the draft — the only place its venue and its pictures
-      // still are — stays, and the screen goes to `confirming`, not `idle`: from that state
-      // the button asks `resolveSubmittedOp` what the operation produced, and there is no
-      // path from it that sends a second `createEvent`.
-      if (eventId === '') {
-        setPhase('confirming');
-        setProblem('noEventId');
-        return;
-      }
       setPhase('finishing');
       const plan = followUpPlan(draft, eventId);
       const done = await runFollowUps(plan);
@@ -359,7 +343,6 @@ export function usePublish(
         return;
       }
       setProblem('');
-      setUnsponsored(false);
       setPhase('pinning');
       try {
         const orgId = draft.orgId.trim();
@@ -368,23 +351,15 @@ export function usePublish(
         const { metadataCid } = await api.pinEventMetadata({ orgId, meta: toPinnedMeta(draft) });
         setPhase('sending');
         const chainDraft = toChainDraft(draft, Math.floor(Date.now() / 1_000));
+        // A relayed `updateEventMeta` (via `sendAction` inside `saveDraft`) that follows the relay
+        // document to a settled answer, so a success is always `done` — no timed-out receipt to
+        // resend around, and sending the same update twice only writes the same `EventMeta` twice.
         const result = await saveDraft(
           BigInt(eventId),
           BigInt(orgId),
           buildEventMeta(chainDraft, metadataCid),
           buildTiers(chainDraft),
         );
-        if (result.state === 'unsponsored') {
-          setPhase('idle');
-          setUnsponsored(true);
-          return;
-        }
-        // Still on its way. The button stays pressable, and pressing it sends the same update
-        // again — which is the whole difference from a `createEvent` that timed out.
-        if (result.state === 'confirming') {
-          setPhase('confirming');
-          return;
-        }
         if (result.state === 'refused') {
           setPhase('idle');
           setProblem(UPDATE_PROBLEMS[result.problem]);
@@ -417,45 +392,44 @@ export function usePublish(
     // tries the two writes that are still missing.
     if (draft.createdEventId !== '') {
       setProblem('');
-      setUnsponsored(false);
       await finish(draft.createdEventId);
       return;
     }
 
-    // One `createEvent` per draft. A previous attempt whose `wait` gave up may still be in
-    // flight and the draft outlives the page, so the first question is always what became of
-    // that one — never "send it again". A bundler we cannot reach answers `pending`, because
-    // the safe reply to "did my event get created?" is never a second event.
-    let resent: PublishProblem | '' = '';
-    if (draft.submittedOpHash !== '') {
+    // A `createEvent` this draft already broadcast but has not seen settle: the relayer answered
+    // `sent`, the relay id was written to the draft, and then the page closed (or the wait dropped).
+    // The first question is always what became of that submission — never "send it again", because
+    // a second `createEvent` is a second event. Following the relay document is the whole of it.
+    if (draft.submittedRelayId !== '') {
       setProblem('');
-      setUnsponsored(false);
       setPhase('confirming');
-      const submitted = await resolveSubmittedOp(draft.submittedOpHash as Hex, draft.submittedAt).catch(
-        () => ({ state: 'pending', logs: [] }) as const,
-      );
-      if (submitted.state === 'pending') return;
-      if (submitted.state === 'landed') {
-        // It did land after all. Same rule as below: the id is recorded before anything else.
-        // An empty one leaves `submittedOpHash` in place, so the next press asks again rather
-        // than falling through to a fresh `createEvent`.
-        const landed = createdEventId(submitted.logs);
-        if (landed !== '') {
-          patch({ createdEventId: landed });
-          await save().catch(() => undefined);
+      try {
+        const result = await followRelay(draft.submittedRelayId);
+        const eventId = result?.eventId ?? '';
+        patch({ createdEventId: eventId, submittedRelayId: '' });
+        await save().catch(() => undefined);
+        if (eventId === '') {
+          setPhase('idle');
+          setProblem('failed');
+          return;
         }
-        await finish(landed);
-        return;
+        await finish(eventId);
+      } catch (cause) {
+        // The relayer settled it as `failed` — `followRelay` rejects with a `CallableError`
+        // carrying the forwarder code or the bubbled `Ticket` error name. The submission is spent,
+        // so drop the record and surface the rule, letting a fresh 만들기 send again.
+        if (cause instanceof CallableError) {
+          setPhase('idle');
+          setProblem(relayProblem(cause, REVERT_PROBLEMS) ?? 'failed');
+          patch({ submittedRelayId: '' });
+          await save().catch(() => undefined);
+          return;
+        }
+        // A dropped Firestore listener: the relay may still land, so the record and the confirming
+        // wait both stay. Re-pressing follows the same document again — it never re-sends.
+        setPhase('confirming');
       }
-      // `failed` (reverted, or dropped from the mempool) or `stale` (still in the mempool but
-      // stuck: priced below the corrected fee, or waiting past the stale horizon). Either way the
-      // recorded op will never land, and because this account is still undeployed its deployment
-      // nonce makes that op mutually exclusive with a fresh one — the new op deploys the account
-      // and lands; the old one can never win the deployment. So drop the record and fall through
-      // to a fresh send with the current (corrected) fees. A stale resend the organiser did not
-      // ask for is named, so the wait that follows reads as a re-send and not a fresh hang.
-      if (submitted.state === 'stale') resent = 'opExpired';
-      patch({ submittedOpHash: '', submittedAt: 0 });
+      return;
     }
 
     // The scene says which field; this is the guard that stops a draft that changed underneath.
@@ -464,8 +438,7 @@ export function usePublish(
       return;
     }
 
-    setProblem(resent);
-    setUnsponsored(false);
+    setProblem('');
     try {
       // Before the pin, because `pinEventMetadata` checks on chain that this person organises
       // for the organisation it is given (`functions/src/lib/auth.ts`) — and the callable
@@ -495,29 +468,39 @@ export function usePublish(
       const { metadataCid } = await api.pinEventMetadata({ orgId, meta: toPinnedMeta({ ...draft, posterCid }) });
       setPhase('sending');
       const chainDraft = toChainDraft({ ...draft, orgId }, Math.floor(Date.now() / 1_000));
-      const receipt = await ticketOp({
-        account: await getStaffAccount(),
-        orgId: BigInt(orgId),
-        functionName: 'createEvent',
-        args: [buildEventMeta(chainDraft, metadataCid), buildTiers(chainDraft)],
-        // Keep polling the receipt to the 45s cap the scene shows, so an op the bundler includes a
-        // little late finishes on its own rather than parking on the decision block (persona R2 P0-1).
-        maxTimeoutMs: MAX_WAIT_TIMEOUT_MS,
-      });
-      // `createEvent` returns the new id, but a sponsored operation gives back a receipt — so
-      // the id comes out of the operation's own `EventCreated` log.
-      const eventId = createdEventId(receipt.logs);
-      // **The first thing written, before anything that could still fail.** One of the two is
-      // always recorded here, so from this line on every route back into `publish()` goes
-      // either to the follow-ups (`createdEventId`) or to `resolveSubmittedOp`
-      // (`submittedOpHash`) — and never to a second `createEvent`.
-      //
-      // The empty-id case is the one this exists for: the operation landed, the event is on
-      // chain, and the only way to find out which one is to ask the bundler again by hash.
-      patch(eventId === ''
-        ? { submittedOpHash: receipt.userOpHash, submittedAt: Date.now() }
-        : { createdEventId: eventId });
+      // `createEvent` as one relayed `MontiForwarder.execute`. `sendAction` follows the relay
+      // document to a settled answer and hands back `result.eventId`. `onSent` fires the moment the
+      // relayer broadcasts (`sent`) but has not yet mined: the relay id is written to the draft
+      // **before** the wait, so a page that closes here reopens onto `followRelay` rather than a
+      // second `createEvent`, and the confirming wait is shown meanwhile.
+      const result = await sendAction(
+        'createEvent',
+        'ticket',
+        encodeFunctionData({
+          abi: ticketAbi,
+          functionName: 'createEvent',
+          args: [buildEventMeta(chainDraft, metadataCid), buildTiers(chainDraft)],
+        }),
+        (relayId) => {
+          patch({ submittedRelayId: relayId });
+          void save().catch(() => undefined);
+          setPhase('confirming');
+        },
+      );
+      const eventId = result?.eventId ?? '';
+      // The id is recorded before anything that could still fail, and the in-flight relay id is
+      // cleared with it: from here every route back into `publish()` goes to the follow-ups
+      // (`createdEventId`) and never to a second `createEvent`.
+      patch({ createdEventId: eventId, submittedRelayId: '' });
       await save().catch(() => undefined);
+      if (eventId === '') {
+        // A confirmed relay that named no event id is a backend fault (C2 fills `result.eventId`),
+        // not a draft the organiser can fix — so it reads as the generic failure, and the retry
+        // sends fresh because the record was cleared above.
+        setPhase('idle');
+        setProblem('failed');
+        return;
+      }
       await finish(eventId, posterCid);
     } catch (cause) {
       if (cause instanceof OrgRefused) {
@@ -525,26 +508,13 @@ export function usePublish(
         setProblem(cause.problem);
         return;
       }
-      // The operation is still on its way; it did not fail. Same rule as the hand-over screen.
-      if (cause instanceof OpReverted && cause.revertReason === 'TIMEOUT') {
-        // Remember which one, and when, so the next press asks after it instead of sending another.
-        if (cause.userOpHash) patch({ submittedOpHash: cause.userOpHash, submittedAt: Date.now() });
-        // This op is the one in flight now; clear any earlier resend notice so the confirming wait
-        // reads cleanly rather than still saying the previous request expired.
-        setProblem('');
-        setPhase('confirming');
-        return;
-      }
       setPhase('idle');
-      if (cause instanceof OpReverted) {
-        const named = cause.revertReason
-          ? revertMatch(ticketAbi, cause.revertReason as Hex, REVERT_PROBLEMS)
-          : undefined;
-        setProblem(named ?? 'failed');
-        return;
-      }
-      if (isUnsponsored(cause)) {
-        setUnsponsored(true);
+      // A relayed `createEvent` refusal — the forwarder code or the bubbled `Ticket` error name,
+      // read off `details.code` and matched against the same rules the sponsored path decoded from
+      // a four-byte selector.
+      const named = relayProblem(cause, REVERT_PROBLEMS);
+      if (named !== undefined) {
+        setProblem(named);
         return;
       }
       const { code, reason } = callableFailure(cause);
@@ -561,5 +531,5 @@ export function usePublish(
 
   // Sentences are the scene's business: this hook hands back the *name* of the rule, so the
   // same failure reads the same whichever screen ends up showing it.
-  return { phase, problem, unsponsored, publish };
+  return { phase, problem, publish };
 }

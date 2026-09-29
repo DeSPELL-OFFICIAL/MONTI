@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { encodeEventTopics, numberToHex } from 'viem';
+import { decodeFunctionData, type Hex } from 'viem';
 import { ticketAbi } from '../../shared/chain/abis';
 import type { EventDraft, StoredEventDraft } from '../../shared/api/firestore';
 
@@ -39,29 +39,21 @@ vi.mock('../../shared/api/functions', async (orig) => ({
   api: { createOrganizerForMe, pinEventMetadata, pinEventImage, saveEventArt, setEventPrivate },
 }));
 
-const TICKET = `0x${'33'.repeat(20)}` as const;
-const CREATED_LOG = {
-  address: TICKET,
-  topics: [
-    encodeEventTopics({ abi: ticketAbi, eventName: 'EventCreated', args: { eventId: 12n } })[0],
-    numberToHex(12n, { size: 32 }),
-    numberToHex(9n, { size: 32 }),
-    `0x${'00'.repeat(12)}${'ab'.repeat(20)}`,
-  ],
-  data: '0x',
-};
-const ticketOp = vi.fn(async (_options: { orgId: bigint; functionName: string }) => ({
-  success: true, userOpHash: `0x${'22'.repeat(32)}`, logs: [CREATED_LOG],
-}));
-vi.mock('../../shared/chain/ops', async (orig) => ({
-  ...(await orig<typeof import('../../shared/chain/ops')>()),
-  ticketOp,
-  resolveSubmittedOp: vi.fn(async () => ({ state: 'pending' as const, logs: [] })),
-}));
+/**
+ * The create path's relay transport (ERC-2771). This file is about which organisation the event
+ * lands under, so a single `sendAction` that resolves `confirmed` with the new id is all it needs;
+ * the org id it carries is a field of the encoded `EventMeta`, decoded from the calldata below.
+ */
+type RelayResult = { eventId?: string } | undefined;
+const sendAction = vi.fn(
+  async (
+    _kind: string, _to: string, _data: Hex, _onSent?: (relayId: string) => void,
+  ): Promise<RelayResult> => ({ eventId: '12' }),
+);
+const followRelay = vi.fn(async (_relayId: string): Promise<RelayResult> => ({ eventId: '12' }));
+vi.mock('../../shared/relay/sendAction', () => ({ sendAction, followRelay }));
 
-vi.mock('../../shared/chain/accounts', () => ({
-  getStaffAccount: async () => ({ address: `0x${'ab'.repeat(20)}` }),
-}));
+const TICKET = `0x${'33'.repeat(20)}` as const;
 vi.mock('../../shared/config', async (orig) => ({
   ...(await orig<typeof import('../../shared/config')>()),
   getConfig: () => ({ addresses: { ticket: TICKET }, ipfsGateway: 'https://gw.test/' }),
@@ -74,6 +66,13 @@ const copy = organizerCopy.ko.scene;
 
 function Probe() {
   return <p>{`landed:${useLocation().pathname}`}</p>;
+}
+
+/** The org id the event was created under, decoded from the one relayed `createEvent` calldata. */
+function sentOrgId(call = 0): bigint {
+  const data = sendAction.mock.calls[call]?.[2] as Hex;
+  const { args = [] } = decodeFunctionData({ abi: ticketAbi, data });
+  return (args[0] as { orgId: bigint }).orgId;
 }
 
 /** Everything filled in but the organisation, which is the whole subject of this file. */
@@ -143,7 +142,7 @@ beforeEach(() => {
   loadMyProfile.mockResolvedValue({ displayName: '김태완' });
   createOrganizerForMe.mockResolvedValue({ orgId: '9' });
   pinEventMetadata.mockResolvedValue({ metadataCid: 'bafyMeta' });
-  ticketOp.mockResolvedValue({ success: true, userOpHash: `0x${'22'.repeat(32)}`, logs: [CREATED_LOG] });
+  sendAction.mockResolvedValue({ eventId: '12' });
 });
 
 /**
@@ -192,11 +191,13 @@ describe('resolving the organisation inside 만들기', () => {
       .find((written) => written.orgPendingName !== '');
     expect(before?.orgPendingName).toBe('김태완');
 
-    // And the event goes to the organisation that call produced.
+    // And the event goes to the organisation that call produced — the pin and the encoded
+    // `EventMeta.orgId` both name it.
     await waitFor(() => expect(pinEventMetadata).toHaveBeenCalledWith(
       expect.objectContaining({ orgId: '9' }),
     ));
-    expect(ticketOp.mock.calls[0]?.[0].orgId).toBe(9n);
+    await waitFor(() => expect(sendAction).toHaveBeenCalled());
+    expect(sentOrgId()).toBe(9n);
     // Cleared once it answered: a draft still carrying a name is a run that did not finish.
     const after = saveEventDraft.mock.calls.at(-1)?.[1] as EventDraft;
     expect(after).toMatchObject({ orgId: '9', orgPendingName: '' });

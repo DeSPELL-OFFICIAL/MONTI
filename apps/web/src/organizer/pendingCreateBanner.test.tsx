@@ -1,9 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { encodeEventTopics, numberToHex } from 'viem';
-import { ticketAbi } from '../shared/chain/abis';
-import type { EventDraft, StoredEventDraft } from '../shared/api/firestore';
+import type { EventDraft, RelayView, StoredEventDraft } from '../shared/api/firestore';
 
 let store: StoredEventDraft[] = [];
 const listEventDrafts = vi.fn(async () => [...store]);
@@ -11,21 +9,18 @@ const deleteEventDraft = vi.fn(async (id: string) => {
   store = store.filter((row) => row.id !== id);
 });
 const saveEventDraft = vi.fn(async () => undefined);
-vi.mock('../shared/api/firestore', () => ({ listEventDrafts, deleteEventDraft, saveEventDraft }));
-
-const resolveSubmittedOp = vi.fn(async () => ({ state: 'pending' as string, logs: [] as unknown[] }));
-vi.mock('../shared/chain/ops', () => ({ resolveSubmittedOp }));
+// What the followed `relays/{relayId}` document reports; each test sets it before mounting, and the
+// mock hands it to the banner's subscriber synchronously (one delivery is enough for these cases).
+let relayView: RelayView | null = { status: 'pending' };
+const watchRelay = vi.fn((_id: string, onChange: (relay: RelayView | null) => void) => {
+  onChange(relayView);
+  return () => undefined;
+});
+vi.mock('../shared/api/firestore', () => ({ listEventDrafts, deleteEventDraft, saveEventDraft, watchRelay }));
 
 const saveEventArt = vi.fn(async () => ({ ok: true }));
 const setEventPrivate = vi.fn(async () => ({ ok: true }));
 vi.mock('../shared/api/functions', () => ({ api: { saveEventArt, setEventPrivate } }));
-
-// `createdEventId` keeps only the Ticket contract's own logs, so the mocked config's ticket
-// address has to match the CREATED_LOG address below.
-vi.mock('../shared/config', async (orig) => ({
-  ...(await orig<typeof import('../shared/config')>()),
-  getConfig: () => ({ addresses: { ticket: `0x${'33'.repeat(20)}` } }),
-}));
 
 const navigate = vi.fn();
 vi.mock('react-router-dom', async (orig) => ({
@@ -38,27 +33,14 @@ const { organizerCopy } = await import('./copy');
 const { emptyEventDraft, emptyEventDraftTier } = await import('./useEventDraft');
 const copy = organizerCopy.ko.home;
 
-const TICKET = `0x${'33'.repeat(20)}` as const;
-const HASH = `0x${'11'.repeat(32)}` as const;
-
-/** `EventCreated(eventId=12, orgId=9, creator)`, so the landed path can read the number. */
-const CREATED_LOG = {
-  address: TICKET,
-  topics: [
-    encodeEventTopics({ abi: ticketAbi, eventName: 'EventCreated', args: { eventId: 12n } })[0],
-    numberToHex(12n, { size: 32 }),
-    numberToHex(9n, { size: 32 }),
-    `0x${'00'.repeat(12)}${'ab'.repeat(20)}`,
-  ],
-  data: '0x',
-};
+const RELAY_ID = 'relay-abc';
 
 const WAITING: EventDraft = {
   ...emptyEventDraft,
   orgId: '9',
   title: '  재즈 나이트  ',
   posterCid: 'bafkposter',
-  submittedOpHash: HASH,
+  submittedRelayId: RELAY_ID,
   tiers: [{ ...emptyEventDraftTier, design: 'c' }],
 };
 
@@ -77,17 +59,18 @@ beforeEach(() => {
   deleteEventDraft.mockClear();
   saveEventArt.mockClear();
   setEventPrivate.mockClear();
-  resolveSubmittedOp.mockResolvedValue({ state: 'pending', logs: [] });
+  watchRelay.mockClear();
+  relayView = { status: 'pending' };
   saveEventArt.mockResolvedValue({ ok: true });
   setEventPrivate.mockResolvedValue({ ok: true });
 });
 
 describe('the home pending-create banner', () => {
-  it('shows nothing when no draft is waiting on an op', async () => {
+  it('shows nothing, and follows no relay, when no draft is waiting on one', async () => {
     open();
     await waitFor(() => expect(listEventDrafts).toHaveBeenCalled());
     expect(screen.queryByText(copy.pendingCreate)).toBeNull();
-    expect(resolveSubmittedOp).not.toHaveBeenCalled();
+    expect(watchRelay).not.toHaveBeenCalled();
   });
 
   it('ignores a draft that already has an event id, or is an edit', async () => {
@@ -100,17 +83,21 @@ describe('the home pending-create banner', () => {
     expect(screen.queryByText(copy.pendingCreate)).toBeNull();
   });
 
-  it('shows the 확인 중 banner, with a way back in, while the op is still pending', async () => {
+  it('shows the 확인 중 banner, with a way back in, while the relay is still sent', async () => {
     store = [{ id: 'd-1', updatedAt: 1, data: WAITING }];
+    relayView = { status: 'sent' };
     open();
     expect(await screen.findByText(copy.pendingCreate)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: copy.pendingCreateOpen }))
       .toHaveAttribute('href', '/org/new/d-1');
+    await waitFor(() => expect(watchRelay)
+      .toHaveBeenCalledWith(RELAY_ID, expect.any(Function), expect.any(Function)));
+    expect(navigate).not.toHaveBeenCalled();
   });
 
-  it('runs the follow-ups and goes to the done screen once the op has landed', async () => {
+  it('runs the follow-ups and goes to the done screen once the relay confirms', async () => {
     store = [{ id: 'd-1', updatedAt: 1, data: WAITING }];
-    resolveSubmittedOp.mockResolvedValue({ state: 'landed', logs: [CREATED_LOG] });
+    relayView = { status: 'confirmed', result: { eventId: '12' } };
     open();
     await waitFor(() => expect(saveEventArt).toHaveBeenCalledWith({
       eventId: '12', tiers: [{ preset: 'c' }],
@@ -125,9 +112,9 @@ describe('the home pending-create banner', () => {
     expect(deleteEventDraft).toHaveBeenCalledWith('d-1');
   });
 
-  it('says the create failed, with a link back in, when the op reverted', async () => {
+  it('says the create failed, with a link back in, when the relay failed', async () => {
     store = [{ id: 'd-1', updatedAt: 1, data: WAITING }];
-    resolveSubmittedOp.mockResolvedValue({ state: 'failed', logs: [] });
+    relayView = { status: 'failed', error: { code: 'TX_REVERT', message: 'reverted' } };
     open();
     expect(await screen.findByText(copy.pendingCreateFailed)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: copy.pendingCreateOpen }))
@@ -135,13 +122,11 @@ describe('the home pending-create banner', () => {
     expect(navigate).not.toHaveBeenCalled();
   });
 
-  it('surfaces the same way back in when the op is stuck in the mempool (stale)', async () => {
+  it('sends them back into the draft when the relay confirmed but named no event id', async () => {
     store = [{ id: 'd-1', updatedAt: 1, data: WAITING }];
-    resolveSubmittedOp.mockResolvedValue({ state: 'stale', logs: [] });
+    relayView = { status: 'confirmed', result: {} };
     open();
-    expect(await screen.findByText(copy.pendingCreateFailed)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: copy.pendingCreateOpen }))
-      .toHaveAttribute('href', '/org/new/d-1');
-    expect(navigate).not.toHaveBeenCalled();
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/org/new/d-1'));
+    expect(saveEventArt).not.toHaveBeenCalled();
   });
 });

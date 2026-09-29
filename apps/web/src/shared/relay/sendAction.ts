@@ -24,8 +24,12 @@ function badNonce(cause: unknown): bigint | undefined {
  * `CallableError` carrying the doc's `error.code` so the caller maps it like any other refusal. A
  * dropped listener rejects too — the caller's own retry is the way out. `pending`/`sent` keep
  * waiting. `null` (the doc is not there yet) is not a verdict, so it is ignored.
+ *
+ * Exported so a caller that persisted a `relayId` (the createEvent draft, whose page can close and
+ * reopen mid-flight) can resume watching the same submission without re-sending it — a second
+ * `createEvent` would be a second event.
  */
-function waitForRelay(relayId: string): Promise<RelayActionResult | undefined> {
+export function followRelay(relayId: string): Promise<RelayActionResult | undefined> {
   return new Promise((resolve, reject) => {
     const sub: { stop?: () => void } = {};
     sub.stop = watchRelay(
@@ -56,11 +60,17 @@ function waitForRelay(relayId: string): Promise<RelayActionResult | undefined> {
  * action) is rebuilt against the fresh nonce the server reported and retried exactly once; a second
  * one is a real conflict and surfaces. Returns the action's result, or `undefined` for a write that
  * settles with none.
+ *
+ * `onSent` fires once, with the `relayId`, the moment the relayer answers `sent` rather than
+ * `confirmed` — before the wait begins. It is the durable-resume hook the createEvent path needs:
+ * the id is persisted on the draft so a page that closes here reopens onto {@link followRelay}
+ * rather than a second send.
  */
 export async function sendAction(
   kind: string,
   to: RelayTarget,
   data: Hex,
+  onSent?: (relayId: string) => void,
 ): Promise<RelayActionResult | undefined> {
   const send = async (nonce?: bigint): Promise<RelayActionResponse> => {
     const built = await buildForwardRequest({ to, data, kind, nonce });
@@ -75,5 +85,6 @@ export async function sendAction(
     response = await send(nonce);
   }
   if (response.status === 'confirmed') return response.result;
-  return waitForRelay(response.relayId);
+  onSent?.(response.relayId);
+  return followRelay(response.relayId);
 }

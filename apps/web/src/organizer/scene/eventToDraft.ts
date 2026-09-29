@@ -81,7 +81,7 @@ export function eventToDraft(eventId: string, sources: EventSources): EventDraft
     requireKyc: event.requireKyc,
     tiers: tierDrafts.length > 0 ? tierDrafts : emptyEventDraft.tiers,
     // This draft was opened from an event; it has not made one. The two are never both set.
-    submittedOpHash: '',
+    submittedRelayId: '',
     createdEventId: '',
     editingEventId: eventId,
   };

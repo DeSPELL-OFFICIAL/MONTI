@@ -1,35 +1,30 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import type { Hex } from 'viem';
 import { Alert } from '../shared/ui';
-import { listEventDrafts, type EventDraft } from '../shared/api/firestore';
-import { resolveSubmittedOp } from '../shared/chain/ops';
-import { createdEventId } from '../shared/chain/createdEvent';
+import { listEventDrafts, watchRelay, type EventDraft } from '../shared/api/firestore';
 import { forgetEventDraft, normalizeEventDraft } from './useEventDraft';
 import { followUpPlan, followUpsDone, runFollowUps } from './scene/followUps';
 import { useOrganizerCopy } from './copy';
 
 /**
- * The background "확인 중" banner on the organiser home (계획 §2a). When a `createEvent` op ran past
- * the creation scene's 45s cap and the organiser chose 나중에 확인, the draft is left with the op
- * hash written and no event id read back. This is where the scene's promise — "잠시 뒤 주최자
- * 화면에서 확인" — is actually kept: the home finds that one draft, polls the op, and resolves it
- * with no manual refresh:
+ * The background "확인 중" banner on the organiser home (계획 §2a). When a `createEvent` was
+ * broadcast by the relayer (`sent`) and the organiser chose 나중에 확인, the draft is left with the
+ * relay id written and no event id read back. This is where the scene's promise — "잠시 뒤 주최자
+ * 화면에서 확인" — is actually kept: the home finds that one draft, follows its `relays/{relayId}`
+ * document, and resolves it with no manual refresh:
  *
- *   pending  → an info banner, with a link back into the draft;
- *   landed   → the two follow-up writes the scene never reached, then the done screen;
- *   reverted → a plain line and a link back in to try again.
+ *   pending/sent → an info banner, with a link back into the draft;
+ *   confirmed    → the two follow-up writes the scene never reached, then the done screen;
+ *   failed       → a plain line and a link back in to try again.
  *
- * A bundler it cannot reach reads as pending, because the safe answer to "did my event get
- * created?" is never "make another one".
+ * A dropped Firestore listener leaves the banner as it is, because the safe answer to "did my
+ * event get created?" is never "make another one".
  */
-
-const POLL_MS = 4_000;
 
 interface Pending {
   draftId: string;
   draft: EventDraft;
-  hash: Hex;
+  relayId: string;
 }
 
 export function PendingCreateBanner() {
@@ -38,7 +33,7 @@ export function PendingCreateBanner() {
   const [pending, setPending] = useState<Pending | null>(null);
   const [failed, setFailed] = useState(false);
 
-  // The one draft that left an op behind: a hash written, no id read back, and not an edit.
+  // The one draft that left a relay behind: an id written, no event id read back, and not an edit.
   useEffect(() => {
     let live = true;
     void (async () => {
@@ -51,68 +46,68 @@ export function PendingCreateBanner() {
       if (!live) return;
       const row = stored.find((entry) => {
         const draft = normalizeEventDraft(entry.data);
-        return draft.submittedOpHash !== ''
+        return draft.submittedRelayId !== ''
           && draft.createdEventId === ''
           && draft.editingEventId === '';
       });
       if (row === undefined) return;
       const draft = normalizeEventDraft(row.data);
-      setPending({ draftId: row.id, draft, hash: draft.submittedOpHash as Hex });
+      setPending({ draftId: row.id, draft, relayId: draft.submittedRelayId });
     })();
     return () => {
       live = false;
     };
   }, []);
 
-  // Poll that op until it lands or reverts.
+  // Follow that relay until it confirms or fails.
   useEffect(() => {
     if (pending === null) return undefined;
     let live = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const tick = async (): Promise<void> => {
-      const result = await resolveSubmittedOp(pending.hash, pending.draft.submittedAt).catch(
-        () => ({ state: 'pending', logs: [] }) as const,
-      );
-      if (!live) return;
-      if (result.state === 'pending') {
-        timer = setTimeout(() => void tick(), POLL_MS);
-        return;
-      }
-      // `failed` (dropped or reverted) and `stale` (stuck in the mempool) both mean the op will
-      // not land on its own — the resend lives in the draft, so surface the way back in.
-      if (result.state === 'failed' || result.state === 'stale') {
-        setFailed(true);
-        return;
-      }
-      // Landed. The event is on chain, but the two writes the scene runs after it never happened,
-      // so they run here before the done screen — the same steps as `usePublish.finish`.
-      const eventId = createdEventId(result.logs);
-      if (eventId === '') {
-        // Landed but its logs named nothing readable: send them into the draft, whose 만들기 button
-        // asks the bundler again by hash and never creates a second event.
-        navigate(`/org/new/${pending.draftId}`);
-        return;
-      }
-      const plan = followUpPlan(pending.draft, eventId);
-      const done = await runFollowUps(plan);
-      const complete = followUpsDone(plan, done);
-      if (complete) await forgetEventDraft(pending.draftId).catch(() => undefined);
-      if (!live) return;
-      navigate(`/org/new/done/${eventId}`, {
-        state: {
-          posterCid: pending.draft.posterCid,
-          title: pending.draft.title.trim(),
-          followUpFailed: !complete,
-          draftId: pending.draftId,
-          plan,
-          done,
-        },
-      });
-    };
-    void tick();
+    const sub: { stop?: () => void } = {};
+    sub.stop = watchRelay(
+      pending.relayId,
+      (relay) => {
+        if (!live || relay === null) return;
+        if (relay.status === 'failed') {
+          // Reverted, or the relayer could not send it: the way back in lives in the draft.
+          sub.stop?.();
+          setFailed(true);
+          return;
+        }
+        if (relay.status !== 'confirmed') return; // pending/sent: keep the 확인 중 banner.
+        sub.stop?.();
+        // Confirmed. The event is on chain, but the two writes the scene runs after it never
+        // happened, so they run here before the done screen — the same steps as `usePublish.finish`.
+        void (async () => {
+          const eventId = relay.result?.eventId ?? '';
+          if (eventId === '') {
+            // Confirmed but named no event id (a backend fault): send them into the draft, whose
+            // 만들기 button follows the same relay again and never creates a second event.
+            navigate(`/org/new/${pending.draftId}`);
+            return;
+          }
+          const plan = followUpPlan(pending.draft, eventId);
+          const done = await runFollowUps(plan);
+          const complete = followUpsDone(plan, done);
+          if (complete) await forgetEventDraft(pending.draftId).catch(() => undefined);
+          if (!live) return;
+          navigate(`/org/new/done/${eventId}`, {
+            state: {
+              posterCid: pending.draft.posterCid,
+              title: pending.draft.title.trim(),
+              followUpFailed: !complete,
+              draftId: pending.draftId,
+              plan,
+              done,
+            },
+          });
+        })();
+      },
+      () => undefined, // a dropped listener leaves the banner as it is.
+    );
     return () => {
       live = false;
-      if (timer !== undefined) clearTimeout(timer);
+      sub.stop?.();
     };
   }, [pending, navigate]);
 

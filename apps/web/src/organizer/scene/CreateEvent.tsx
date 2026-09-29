@@ -10,7 +10,6 @@ import { useDisplayName } from '../../shared/displayName';
 import { useOrganizerCopy } from '../copy';
 import { useMyOrgs } from '../useMyOrgs';
 import { isGoodOrgName, ORG_NAME_MAX } from '../orgName';
-import { UnsponsoredNotice } from '../Unsponsored';
 import { useEventDraft } from '../useEventDraft';
 import { KR_REGIONS } from './regions';
 import { fromLocalInput, toLocalInput } from './datetime';
@@ -155,7 +154,7 @@ export function CreateEvent() {
   // `eventProblems` guard.
   const [waiting, setWaiting] = useState(false);
 
-  const { phase, problem, unsponsored, publish } = usePublish({
+  const { phase, problem, publish } = usePublish({
     draft,
     draftId,
     myOrgs,
@@ -196,16 +195,16 @@ export function CreateEvent() {
     void publish();
   }, [waiting, poster.busy, poster.problem, publish]);
 
-  // `confirming` deliberately leaves the button pressable: that press is what asks the bundler
-  // what became of an operation whose `wait` gave up, and it never sends a second one.
+  // `confirming` deliberately leaves the button pressable: that press is what follows the relay
+  // document to find what became of a `createEvent` the relayer broadcast, and it never sends a
+  // second one.
   const working = waiting
     || phase === 'org' || phase === 'pinning' || phase === 'sending' || phase === 'finishing';
 
   // The determinate wait shown in place of a bare spinner (plan §2c). It stays mounted from the
   // first write through `confirming`, so its own timer can reach the 30s timeout and offer 다시
-  // 시도 — safe here because `create` re-checks `submittedOpHash` and never sends a second event.
-  // `noEventId` is not an in-flight wait — the op landed and the number just has to be looked up —
-  // so it keeps its own line rather than a progress that would never finish.
+  // 시도 — safe here because `create` re-checks `submittedRelayId` and follows the same relay rather
+  // than sending a second event.
   const opPhase: OpPhase | null =
     phase === 'org' || phase === 'pinning' || phase === 'sending'
       ? 'saving'
@@ -492,14 +491,13 @@ export function CreateEvent() {
           </Card>
         ) : null}
 
-        {unsponsored ? <UnsponsoredNotice /> : null}
         {problem !== '' ? <Alert tone="error">{copy.publishProblems[problem]}</Alert> : null}
         {waiting ? <p className="working"><Spinner />{copy.posterWaiting}</p> : null}
         {/* One determinate wait, never an info-alert stacked on top of it (계획 §2a). At the 45s cap
-            it turns into the decision block: 다시 시도 (re-checks the op hash — never a second event)
+            it turns into the decision block: 다시 시도 (follows the same relay — never a second event)
             and, for a create, 나중에 확인 (leaves to /org, where the home banner resolves it). Both are
-            offered only once `confirming` has recorded the hash, so neither can fire while the first
-            send is still in flight. */}
+            offered only once `confirming` has recorded the relay id, so neither can fire while the
+            first send is still in flight. */}
         {opPhase ? (
           <OpProgress
             phase={opPhase}

@@ -393,15 +393,12 @@ export interface EventDraft {
   approvalRequired: boolean;
   tiers: EventDraftTier[];
   /**
-   * The `userOpHash` of a `createEvent` whose `wait` gave up before it landed, or `''`. The
-   * draft outlives the page, so without it a second attempt is a second event.
+   * The `relays/{relayId}` of a `createEvent` the relayer has broadcast (`sent`) but not yet
+   * settled, or `''`. The draft outlives the page, so a reopen resumes by following that document
+   * ({@link watchRelay}) to `confirmed`/`failed` rather than sending a second `createEvent` — which
+   * would be a second event.
    */
-  submittedOpHash: string;
-  /**
-   * Epoch ms {@link submittedOpHash} was recorded, or 0. `resolveSubmittedOp` uses it to tell a
-   * young op still on its way from one that has been stuck in the mempool too long to land.
-   */
-  submittedAt: number;
+  submittedRelayId: string;
   /**
    * The id of the event this draft already created, or `''`. Written the moment the chain
    * names it and **before** anything that could still fail, so a draft can never make a second

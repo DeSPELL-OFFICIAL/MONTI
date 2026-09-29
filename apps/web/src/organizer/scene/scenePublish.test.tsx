@@ -2,7 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { encodeErrorResult, encodeEventTopics, keccak256, numberToHex, toBytes } from 'viem';
+import { decodeFunctionData, keccak256, toBytes, type Hex } from 'viem';
 import { ticketAbi } from '../../shared/chain/abis';
 import type { EventDraft, StoredEventDraft } from '../../shared/api/firestore';
 import { ko as sharedKo } from '../../shared/copy/index';
@@ -45,38 +45,26 @@ vi.mock('../../shared/api/functions', async (orig) => ({
   api: { pinEventImage, pinEventMetadata, saveEventArt, setEventPrivate },
 }));
 
-interface SentOp { functionName: string; orgId: bigint; args: readonly unknown[] }
+/**
+ * The relay transport the create path now takes (ERC-2771, retiring the sponsored userOp). One
+ * relayed `createEvent` goes out through `sendAction`, which follows the `relays/{relayId}`
+ * document to a settled `result.eventId`; a submission the draft already recorded is resumed with
+ * `followRelay`. These two are the whole of what `usePublish` imports from this module.
+ *
+ * The default resolves as an already-`confirmed` relay (`onSent` never fires): the id is known
+ * the moment `sendAction` returns, which is the happy path. A test that wants the broadcast-but-
+ * not-settled (`sent`) state fires the `onSent` callback itself and leaves the promise pending.
+ */
+type RelayResult = { eventId?: string } | undefined;
+const sendAction = vi.fn(
+  async (
+    _kind: string, _to: string, _data: Hex, _onSent?: (relayId: string) => void,
+  ): Promise<RelayResult> => ({ eventId: '12' }),
+);
+const followRelay = vi.fn(async (_relayId: string): Promise<RelayResult> => ({ eventId: '12' }));
+vi.mock('../../shared/relay/sendAction', () => ({ sendAction, followRelay }));
+
 const TICKET = `0x${'33'.repeat(20)}` as const;
-
-/** `EventCreated(eventId, orgId, creator)` for event 12, all three arguments indexed. */
-const CREATED_LOG = {
-  address: TICKET,
-  topics: [
-    encodeEventTopics({ abi: ticketAbi, eventName: 'EventCreated', args: { eventId: 12n } })[0],
-    numberToHex(12n, { size: 32 }),
-    numberToHex(9n, { size: 32 }),
-    `0x${'00'.repeat(12)}${'ab'.repeat(20)}`,
-  ],
-  data: '0x',
-};
-
-const OP_HASH = `0x${'22'.repeat(32)}` as const;
-const ticketOp = vi.fn(async (_options: SentOp) => ({
-  success: true, userOpHash: OP_HASH, logs: [CREATED_LOG],
-}));
-const resolveSubmittedOp = vi.fn(async (_hash: string, _submittedAt?: number) => ({
-  state: 'pending' as 'pending' | 'landed' | 'failed' | 'stale',
-  logs: [] as unknown[],
-}));
-vi.mock('../../shared/chain/ops', async (orig) => ({
-  ...(await orig<typeof import('../../shared/chain/ops')>()),
-  ticketOp,
-  resolveSubmittedOp,
-}));
-
-const ACCOUNT = `0x${'ab'.repeat(20)}` as const;
-vi.mock('../../shared/chain/accounts', () => ({ getStaffAccount: async () => ({ address: ACCOUNT }) }));
-
 vi.mock('../../shared/config', async (orig) => ({
   ...(await orig<typeof import('../../shared/config')>()),
   getConfig: () => ({ addresses: { ticket: TICKET }, ipfsGateway: 'https://gw.test/' }),
@@ -89,11 +77,15 @@ vi.mock('./autoPoster', () => ({
   buildPosterSvg: () => '<svg/>',
 }));
 
-const { OpReverted } = await import('../../shared/chain/ops');
 const { CreateEvent } = await import('./CreateEvent');
 const { emptyEventDraft, emptyEventDraftTier } = await import('../useEventDraft');
 const { organizerCopy } = await import('../copy');
 const copy = organizerCopy.ko.scene;
+// Dynamic, not a top-level import: the module is mocked, and pulling a named export at the top of
+// the file would run the mock factory before the mocked callables above are initialised. The
+// factory preserves this export (`...(await orig())`), so the real `CallableError` is what both
+// this file and `usePublish` reference — `cause instanceof CallableError` still holds.
+const { CallableError } = await import('../../shared/api/functions');
 
 /** Where a navigation landed, and what it carried — the handover is what the retry runs on. */
 let handed: unknown = null;
@@ -106,7 +98,15 @@ function Probe() {
   return <p>{`landed:${location.pathname}`}</p>;
 }
 
-const SUBMITTED = `0x${'11'.repeat(32)}` as const;
+/** The `relays/{relayId}` a `sent` (broadcast, not yet settled) createEvent recorded on the draft. */
+const SUBMITTED = 'relay-9';
+
+/** The `EventMeta`/tiers the create path encoded into its one relayed `createEvent` calldata. */
+function createArgs(call = 0): { meta: Record<string, unknown>; tiers: unknown[] } {
+  const data = sendAction.mock.calls[call]?.[2] as Hex;
+  const { args = [] } = decodeFunctionData({ abi: ticketAbi, data });
+  return { meta: args[0] as Record<string, unknown>, tiers: args[1] as unknown[] };
+}
 
 const READY: EventDraft = {
   ...emptyEventDraft,
@@ -155,8 +155,8 @@ beforeEach(() => {
   localStorage.clear();
   store = [];
   handed = null;
-  ticketOp.mockResolvedValue({ success: true, userOpHash: OP_HASH, logs: [CREATED_LOG] });
-  resolveSubmittedOp.mockResolvedValue({ state: 'pending', logs: [] });
+  sendAction.mockResolvedValue({ eventId: '12' });
+  followRelay.mockResolvedValue({ eventId: '12' });
   pinEventMetadata.mockResolvedValue({ metadataCid: 'bafyMeta' });
   saveEventArt.mockResolvedValue({ ok: true });
   setEventPrivate.mockResolvedValue({ ok: true });
@@ -184,11 +184,15 @@ describe('the publish path', () => {
       },
     });
 
-    // 2. one sponsored `createEvent`, built by the one helper that owns the hashing.
-    const sent = ticketOp.mock.calls[0]?.[0] as SentOp;
-    expect(sent.functionName).toBe('createEvent');
-    expect(sent.orgId).toBe(9n);
-    expect(sent.args[0]).toMatchObject({
+    // 2. one relayed `createEvent`, built by the one helper that owns the hashing and handed to
+    //    `sendAction('createEvent', 'ticket', <calldata>, onSent)`.
+    expect(sendAction).toHaveBeenCalledWith(
+      'createEvent', 'ticket', expect.any(String), expect.any(Function),
+    );
+    const { meta, tiers } = createArgs();
+    // The org id no longer rides beside the call — it is a field of the encoded `EventMeta`.
+    expect(meta).toMatchObject({
+      orgId: 9n,
       imageCid: 'bafyMeta',
       // The trimmed title is what is hashed, because the trimmed title is what is pinned.
       titleHash: keccak256(toBytes('재즈 나이트')),
@@ -203,10 +207,9 @@ describe('the publish path', () => {
     });
     // Derived rather than asked for: open now, close when the event ends. `createEvent` only
     // asks that the two are the right way round, and this pair always is.
-    const meta = sent.args[0] as { saleStart: bigint; saleEnd: bigint };
-    expect(meta.saleStart).toBeLessThan(meta.saleEnd);
+    expect(meta.saleStart as bigint).toBeLessThan(meta.saleEnd as bigint);
     expect(Number(meta.saleStart)).toBeCloseTo(Math.floor(Date.now() / 1_000), -1);
-    expect(sent.args[1]).toEqual([
+    expect(tiers).toEqual([
       { name: '일반', priceUsdCents: 0n, supply: 100, minted: 0, maxPerWallet: 2, seated: false },
       { name: '학생', priceUsdCents: 0n, supply: 20, minted: 0, maxPerWallet: 1, seated: false },
     ]);
@@ -237,15 +240,13 @@ describe('the publish path', () => {
     await waitFor(() => expect(screen.getByText('landed:/org/new/done/12')).toBeInTheDocument());
 
     const derived = BigInt(READY.startsAt + 7_200);
-    const meta = ticketOp.mock.calls[0]?.[0].args[0] as {
-      startsAt: bigint; endsAt: bigint; saleStart: bigint; saleEnd: bigint;
-    };
+    const { meta } = createArgs();
     expect(meta.endsAt).toBe(derived);
     // `Ticket.createEvent` only asks that `saleStart < saleEnd`; the derived end is what makes
     // that true without a second date field ever being shown.
     expect(meta.saleEnd).toBe(derived);
-    expect(meta.saleStart).toBeLessThan(meta.saleEnd);
-    expect(meta.startsAt).toBeLessThan(meta.endsAt);
+    expect(meta.saleStart as bigint).toBeLessThan(meta.saleEnd as bigint);
+    expect(meta.startsAt as bigint).toBeLessThan(meta.endsAt as bigint);
   });
 
   it('keeps a hidden venue out of the pin and puts it behind the callable instead', async () => {
@@ -259,8 +260,8 @@ describe('the publish path', () => {
     expect(Object.hasOwn(pinned?.meta ?? {}, 'venue')).toBe(false);
     expect(pinned?.meta).toMatchObject({ venueHidden: true, timeHidden: true });
     // The chain still carries the hash of the *real* venue, so the claim stays provable.
-    const sent = ticketOp.mock.calls[0]?.[0] as SentOp;
-    expect(sent.args[0]).toMatchObject({ venueHash: keccak256(toBytes('서울 용산구 한남동')) });
+    const { meta } = createArgs();
+    expect(meta).toMatchObject({ venueHash: keccak256(toBytes('서울 용산구 한남동')) });
   });
 
   /**
@@ -301,7 +302,8 @@ describe('the publish path', () => {
     open({ ...READY, createdEventId: '12' });
     await create();
     await waitFor(() => expect(saveEventArt).toHaveBeenCalled());
-    expect(ticketOp).not.toHaveBeenCalled();
+    expect(sendAction).not.toHaveBeenCalled();
+    expect(followRelay).not.toHaveBeenCalled();
     expect(pinEventMetadata).not.toHaveBeenCalled();
   });
 
@@ -321,150 +323,132 @@ describe('the publish path', () => {
 });
 
 describe('when it does not land', () => {
-  it('remembers the operation on a timeout and asks after it rather than sending a second', async () => {
+  /**
+   * The relayer answered `sent` (broadcast, not yet mined): `onSent` fires with the relay id and
+   * the returned promise stays pending. The draft persists the id **before** the wait, and the
+   * scene shows the determinate 확인 중 step, not an info-alert stacked on it (계획 §2a). Pressing
+   * again follows the same relay document — it never sends a second createEvent.
+   */
+  it('shows the confirming wait when the relayer has broadcast, and follows rather than resending', async () => {
     const user = userEvent.setup();
-    ticketOp.mockRejectedValue(new OpReverted('createEvent', 'TIMEOUT', SUBMITTED));
+    sendAction.mockImplementation(async (_kind, _to, _data, onSent) => {
+      onSent?.('relay-1');
+      return new Promise<RelayResult>(() => undefined);
+    });
+    followRelay.mockReturnValue(new Promise<RelayResult>(() => undefined));
     open();
     await create();
-    // The scene shows the determinate wait's 확인 중 step, not an info-alert stacked on it (계획 §2a).
     await waitFor(() => expect(
       document.querySelector('.op-progress .steps__step--current .steps__label')?.textContent,
     ).toBe(sharedKo.op.confirming));
-    expect(ticketOp).toHaveBeenCalledTimes(1);
+    expect(sendAction).toHaveBeenCalledTimes(1);
+    // The relay id is written to the draft before the wait, so a reopen resumes rather than resends.
+    await waitFor(() => {
+      const written = saveEventDraft.mock.calls.at(-1)?.[1] as { submittedRelayId?: string } | undefined;
+      expect(written?.submittedRelayId).toBe('relay-1');
+    });
 
-    // Pressing again asks the bundler what became of the first one. It is still pending.
+    // Pressing again follows the same relay document rather than sending a second createEvent.
     await user.click(screen.getByRole('button', { name: copy.tiers.create }));
-    await waitFor(() => expect(resolveSubmittedOp).toHaveBeenCalledWith(SUBMITTED, expect.any(Number)));
-    expect(ticketOp).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(followRelay).toHaveBeenCalledWith('relay-1'));
+    expect(sendAction).toHaveBeenCalledTimes(1);
   });
 
-  it('finishes the event a timed-out operation actually created', async () => {
-    resolveSubmittedOp.mockResolvedValue({ state: 'landed', logs: [CREATED_LOG] });
-    open({ ...READY, submittedOpHash: SUBMITTED });
+  it('finishes the event a broadcast relay actually created, on resume', async () => {
+    followRelay.mockResolvedValue({ eventId: '12' });
+    open({ ...READY, submittedRelayId: SUBMITTED });
     await create();
     await waitFor(() => expect(screen.getByText('landed:/org/new/done/12')).toBeInTheDocument());
-    expect(ticketOp).not.toHaveBeenCalled();
+    expect(followRelay).toHaveBeenCalledWith(SUBMITTED);
+    expect(sendAction).not.toHaveBeenCalled();
     expect(saveEventArt).toHaveBeenCalled();
   });
 
   /**
-   * A recorded op that will never land — dropped, reverted, or stuck in the mempool underpriced
-   * or too old (task-create-failure-4). The guard clears it and sends one fresh createEvent with
-   * the corrected fees; the undeployed account's deployment nonce keeps the two mutually
-   * exclusive, so exactly one event is ever made.
+   * The relayer settled the submission as `failed`: `followRelay` rejects with a `CallableError`
+   * whose `details.code` is the bubbled `Ticket` error name. The submission is spent, so the
+   * record is dropped and the rule is named — never sent a second time on this pass.
    */
-  it('clears a stale op and sends one fresh createEvent, naming the resend', async () => {
-    resolveSubmittedOp.mockResolvedValue({ state: 'stale', logs: [] });
-    let releasePin = (): void => undefined;
-    pinEventMetadata.mockReturnValueOnce(
-      new Promise((resolve) => { releasePin = () => resolve({ metadataCid: 'bafyMeta' }); }),
+  it('clears a spent relay and names the rule when the settle failed', async () => {
+    followRelay.mockRejectedValueOnce(
+      new CallableError('failed-precondition', 'InvalidTiers', { code: 'InvalidTiers' }),
     );
-    open({ ...READY, submittedOpHash: SUBMITTED });
+    open({ ...READY, submittedRelayId: SUBMITTED });
     await create();
-    // The organiser is told the earlier request expired while the resend is on its way.
-    expect(await screen.findByText(copy.publishProblems.opExpired)).toBeInTheDocument();
-    releasePin();
+    expect(await screen.findByText(copy.publishProblems.tiersEmpty)).toBeInTheDocument();
+    expect(sendAction).not.toHaveBeenCalled();
+    // The spent id is dropped, so a fresh 만들기 is free to send again.
+    await waitFor(() => {
+      const written = saveEventDraft.mock.calls.at(-1)?.[1] as { submittedRelayId?: string } | undefined;
+      expect(written?.submittedRelayId).toBe('');
+    });
+  });
+
+  /**
+   * The same spent submission, but the failure carries no rule the organiser can fix — it reads
+   * as the generic failure. Because the record was cleared, the next 만들기 sends one fresh
+   * createEvent (the resume path never resends; a cleared draft is an ordinary create again).
+   */
+  it('sends one fresh createEvent after a spent relay is cleared', async () => {
+    const user = userEvent.setup();
+    followRelay.mockRejectedValueOnce(
+      new CallableError('failed-precondition', 'TX_REVERT', { code: 'TX_REVERT' }),
+    );
+    open({ ...READY, submittedRelayId: SUBMITTED });
+    await create();
+    expect(await screen.findByText(copy.publishProblems.failed)).toBeInTheDocument();
+    expect(sendAction).not.toHaveBeenCalled();
+
+    // The relay id is gone, so pressing again sends a fresh createEvent and finishes.
+    await user.click(screen.getByRole('button', { name: copy.tiers.create }));
     await waitFor(() => expect(screen.getByText('landed:/org/new/done/12')).toBeInTheDocument());
-    expect(resolveSubmittedOp).toHaveBeenCalledWith(SUBMITTED, expect.any(Number));
-    expect(ticketOp).toHaveBeenCalledTimes(1);
+    expect(sendAction).toHaveBeenCalledTimes(1);
+    expect(followRelay).toHaveBeenCalledTimes(1);
   });
 
-  it('clears a failed op and sends one fresh createEvent, with no resend notice', async () => {
-    resolveSubmittedOp.mockResolvedValue({ state: 'failed', logs: [] });
-    open({ ...READY, submittedOpHash: SUBMITTED });
+  /**
+   * A dropped Firestore listener is not a verdict: the relay may still land, so the record and
+   * the confirming wait both stay, and re-pressing follows the same document rather than resending.
+   */
+  it('keeps the relay and stays confirming when the listener drops', async () => {
+    followRelay.mockRejectedValueOnce(new Error('listener dropped'));
+    open({ ...READY, submittedRelayId: SUBMITTED });
     await create();
-    await waitFor(() => expect(screen.getByText('landed:/org/new/done/12')).toBeInTheDocument());
-    expect(ticketOp).toHaveBeenCalledTimes(1);
-    expect(screen.queryByText(copy.publishProblems.opExpired)).toBeNull();
+    await waitFor(() => expect(
+      document.querySelector('.op-progress .steps__step--current .steps__label')?.textContent,
+    ).toBe(sharedKo.op.confirming));
+    expect(followRelay).toHaveBeenCalledWith(SUBMITTED);
+    expect(sendAction).not.toHaveBeenCalled();
   });
 
-  it('shows the organiser notice when nothing agreed to pay for the operation', async () => {
-    ticketOp.mockRejectedValue(new Error('AA33 reverted: SelectorNotAllowed'));
-    open();
-    await create();
-    expect(await screen.findByText(new RegExp(organizerCopy.ko.unsponsored.notice))).toBeInTheDocument();
-    expect(deleteEventDraft).not.toHaveBeenCalled();
-  });
-
-  it('names the rule when the chain refuses the organisation', async () => {
-    ticketOp.mockRejectedValue(
-      new OpReverted('createEvent', encodeErrorResult({ abi: ticketAbi, errorName: 'Unauthorized' })),
+  /**
+   * A fresh createEvent the chain refuses: `sendAction` rejects with a `CallableError` whose
+   * `details.code` is the bubbled `Ticket` error name, read off the same way the sponsored path
+   * decoded a four-byte selector. `Unauthorized` is the organiser not owning the org.
+   */
+  it('names the rule when a fresh createEvent reverts', async () => {
+    sendAction.mockRejectedValueOnce(
+      new CallableError('failed-precondition', 'Unauthorized', { code: 'Unauthorized' }),
     );
     open();
     await create();
     expect(await screen.findByText(copy.publishProblems.notYourOrg)).toBeInTheDocument();
+    expect(deleteEventDraft).not.toHaveBeenCalled();
   });
 
   /**
-   * The receipt landed but no `EventCreated` came out of its logs. The event exists and
-   * nothing can address it, so the draft — the only place its venue and pictures still are —
-   * stays, and the organiser is told rather than dropped on the home screen without a word.
+   * A confirmed relay that named no event id is a backend fault (the relayer fills
+   * `result.eventId`), not a draft the organiser can fix — so it reads as the generic failure,
+   * nothing is finished, and the draft is kept.
    */
-  it('says so when the event was made but its number could not be read', async () => {
-    ticketOp.mockResolvedValue({ success: true, userOpHash: OP_HASH, logs: [] });
+  it('reads a confirmed relay that named no event id as the generic failure', async () => {
+    sendAction.mockResolvedValue({});
     open();
     await create();
-    expect(await screen.findByText(copy.publishProblems.noEventId)).toBeInTheDocument();
+    expect(await screen.findByText(copy.publishProblems.failed)).toBeInTheDocument();
     expect(screen.queryByText(/^landed:/)).toBeNull();
     expect(deleteEventDraft).not.toHaveBeenCalled();
     expect(saveEventArt).not.toHaveBeenCalled();
-  });
-
-  /**
-   * The operation landed — the event is on chain — but its logs named nothing this side could
-   * read. The only safe way on is to ask the bundler again **by hash**, so the hash is the
-   * first thing written, and the button that invites another press can only resolve.
-   */
-  it('records the operation hash before anything else and never sends a second createEvent', async () => {
-    const user = userEvent.setup();
-    ticketOp.mockResolvedValue({ success: true, userOpHash: OP_HASH, logs: [] });
-    open();
-    await create();
-    await screen.findByText(copy.publishProblems.noEventId);
-
-    await waitFor(() => expect(saveEventDraft).toHaveBeenCalled());
-    const written = saveEventDraft.mock.calls.at(-1)?.[1] as { submittedOpHash?: string };
-    expect(written.submittedOpHash).toBe(OP_HASH);
-
-    // The press the copy asks for. It resolves; it does not create.
-    expect(screen.getByRole('button', { name: copy.tiers.create })).toBeEnabled();
-    await user.click(screen.getByRole('button', { name: copy.tiers.create }));
-    await waitFor(() => expect(resolveSubmittedOp).toHaveBeenCalledWith(OP_HASH, expect.any(Number)));
-    expect(ticketOp).toHaveBeenCalledTimes(1);
-    expect(pinEventMetadata).toHaveBeenCalledTimes(1);
-  });
-
-  it('finds the id on that second press and finishes the event', async () => {
-    const user = userEvent.setup();
-    ticketOp.mockResolvedValue({ success: true, userOpHash: OP_HASH, logs: [] });
-    resolveSubmittedOp.mockResolvedValue({ state: 'landed', logs: [CREATED_LOG] });
-    open();
-    await create();
-    await screen.findByText(copy.publishProblems.noEventId);
-
-    await user.click(screen.getByRole('button', { name: copy.tiers.create }));
-    await waitFor(() => expect(saveEventArt).toHaveBeenCalledWith({
-      eventId: '12', tiers: [{ preset: 'c' }, { imageCid: 'bafkart' }],
-    }));
-    expect(await screen.findByText('landed:/org/new/done/12')).toBeInTheDocument();
-    expect(ticketOp).toHaveBeenCalledTimes(1);
-  });
-
-  it('stays on the resolve route when the bundler still cannot name it', async () => {
-    const user = userEvent.setup();
-    ticketOp.mockResolvedValue({ success: true, userOpHash: OP_HASH, logs: [] });
-    resolveSubmittedOp.mockResolvedValue({ state: 'landed', logs: [] });
-    open();
-    await create();
-    await screen.findByText(copy.publishProblems.noEventId);
-
-    await user.click(screen.getByRole('button', { name: copy.tiers.create }));
-    await waitFor(() => expect(resolveSubmittedOp).toHaveBeenCalled());
-    // Still no id, still no second operation, and the hash is still on the draft.
-    expect(ticketOp).toHaveBeenCalledTimes(1);
-    expect(screen.getByText(copy.publishProblems.noEventId)).toBeInTheDocument();
-    const written = saveEventDraft.mock.calls.at(-1)?.[1] as { submittedOpHash?: string };
-    expect(written.submittedOpHash).toBe(OP_HASH);
   });
 
   it('names a refused tag rather than blaming the connection', async () => {
@@ -472,7 +456,7 @@ describe('when it does not land', () => {
     open();
     await create();
     expect(await screen.findByText(copy.publishProblems.badTags)).toBeInTheDocument();
-    expect(ticketOp).not.toHaveBeenCalled();
+    expect(sendAction).not.toHaveBeenCalled();
   });
 
   /**
@@ -487,7 +471,7 @@ describe('when it does not land', () => {
     await create();
     expect(await screen.findByText(copy.publishProblems.imageQuota)).toBeInTheDocument();
     expect(screen.queryByText(copy.publishProblems.failed)).toBeNull();
-    expect(ticketOp).not.toHaveBeenCalled();
+    expect(sendAction).not.toHaveBeenCalled();
   });
 
   /**
@@ -500,7 +484,7 @@ describe('when it does not land', () => {
     await create();
     expect(await screen.findByText(copy.publishProblems.imageQuota)).toBeInTheDocument();
     expect(pinEventMetadata).not.toHaveBeenCalled();
-    expect(ticketOp).not.toHaveBeenCalled();
+    expect(sendAction).not.toHaveBeenCalled();
   });
 });
 

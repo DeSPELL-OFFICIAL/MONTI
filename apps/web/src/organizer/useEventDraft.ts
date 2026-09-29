@@ -68,7 +68,7 @@ export const emptyEventDraft: EventDraft = {
   transferable: true, transferCutoffHours: 2, requireKyc: false,
   approvalRequired: false,
   tiers: [emptyEventDraftTier],
-  submittedOpHash: '', submittedAt: 0, createdEventId: '', editingEventId: '', orgPendingName: '',
+  submittedRelayId: '', createdEventId: '', editingEventId: '', orgPendingName: '',
 };
 
 /**
@@ -164,8 +164,7 @@ export function normalizeEventDraft(raw: unknown): EventDraft {
     requireKyc: flag(saved.requireKyc, emptyEventDraft.requireKyc),
     approvalRequired: flag(saved.approvalRequired, emptyEventDraft.approvalRequired),
     tiers: tiers.length > 0 ? tiers : emptyEventDraft.tiers,
-    submittedOpHash: text(saved.submittedOpHash, emptyEventDraft.submittedOpHash),
-    submittedAt: count(saved.submittedAt, emptyEventDraft.submittedAt),
+    submittedRelayId: text(saved.submittedRelayId, emptyEventDraft.submittedRelayId),
     createdEventId: text(saved.createdEventId, emptyEventDraft.createdEventId),
     editingEventId: text(saved.editingEventId, emptyEventDraft.editingEventId),
     orgPendingName: text(saved.orgPendingName, emptyEventDraft.orgPendingName),

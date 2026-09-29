@@ -40,12 +40,6 @@ vi.mock('../../shared/api/functions', async (orig) => ({
   api: { pinEventMetadata, saveEventArt, setEventPrivate, getEventPrivate, pinEventImage },
 }));
 
-interface SentOp { functionName: string; orgId: bigint; args: readonly unknown[] }
-const ticketOp = vi.fn(async (_options: SentOp) => ({ success: true, userOpHash: '0x', logs: [] }));
-vi.mock('../../shared/chain/ops', async (orig) => ({
-  ...(await orig<typeof import('../../shared/chain/ops')>()),
-  ticketOp,
-}));
 
 const ACCOUNT = `0x${'ab'.repeat(20)}` as const;
 vi.mock('../../shared/chain/accounts', () => ({ getStaffAccount: async () => ({ address: ACCOUNT }) }));
@@ -126,7 +120,6 @@ beforeEach(() => {
   getEventPrivate.mockResolvedValue({ venue: '서울 용산구 한남동 12-3' });
   loadEventArt.mockResolvedValue([{ preset: 'c' }, { imageCid: 'bafkmine' }]);
   pinEventMetadata.mockResolvedValue({ metadataCid: 'bafyNew' });
-  ticketOp.mockResolvedValue({ success: true, userOpHash: '0x', logs: [] });
   saveDraft.mockReset().mockResolvedValue({ state: 'done' });
   saveEventArt.mockResolvedValue({ ok: true });
   setEventPrivate.mockResolvedValue({ ok: true });
@@ -170,7 +163,7 @@ describe('reopening the scene on an event that already exists', () => {
     ]);
     // Neither duplicate guard is carried over: this draft made no event, it opened one.
     expect(draft.createdEventId).toBe('');
-    expect(draft.submittedOpHash).toBe('');
+    expect(draft.submittedRelayId).toBe('');
 
     // And the fields are on screen, in the scene itself rather than in a second copy of it.
     expect(await screen.findByDisplayValue('재즈 나이트')).toBeInTheDocument();
@@ -261,7 +254,6 @@ describe('saving an edit', () => {
       venueHash: keccak256(toBytes('서울 용산구 한남동 12-3')),
       regionCode: keccak256(toBytes('KR-11')),
     });
-    expect(ticketOp).not.toHaveBeenCalled();
 
     // 3. the same two follow-ups, addressed at the event that already existed.
     await waitFor(() => expect(saveEventArt).toHaveBeenCalledWith({
