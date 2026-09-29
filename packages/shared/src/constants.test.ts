@@ -103,14 +103,13 @@ describe('deployments', () => {
       organizers: '0x2222222222222222222222222222222222222222',
       ticket: '0x3333333333333333333333333333333333333333',
       attester: '0x6666666666666666666666666666666666666666',
-      coinbaseFactory: '0x5555555555555555555555555555555555555555',
-      entryPoint: '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789',
+      forwarder: '0x4444444444444444444444444444444444444444',
       block: 42,
     });
     expect(parsed.chainId).toBe(10143);
     expect(parsed.block).toBe(42);
     expect(parsed.ticket).toBe('0x3333333333333333333333333333333333333333');
-    expect(parsed.coinbaseFactory).toBe('0x5555555555555555555555555555555555555555');
+    expect(parsed.forwarder).toBe('0x4444444444444444444444444444444444444444');
   });
 
   it('rejects a malformed address and a missing block', () => {
@@ -120,12 +119,11 @@ describe('deployments', () => {
       organizers: '0x2222222222222222222222222222222222222222',
       ticket: '0x3333333333333333333333333333333333333333',
       attester: '0x6666666666666666666666666666666666666666',
-      coinbaseFactory: '0x5555555555555555555555555555555555555555',
-      entryPoint: '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789',
+      forwarder: '0x4444444444444444444444444444444444444444',
       block: 1,
     };
     expect(() => parseDeployment({ ...good, identity: '0xnope' })).toThrow('BAD_DEPLOYMENT_FIELD:identity');
-    expect(() => parseDeployment({ ...good, coinbaseFactory: undefined })).toThrow('BAD_DEPLOYMENT_FIELD:coinbaseFactory');
+    expect(() => parseDeployment({ ...good, forwarder: undefined })).toThrow('BAD_DEPLOYMENT_FIELD:forwarder');
     expect(() => parseDeployment({ ...good, block: undefined })).toThrow('BAD_DEPLOYMENT_FIELD:block');
   });
 
@@ -136,8 +134,7 @@ describe('deployments', () => {
       organizers: '0x2222222222222222222222222222222222222222',
       ticket: '0x3333333333333333333333333333333333333333',
       attester: '0x6666666666666666666666666666666666666666',
-      coinbaseFactory: '0x5555555555555555555555555555555555555555',
-      entryPoint: '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789',
+      forwarder: '0x4444444444444444444444444444444444444444',
       block: 1,
     };
     expect(() => parseDeployment(filedUnder10143, 10143)).toThrow('DEPLOYMENT_CHAIN_MISMATCH:10143');

@@ -2,7 +2,7 @@ import { createHash, createHmac, createSign, generateKeyPairSync, randomBytes } 
 import { Encoder } from 'cbor-x';
 import { getAddress } from 'viem';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
-import type { Hex } from '@monti/shared';
+import { COINBASE_SMART_WALLET_FACTORY_ADDRESS, type Hex } from '@monti/shared';
 import { FakeRes } from '../helpers/webhookRes.js';
 
 /**
@@ -363,7 +363,7 @@ describe('signup chain on the Firestore + Auth emulators', () => {
     expect(result.ok).toBe(true);
     expect(result.credentialId).toBe(credentialId);
     expect(result.account).toBe(ACCOUNT); // 팩토리가 준 소문자를 EIP-55 로 고쳐서 돌려준다
-    expect(readContract.mock.calls[0]![0]).toMatchObject({ address: FACTORY, functionName: 'getAddress' });
+    expect(readContract.mock.calls[0]![0]).toMatchObject({ address: COINBASE_SMART_WALLET_FACTORY_ADDRESS, functionName: 'getAddress' });
 
     const stored = await db.collection(PASSKEYS).doc(credentialId).get();
     expect(stored.get('personId')).toBe(personId);

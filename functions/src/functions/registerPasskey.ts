@@ -3,16 +3,16 @@ import type { RegistrationResponseJSON } from '@simplewebauthn/server';
 import { FieldValue } from 'firebase-admin/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { getAddress, parseAbi } from 'viem';
-import { type Hex } from '@monti/shared';
+import { COINBASE_SMART_WALLET_FACTORY_ADDRESS, type Hex } from '@monti/shared';
 import { RP_ID, expectedOrigins } from '../config.js';
-import { deployment, publicClient } from '../lib/chain.js';
+import { publicClient } from '../lib/chain.js';
 import { AUTH_CHALLENGES, PASSKEYS, PERSONS, USERS, db } from '../lib/db.js';
 import { CHALLENGE_RE, challengeFromClientData, coseToP256, ownerBytes } from '../lib/webauthn.js';
 
 /**
  * Coinbase Smart Wallet 팩토리의 counterfactual 주소 계산에 필요한 최소 ABI(설계 §3·§7).
  * 4337 은 폐기됐지만 계정은 여전히 counterfactual 이라 이 view 로 주소만 예측한다. 팩토리
- * 주소는 배포 레코드(`contracts.coinbaseFactory`)에서 온다.
+ * 주소는 정적 상수 `COINBASE_SMART_WALLET_FACTORY_ADDRESS`(설계 §7) 다.
  */
 const coinbaseFactoryAbi = parseAbi([
   'function getAddress(bytes[] owners, uint256 nonce) view returns (address)',
@@ -132,9 +132,8 @@ export const registerPasskey = onCall(
       throw new HttpsError('permission-denied', 'ATTESTATION_REJECTED');
     }
 
-    const contracts = deployment();
     const predicted = await publicClient().readContract({
-      address: contracts.coinbaseFactory,
+      address: COINBASE_SMART_WALLET_FACTORY_ADDRESS,
       abi: coinbaseFactoryAbi,
       functionName: 'getAddress',
       args: [[owner], ACCOUNT_NONCE],

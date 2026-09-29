@@ -16,6 +16,14 @@ export const P256_PRECOMPILE_ADDRESS = '0x00000000000000000000000000000000000001
 export const CREATE2_DEPLOYER_ADDRESS = '0x4e59b44847b379578588920cA78FbF26c0B4956C' as Hex;
 export const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as Hex;
 
+/**
+ * Coinbase Smart Wallet 팩토리(체인 공통 canonical 주소). 4337 릴레이 경로는 폐기됐지만
+ * 계정은 여전히 counterfactual 이라, registerPasskey/recoverAccess 가 이 팩토리의 `getAddress`
+ * view 로 패스키 소유자의 계정 주소만 예측한다. 배포 JSON 에서 빠진(설계 §3) 뒤로는 정적 설정값이다.
+ */
+export const COINBASE_SMART_WALLET_FACTORY_ADDRESS =
+  '0xBA5ED110eFDBa3D005bfC882d75358ACBbB85842' as Hex;
+
 /** Monad는 gas_limit 기준 과금이다. 모든 쓰기는 estimate × 1.075를 명시한다. */
 export const GAS_LIMIT_MULTIPLIER_BPS = 10_750n;
 export const BPS_DENOMINATOR = 10_000n;
@@ -173,23 +181,17 @@ export interface Deployment {
   identity: Hex;
   organizers: Hex;
   ticket: Hex;
-  /**
-   * Phase 2 ERC-2771 전달자(설계 §1). 컨트랙트를 forwarder 포함해 재배포하는 중이라 아직 없는
-   * 배포 파일이 있을 수 있어 **선택 필드**다 — 없으면 relayAction 이 MISSING_FORWARDER 로 거절한다.
-   */
-  forwarder?: Hex;
+  /** Phase 2 ERC-2771 전달자(설계 §1). 2026-09-30 재배포부터 배포 파일의 필수 키다. */
+  forwarder: Hex;
   attester: Hex;
-  coinbaseFactory: Hex;
-  entryPoint: Hex;
 }
 
 const ADDRESS_FIELDS = [
   'identity',
   'organizers',
   'ticket',
+  'forwarder',
   'attester',
-  'coinbaseFactory',
-  'entryPoint',
 ] as const;
 
 /**
@@ -211,14 +213,6 @@ export function parseDeployment(raw: unknown, expectedChainId?: number): Deploym
       throw new Error(`BAD_DEPLOYMENT_FIELD:${field}`);
     }
     out[field] = address as Hex;
-  }
-  // forwarder 는 선택 필드다(재배포 진행 중). 있으면 모양만 검증하고, 없으면 조용히 비운다 —
-  // 부재를 크게 실패시키는 자리는 loadDeployment 가 아니라 실제로 쓰는 relayAction 이다.
-  if (value.forwarder !== undefined) {
-    if (typeof value.forwarder !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(value.forwarder)) {
-      throw new Error('BAD_DEPLOYMENT_FIELD:forwarder');
-    }
-    out.forwarder = value.forwarder as Hex;
   }
   const deployment = out as unknown as Deployment;
   if (expectedChainId !== undefined && deployment.chainId !== expectedChainId) {
@@ -250,12 +244,6 @@ export function loadDeployment(chainId: number = DEFAULT_CHAIN_ID): Deployment {
 export const identityAddress = (chainId?: number): Hex => loadDeployment(chainId).identity;
 export const organizersAddress = (chainId?: number): Hex => loadDeployment(chainId).organizers;
 export const ticketAddress = (chainId?: number): Hex => loadDeployment(chainId).ticket;
-/** Phase 2 전달자 주소. 배포 파일에 없으면 크게 실패한다(relayAction 이 HttpsError 로 감싼다). */
-export const forwarderAddress = (chainId?: number): Hex => {
-  const forwarder = loadDeployment(chainId).forwarder;
-  if (!forwarder) throw new Error('MISSING_FORWARDER');
-  return forwarder;
-};
+/** Phase 2 전달자 주소. 2026-09-30 재배포부터 필수 키라 loadDeployment 가 부재를 이미 막는다. */
+export const forwarderAddress = (chainId?: number): Hex => loadDeployment(chainId).forwarder;
 export const attesterAddress = (chainId?: number): Hex => loadDeployment(chainId).attester;
-export const coinbaseFactoryAddress = (chainId?: number): Hex => loadDeployment(chainId).coinbaseFactory;
-export const entryPointAddress = (chainId?: number): Hex => loadDeployment(chainId).entryPoint;

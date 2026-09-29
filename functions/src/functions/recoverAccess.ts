@@ -5,7 +5,7 @@ import { warn } from 'firebase-functions/logger';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import type { FunctionsErrorCode } from 'firebase-functions/v2/https';
 import { getAddress, parseAbi } from 'viem';
-import { ROTATION_COOLDOWN_SECONDS, identityAbi, type Hex } from '@monti/shared';
+import { COINBASE_SMART_WALLET_FACTORY_ADDRESS, ROTATION_COOLDOWN_SECONDS, identityAbi, type Hex } from '@monti/shared';
 import { ATTESTER_PK, PHONE_INDEX_KEY, RP_ID, expectedOrigins } from '../config.js';
 import { sendSerialized } from '../lib/attesterLock.js';
 import { awaitFinalized, deployment, publicClient, sendAttesterTx } from '../lib/chain.js';
@@ -28,7 +28,7 @@ const ZERO32 = `0x${'00'.repeat(32)}`;
 const ZERO_ADDR = '0x0000000000000000000000000000000000000000';
 /**
  * counterfactual 계정 주소 계산용 최소 팩토리 ABI(설계 §3·§7, registerPasskey 와 동일).
- * 팩토리 주소는 배포 레코드(`contracts.coinbaseFactory`)에서 온다.
+ * 팩토리 주소는 정적 상수 `COINBASE_SMART_WALLET_FACTORY_ADDRESS`(설계 §7) 다.
  */
 const coinbaseFactoryAbi = parseAbi([
   'function getAddress(bytes[] owners, uint256 nonce) view returns (address)',
@@ -250,7 +250,7 @@ export const recoverAccess = onCall(
     const contracts = deployment();
     const newAccount = getAddress(
       (await publicClient().readContract({
-        address: contracts.coinbaseFactory,
+        address: COINBASE_SMART_WALLET_FACTORY_ADDRESS,
         abi: coinbaseFactoryAbi,
         functionName: 'getAddress',
         args: [[owner], ACCOUNT_NONCE],
