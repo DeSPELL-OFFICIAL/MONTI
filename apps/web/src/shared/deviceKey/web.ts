@@ -148,19 +148,19 @@ export async function armDeviceKeyWeb(): Promise<never> {
  * Signs with the browser's device key and returns what the secure element returns: `{ r, s }`,
  * each 32 bytes, `s` normalised into the low half.
  *
- * One difference, and it is load-bearing: WebCrypto's ECDSA hashes the message it is given, so
- * this signature verifies over `SHA-256(digest)` while `Ticket.checkIn` recomputes `digest` and
- * verifies over that. The chain would therefore refuse it — which is why nothing offers it a
- * gate digest: `armDeviceKeyWeb` throws before the entry flow ever reaches a signer. Making
- * browser entry work is not a change here but at the call site: `deviceSigDigest` is SHA-256 of
- * `deviceSigMessage` (buildResponse.ts), so a signer handed the *preimage* would produce a
- * chain-valid signature. That is a product decision, not a detail — entry stays native-only.
+ * WebCrypto's ECDSA hashes the message it is given rather than taking a digest, so the caller
+ * hands this the **preimage** — the abi-encoded bytes whose SHA-256 is the digest the chain
+ * verifies (`claimAuthPreimage` / `deviceDigestPreimage` in `@monti/shared`). The single SHA-256
+ * WebCrypto applies then yields a signature over that digest, byte-identical to what the on-chain
+ * verifier recomputes. A raw signer (the secure element, `native.ts`) is handed the 32-byte digest
+ * and signs it as-is: the two backends take different bytes for the same result, so the call site
+ * picks which (preimage for this WebCrypto path, digest for native — see `buildClaimAuth`).
  */
-export async function signWithDeviceKeyWeb(digest: Hex, options: { alias: string }): Promise<{ r: Hex; s: Hex }> {
-  if (!/^0x[0-9a-fA-F]{64}$/.test(digest)) throw new Error('BAD_DIGEST');
+export async function signWithDeviceKeyWeb(preimage: Hex, options: { alias: string }): Promise<{ r: Hex; s: Hex }> {
+  if (!/^0x([0-9a-fA-F]{2})+$/.test(preimage)) throw new Error('BAD_MESSAGE');
   try {
     const { privateKey } = await keyPair(options.alias);
-    const message = Uint8Array.from((digest.slice(2).match(/../g) ?? []).map((byte) => Number.parseInt(byte, 16)));
+    const message = Uint8Array.from((preimage.slice(2).match(/../g) ?? []).map((byte) => Number.parseInt(byte, 16)));
     const raw = new Uint8Array(await subtle().sign(SIGN_PARAMS, privateKey, message));
     // WebCrypto answers with raw r || s, always 64 bytes — no DER unwrapping, unlike native.
     const { r, s } = splitRs(rawToHex(raw));

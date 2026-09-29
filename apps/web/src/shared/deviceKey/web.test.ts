@@ -204,9 +204,23 @@ describe('browser device key', () => {
     expect(toLowS(flipped)).toBe(s);
   });
 
-  it('refuses a digest that is not 32 bytes rather than signing whatever it was handed', async () => {
+  it('signs a preimage of any length, so a browser claim is signed over the digest', async () => {
+    const { ensureDeviceKeyWeb, signWithDeviceKeyWeb } = await loadModule();
+    const { x, y } = await ensureDeviceKeyWeb({ alias: ALIAS });
+    // 256 bytes — the shape of claimAuthPreimage; the old 32-byte guard would have refused it.
+    const preimage = `0x${'cd'.repeat(256)}` as Hex;
+
+    const { r, s } = await signWithDeviceKeyWeb(preimage, { alias: ALIAS });
+
+    // WebCrypto hashed the preimage, so r‖s verifies over it — i.e. over its SHA-256, the digest.
+    await expect(verify(await verifier(x, y), joinRs(r, s), hexToBytes(preimage))).resolves.toBe(true);
+    expect(BigInt(s) <= P256_HALF_ORDER).toBe(true);
+  });
+
+  it('refuses malformed hex rather than signing whatever it was handed', async () => {
     const { signWithDeviceKeyWeb } = await loadModule();
-    await expect(signWithDeviceKeyWeb('0xabcd' as Hex, { alias: ALIAS })).rejects.toThrow('BAD_DIGEST');
+    await expect(signWithDeviceKeyWeb('0xabc' as Hex, { alias: ALIAS })).rejects.toThrow('BAD_MESSAGE'); // odd length
+    await expect(signWithDeviceKeyWeb('0x' as Hex, { alias: ALIAS })).rejects.toThrow('BAD_MESSAGE'); // empty
   });
 
   it('reports the key as unavailable when the browser has no IndexedDB', async () => {
