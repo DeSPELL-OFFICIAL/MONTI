@@ -113,10 +113,19 @@ async function isSignedIn(page: Page): Promise<boolean> {
   return /\/tickets(\/|$)/.test(page.url());
 }
 
-/** Persist storage state (incl. localStorage `monti.passkey`) and the authenticator credentials. */
+/**
+ * Persist storage state (incl. localStorage `monti.passkey`) and the authenticator credentials.
+ *
+ * `indexedDB: true` (Playwright ≥1.51 serialises IndexedDB, incl. non-extractable CryptoKeys) is
+ * essential: the browser **device key** is a non-extractable P-256 `CryptoKeyPair` in IndexedDB
+ * (`monti-device-key`, `src/shared/deviceKey/web.ts`). Without it a reused persona lost its
+ * registered device key, minted a fresh unregistered one, and `relayClaim` rejected the
+ * `ClaimAuth` deviceSig as `BAD_DEVICE_SIG`. `openPersona` restores this automatically by passing
+ * the saved state file as `storageState` to `newContext` (IndexedDB is rehydrated with it).
+ */
 export async function persist(session: PersonaSession): Promise<void> {
   mkdirSync(STATE_DIR, { recursive: true });
-  await session.context.storageState({ path: statePath(session.persona) });
+  await session.context.storageState({ path: statePath(session.persona), indexedDB: true });
   const creds = await session.auth.exportCredentials();
   writeFileSync(credsPath(session.persona), JSON.stringify(creds, null, 2));
 }
