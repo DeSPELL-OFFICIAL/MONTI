@@ -260,7 +260,9 @@ contract TicketOfferTest is MontiTest {
     function test_theFixedVectorSharedWithTheTypescriptHalf() public {
         vm.chainId(31337);
         Ticket pinned = Ticket(SHARED_VECTOR_TICKET);
-        deployCodeTo("Ticket.sol:Ticket", abi.encode(address(identity), address(organizers)), SHARED_VECTOR_TICKET);
+        deployCodeTo(
+            "Ticket.sol:Ticket", abi.encode(address(identity), address(organizers), address(0)), SHARED_VECTOR_TICKET
+        );
         assertEq(
             pinned.offerDigest(
                 7, bytes32(uint256(0x1111111111111111111111111111111111111111111111111111111111111111)), address(0x1)

@@ -268,11 +268,7 @@ abstract contract MontiTest is Test {
         returns (MontiForwarder.ForwardRequest memory r)
     {
         r = MontiForwarder.ForwardRequest({
-            from: from,
-            to: to,
-            nonce: fwd.nonces(from),
-            deadline: uint64(block.timestamp + 10 minutes),
-            data: data
+            from: from, to: to, nonce: fwd.nonces(from), deadline: uint64(block.timestamp + 10 minutes), data: data
         });
     }
 
