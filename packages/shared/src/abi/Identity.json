@@ -184,6 +184,25 @@
   },
   {
     "type": "function",
+    "name": "isTrustedForwarder",
+    "inputs": [
+      {
+        "name": "forwarder",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "kycLevelOf",
     "inputs": [
       {
@@ -393,6 +412,19 @@
   },
   {
     "type": "function",
+    "name": "setForwarder",
+    "inputs": [
+      {
+        "name": "forwarder_",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "setKycLevel",
     "inputs": [
       {
@@ -426,6 +458,19 @@
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "trustedForwarder",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "event",
@@ -605,6 +650,11 @@
   {
     "type": "error",
     "name": "CooldownActive",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ForwarderAlreadySet",
     "inputs": []
   },
   {
