@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.31;
 
-/// @notice The slice of Organizers that Ticket and MontiPaymaster are allowed to see.
+/// @notice The slice of Organizers that Ticket is allowed to see.
 interface IOrganizers {
     function ownerOf(uint256 orgId) external view returns (address);
     function hasPermission(uint256 orgId, address account, uint32 bit) external view returns (bool);
