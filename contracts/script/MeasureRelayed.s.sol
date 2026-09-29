@@ -4,6 +4,7 @@ pragma solidity 0.8.31;
 import {Script} from "forge-std/Script.sol";
 import {console2} from "forge-std/console2.sol";
 import {Ticket} from "../src/Ticket.sol";
+import {MontiForwarder} from "../src/MontiForwarder.sol";
 import {P256Vectors} from "../test/utils/P256Vectors.sol";
 
 /// @title MeasureRelayed
@@ -32,8 +33,14 @@ import {P256Vectors} from "../test/utils/P256Vectors.sol";
 contract MeasureRelayed is Script {
     uint256 internal constant EVENT_ID = 1;
     uint256 internal constant GATE_ID = 1;
+    string internal constant OWNER_LABEL = "monti.seed.demo.organizer";
     string internal constant MEMBER_LABEL = "monti.seed.demo.member";
     string internal constant PERSON_LABEL = "monti.seed.demo.person";
+
+    /// @dev Identical to Seed.ownerKey so the derived organizer owner matches the seeded one.
+    function ownerKey() public pure returns (uint256) {
+        return uint256(keccak256(abi.encodePacked(OWNER_LABEL)));
+    }
 
     /// @dev Identical to Seed.memberKey so the derived member accounts match the seeded holders.
     function memberKey(uint256 index) public pure returns (uint256) {
@@ -105,9 +112,69 @@ contract MeasureRelayed is Script {
             bytes32 devDigest = ticket.deviceDigest(tokenId, GATE_ID, EVENT_ID, nonce, issuedAt);
             (bytes32 dr, bytes32 ds) = vm.signP256(P256Vectors.DEVICE_PRIV, devDigest);
 
-            bytes memory data =
-                abi.encodeCall(Ticket.checkInFor, (tokenId, g, abi.encode(gr, gs), abi.encode(dr, ds)));
+            bytes memory data = abi.encodeCall(Ticket.checkInFor, (tokenId, g, abi.encode(gr, gs), abi.encode(dr, ds)));
             console2.log(string.concat("CHECKIN ", vm.toString(tokenId), " ", vm.toString(data)));
         }
+    }
+
+    /// @notice Emits one `MontiForwarder.execute` calldata for a relayed `createEvent`, signed as the
+    ///         seeded organizer owner's device key. Submit it with `cast send <forwarder> <calldata>`
+    ///         from the relayer to read the true Monad gas/MON cost of a relayed organizer action.
+    /// @dev    Inputs (env): FORWARDER (deployed forwarder address). The organizer owner is the public
+    ///         seed fixture, so its device key (DEVICE_PRIV) signs the forward digest — never mainnet.
+    function genForwardCreateEvent() external view {
+        _emitForward(
+            "FORWARD_CREATE_EVENT", vm.envAddress("TICKET"), abi.encodeCall(Ticket.createEvent, (_meta(), _tiers()))
+        );
+    }
+
+    /// @notice Emits one `MontiForwarder.execute` calldata for a relayed `publishEvent(EVENT_ID)`.
+    function genForwardPublish() external view {
+        _emitForward("FORWARD_PUBLISH", vm.envAddress("TICKET"), abi.encodeCall(Ticket.publishEvent, (EVENT_ID)));
+    }
+
+    /// @dev Builds and signs a forward request from the seeded organizer owner and prints the
+    ///      `execute` calldata to submit against FORWARDER.
+    function _emitForward(string memory tag, address to, bytes memory inner) private view {
+        MontiForwarder forwarder = MontiForwarder(vm.envAddress("FORWARDER"));
+        address owner = vm.addr(ownerKey());
+        MontiForwarder.ForwardRequest memory req = MontiForwarder.ForwardRequest({
+            from: owner,
+            to: to,
+            nonce: forwarder.nonces(owner),
+            deadline: uint64(block.timestamp + 1 hours),
+            data: inner
+        });
+        (bytes32 r, bytes32 s) = vm.signP256(P256Vectors.DEVICE_PRIV, forwarder.forwardDigest(req));
+        bytes memory data = abi.encodeCall(MontiForwarder.execute, (req, abi.encode(r, s)));
+        console2.log(string.concat(tag, " ", vm.toString(owner), " ", vm.toString(data)));
+    }
+
+    function _meta() private view returns (Ticket.EventMeta memory) {
+        uint64 nowTs = uint64(block.timestamp);
+        return Ticket.EventMeta({
+            orgId: 1,
+            titleHash: keccak256("MONTI Measure Night"),
+            descHash: keccak256("relayed createEvent gas measurement"),
+            imageCid: "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi",
+            startsAt: nowTs + 30 days,
+            endsAt: nowTs + 31 days,
+            venueHash: keccak256("Seoul, Gangnam"),
+            saleStart: nowTs,
+            saleEnd: nowTs + 30 days,
+            transferable: true,
+            transferCutoffSeconds: 600,
+            maxTransfers: 2,
+            approvalRequired: false,
+            category: 1,
+            regionCode: keccak256("KR-11"),
+            requireKyc: false
+        });
+    }
+
+    function _tiers() private pure returns (Ticket.Tier[] memory tiers_) {
+        tiers_ = new Ticket.Tier[](1);
+        tiers_[0] =
+            Ticket.Tier({name: "General", priceUsdCents: 0, supply: 500, minted: 0, maxPerWallet: 2, seated: false});
     }
 }
