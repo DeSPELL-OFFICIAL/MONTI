@@ -52,7 +52,7 @@ contract DeployTicketTest is Test {
         vm.deal(address(script), 100 ether);
 
         identity = new Identity(ATTESTER);
-        organizers = new Organizers();
+        organizers = new Organizers(address(0));
     }
 
     function test_deploysNewTicketAndPaymasterOnTheKeptStack() public {

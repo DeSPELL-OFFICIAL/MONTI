@@ -8,6 +8,7 @@ import {IEntryPoint} from "account-abstraction/interfaces/IEntryPoint.sol";
 import {Identity} from "../src/Identity.sol";
 import {Organizers} from "../src/Organizers.sol";
 import {Ticket} from "../src/Ticket.sol";
+import {MontiForwarder} from "../src/MontiForwarder.sol";
 import {MontiPaymaster} from "../src/MontiPaymaster.sol";
 import {IIdentity} from "../src/interfaces/IIdentity.sol";
 import {IOrganizers} from "../src/interfaces/IOrganizers.sol";
@@ -50,6 +51,7 @@ contract Deploy is Script {
     Organizers public organizers;
     Ticket public ticket;
     MontiPaymaster public paymaster;
+    MontiForwarder public forwarder;
 
     /// @notice Kept alongside the contracts because `record` writes them into the same file.
     address public attester;
@@ -85,8 +87,15 @@ contract Deploy is Script {
         entryPoint = entryPoint_;
 
         identity = new Identity(attester_);
-        organizers = new Organizers();
-        ticket = new Ticket(address(identity), address(organizers));
+        // Identity is deployed before the forwarder (the forwarder reads Identity), so it learns the
+        // forwarder through a one-shot setForwarder, not a constructor immutable. Order (design §2):
+        // Identity -> Forwarder -> Organizers -> Ticket -> setForwarder -> setTargets -> setTicket.
+        // identity.deployer() is the address that sent these txs, so it can call setTargets below.
+        forwarder = new MontiForwarder(IIdentity(address(identity)), identity.deployer());
+        organizers = new Organizers(address(forwarder));
+        ticket = new Ticket(address(identity), address(organizers), address(forwarder));
+        identity.setForwarder(address(forwarder));
+        forwarder.setTargets(address(ticket), address(organizers));
         // Once-only by design (Organizers.TicketAlreadySet): the Organizers above is brand new, so this
         // is the single call that will ever succeed on it.
         organizers.setTicket(address(ticket));

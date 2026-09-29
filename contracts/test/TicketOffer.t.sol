@@ -240,7 +240,7 @@ contract TicketOfferTest is MontiTest {
     /// @dev 같은 (tokenId, commitment, recipient) 에 대한 서명이 다른 Ticket 배포본에서는 안 먹힌다.
     ///      재배포할 때마다 옛 서명이 죽는다는 것이 이 줄의 뜻이다.
     function test_aSignatureDoesNotCrossToAnotherTicketDeployment() public {
-        Ticket other = new Ticket(address(identity), address(organizers));
+        Ticket other = new Ticket(address(identity), address(organizers), address(0));
         assertTrue(
             ticket.offerDigest(tokenId, COMMITMENT, BOB) != other.offerDigest(tokenId, COMMITMENT, BOB),
             "verifyingContract must be in the domain"

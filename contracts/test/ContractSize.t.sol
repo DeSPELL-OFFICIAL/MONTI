@@ -29,8 +29,8 @@ contract ContractSizeTest is Test {
 
     function test_ticketFitsUnderMonadsLimit() public {
         Identity identity = new Identity(address(0xA11CE));
-        Organizers organizers = new Organizers();
-        Ticket ticket = new Ticket(address(identity), address(organizers));
+        Organizers organizers = new Organizers(address(0));
+        Ticket ticket = new Ticket(address(identity), address(organizers), address(0));
 
         uint256 runtime = address(ticket).code.length;
         uint256 initcode = type(Ticket).creationCode.length;
@@ -49,7 +49,7 @@ contract ContractSizeTest is Test {
     ///      어느 컨트랙트가 Monad 한도를 넘는지 보는 곳이 이 파일 말고는 없다.
     function test_theOtherThreeAreNowhereNearTheLimit() public {
         Identity identity = new Identity(address(0xA11CE));
-        Organizers organizers = new Organizers();
+        Organizers organizers = new Organizers(address(0));
         // 페이마스터의 생성자는 0 이 아닌 네 주소만 요구한다. 크기를 재는 데에는 목이면 충분하다.
         MontiPaymaster paymaster = new MontiPaymaster(
             IEntryPoint(address(0xE41)),

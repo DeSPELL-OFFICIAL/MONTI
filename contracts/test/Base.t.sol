@@ -5,12 +5,15 @@ import {Test} from "forge-std/Test.sol";
 import {Identity} from "../src/Identity.sol";
 import {Organizers} from "../src/Organizers.sol";
 import {Ticket} from "../src/Ticket.sol";
+import {MontiForwarder} from "../src/MontiForwarder.sol";
+import {IIdentity} from "../src/interfaces/IIdentity.sol";
 import {P256Vectors} from "./utils/P256Vectors.sol";
 
 abstract contract MontiTest is Test {
     Identity internal identity;
     Organizers internal organizers;
     Ticket internal ticket;
+    MontiForwarder internal fwd;
 
     uint256 internal constant ATTESTER_PK = 0xA11CE;
     address internal attester;
@@ -39,8 +42,13 @@ abstract contract MontiTest is Test {
     function _deployMonti() internal {
         attester = vm.addr(ATTESTER_PK);
         identity = new Identity(attester);
-        organizers = new Organizers();
-        ticket = new Ticket(address(identity), address(organizers));
+        // Deploy order (design §2): Identity -> Forwarder -> Organizers -> Ticket ->
+        // setForwarder -> setTargets -> setTicket. Deployer = this test contract.
+        fwd = new MontiForwarder(IIdentity(address(identity)), address(this));
+        organizers = new Organizers(address(fwd));
+        ticket = new Ticket(address(identity), address(organizers), address(fwd));
+        identity.setForwarder(address(fwd));
+        fwd.setTargets(address(ticket), address(organizers));
         organizers.setTicket(address(ticket));
         vm.warp(T0);
     }
@@ -250,5 +258,35 @@ abstract contract MontiTest is Test {
         eventId = ticket.createEvent(m, t);
         vm.prank(ORG_OWNER);
         ticket.publishEvent(eventId);
+    }
+
+    // --- relayed forward (MontiForwarder.execute) ------------------------------------------------
+
+    function _fwdReq(address from, address to, bytes memory data)
+        internal
+        view
+        returns (MontiForwarder.ForwardRequest memory r)
+    {
+        r = MontiForwarder.ForwardRequest({
+            from: from,
+            to: to,
+            nonce: fwd.nonces(from),
+            deadline: uint64(block.timestamp + 10 minutes),
+            data: data
+        });
+    }
+
+    /// @dev Signs forwardDigest with the attendee device key (DEVICE vector).
+    function _fwdSign(MontiForwarder.ForwardRequest memory r) internal view returns (bytes memory) {
+        (bytes32 sr, bytes32 ss) = vm.signP256(P256Vectors.DEVICE_PRIV, fwd.forwardDigest(r));
+        return abi.encode(sr, ss);
+    }
+
+    /// @dev RELAYER EOA relays a signed request to the target (permissionless).
+    function _execFwd(address from, address to, bytes memory data) internal returns (bytes memory) {
+        MontiForwarder.ForwardRequest memory r = _fwdReq(from, to, data);
+        bytes memory sig = _fwdSign(r);
+        vm.prank(RELAYER);
+        return fwd.execute(r, sig);
     }
 }

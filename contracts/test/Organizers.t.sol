@@ -15,7 +15,7 @@ contract OrganizersTest is Test {
     event ManagerSet(uint256 indexed orgId, address indexed manager, bool exists, bool canApprove);
 
     function setUp() public {
-        orgs = new Organizers();
+        orgs = new Organizers(address(0));
         vm.warp(1_800_000_000);
     }
 
@@ -51,7 +51,7 @@ contract OrganizersTest is Test {
         assertEq(orgs.ticket(), address(0x7107));
         vm.expectRevert(Organizers.TicketAlreadySet.selector);
         orgs.setTicket(address(0xBEEF));
-        Organizers fresh = new Organizers();
+        Organizers fresh = new Organizers(address(0));
         vm.prank(OTHER);
         vm.expectRevert(Organizers.NotDeployer.selector);
         fresh.setTicket(address(0xBEEF));

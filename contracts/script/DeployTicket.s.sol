@@ -6,6 +6,7 @@ import {VmSafe} from "forge-std/Vm.sol";
 import {console2} from "forge-std/console2.sol";
 import {IEntryPoint} from "account-abstraction/interfaces/IEntryPoint.sol";
 import {Ticket} from "../src/Ticket.sol";
+import {MontiForwarder} from "../src/MontiForwarder.sol";
 import {MontiPaymaster} from "../src/MontiPaymaster.sol";
 import {IIdentity} from "../src/interfaces/IIdentity.sol";
 import {IOrganizers} from "../src/interfaces/IOrganizers.sol";
@@ -88,7 +89,10 @@ contract DeployTicket is Script {
         organizers = organizers_;
         entryPoint = entryPoint_;
 
-        ticket = new Ticket(identity_, organizers_);
+        // A2: Ticket now trusts an ERC-2771 forwarder. Fully re-wiring a redeploy against the kept
+        // stack (setTargets / Identity.setForwarder) is out of scope here — A3 owns the redeploy.
+        MontiForwarder forwarder = new MontiForwarder(IIdentity(identity_), msg.sender);
+        ticket = new Ticket(identity_, organizers_, address(forwarder));
         paymaster = new MontiPaymaster(
             IEntryPoint(entryPoint_), IOrganizers(organizers_), ITicket(address(ticket)), IIdentity(identity_)
         );
