@@ -176,3 +176,42 @@ function rawToHex(bytes: Uint8Array): Hex {
   for (const byte of bytes) out += byte.toString(16).padStart(2, '0');
   return out as Hex;
 }
+
+/**
+ * The stored key's public point, or `null` when this browser holds none. Read-only: a fresh
+ * browser reads as "none" here instead of silently minting a key that could never match the chain.
+ * The public half exports even from a pair whose private half can no longer sign (a restored,
+ * unusable key), which is deliberate — existence and usability are separate questions, and the
+ * device-key health check answers the second with a throwaway sign.
+ */
+export async function peekDeviceKeyWeb(options: { alias: string }): Promise<DeviceKeyPublic | null> {
+  try {
+    const stored = await readKey(options.alias);
+    if (!isKeyPair(stored)) return null;
+    return spkiToXy(new Uint8Array(await subtle().exportKey('spki', stored.publicKey)));
+  } catch (cause) {
+    if (cause instanceof DeviceKeyUnavailable) throw cause;
+    throw new DeviceKeyUnavailable();
+  }
+}
+
+/**
+ * Drops the browser's stored device key so the next {@link ensureDeviceKeyWeb} mints a fresh one.
+ * Recovery calls this before re-minting: a restored-but-unusable pair otherwise survives
+ * `loadOrCreate` and would be re-registered on chain still unable to sign. Best-effort — a store
+ * that cannot even be opened has nothing to drop, and `ensureDeviceKey` surfaces the real problem.
+ */
+export async function deleteDeviceKeyWeb(options: { alias: string }): Promise<void> {
+  inFlight.delete(options.alias);
+  let db: IDBDatabase;
+  try {
+    db = await openDb();
+  } catch {
+    return;
+  }
+  try {
+    await settle(db.transaction(STORE, 'readwrite').objectStore(STORE).delete(options.alias));
+  } finally {
+    db.close();
+  }
+}

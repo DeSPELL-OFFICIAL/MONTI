@@ -35,3 +35,11 @@ export async function signWithDeviceKeyNative(digest: Hex, options: { alias: str
   const { r, s } = splitRs(derToRs(bytesToHex(base64UrlDecode(signature))));
   return { r, s: toLowS(s) };
 }
+
+/** The secure element's stored public point, or `null` when this phone holds none. Never mints. */
+export async function peekDeviceKeyNative(options: { alias: string }): Promise<DeviceKeyPublic | null> {
+  const key = await loadKey({ alias: options.alias });
+  if (!key) return null;
+  const point = spkiToXy(base64UrlDecode(key.publicKey));
+  return key.backing ? { ...point, backing: key.backing } : point;
+}

@@ -7,10 +7,11 @@ import { fmt, useCopy, useLocale } from '../../shared/i18n';
 import type { Copy } from '../../shared/copy/index';
 import type { Hex } from '@monti/shared';
 import { RP_NAME, createPasskey, passkeyProblem } from '../../shared/passkey';
-import { ATTENDEE_KEY_ALIAS, DeviceKeyUnavailable, ensureDeviceKey } from '../../shared/deviceKey';
+import { ATTENDEE_KEY_ALIAS, DeviceKeyUnavailable, ensureDeviceKey, resetDeviceKey } from '../../shared/deviceKey';
 import { api, callableFailure } from '../../shared/api/functions';
 import { getFirebaseAuth } from '../../shared/api/firebase';
 import { getSession } from '../../shared/session';
+import { markDeviceHealthy } from '../../shared/deviceHealth';
 import { clearSignup, readSignup } from './useSignup';
 import { useRegisterChallenge } from './Register';
 
@@ -118,6 +119,10 @@ export function Recover() {
         setGettingReady(false);
       }
       const credential = await createPasskey(RP_NAME, challenge);
+      // A restored-but-unusable key survives loadOrCreate, so drop it first: recovery must mint a
+      // fresh key, not re-register the same one that could not sign (the F1 "restored IndexedDB
+      // CryptoKey can't sign" case).
+      await resetDeviceKey({ alias: ATTENDEE_KEY_ALIAS });
       // No second tap: the device key is minted without a gesture of its own.
       const { x, y } = await ensureDeviceKey({
         alias: ATTENDEE_KEY_ALIAS,
@@ -138,6 +143,9 @@ export function Recover() {
       // path signup and sign-in take, which is why nothing here sets the session by hand.
       await signInWithCustomToken(getFirebaseAuth(), result.token);
       clearSignup();
+      // The key was just replaced and re-registered; clear the cached needs-recovery so the health
+      // guard does not bounce this person straight back to /recover on /tickets.
+      markDeviceHealthy();
       navigate('/tickets');
     } catch (failure) {
       setError(message(copy, locale, failure));

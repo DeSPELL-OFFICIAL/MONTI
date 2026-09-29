@@ -1,6 +1,7 @@
 import { Navigate, Outlet, type RouteObject, useLocation, useOutlet } from 'react-router-dom';
 import { BottomTabs } from './shared/ui';
 import { useRegistration } from './shared/registration';
+import { useDeviceHealth } from './shared/deviceHealth';
 import { useSession } from './shared/session';
 import { Spinner } from './shared/ui';
 import { AnimatePresence, m, useReducedMotion } from './shared/motion';
@@ -66,9 +67,30 @@ export function RequireSession() {
 function FinishSignupFirst() {
   const registration = useRegistration();
   const location = useLocation();
-  if (registration !== 'pending') return <Outlet />;
-  const returnTo = encodeURIComponent(`${location.pathname}${location.search}`);
-  return <Navigate to={`/signup/register?returnTo=${returnTo}`} replace />;
+  if (registration === 'pending') {
+    const returnTo = encodeURIComponent(`${location.pathname}${location.search}`);
+    return <Navigate to={`/signup/register?returnTo=${returnTo}`} replace />;
+  }
+  return <HealthyDeviceFirst registrationDone={registration === 'done'} />;
+}
+
+/**
+ * The second guard, after signup is known finished: is the device key on this browser one the
+ * chain will accept? A passkey syncs across a person's browsers; the device key does not, so a
+ * synced-passkey login can land on a browser with no usable device key — and without this the
+ * person only finds out at a claim or a door (`BadDeviceSignature`). `/recover` re-issues the key
+ * after a fresh phone check (`recoverAccess`), and until then the 내 티켓 actions behind this guard
+ * stay out of reach.
+ *
+ * Gated on `registrationDone`: the check reads `Identity.activeDevice`, which is zero for a person
+ * who never finished chain registration, and that person belongs in signup (handled above), not in
+ * recovery. `needs-recovery` is the only state that redirects; `unknown` (chain unreachable, or a
+ * native device) never interrupts anyone.
+ */
+function HealthyDeviceFirst({ registrationDone }: { registrationDone: boolean }) {
+  const health = useDeviceHealth(registrationDone);
+  if (health === 'needs-recovery') return <Navigate to="/recover" replace />;
+  return <Outlet />;
 }
 
 /**

@@ -24,6 +24,13 @@ vi.mock('./shared/api/functions', async (orig) => ({
 
 // Imported after the mocks rather than above them: `vi.mock` is hoisted, and a factory that
 // closes over the stubs above cannot run before they exist.
+vi.mock('./shared/deviceHealth', async (orig) => ({
+  ...(await orig<typeof import('./shared/deviceHealth')>()),
+  // This file is about the route table / the signup guard, not device health; a healthy-enough
+  // "unknown" keeps the health guard from redirecting the signed-in routes under test to /recover.
+  useDeviceHealth: () => 'unknown',
+}));
+
 const { routes } = await import('./router');
 const { queryClient } = await import('./shared/query');
 const { bootSession, getSession, registerSessionHydrator, setSession } = await import('./shared/session');
