@@ -16,6 +16,7 @@ export { loginChallenge, loginVerify } from './functions/login.js';
 export { pinEventImage, pinEventMetadata } from './functions/organizer.js';
 export { reconcilePending } from './functions/reconcilePending.js';
 export { relayClaim, relayCheckIn } from './functions/relay.js';
+export { relayAction } from './functions/relayAction.js';
 export { relayerHealth } from './functions/relayerHealth.js';
 export { registerIdentity } from './functions/registerIdentity.js';
 export { saveEventArt } from './functions/eventArt.js';
