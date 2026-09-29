@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { encodeFunctionData } from 'viem';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Alert, Button, Card, EmptyState, OpProgress, Screen, Spinner } from '../../shared/ui';
@@ -12,8 +13,8 @@ import {
   type EnvioTier,
 } from '../../shared/envio/queries';
 import { useEventRequests } from '../../shared/envio/claimRequests';
-import { ticketOp, OpReverted } from '../../shared/chain/ops';
-import { getStaffAccount } from '../../shared/chain/accounts';
+import { ticketAbi } from '../../shared/chain/abis';
+import { sendAction } from '../../shared/relay/sendAction';
 import { useMyOrgs } from '../useMyOrgs';
 import { useOrganizerCopy } from '../copy';
 
@@ -107,25 +108,20 @@ export function Requests() {
       setConfirming(false);
       setDone((prev) => new Set([...prev, ...ids]));
       try {
-        // ≤ BATCH_SIZE ids per op — a bigger selection goes out as several sponsored ops in turn.
+        // ≤ BATCH_SIZE ids per relayed action — a bigger selection goes out in several in turn.
         for (const group of chunk(ids, BATCH_SIZE)) {
-          await ticketOp({
-            account: await getStaffAccount(),
-            orgId: BigInt(event.orgId),
+          await sendAction(
             functionName,
-            args: [BigInt(eventId), group.map((id) => BigInt(id))],
-          });
+            'ticket',
+            encodeFunctionData({ abi: ticketAbi, functionName, args: [BigInt(eventId), group.map((id) => BigInt(id))] }),
+          );
         }
         setSelected(new Set());
-      } catch (cause) {
-        if (cause instanceof OpReverted && cause.revertReason === STILL_CONFIRMING) {
-          // Still on its way — keep the rows optimistically hidden; the poll below reconciles them.
-          setConfirming(true);
-        } else {
-          // A real refusal: the rows never moved, so let them back into the list at once.
-          setError(copy.failed);
-          setDone((prev) => new Set([...prev].filter((id) => !ids.includes(id))));
-        }
+      } catch {
+        // A refusal: the rows never moved, so let them back into the list at once. (sendAction
+        // follows the relay doc to a settled answer, so there is no in-flight timeout to keep.)
+        setError(copy.failed);
+        setDone((prev) => new Set([...prev].filter((id) => !ids.includes(id))));
       } finally {
         setBusy(false);
         // The indexer lags the decision, so a single refetch would show the rows still pending and

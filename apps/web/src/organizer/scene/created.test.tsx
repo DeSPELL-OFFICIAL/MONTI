@@ -2,6 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { LifecycleResult } from '../lifecycle';
 
 /**
  * `qrcode` 1.5.4 is already a dependency of this app and already drives the entry fallback
@@ -25,7 +26,7 @@ vi.mock('../../shared/chain/ops', async (orig) => ({
 vi.mock('../../shared/chain/accounts', () => ({ getStaffAccount: async () => ({ address: `0x${'ab'.repeat(20)}` }) }));
 
 // The relayed publish is mocked at the module seam; lifecycle.test.ts covers the transport.
-const publishEvent = vi.fn(async () => ({ state: 'done' as const }));
+const publishEvent = vi.fn<(eventId: bigint, orgId: bigint) => Promise<LifecycleResult>>(async () => ({ state: 'done' }));
 vi.mock('../lifecycle', () => ({ publishEvent }));
 const eventOrg = vi.fn(async () => 9n);
 vi.mock('../../shared/chain/reads', async (orig) => ({

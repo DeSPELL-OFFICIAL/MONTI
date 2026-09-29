@@ -3,13 +3,12 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { decodeFunctionData, encodeFunctionData } from 'viem';
+import { ticketAbi } from '../../shared/chain/abis';
 
 // The op layer is mocked; the sponsor account is a stub. Every assertion is about which ids go out.
-const ticketOp = vi.fn();
-vi.mock('../../shared/chain/ops', async (orig) => ({
-  ...(await orig<typeof import('../../shared/chain/ops')>()),
-  ticketOp,
-}));
+const sendAction = vi.fn<(kind: string, to: string, data: `0x${string}`) => Promise<undefined>>(async () => undefined);
+vi.mock('../../shared/relay/sendAction', () => ({ sendAction }));
 vi.mock('../../shared/chain/accounts', () => ({ getStaffAccount: async () => ({ address: `0x${'ab'.repeat(20)}` }) }));
 vi.mock('react-router-dom', async (orig) => ({
   ...(await orig<typeof import('react-router-dom')>()), useParams: () => ({ eventId: '5' }),
@@ -66,11 +65,16 @@ beforeEach(() => {
   requests.rows = [];
   names.rows = [];
   gql.mockImplementation(answerIndexer);
-  ticketOp.mockReset();
-  ticketOp.mockResolvedValue({ success: true, txHash: '0x2', blockNumber: 1n });
+  sendAction.mockReset();
+  sendAction.mockResolvedValue(undefined);
 });
 
 afterEach(() => cleanup());
+
+const data = (functionName: 'approveClaims' | 'rejectClaims', args: readonly unknown[]) =>
+  encodeFunctionData({ abi: ticketAbi, functionName, args });
+const argsOf = (index: number): readonly unknown[] =>
+  decodeFunctionData({ abi: ticketAbi, data: sendAction.mock.calls[index]![2] }).args as readonly unknown[];
 
 describe('Requests · gating', () => {
   it('refuses somebody who cannot approve for the event organisation', async () => {
@@ -79,7 +83,7 @@ describe('Requests · gating', () => {
     renderRequests();
     expect(await screen.findByText('이 행사의 신청을 처리할 권한이 없어요')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '전체 승인' })).not.toBeInTheDocument();
-    expect(ticketOp).not.toHaveBeenCalled();
+    expect(sendAction).not.toHaveBeenCalled();
   });
 
   it('refuses when the event belongs to an organisation this person does not act for', async () => {
@@ -117,10 +121,8 @@ describe('Requests · actions', () => {
     await screen.findByRole('button', { name: '선택 승인' });
     await userEvent.click(screen.getAllByRole('checkbox')[0]!);
     await userEvent.click(screen.getByRole('button', { name: '선택 승인' }));
-    await waitFor(() => expect(ticketOp).toHaveBeenCalled());
-    expect(ticketOp).toHaveBeenCalledWith(
-      expect.objectContaining({ orgId: 9n, functionName: 'approveClaims', args: [5n, [3n]] }),
-    );
+    await waitFor(() => expect(sendAction).toHaveBeenCalled());
+    expect(sendAction).toHaveBeenCalledWith('approveClaims', 'ticket', data('approveClaims', [5n, [3n]]));
   });
 
   it('rejects the selected requests', async () => {
@@ -129,9 +131,7 @@ describe('Requests · actions', () => {
     await userEvent.click((await screen.findAllByRole('checkbox'))[0]!);
     await userEvent.click(screen.getByRole('button', { name: '거절' }));
     await waitFor(() =>
-      expect(ticketOp).toHaveBeenCalledWith(
-        expect.objectContaining({ functionName: 'rejectClaims', args: [5n, [3n]] }),
-      ),
+      expect(sendAction).toHaveBeenCalledWith('rejectClaims', 'ticket', data('rejectClaims', [5n, [3n]])),
     );
   });
 
@@ -139,15 +139,15 @@ describe('Requests · actions', () => {
     requests.rows = Array.from({ length: 25 }, (_, index) => req(String(index + 1)));
     renderRequests();
     await userEvent.click(await screen.findByRole('button', { name: '전체 승인' }));
-    await waitFor(() => expect(ticketOp).toHaveBeenCalledTimes(2));
-    const [first] = ticketOp.mock.calls[0] as [{ functionName: string; args: [bigint, bigint[]] }];
-    const [second] = ticketOp.mock.calls[1] as [{ functionName: string; args: [bigint, bigint[]] }];
-    expect(first.functionName).toBe('approveClaims');
-    expect(first.args[1]).toHaveLength(20);
-    expect(second.args[1]).toHaveLength(5);
+    await waitFor(() => expect(sendAction).toHaveBeenCalledTimes(2));
+    expect(sendAction.mock.calls[0]![0]).toBe('approveClaims');
+    const firstIds = argsOf(0)[1] as bigint[];
+    const secondIds = argsOf(1)[1] as bigint[];
+    expect(firstIds).toHaveLength(20);
+    expect(secondIds).toHaveLength(5);
     // Every id is a bigint and the two chunks together cover all twenty-five.
-    expect(first.args[1].concat(second.args[1]).every((id) => typeof id === 'bigint')).toBe(true);
-    expect(first.args[1].length + second.args[1].length).toBe(25);
+    expect(firstIds.concat(secondIds).every((id) => typeof id === 'bigint')).toBe(true);
+    expect(firstIds.length + secondIds.length).toBe(25);
   });
 });
 
@@ -196,9 +196,7 @@ describe('Requests · re-polling the pending list', () => {
     fireEvent.click(screen.getAllByRole('checkbox')[0]!);
     fireEvent.click(screen.getByRole('button', { name: '선택 승인' }));
     await flush();
-    expect(ticketOp).toHaveBeenCalledWith(
-      expect.objectContaining({ functionName: 'approveClaims', args: [5n, [3n]] }),
-    );
+    expect(sendAction).toHaveBeenCalledWith('approveClaims', 'ticket', data('approveClaims', [5n, [3n]]));
     // Hidden the moment it is sent.
     expect(screen.queryByText(/민수/)).toBeNull();
     expect(screen.queryByText(/지현/)).toBeInTheDocument();

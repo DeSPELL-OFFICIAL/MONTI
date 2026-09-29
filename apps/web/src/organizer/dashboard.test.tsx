@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { LifecycleResult } from './lifecycle';
 
 interface SentOp { functionName: string; orgId: bigint; args: readonly unknown[] }
 const ticketOp = vi.fn(async (_options: SentOp) => ({ success: true }));
@@ -16,8 +17,8 @@ vi.mock('../shared/chain/accounts', () => ({ getStaffAccount: async () => ({ add
 
 // The relayed lifecycle writes are mocked at the module seam; lifecycle.test.ts covers the
 // transport (sendAction), so here the dashboard is judged on how it consumes the result.
-const publishEvent = vi.fn(async () => ({ state: 'done' as const }));
-const cancelEvent = vi.fn(async () => ({ state: 'done' as const }));
+const publishEvent = vi.fn<(eventId: bigint, orgId: bigint) => Promise<LifecycleResult>>(async () => ({ state: 'done' }));
+const cancelEvent = vi.fn<(eventId: bigint, orgId: bigint) => Promise<LifecycleResult>>(async () => ({ state: 'done' }));
 vi.mock('./lifecycle', () => ({ publishEvent, cancelEvent }));
 
 const eventOrg = vi.fn(async () => 9n);

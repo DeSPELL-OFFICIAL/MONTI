@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import { encodeFunctionData } from 'viem';
 import type { Hex } from 'viem';
 import { Alert, Button, Field, Screen, Spinner } from '../../shared/ui';
 import { api, type PendingGate } from '../../shared/api/functions';
 import { organizersAbi } from '../../shared/chain/abis';
 import { getStaffAccount } from '../../shared/chain/accounts';
-import { OpReverted, organizersOp } from '../../shared/chain/ops';
 import { PERM_MANAGE_GATES } from '../../shared/chain/permissions';
 import { readOrganizers, readTicket } from '../../shared/chain/reads';
-import { revertMatch } from '../../shared/chain/revert';
-import { isUnsponsored } from '../../shared/chain/unsponsored';
+import { sendAction } from '../../shared/relay/sendAction';
+import { relayProblem } from '../../shared/relay/relayError';
 import { gql } from '../../shared/envio/client';
 import { GATES_QUERY, type EnvioGate } from '../../shared/envio/queries';
 import { useOrganizerCopy, type OrganizerCopy } from '../copy';
@@ -118,30 +118,15 @@ export function Gates() {
       setConfirming(false);
       setUnsponsored(false);
       try {
-        await organizersOp({ account: await getStaffAccount(), orgId, functionName, args });
+        await sendAction(functionName, 'organizers', encodeFunctionData({ abi: organizersAbi, functionName, args }));
         setPaste(EMPTY_PASTE);
         setReload((count) => count + 1);
       } catch (cause) {
-        if (cause instanceof OpReverted) {
-          // A `wait` that gave up is not a refusal — it says so, rather than going quiet after
-          // a write that is still on its way. The list is reloaded either way, so whatever did
-          // land shows up in it.
-          if (cause.revertReason === 'TIMEOUT') setConfirming(true);
-          else {
-            // A `success: false` receipt need not carry a reason, and `revertMatch` slices the
-            // four bytes off one — so the guard is what stops this catch throwing a second time
-            // and leaving the screen silent after a write that plainly did not land.
-            const named = cause.revertReason
-              ? revertMatch(organizersAbi, cause.revertReason as Hex, GATE_REVERTS)
-              : undefined;
-            setProblem(named ?? 'failed');
-          }
-          setReload((count) => count + 1);
-        } else if (isUnsponsored(cause)) {
-          setUnsponsored(true);
-        } else {
-          setProblem('failed');
-        }
+        // The relayer bubbles the target's Solidity error name; `relayProblem` maps it, and a
+        // refusal that names nothing falls through to one sentence. The list is reloaded either
+        // way, so whatever did land shows up in it.
+        setProblem(relayProblem(cause, GATE_REVERTS) ?? 'failed');
+        setReload((count) => count + 1);
       } finally {
         setBusy(false);
       }

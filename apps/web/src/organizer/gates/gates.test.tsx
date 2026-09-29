@@ -2,15 +2,11 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { encodeErrorResult, getAddress } from 'viem';
+import { encodeFunctionData, getAddress } from 'viem';
 import { organizersAbi } from '../../shared/chain/abis';
 
-interface SentOp { functionName: string; orgId: bigint; args: readonly unknown[] }
-const organizersOp = vi.fn(async (_options: SentOp) => ({ success: true }));
-vi.mock('../../shared/chain/ops', async (orig) => ({
-  ...(await orig<typeof import('../../shared/chain/ops')>()),
-  organizersOp,
-}));
+const sendAction = vi.fn(async () => undefined);
+vi.mock('../../shared/relay/sendAction', () => ({ sendAction }));
 
 const ACCOUNT = `0x${'ab'.repeat(20)}` as const;
 vi.mock('../../shared/chain/accounts', () => ({ getStaffAccount: async () => ({ address: ACCOUNT }) }));
@@ -38,11 +34,12 @@ vi.mock('../../shared/api/functions', async (orig) => ({
 const gql = vi.fn(async () => ({ Gate: [] as unknown[] }));
 vi.mock('../../shared/envio/client', () => ({ gql }));
 
-const { OpReverted } = await import('../../shared/chain/ops');
 const { organizerCopy } = await import('../copy');
 const { Gates } = await import('./Gates');
 const copy = organizerCopy.ko.gates;
 const life = organizerCopy.ko.lifecycle;
+const data = (functionName: 'registerGate' | 'openGate' | 'closeGate' | 'revokeGate', args: readonly unknown[]) =>
+  encodeFunctionData({ abi: organizersAbi, functionName, args });
 
 function open() {
   render(
@@ -68,9 +65,7 @@ describe('the pending-gate queue', () => {
     await user.click(await screen.findByRole('button', { name: copy.register }));
 
     await waitFor(() =>
-      expect(organizersOp).toHaveBeenCalledWith(
-        expect.objectContaining({ orgId: 9n, functionName: 'registerGate', args: [5n, GATE, KX, KY] }),
-      ),
+      expect(sendAction).toHaveBeenCalledWith('registerGate', 'organizers', data('registerGate', [5n, GATE, KX, KY])),
     );
   });
 
@@ -83,9 +78,7 @@ describe('the pending-gate queue', () => {
   /** `GateAccountInUse`: the same terminal is already on another event's allowlist. */
   it('names the refusal when the terminal is already registered somewhere', async () => {
     const user = userEvent.setup();
-    organizersOp.mockRejectedValueOnce(
-      new OpReverted('registerGate', encodeErrorResult({ abi: organizersAbi, errorName: 'GateAccountInUse' })),
-    );
+    sendAction.mockRejectedValueOnce({ details: { code: 'GateAccountInUse' } });
     open();
     await user.click(await screen.findByRole('button', { name: copy.register }));
     expect(await screen.findByText(copy.problems.inUse)).toBeInTheDocument();
@@ -94,9 +87,7 @@ describe('the pending-gate queue', () => {
   /** `registerGate` raises this for an event that does not exist (`Organizers.sol:127`). */
   it('says the event number is not one rather than "try again"', async () => {
     const user = userEvent.setup();
-    organizersOp.mockRejectedValueOnce(
-      new OpReverted('registerGate', encodeErrorResult({ abi: organizersAbi, errorName: 'UnknownOrganizer' })),
-    );
+    sendAction.mockRejectedValueOnce({ details: { code: 'UnknownOrganizer' } });
     open();
     await user.click(await screen.findByRole('button', { name: copy.register }));
     expect(await screen.findByText(copy.problems.unknownEvent)).toBeInTheDocument();
@@ -109,7 +100,7 @@ describe('the pending-gate queue', () => {
    */
   it('survives a failure that carries no revert reason', async () => {
     const user = userEvent.setup();
-    organizersOp.mockRejectedValueOnce(new OpReverted('registerGate'));
+    sendAction.mockRejectedValueOnce({ details: {} });
     open();
     const before = listPendingGates.mock.calls.length;
     await user.click(await screen.findByRole('button', { name: copy.register }));
@@ -117,16 +108,6 @@ describe('the pending-gate queue', () => {
     expect(await screen.findByText(copy.problems.failed)).toBeInTheDocument();
     // The list is reloaded either way, so whatever did land shows up in it.
     await waitFor(() => expect(listPendingGates.mock.calls.length).toBeGreaterThan(before));
-  });
-
-  /** The screen used to go quiet after a write that was still on its way. */
-  it('says it is still confirming when the wait gave up', async () => {
-    const user = userEvent.setup();
-    organizersOp.mockRejectedValueOnce(new OpReverted('registerGate', 'TIMEOUT'));
-    open();
-    await user.click(await screen.findByRole('button', { name: copy.register }));
-    expect(await screen.findByText(life.confirming)).toBeInTheDocument();
-    expect(screen.queryByText(copy.problems.failed)).not.toBeInTheDocument();
   });
 
   it('tells an organiser without the gate permission instead of letting them send', async () => {
@@ -150,9 +131,7 @@ describe('the paste fallback', () => {
     open();
     await paste(user, KX, KY);
     await waitFor(() =>
-      expect(organizersOp).toHaveBeenCalledWith(
-        expect.objectContaining({ functionName: 'registerGate', args: [5n, GATE, KX, KY] }),
-      ),
+      expect(sendAction).toHaveBeenCalledWith('registerGate', 'organizers', data('registerGate', [5n, GATE, KX, KY])),
     );
   });
 
@@ -165,7 +144,7 @@ describe('the paste fallback', () => {
     open();
     await paste(user, KX, `0x${'00'.repeat(32)}`);
     expect(await screen.findByText(copy.problems.halfZero)).toBeInTheDocument();
-    expect(organizersOp).not.toHaveBeenCalled();
+    expect(sendAction).not.toHaveBeenCalled();
   });
 
   it('refuses an address that is not 20 bytes', async () => {
@@ -176,7 +155,7 @@ describe('the paste fallback', () => {
     await user.type(screen.getByLabelText(copy.ky), KY);
     await user.click(screen.getByRole('button', { name: copy.manual }));
     expect(await screen.findByText(copy.problems.account)).toBeInTheDocument();
-    expect(organizersOp).not.toHaveBeenCalled();
+    expect(sendAction).not.toHaveBeenCalled();
   });
 });
 
@@ -203,9 +182,7 @@ describe('the registered list', () => {
     open();
     await user.click(await screen.findByRole('button', { name: copy.close }));
     await waitFor(() =>
-      expect(organizersOp).toHaveBeenCalledWith(
-        expect.objectContaining({ orgId: 9n, functionName: 'closeGate', args: [7n] }),
-      ),
+      expect(sendAction).toHaveBeenCalledWith('closeGate', 'organizers', data('closeGate', [7n])),
     );
   });
 
@@ -217,11 +194,11 @@ describe('the registered list', () => {
     open();
     await user.click(await screen.findByRole('button', { name: copy.open }));
     await waitFor(() =>
-      expect(organizersOp).toHaveBeenCalledWith(expect.objectContaining({ functionName: 'openGate', args: [7n] })),
+      expect(sendAction).toHaveBeenCalledWith('openGate', 'organizers', data('openGate', [7n])),
     );
     await user.click(screen.getByRole('button', { name: copy.revoke }));
     await waitFor(() =>
-      expect(organizersOp).toHaveBeenCalledWith(expect.objectContaining({ functionName: 'revokeGate', args: [7n] })),
+      expect(sendAction).toHaveBeenCalledWith('revokeGate', 'organizers', data('revokeGate', [7n])),
     );
   });
 });

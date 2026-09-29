@@ -2,6 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { LifecycleResult } from '../lifecycle';
 import { keccak256, toBytes } from 'viem';
 import type { EventDraft, StoredEventDraft } from '../../shared/api/firestore';
 
@@ -50,7 +51,7 @@ const ACCOUNT = `0x${'ab'.repeat(20)}` as const;
 vi.mock('../../shared/chain/accounts', () => ({ getStaffAccount: async () => ({ address: ACCOUNT }) }));
 
 // The relayed draft save is mocked at the module seam; lifecycle.test.ts covers the transport.
-const saveDraft = vi.fn(async () => ({ state: 'done' as const }));
+const saveDraft = vi.fn<(eventId: bigint, orgId: bigint, meta: unknown, tiers: unknown) => Promise<LifecycleResult>>(async () => ({ state: 'done' }));
 vi.mock('../lifecycle', () => ({ saveDraft }));
 
 const gql = vi.fn(async () => ({ Event: [EVENT], Tier: TIERS }));

@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
-import { isAddress, type Hex } from 'viem';
+import { encodeFunctionData, isAddress, type Hex } from 'viem';
 import { Alert, Button, Field, Screen } from '../shared/ui';
 import { api, callableFailure, type InviteRow } from '../shared/api/functions';
 import { organizersAbi } from '../shared/chain/abis';
 import { getStaffAccount } from '../shared/chain/accounts';
-import { OpReverted, organizersOp } from '../shared/chain/ops';
 import { PERMISSION_BITS, PERM_CREATE_EVENT, PERM_MANAGE_GATES } from '../shared/chain/permissions';
 import { readOrganizers } from '../shared/chain/reads';
-import { revertMatch } from '../shared/chain/revert';
-import { isUnsponsored } from '../shared/chain/unsponsored';
+import { sendAction } from '../shared/relay/sendAction';
+import { relayProblem } from '../shared/relay/relayError';
 import { useOrganizerCopy, type OrganizerCopy } from './copy';
 import { UnsponsoredNotice } from './Unsponsored';
 
@@ -305,27 +304,16 @@ export function Team({ orgId: fixedOrgId }: { orgId?: string } = {}) {
 
     setBusy(true);
     try {
-      await organizersOp({
-        account: await getStaffAccount(),
-        orgId: BigInt(orgId),
-        ...(granting.role === 'admin'
-          ? { functionName: 'setAdmin' as const, args: [BigInt(orgId), account as Hex, grantBits] }
-          : { functionName: 'setManager' as const, args: [BigInt(orgId), account as Hex, true, grantCanApprove] }),
-      });
+      const data =
+        granting.role === 'admin'
+          ? encodeFunctionData({ abi: organizersAbi, functionName: 'setAdmin', args: [BigInt(orgId), account as Hex, grantBits] })
+          : encodeFunctionData({ abi: organizersAbi, functionName: 'setManager', args: [BigInt(orgId), account as Hex, true, grantCanApprove] });
+      await sendAction(granting.role === 'admin' ? 'setAdmin' : 'setManager', 'organizers', data);
       await check();
     } catch (cause) {
-      if (cause instanceof OpReverted) {
-        // A `wait` that gave up is not a refusal: the grant may well be landing, and telling
-        // the owner it failed invites a second send. Same rule as every other screen here.
-        if (cause.revertReason === 'TIMEOUT') setConfirming(true);
-        else {
-          const named = cause.revertReason
-            ? revertMatch(organizersAbi, cause.revertReason as Hex, GRANT_REVERTS)
-            : undefined;
-          setProblem(named ?? 'failed');
-        }
-      } else if (isUnsponsored(cause)) setUnsponsored(true);
-      else setProblem('failed');
+      // The relayer bubbles the target's Solidity error name; `relayProblem` maps it, an unnamed
+      // refusal falls through to one sentence.
+      setProblem(relayProblem(cause, GRANT_REVERTS) ?? 'failed');
     } finally {
       setBusy(false);
     }
