@@ -25,8 +25,8 @@ import { DEVICE_DIGEST_FORM, deviceDigest, deviceDigestV2, ticketAbi } from '@mo
 /** The public endpoint the 01b redeploy was broadcast through (abi-delta-01b.md §10). */
 const RPC_URL = 'https://testnet-rpc.monad.xyz';
 const CHAIN_ID = 10143;
-/** The Ticket deployed 2026-09-29. A fixture derived against any other address is meaningless. */
-const TICKET = '0x86550c0408A9Bb6da1766b0ed4e57b3ec914A671' as const;
+/** The Ticket deployed 2026-09-30. A fixture derived against any other address is meaningless. */
+const TICKET = '0x7E1fdfCB3688C5b0539101cEAE6a7Ee5bD9b51Cf' as const;
 
 /** The five caller-chosen inputs of the doc's vector (§7.2, re-derived on chain in §10). */
 const VECTOR = {
@@ -42,7 +42,7 @@ const VECTOR = {
  * digest `0xca378ab2…fe66`: that one names chain 31337 and Ticket `0x7111…1111`, and cannot
  * reappear here precisely because the contract supplies those two words itself.
  */
-const EXPECTED = '0xe9d423f26873e3562d5665f22f9c8ecaca290b6aeeb4d63e2dd787f1dc0775cc';
+const EXPECTED = '0x5e3dc13903f0324d285dd06664b0af93191290ecd3fa5d843737c68b39de8319';
 
 /** Generous, because a public testnet RPC is slow; bounded, because CI must not hang on it. */
 const TIMEOUT_MS = 20_000;

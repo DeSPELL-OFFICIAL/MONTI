@@ -60,7 +60,7 @@ export const P256_HALF_ORDER = P256_ORDER / 2n;
  *   검증하던 형식이다. 이 값을 받아 주는 컨트랙트는 이제 없다.
  * - `v2-domainSeparated` — 앞에 `chainId` 와 Ticket 주소 두 워드를 붙인 7워드 형식.
  *   01b 번들이 `Ticket._deviceDigest` 로 들여왔고, **지금 배포된** 것이 이쪽이다 —
- *   최신 재배포는 2026-09-29, chain 10143, Ticket `0x86550c0408A9Bb6da1766b0ed4e57b3ec914A671`.
+ *   최신 재배포는 2026-09-30, chain 10143, Ticket `0x7E1fdfCB3688C5b0539101cEAE6a7Ee5bD9b51Cf`.
  *
  * 그 재배포(01b 계획의 Task 15)가 끝났으므로 이 한 줄은 `v2-domainSeparated` 이고,
  * 서명·검증·QR 이 한꺼번에 여기에 따라온다. 형식을 고르는 곳은 여기 하나뿐이다.
