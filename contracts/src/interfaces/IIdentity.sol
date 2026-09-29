@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.31;
 
-/// @notice The slice of Identity that Ticket and MontiPaymaster are allowed to see.
+/// @notice The slice of Identity that Ticket and the forwarder are allowed to see.
 interface IIdentity {
     /// @dev Ticket._update reads this so the quarantine window and Identity's own undo window
     ///      can never drift apart -- they are the same number or the fix is a lie.
