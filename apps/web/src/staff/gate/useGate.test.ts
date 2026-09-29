@@ -40,7 +40,6 @@ vi.mock('../../shared/config', () => ({
       identity: IDENTITY_ADDRESS,
       organizers: ORGANIZERS_ADDRESS,
       ticket: TICKET_ADDRESS,
-      paymaster: `0x${'66'.repeat(20)}`,
     },
   }),
 }));

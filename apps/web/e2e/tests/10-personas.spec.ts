@@ -6,8 +6,8 @@ import { approveAll, approveSelected, claimFree, hasTicketFor, myTickets, reques
 import { getClaim, getEvent, markPublished, recordClaim, recordEvent, recordPersona } from '../utils/scenario-state';
 
 /**
- * The real-usage scenarios, single-worker because every one spends on-chain operations through a
- * shared paymaster. The nine-user fan-out throttles to three at a time.
+ * The real-usage scenarios, single-worker because every one spends on-chain operations the MONTI
+ * relayer pays for. The nine-user fan-out throttles to three at a time.
  *
  * Approval scenarios (d and the approval-required event in a) run only with E2E_APPROVAL=1 AND a
  * build where VITE_APPROVAL_MODES=on — both arrive with the 01c deploy. Paid tickets stay
@@ -30,7 +30,7 @@ const APPROVAL_TITLE = '관리자 승인 테스트 행사';
 
 const now = (): string => new Date().toISOString();
 
-// Fan-out size, tunable so a budget-limited live run can spend fewer sponsored ops. Default 9 keeps
+// Fan-out size, tunable so a budget-limited live run can spend fewer relayed ops. Default 9 keeps
 // the original full run; a reduced pass sets E2E_USERS (e.g. 3 for b+c, 4 for f). The first `USERS`
 // personas are used, so the reduced set is always persona-02 … persona-(01+N).
 const USER_COUNT = Math.min(Number(process.env.E2E_USERS ?? 9), USERS.length);
@@ -42,7 +42,7 @@ const SOLDOUT_SUPPLY = Number(process.env.E2E_SOLDOUT_SUPPLY ?? 5);
 const sessions = new Map<string, PersonaSession>();
 
 /** Best-effort Firebase Auth uid, read from IndexedDB — the account half of the map comes from the
- * userOp sender observed during a claim (bundler-capture.ts). Never throws. */
+ * account observed on the relay callable during a claim (relay-capture.ts). Never throws. */
 async function readUid(page: Page): Promise<string | undefined> {
   try {
     return await page.evaluate(

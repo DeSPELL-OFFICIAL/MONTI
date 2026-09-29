@@ -18,8 +18,8 @@ import { loadScenarioState } from '../utils/scenario-state';
  *
  * This spec asserts the fix against the two events the regression hit — Event 6 (free, maxPerWallet 1)
  * and Event 10 — with the three personas that already hold tickets on each (02, 03, 04). It sends NO
- * new sponsored op: passkey login is not on-chain and the pre-block prevents the claim op, so the run
- * is free on the paymaster. When the pre-block does NOT render it captures the OwnedTickets indexer
+ * new op: passkey login is not on-chain and the pre-block prevents the claim op, so the run
+ * costs the relayer nothing. When the pre-block does NOT render it captures the OwnedTickets indexer
  * exchange (the `owner` the page queried with vs the `owner`/`eventId` the indexer returned) so the
  * cause — UI, owner casing in the query, or indexer lag — can be read off the evidence.
  */
@@ -74,7 +74,7 @@ test.describe('MONTI limit pre-block (live check e, post-fix)', () => {
       try {
         await ensureAccount(session);
         const page = session.page;
-        // The checksummed account for the report, from the persisted persona map (the userOp sender
+        // The checksummed account for the report, from the persisted persona map (the account
         // observed on earlier claims). `queriedOwner` below is the lowercased owner the page's
         // OwnedTickets query actually used — the two together answer the casing/checksum question.
         const account = loadScenarioState().personas[persona.id]?.account ?? '';
@@ -97,8 +97,8 @@ test.describe('MONTI limit pre-block (live check e, post-fix)', () => {
             try {
               if (req.method() !== 'POST') return;
               const post = req.postData() ?? '';
-              // A claim submission now: the relayClaim callable (a claim no longer emits a sponsored
-              // userOp). Count either, so the pre-block's "nothing was submitted" guarantee still holds.
+              // A claim submission now: the relayClaim callable (a claim no longer emits an on-chain
+              // op of its own). Count either, so the pre-block's "nothing was submitted" guarantee holds.
               if (post.includes('"eth_sendUserOperation"') || req.url().toLowerCase().includes('relayclaim')) ops += 1;
               if (post.includes('OwnedTickets')) {
                 const m = /"owner"\s*:\s*"(0x[0-9a-fA-F]{40})"/.exec(post);
@@ -183,7 +183,7 @@ test.describe('MONTI limit pre-block (live check e, post-fix)', () => {
             // Assertions (soft, so both events for a persona are always exercised and reported).
             expect.soft(alreadyHaveShown, `${persona.id} · event ${eventId}: 이미 받았어요 pre-block copy renders`).toBe(true);
             expect.soft(buttonDisabled, `${persona.id} · event ${eventId}: 티켓 받기 disabled`).toBe(true);
-            expect.soft(ops, `${persona.id} · event ${eventId}: no claim submitted (relayClaim/userOp)`).toBe(0);
+            expect.soft(ops, `${persona.id} · event ${eventId}: no claim submitted (relayClaim)`).toBe(0);
           } finally {
             page.off('request', onRequest);
             page.off('response', onResponse);

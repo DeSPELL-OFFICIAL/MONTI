@@ -55,8 +55,8 @@ async function send(functionName: LifecycleWrite, args: readonly unknown[]): Pro
 
 /**
  * Draft → Published. From here the event is visible to everybody and cannot be edited. `_orgId` is
- * no longer used to pick a paymaster (the relayer pays), kept only so callers need not change until
- * the final sweep (F).
+ * no longer used (the relayer pays regardless of the organisation), kept only so callers need not
+ * change.
  */
 export function publishEvent(eventId: bigint, _orgId: bigint): Promise<LifecycleResult> {
   return send('publishEvent', [eventId]);

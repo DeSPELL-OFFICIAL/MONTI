@@ -92,8 +92,8 @@ export function Created() {
   /**
    * 지금 공개하기 — Draft → Published, run right here so the share link appears on the very same
    * screen with no navigation (T-SIMP-6). The organisation is read off the chain, not the indexer,
-   * because the paymaster is paid per organisation and an indexer running behind would name the
-   * wrong one. `publishEvent` replaces rather than adds, so a second press after a timeout is safe.
+   * because an indexer running behind would name the wrong one. `publishEvent` replaces rather than
+   * adds, so a second press after a timeout is safe.
    */
   async function goPublic(): Promise<void> {
     if (publishing === 'saving') return;

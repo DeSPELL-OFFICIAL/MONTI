@@ -25,14 +25,13 @@ import { OVERRIDE_REASON, ticketAbi } from '@monti/shared';
 
 const ORGANIZERS = `0x${'55'.repeat(20)}` as Hex;
 const TICKET = `0x${'33'.repeat(20)}` as Hex;
-const PAYMASTER = `0x${'66'.repeat(20)}` as Hex;
 /** The staff member's passkey account. Deliberately not the gate's `0xaa…`. */
 const STAFF = `0x${'bb'.repeat(20)}` as Hex;
 
 vi.mock('../../shared/config', () => ({
   getConfig: () => ({
     chainId: 10143,
-    addresses: { identity: `0x${'44'.repeat(20)}`, organizers: ORGANIZERS, ticket: TICKET, paymaster: PAYMASTER },
+    addresses: { identity: `0x${'44'.repeat(20)}`, organizers: ORGANIZERS, ticket: TICKET },
   }),
 }));
 

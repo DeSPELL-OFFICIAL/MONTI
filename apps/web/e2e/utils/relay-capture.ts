@@ -4,20 +4,18 @@ import { dirname } from 'node:path';
 import { recordPersona } from './scenario-state';
 
 /**
- * Passive capture for the RELAYED claim/request path (task F1).
+ * Passive capture for the RELAYED submission paths (task F1) — the single relay-path capture util,
+ * replacing the retired sponsored-op capture.
  *
- * A ticket claim no longer sends a sponsored UserOperation. The app signs a `ClaimAuth` with the
- * device key and calls the `relayClaim` Firebase callable; the MONTI relayer pays the gas and the
- * app follows `relays/{relayId}` (저장→확인→완료 on screen). This is the relay-path replacement for
- * `bundler-capture` on the claim flow — it watches the `relayClaim` callable instead of
- * `eth_sendUserOperation`/`eth_estimateUserOperationGas`. (Transfer still spends a sponsored op, so
- * 30-transfer keeps bundler-capture.)
+ * No write on the web sends a transaction of its own any more: a ticket claim signs a `ClaimAuth`
+ * and calls the `relayClaim` callable, while a transfer / override / organizer write signs a
+ * `ForwardRequest` and calls the `relayAction` callable. Either way the MONTI relayer pays and the
+ * app follows `relays/{relayId}` (저장→확인→완료 on screen). This watches both callables.
  *
  * It does two jobs, both best-effort and never throwing into the flow:
- *  1. records the persona's smart-account address from the callable REQUEST body
- *     (`data.auth.account`) — the account half of the persona map that the userOp `sender` used to
- *     give, now that a claim never emits a userOp;
- *  2. on a failed claim, writes the callable's refusal — the same `{ code, nonce? }` a `relays/{id}`
+ *  1. records the persona's smart-account address from the callable REQUEST body — `data.auth.account`
+ *     on a claim, `data.req.from` on an action — now that no submission carries an on-chain `sender`;
+ *  2. on a failure, writes the callable's refusal — the same `{ code, nonce? }` a `relays/{id}`
  *     doc's `error` carries, surfaced here as the callable's `HttpsError` — verbatim to the artifacts
  *     (`e2e/.artifacts/relay-errors/…`) and the friction log, so a failure leaves the diagnostic the
  *     trace used to hide.
@@ -31,8 +29,8 @@ export const RELAY_ERRORS_DIR = `${ARTIFACT_DIR}/relay-errors`;
 export const RELAY_ERRORS_PATH = `${RELAY_ERRORS_DIR}/relay-errors.jsonl`;
 export const FRICTION_LOG_PATH = `${ARTIFACT_DIR}/friction.jsonl`;
 
-/** The callable this capture follows. `relayCheckIn` (staff) is deliberately not matched here. */
-const RELAY_CLAIM_CALLABLE = 'relayclaim';
+/** The callables this capture follows. `relayCheckIn` (staff) is deliberately not matched here. */
+const RELAY_CALLABLES = ['relayclaim', 'relayaction'] as const;
 
 export interface CapturedRelayError {
   persona: string;
@@ -89,15 +87,16 @@ interface CallableBody {
   error?: { status?: string; message?: string; details?: { code?: string; nonce?: string } };
 }
 
-function isRelayClaim(url: string): boolean {
-  return url.toLowerCase().includes(RELAY_CLAIM_CALLABLE);
+function isRelayCallable(url: string): boolean {
+  const lower = url.toLowerCase();
+  return RELAY_CALLABLES.some((callable) => lower.includes(callable));
 }
 
-/** The `auth.account` from the callable request body (avoids deep-parsing the whole payload). */
+/** The persona account from the request body: `auth.account` on a claim, `req.from` on an action. */
 function accountOf(postData: string): string | undefined {
   try {
-    const body = JSON.parse(postData) as { data?: { auth?: { account?: unknown } } };
-    const account = body.data?.auth?.account;
+    const body = JSON.parse(postData) as { data?: { auth?: { account?: unknown }; req?: { from?: unknown } } };
+    const account = body.data?.auth?.account ?? body.data?.req?.from;
     return typeof account === 'string' ? account : undefined;
   } catch {
     return undefined;
@@ -141,12 +140,12 @@ export function attachRelayCapture(page: Page, ctx: Ctx): RelayCapture {
       try {
         const request = response.request();
         if (request.method() !== 'POST') return;
-        if (!isRelayClaim(response.url())) return;
+        if (!isRelayCallable(response.url())) return;
         const post = request.postData() ?? '';
 
         const account = accountOf(post);
         // The account is the persona's smart-account address — persist it once as the account half
-        // of the persona map, now that a claim carries no userOp `sender` to read (best-effort).
+        // of the persona map, now that a claim carries no on-chain `sender` to read (best-effort).
         if (account && account !== recordedAccount) {
           recordedAccount = account;
           recordPersona(ctx.persona, { account });

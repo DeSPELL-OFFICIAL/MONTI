@@ -55,9 +55,9 @@ export function Requests() {
   const copy = useOrganizerCopy().requests;
   const { eventId = '' } = useParams();
 
-  // The event, for its organisation: the paymaster is paid per organisation and the gate is per
-  // organisation, so both need the orgId this event belongs to. Its org never changes, so the
-  // indexer's value is safe to sponsor with (unlike a status that can race a fresh write).
+  // The event, for its organisation: the gate is per organisation, so this needs the orgId this
+  // event belongs to. Its org never changes, so the indexer's value is safe to use here (unlike a
+  // status that can race a fresh write).
   const { data: eventData, isLoading: eventLoading } = useQuery({
     queryKey: ['event', eventId],
     queryFn: () => gql<{ Event: EnvioEvent[]; Tier: EnvioTier[] }>(EVENT_QUERY, { id: eventId, eventId }),

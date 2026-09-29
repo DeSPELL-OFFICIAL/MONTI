@@ -8,7 +8,8 @@ import { timed } from '../fixtures/timings';
  * Edit a Draft, then publish — the whole "make it, fix it, ship it" loop for an organiser.
  *
  * Extra scenario, off by default (`E2E_EXTRA=1`): it creates, updates and publishes an event, all
- * sponsored on-chain ops, so the controller schedules it against the paymaster budget.
+ * on-chain writes relayed through `relayAction`, so the controller schedules it against the
+ * relayer's budget.
  *
  * Steps, exactly as the app allows them:
  *  1. Admin creates a NEW event and stops on the done screen — a Draft, deliberately NOT published.

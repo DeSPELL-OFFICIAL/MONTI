@@ -1,14 +1,15 @@
 import { test, expect, type Page } from '@playwright/test';
 import { USERS, type Persona } from '../fixtures/personas';
 import { closePersona, ensureAccount, openPersona } from '../utils/session';
-import { attachBundlerCapture } from '../utils/bundler-capture';
+import { attachRelayCapture } from '../utils/relay-capture';
 import { timed } from '../fixtures/timings';
 
 /**
  * 친구에게 주기 — persona-02 hands their Event 6 ticket to persona-08 (who holds none there).
  *
- * Extra scenario, off by default: it spends a sponsored on-chain op (the hand-over itself), so it
- * runs only under `E2E_EXTRA=1` and the controller schedules it against the paymaster budget.
+ * Extra scenario, off by default: it spends an on-chain write (the hand-over itself, relayed
+ * through `relayAction`), so it runs only under `E2E_EXTRA=1` and is scheduled against the
+ * relayer's budget.
  *
  * It drives the real UI — ticket detail → 친구에게 주기 → recipient by phone → 찾기 — and then
  * follows whichever hand-over the app routes to, because the app implements two and both are the
@@ -22,8 +23,8 @@ import { timed } from '../fixtures/timings';
  *
  * The durable proof either way is the indexer's `Ticket.owner`: it is read straight off the indexer
  * (the same endpoint the app queries) before and after, and it must move off persona-02 to a new,
- * non-empty account. Both screens' copy is asserted along the path taken. Bundler errors on either
- * side are captured to the artifacts.
+ * non-empty account. Both screens' copy is asserted along the path taken. Relay-callable errors on
+ * either side are captured to the artifacts.
  */
 
 const EXTRA = process.env.E2E_EXTRA === '1';
@@ -114,8 +115,8 @@ describe('MONTI transfer (persona-02 → persona-08)', () => {
     const recipient = await openPersona(browser, RECIPIENT);
     const senderWatch = watchOwned(sender.page);
     const recipientWatch = watchOwned(recipient.page);
-    const senderCapture = attachBundlerCapture(sender.page, { persona: SENDER.id, eventId: EVENT_ID });
-    const recipientCapture = attachBundlerCapture(recipient.page, { persona: RECIPIENT.id, eventId: EVENT_ID });
+    const senderCapture = attachRelayCapture(sender.page, { persona: SENDER.id, eventId: EVENT_ID });
+    const recipientCapture = attachRelayCapture(recipient.page, { persona: RECIPIENT.id, eventId: EVENT_ID });
 
     try {
       await ensureAccount(sender);
@@ -234,7 +235,7 @@ describe('MONTI transfer (persona-02 → persona-08)', () => {
       // Best-effort corroboration from the recipient's own list.
       expect.soft(recipientWatch.rows().some((r) => r.id === tokenId), 'persona-08 OwnedTickets lists the token').toBe(true);
     } finally {
-      // Any bundler error seen on either side goes to the artifacts and the friction log.
+      // Any relay-callable error seen on either side goes to the artifacts and the friction log.
       if (senderCapture.errors.length > 0) senderCapture.flushFailure('transfer sender');
       if (recipientCapture.errors.length > 0) recipientCapture.flushFailure('transfer recipient');
       senderCapture.detach();

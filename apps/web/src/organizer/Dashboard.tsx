@@ -106,8 +106,8 @@ export function Dashboard() {
   async function run(which: Exclude<Pending, ''>): Promise<void> {
     setBusy(true);
     setOutcome(null);
-    // The organisation comes from the chain, not from the indexer: the paymaster is paid per
-    // organisation and an indexer running behind would sponsor the wrong one.
+    // The organisation is read off the chain, not the indexer, so a lagging indexer cannot feed
+    // a stale org into the write.
     const orgId = await readTicket()
       .eventOrg(BigInt(eventId))
       .catch(() => null);
