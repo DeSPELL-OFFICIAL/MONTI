@@ -611,6 +611,34 @@ function scanForbiddenNames(files: SourceFile[]): ScanResult {
   return { findings, targets: sites.length };
 }
 
+const FORBIDDEN_4337 = [
+  'paymaster',
+  'bundler',
+  'EntryPoint',
+  'sendSponsoredOp',
+  'UserOperation',
+  'predeployAccount',
+  'accountDeployPending',
+];
+
+/**
+ * 설계 §3 — 4337(페이마스터·번들러·스마트계정 사전배포) 경로는 폐기됐다. 되살아나면 여기서 막는다.
+ * 주석을 지운 본문(문자열 포함)만 본다 — 코드·식별자에 이 심볼이 남으면 실패. 대소문자는 가리지 않는다.
+ */
+function scanForbidden4337(files: SourceFile[]): ScanResult {
+  const findings: Finding[] = [];
+  for (const file of files) {
+    for (const symbol of FORBIDDEN_4337) {
+      if (new RegExp(symbol, 'i').test(file.code)) {
+        findings.push(
+          `${file.rel} 에 폐기된 4337 심볼 "${symbol}" 가 남아 있다 — 설계 §3: 페이마스터·번들러·사전배포는 폐기됐다.`,
+        );
+      }
+    }
+  }
+  return { findings, targets: files.length };
+}
+
 const CHAIN_PROOFS = ['awaitFinalized', "blockTag: 'finalized'", 'decodeMontiLogs', "functionName: 'accountOf'"];
 
 /**
@@ -1169,6 +1197,11 @@ describe('spec §10.4 rule 1 — no chain state in Firestore', () => {
   it('never names a ticket, role or check-in collection anywhere', () => expectClean(scanForbiddenNames));
 });
 
+describe('design §3 — the retired 4337/paymaster/pre-deploy path leaves no symbol behind', () => {
+  it('no source file mentions a paymaster, bundler, EntryPoint, sponsored op or account pre-deploy', () =>
+    expectClean(scanForbidden4337));
+});
+
 describe('spec §10.4 rule 3 — active only after chain confirmation', () => {
   it("every file that sets status 'active' also proves it read the chain", () => expectClean(scanActiveStatus));
   it('never sets a paid-looking ticket or permission field on a Firestore document', () =>
@@ -1603,6 +1636,19 @@ describe('negative fixtures — every way a violation has slipped past, locked o
        }`,
     ]);
     expectCaught(scanQueryIndexes(files, INDEX_FIXTURE), /를 해석하지 못했다 — 컬렉션·필드·연산자가/);
+  });
+
+  it('24. a resurrected pre-deploy or paymaster symbol is caught', () => {
+    const files = fixture([
+      join('lib', 'evade.ts'),
+      `import { deployment } from './chain.js';
+       export async function evade() {
+         await predeployAccount({ account: '0x' });
+         return deployment().paymaster;
+       }`,
+    ]);
+    expectCaught(scanForbidden4337(files), /predeployAccount/);
+    expectCaught(scanForbidden4337(files), /paymaster/);
   });
 
   it('an emptied source tree fails every scan instead of passing vacuously', () => {

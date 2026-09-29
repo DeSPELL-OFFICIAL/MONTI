@@ -20,7 +20,6 @@ import {
   authAdmin,
   db,
 } from '../lib/db.js';
-import { predeployAccount } from '../lib/predeployAccount.js';
 import { hmacPhone } from '../lib/phoneIndex.js';
 import { CHALLENGE_RE, challengeFromClientData, coseToP256, ownerBytes } from '../lib/webauthn.js';
 
@@ -371,7 +370,6 @@ export const recoverAccess = onCall(
 
     // 20. 세션 클레임·토큰을 새 계정으로 심는다(loginVerify·registerIdentity 와 같은 모양).
     await mintSessionClaims(uid, personId, newAccount);
-    await predeployAccount({ personRef, personId, account: newAccount }).catch(() => {});
     const token = await authAdmin.createCustomToken(uid, { personId, account: newAccount });
 
     // 21.
