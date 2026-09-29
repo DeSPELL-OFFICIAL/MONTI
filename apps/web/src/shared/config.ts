@@ -12,7 +12,7 @@ export interface AppConfig {
   wsUrl: string;
   bundlerUrl: string;
   entryPoint: Hex;
-  addresses: { identity: Hex; organizers: Hex; ticket: Hex; paymaster: Hex };
+  addresses: { identity: Hex; organizers: Hex; ticket: Hex; paymaster: Hex; forwarder: Hex };
   envioUrl: string;
   rpId: string;
   ipfsGateway: string;
@@ -70,6 +70,8 @@ export function getConfig(): AppConfig {
       organizers: requiredEnv('VITE_ADDR_ORGANIZERS') as Hex,
       ticket: requiredEnv('VITE_ADDR_TICKET') as Hex,
       paymaster: requiredEnv('VITE_ADDR_PAYMASTER') as Hex,
+      // The ERC-2771 relay target (design §1). Added for Phase 2; B2 finalises the deployed value.
+      forwarder: requiredEnv('VITE_ADDR_FORWARDER') as Hex,
     },
     envioUrl: requiredEnv('VITE_ENVIO_URL'),
     rpId: requiredEnv('VITE_RP_ID'),

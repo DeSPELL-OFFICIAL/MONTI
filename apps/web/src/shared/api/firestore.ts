@@ -3,6 +3,7 @@ import {
   serverTimestamp, setDoc,
 } from 'firebase/firestore';
 import type { Hex } from '@monti/shared';
+import type { RelayActionResult } from './functions';
 import type { TicketArtPreset, TicketArtSource } from '../ui/TicketArt';
 import { getDb, getFirebaseAuth } from './firebase';
 
@@ -30,6 +31,12 @@ export interface RelayView {
   status: RelayStatus;
   txHash?: string;
   tokenId?: string;
+  /**
+   * A settled relayed action's per-`kind` payload (design §1, Phase 2) — the same shape the
+   * `relayAction` callable returns on a `confirmed` answer, written to the doc when the tx mines.
+   * Absent for a claim (which uses `tokenId`) and for a still-pending action.
+   */
+  result?: RelayActionResult;
   error?: { code: string; message: string };
 }
 
@@ -52,7 +59,7 @@ export function watchRelay(
       const data = snapshot.data() as Partial<RelayView> | undefined;
       onChange(
         data && typeof data.status === 'string'
-          ? { status: data.status, txHash: data.txHash, tokenId: data.tokenId, error: data.error }
+          ? { status: data.status, txHash: data.txHash, tokenId: data.tokenId, result: data.result, error: data.error }
           : null,
       );
     },

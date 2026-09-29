@@ -1,7 +1,7 @@
 import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
 import type { FunctionsErrorCodeCore } from 'firebase/functions';
-import type { AttendeeRow, ClaimAuthWire, Hex, PersonStatus, ResolveRecipientResult, SnapshotWire } from '@monti/shared';
+import type { AttendeeRow, ClaimAuthWire, ForwardRequestWire, Hex, PersonStatus, ResolveRecipientResult, SnapshotWire } from '@monti/shared';
 import type { TicketArtSource } from '../ui/TicketArt';
 import { getFirebaseFunctions } from './firebase';
 
@@ -260,6 +260,45 @@ export interface RelayCheckInResponse {
   usedAt?: number;
 }
 
+/**
+ * The relayed organizer/transfer/override action (design §1, Phase 2). The device key signed a
+ * `ForwardRequest` digest; the MONTI relayer submits `MontiForwarder.execute` and pays the gas, so
+ * nothing here touches a paymaster. `kind` is the action tag the relayer routes on (`createEvent`,
+ * `registerGate`, `approveClaims`, …); `req` is the frozen ERC-2771 tuple and `deviceSig` its r‖s.
+ */
+export interface RelayActionRequest {
+  req: ForwardRequestWire;
+  deviceSig: Hex;
+  kind: string;
+}
+
+/**
+ * What a confirmed action hands back, filled per `kind` from the receipt's logs — an event's id, a
+ * gate's id, an organisation's id, or the token ids a batch touched. All optional: most actions
+ * (publish, cancel, open/close a gate) return nothing but the settled status.
+ */
+export interface RelayActionResult {
+  eventId?: string;
+  gateId?: string;
+  orgId?: string;
+  tokenIds?: string[];
+}
+
+/**
+ * What the relayer answers. `status: 'sent'` is broadcast (the simulation passed), `'confirmed'`
+ * one already mined — a confirmed answer carries `result` directly, a `sent` one leaves the caller
+ * to read the settled `result` off the `relays/{relayId}` document. Refusals arrive as `HttpsError`
+ * with `details.code` — the forwarder codes (`TARGET_NOT_ALLOWED`, `EXPIRED`, `BAD_NONCE` with
+ * `details.nonce`, `NOT_MEMBER`, `DEVICE_LOCKED`, `BAD_DEVICE_SIG`, `SELECTOR_NOT_ALLOWED`,
+ * `TOO_MANY_PENDING`, `TX_REVERT`) or a bubbled Solidity error name the target reverted with.
+ */
+export interface RelayActionResponse {
+  relayId: string;
+  status: 'sent' | 'confirmed';
+  txHash?: Hex;
+  result?: RelayActionResult;
+}
+
 export const api = {
   /**
    * The relayed ticket claim (design §5). The attendee device key signed a `ClaimAuth` digest; the
@@ -283,6 +322,9 @@ export const api = {
   // which the backend maps the contract's revert names onto. `AlreadyCheckedIn` is not one of them:
   // the backend answers `confirmed` for it, so a duplicate resolves as idempotent success.
   relayCheckIn: call<RelayCheckInRequest, RelayCheckInResponse>('relayCheckIn'),
+  // The relayed organizer/transfer/override action (design §1, Phase 2). See the types above;
+  // `sendAction` in `shared/relay/` builds the request, calls this, and follows the relay doc.
+  relayAction: call<RelayActionRequest, RelayActionResponse>('relayAction'),
   startSignup: call<void, { personId: Hex }>('startSignup'),
   // Identity verification is per event, not part of signup. `startKyc` reuses the person's open
   // session when there is one and opens a fresh one otherwise. `callbackUrl` is optional and

@@ -10,6 +10,7 @@ const BASE = {
   VITE_ADDR_ORGANIZERS: `0x${'22'.repeat(20)}`,
   VITE_ADDR_TICKET: `0x${'33'.repeat(20)}`,
   VITE_ADDR_PAYMASTER: `0x${'44'.repeat(20)}`,
+  VITE_ADDR_FORWARDER: `0x${'55'.repeat(20)}`,
   VITE_ENVIO_URL: 'https://indexer.example/v1/graphql',
   VITE_RP_ID: 'monti.despell.io',
   VITE_IPFS_GATEWAY: 'https://gateway.pinata.cloud/ipfs/',
