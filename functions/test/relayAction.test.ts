@@ -9,10 +9,9 @@ import {
   toFunctionSelector,
   type Abi,
 } from 'viem';
-import { identityAbi, organizersAbi, ticketAbi, type Hex } from '@monti/shared';
+import { forwarderAbi, identityAbi, organizersAbi, ticketAbi, type Hex } from '@monti/shared';
 import { Timestamp } from 'firebase-admin/firestore';
 import { createFakeFirestore } from './helpers/fakeFirestore.js';
-import { forwarderAbi } from '../src/lib/forwarderAbi.js';
 import { ACTION_ALLOWLIST } from '../src/lib/actionAllowlist.js';
 
 process.env.GCP_PROJECT_ID = 'monti-dev';

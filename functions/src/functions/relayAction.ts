@@ -12,14 +12,13 @@ import {
   type Abi,
   type TransactionReceipt,
 } from 'viem';
-import { identityAbi, organizersAbi, ticketAbi, type Hex } from '@monti/shared';
+import { forwarderAbi, identityAbi, organizersAbi, ticketAbi, type Hex } from '@monti/shared';
 import { RELAYER_PK } from '../config.js';
 import { resolveCallerAccount } from '../lib/auth.js';
 import { deployment, publicClient } from '../lib/chain.js';
 import { RELAYS, USERS, db } from '../lib/db.js';
 import { getRelayerAccount, sendRelayed } from '../lib/relayer.js';
 import { actionFor, type ActionEntry, type ActionTarget } from '../lib/actionAllowlist.js';
-import { forwarderAbi } from '../lib/forwarderAbi.js';
 import { recordUsage } from '../lib/usage.js';
 
 /**
