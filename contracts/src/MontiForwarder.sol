@@ -105,6 +105,7 @@ contract MontiForwarder {
     ///         `to.call(data ‖ from)` 로 부르고, 대상 revert 는 원문 그대로 버블한다.
     /// @param deviceSig r‖s 64바이트(abi.encode(bytes32,bytes32) 와 동일). Phase 1 과 같은 형식.
     function execute(ForwardRequest calldata req, bytes calldata deviceSig) external returns (bytes memory ret) {
+        if (req.to == address(0)) revert TargetNotAllowed(); // 배선 전 ticket/organizers 가 0 이라 0 대상이 새는 것을 막는다
         if (req.to != ticket && req.to != organizers && req.to != address(identity)) revert TargetNotAllowed();
         if (block.timestamp > req.deadline) revert Expired();
         if (req.nonce != nonces[req.from]) revert BadNonce();
