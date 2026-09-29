@@ -42,8 +42,10 @@ class DeviceKeyUnavailable extends Error {
   }
 }
 const ensureDeviceKey = vi.fn(async () => ({ x: DEVICE_X, y: DEVICE_Y, backing: 'secureEnclave' }));
+const resetDeviceKey = vi.fn(async () => undefined);
 vi.mock('../../shared/deviceKey', () => ({
   ensureDeviceKey,
+  resetDeviceKey,
   ATTENDEE_KEY_ALIAS: 'monti-attendee',
   DeviceKeyUnavailable,
 }));
@@ -99,6 +101,7 @@ beforeEach(() => {
   createPasskey.mockClear();
   ensureDeviceKey.mockReset();
   ensureDeviceKey.mockResolvedValue({ x: DEVICE_X, y: DEVICE_Y, backing: 'secureEnclave' });
+  resetDeviceKey.mockClear();
   signInWithCustomToken.mockClear();
   navigate.mockClear();
   getPlatform.mockReturnValue('ios');
@@ -112,6 +115,7 @@ describe('lost-passkey recovery', () => {
     await waitFor(() => expect(signInWithCustomToken).toHaveBeenCalled());
     // A locally invented challenge is rejected by the server, so the minted one has to travel.
     expect(createPasskey).toHaveBeenCalledWith('MONTI', CHALLENGE);
+    expect(resetDeviceKey).toHaveBeenCalledWith({ alias: 'monti-attendee' });
     expect(ensureDeviceKey).toHaveBeenCalledWith({
       alias: 'monti-attendee',
       requireAuth: true,
