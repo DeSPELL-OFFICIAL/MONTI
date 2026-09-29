@@ -4,14 +4,15 @@ import { StrictMode } from 'react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Hex } from 'viem';
+import { decodeFunctionData, type Hex } from 'viem';
 import { clearSession, setSession } from '../../shared/session';
 import type { RelayView } from '../../shared/api/firestore';
+import { ticketAbi } from '../../shared/chain/abis';
 
 // The claim submission is the relayer callable now, not a sponsored op. The authorization builder
 // (device-key signing + chain nonce read) is mocked to a fixed value, the callable and the relay
-// doc subscription are mocked, and everything else is the real screen. `ticketOp` stays mocked for
-// the one op the attendee still sends themselves — the approval-mode cancel.
+// doc subscription are mocked, and everything else is the real screen. `sendAction` stays mocked
+// for the one other relayed write this screen makes — the approval-mode cancel (`cancelRequest`).
 const ACCOUNT = `0x${'ab'.repeat(20)}` as Hex;
 const AUTH = { eventId: '5', tier: 0, account: ACCOUNT, nonce: '0', deadline: '1799999999' };
 const DEVICE_SIG = `0x${'cd'.repeat(64)}` as Hex;
@@ -36,11 +37,8 @@ async function emitRelay(relay: RelayView): Promise<void> {
   });
 }
 
-const ticketOp = vi.fn();
-vi.mock('../../shared/chain/ops', async (orig) => ({
-  ...(await orig<typeof import('../../shared/chain/ops')>()),
-  ticketOp,
-}));
+const sendAction = vi.fn();
+vi.mock('../../shared/relay/sendAction', () => ({ sendAction }));
 vi.mock('../../shared/chain/accounts', () => ({ getAttendeeAccount: async () => ({ address: ACCOUNT }) }));
 // `navigate` is only read when the screen calls `useNavigate()`, well after this module is
 // initialised, so the factory never touches it too early. `useSearchParams` stays real: the
@@ -77,7 +75,6 @@ vi.mock('../me/useKycLevel', () => ({
 }));
 
 const { Claim } = await import('./Claim');
-const { MAX_WAIT_TIMEOUT_MS } = await import('../../shared/chain/sendSponsoredOp');
 
 /** A callable rejection shaped like the frozen HttpsError: the code (and nonce) live in details. */
 function callableError(code: string, extra: Record<string, unknown> = {}) {
@@ -121,8 +118,8 @@ beforeEach(() => {
   relayClaim.mockResolvedValue({ relayId: 'r1', status: 'confirmed', tokenId: '77' });
   watchRelay.mockClear();
   relayListener = null;
-  ticketOp.mockReset();
-  ticketOp.mockResolvedValue({ success: true, txHash: '0x2', blockNumber: 1n });
+  sendAction.mockReset();
+  sendAction.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -470,11 +467,11 @@ describe('Claim · approval mode', () => {
     renderClaim();
     expect(await screen.findByText('신청 완료 · 승인을 기다리고 있어요')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: '신청 취소' }));
-    await waitFor(() => expect(ticketOp).toHaveBeenCalled());
-    // The cancel is the attendee's own sponsored op, unchanged by the relay switch.
-    expect(ticketOp).toHaveBeenCalledWith(
-      expect.objectContaining({ functionName: 'cancelRequest', args: [5n, 3n], maxTimeoutMs: MAX_WAIT_TIMEOUT_MS }),
-    );
+    await waitFor(() => expect(sendAction).toHaveBeenCalled());
+    // The cancel is relayed now (design §5), through the generic relay client, not relayClaim.
+    const [kind, target, data] = sendAction.mock.calls[0]!;
+    expect([kind, target]).toEqual(['cancelRequest', 'ticket']);
+    expect(decodeFunctionData({ abi: ticketAbi, data })).toEqual({ functionName: 'cancelRequest', args: [5n, 3n] });
     expect(relayClaim).not.toHaveBeenCalled();
   });
 

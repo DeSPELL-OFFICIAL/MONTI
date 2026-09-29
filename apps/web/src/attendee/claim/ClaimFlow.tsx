@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import type { Hex } from 'viem';
+import { encodeFunctionData, type Hex } from 'viem';
 import { Alert, Button, Field, KycBadge, OpProgress, Screen, Sheet, Spinner } from '../../shared/ui';
 import { useCopy } from '../../shared/i18n';
 import { gql } from '../../shared/envio/client';
 import { describeFailure } from '../../shared/errors';
 import { EVENT_QUERY, type EnvioEvent, type EnvioTier } from '../../shared/envio/queries';
 import { useMyRequest } from '../../shared/envio/claimRequests';
-import { ticketOp, OpReverted } from '../../shared/chain/ops';
-import { MAX_WAIT_TIMEOUT_MS } from '../../shared/chain/sendSponsoredOp';
+import { ticketAbi } from '../../shared/chain/abis';
+import { sendAction } from '../../shared/relay/sendAction';
 import { getAttendeeAccount } from '../../shared/chain/accounts';
 import { api } from '../../shared/api/functions';
 import { watchRelay } from '../../shared/api/firestore';
@@ -18,8 +18,6 @@ import { useMyTickets } from '../tickets/useTickets';
 import { buildClaimAuth } from './buildClaimAuth';
 import { relayClaimCopy, relayClaimError } from './claimErrors';
 
-/** `wait` gave up before a cancel op landed. Not a failure — it is still on its way. */
-const STILL_CONFIRMING = 'TIMEOUT';
 /** Level 1 is id + face confirmed; the events that ask for it ask for exactly that. */
 const VERIFIED_LEVEL = 1;
 /** The indexer's own spelling of a called-off event. */
@@ -196,7 +194,7 @@ export function ClaimFlow({ eventId, present }: ClaimFlowProps) {
   const busy = phase === 'saving' || phase === 'sent';
 
   // A cancel op's real failure sentence. Approval mode is the only place cancel runs, so this is
-  // describeFailure (offline, indexer, generic); the STILL_CONFIRMING timeout is handled before it.
+  // describeFailure (offline, indexer, generic); an unknown outcome is handled before it.
   const opFailure = useCallback(
     (cause: unknown): string => (approval ? describeFailure(cause, copy) : copy.claim.failed),
     [approval, copy],
@@ -278,20 +276,24 @@ export function ClaimFlow({ eventId, present }: ClaimFlowProps) {
     setError('');
     setRetrying(false);
     try {
-      await ticketOp({
-        account: await getAttendeeAccount(),
-        orgId: BigInt(event.orgId),
-        functionName: 'cancelRequest',
-        args: [BigInt(eventId), BigInt(myRequest.requestId)],
-        // Same 45s cap the cancel's OpProgress counts to, so a late inclusion still lands (T-SIMP-7).
-        maxTimeoutMs: MAX_WAIT_TIMEOUT_MS,
-        onSubmitted: () => setPhase('sent'),
-        onSendRetry: () => setRetrying(true),
-      });
+      // `cancelRequest` is relayed now (design §5): the device key signs the ForwardRequest and the
+      // relayer submits it. `sendAction` follows the relay doc to a settled answer, so the old op
+      // handle's onSubmitted/onSendRetry and 45s cap are gone — the relayer settles authoritatively.
+      await sendAction(
+        'cancelRequest',
+        'ticket',
+        encodeFunctionData({
+          abi: ticketAbi,
+          functionName: 'cancelRequest',
+          args: [BigInt(eventId), BigInt(myRequest.requestId)],
+        }),
+      );
       await refetchRequest();
       setPhase('idle');
     } catch (cause) {
-      if (cause instanceof OpReverted && cause.revertReason === STILL_CONFIRMING) {
+      // An unknown outcome (a dropped relay listener) is not a failure — the cancel may still land,
+      // so hand it to 'stuck' rather than say it failed. A determinate refusal gets its sentence.
+      if (relayClaimError(cause).code === '') {
         setPhase('stuck');
         return;
       }

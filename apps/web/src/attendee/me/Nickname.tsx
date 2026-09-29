@@ -1,21 +1,15 @@
 import { useState } from 'react';
-import { encodeErrorResult, keccak256, toBytes, type Hex } from 'viem';
+import { encodeFunctionData, keccak256, toBytes } from 'viem';
 import { Alert, Button, Field } from '../../shared/ui';
 import { useCopy } from '../../shared/i18n';
 import type { Copy } from '../../shared/copy/index';
 import { identityAbi } from '../../shared/chain/abis';
 import { readIdentity } from '../../shared/chain/reads';
-import { identityOp } from '../../shared/chain/ops';
+import { sendAction } from '../../shared/relay/sendAction';
 import { getAttendeeAccount } from '../../shared/chain/accounts';
 import { saveUserProfile } from '../../shared/api/firestore';
 
 const ZERO_ADDRESS = `0x${'00'.repeat(20)}`;
-
-/**
- * Platform budget: a name change belongs to nobody's event, so the paymaster sponsors it out
- * of the platform's own allowance rather than an organiser's.
- */
-const PLATFORM_ORG_ID = 0n;
 
 /**
  * `Identity.setNickname` refuses for exactly three reasons, and they are not the same reason.
@@ -30,42 +24,27 @@ const REVERT_SENTENCES: ReadonlyArray<readonly [string, keyof Copy['me']]> = [
 ];
 
 /**
- * `wait` gave up before the operation landed. Not a refusal — it is still on its way, and it
- * carries no `0x` (`ops.ts`, `sendSponsoredOp.ts`). The claim and handover screens branch on
- * the same sentinel; a name change has to as well, or it invites a second `setNickname` on top
- * of one that is about to land.
+ * The forwarder/contract error code a relayed `setNickname` carries on a determinate refusal, read
+ * structurally off `details.code` (the frozen `{ code }` shape a `relays/{id}` doc's `error`
+ * carries), so the branch survives a screen test that mocks `relay/sendAction` whole. Empty for an
+ * unknown outcome — a dropped relay listener — where the name may yet have been taken, so the
+ * screen says "still confirming" rather than inviting a second `setNickname`.
  */
-const STILL_CONFIRMING = 'TIMEOUT';
-
-/**
- * The reason an operation carried back, read structurally rather than with `instanceof
- * OpReverted`, so the branch survives a screen test that mocks `chain/ops` whole — the same
- * reason `callableFailure` does it that way.
- */
-function revertReasonOf(error: unknown): Hex | typeof STILL_CONFIRMING | undefined {
-  const reason = (error as { revertReason?: unknown } | null)?.revertReason;
-  if (reason === STILL_CONFIRMING) return STILL_CONFIRMING;
-  return typeof reason === 'string' && reason.startsWith('0x') ? (reason as Hex) : undefined;
-}
-
-/** The four-byte selector the generated ABI gives this error, or nothing when it dropped it. */
-function selectorOf(errorName: string): string | undefined {
-  try {
-    // Sliced, not compared whole: an error that later takes an argument would encode longer.
-    return encodeErrorResult({ abi: identityAbi, errorName }).slice(0, 10).toLowerCase();
-  } catch {
-    return undefined;
+function relayCode(error: unknown): string {
+  const details = (error as { details?: unknown } | null)?.details;
+  if (typeof details === 'object' && details !== null) {
+    const { code } = details as { code?: unknown };
+    if (typeof code === 'string') return code;
   }
+  return '';
 }
 
 /** What a failed send should say, and whether it is a failure at all. */
 function failure(copy: Copy, error: unknown): { tone: 'info' | 'error'; message: string } {
-  const reason = revertReasonOf(error);
-  if (reason === STILL_CONFIRMING) return { tone: 'info', message: copy.me.nicknameConfirming };
-  if (reason === undefined) return { tone: 'error', message: copy.common.error };
-  const selector = reason.slice(0, 10).toLowerCase();
-  for (const [errorName, key] of REVERT_SENTENCES) {
-    if (selectorOf(errorName) === selector) return { tone: 'error', message: copy.me[key] };
+  const code = relayCode(error);
+  if (code === '') return { tone: 'info', message: copy.me.nicknameConfirming };
+  for (const [name, key] of REVERT_SENTENCES) {
+    if (name === code) return { tone: 'error', message: copy.me[key] };
   }
   return { tone: 'error', message: copy.common.error };
 }
@@ -104,7 +83,7 @@ export function Nickname() {
       // why `NicknameTaken` still has a sentence below.
       const owner = await readIdentity().nicknameOwner(hash);
       if (owner.toLowerCase() === account.address.toLowerCase()) {
-        // The contract returns early for this, so sending would burn a sponsored operation to
+        // The contract returns early for this, so sending would burn a relayed operation to
         // achieve nothing.
         setTone('info');
         setMessage(copy.me.nicknameMine);
@@ -115,12 +94,13 @@ export function Nickname() {
         setMessage(copy.me.nicknameTaken);
         return;
       }
-      await identityOp({
-        account,
-        orgId: PLATFORM_ORG_ID,
-        functionName: 'setNickname',
-        args: [hash, name],
-      });
+      // Platform action: a name change belongs to nobody's event, so the relayer sponsors it out
+      // of the platform's own budget rather than an organiser's.
+      await sendAction(
+        'setNickname',
+        'identity',
+        encodeFunctionData({ abi: identityAbi, functionName: 'setNickname', args: [hash, name] }),
+      );
       // Only after the chain took it: the profile copy is a convenience mirror of an on-chain
       // fact, and a mirror of something that never happened is worse than no mirror.
       await saveUserProfile({ nickname: name });

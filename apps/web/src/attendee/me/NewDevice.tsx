@@ -1,19 +1,17 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import type { Abi } from 'viem';
+import { encodeFunctionData } from 'viem';
 import { DEVICE_COOLDOWN_SECONDS, MIGRATE_DELAY_SECONDS, type Hex } from '@monti/shared';
 import { Alert, Button } from '../../shared/ui';
 import { fmt, useCopy, useLocale } from '../../shared/i18n';
 import type { Copy } from '../../shared/copy/index';
 import { api, callableFailure } from '../../shared/api/functions';
 import { identityAbi, ticketAbi } from '../../shared/chain/abis';
-import { getAttendeeAccount } from '../../shared/chain/accounts';
-import { OpReverted, identityOp, ticketOp } from '../../shared/chain/ops';
 import { readIdentity, readTicket } from '../../shared/chain/reads';
-import { revertMatch } from '../../shared/chain/revert';
+import { sendAction } from '../../shared/relay/sendAction';
+import { relayActionCode } from '../transfer/useTransfer';
 import { useSession } from '../../shared/session';
-import { STILL_CONFIRMING, orgIdOfTicket } from '../transfer/offers';
 import { loadMyTickets } from '../tickets/useTickets';
 
 const SECONDS_PER_HOUR = 3_600;
@@ -46,15 +44,12 @@ function daysUntil(readyAt: number, now: number): number {
 }
 
 /**
- * Whether an operation was refused with one named error. The four bytes are read through the
- * shared {@link revertMatch}, against the ABI of the contract that raised them, so a name sub-plan
- * 01 renames stops matching instead of throwing inside the `catch` that calls this.
+ * Whether a relayed operation was refused with one named error. The relayer names the revert in the
+ * settled doc's `error.code`, read through {@link relayActionCode}; an unknown outcome (empty code)
+ * is not a match, so a dropped relay listener is never mistaken for a determinate refusal.
  */
-function refusedWith(abi: Abi, cause: unknown, errorName: string): boolean {
-  if (!(cause instanceof OpReverted)) return false;
-  const reason = cause.revertReason;
-  if (!reason || reason === STILL_CONFIRMING) return false;
-  return revertMatch(abi, reason, [[errorName, true]] as const) === true;
+function refusedWith(cause: unknown, errorName: string): boolean {
+  return relayActionCode(cause) === errorName;
 }
 
 /** The single banner: the server's sentence if it has spoken, otherwise the chain's count. */
@@ -249,24 +244,23 @@ export function NewDevice() {
     }
   }
 
-  /** `Identity.cancelRotation()`: no arguments — the contract reads `msg.sender` — and
-   *  Platform-sponsored, so `orgId` is 0 rather than any organisation's. */
+  /** `Identity.cancelRotation()`: no arguments — the forwarder passes the account through as
+   *  `_msgSender()` — and relayed on the platform's budget, not any organisation's. */
   async function undoRotation(): Promise<void> {
     setUndoPhase('working');
     setUndoError('');
     try {
-      await identityOp({
-        account: await getAttendeeAccount(),
-        orgId: 0n,
-        functionName: 'cancelRotation',
-        args: [],
-      });
+      await sendAction(
+        'cancelRotation',
+        'identity',
+        encodeFunctionData({ abi: identityAbi, functionName: 'cancelRotation', args: [] }),
+      );
       setUndoPhase('done');
     } catch (cause) {
       // One refusal covers both "no rotation" and "the window closed": the contract will not
       // tell them apart, and neither does the sentence.
       setUndoError(
-        refusedWith(identityAbi, cause, 'NoRotationToCancel') ? copy.me.undoGone : copy.me.undoFailed,
+        refusedWith(cause, 'NoRotationToCancel') ? copy.me.undoGone : copy.me.undoFailed,
       );
       setUndoPhase('idle');
     }
@@ -275,8 +269,7 @@ export function NewDevice() {
   /**
    * One `migrate` per ticket, one at a time, the way the invite inbox collects offers: a single
    * refusal — one ticket already spent, one event that voided it — must not abandon the rest.
-   * Every operation is sponsored by the organisation that owns the ticket's event (ArgKind
-   * TokenId), which is what `orgIdOfTicket` answers.
+   * Every operation is relayed, so nothing here needs the ticket's organisation.
    */
   async function migrateTickets(): Promise<void> {
     setMigratePhase('working');
@@ -285,19 +278,17 @@ export function NewDevice() {
     let moved = 0;
     let failure = '';
     try {
-      const account = await getAttendeeAccount();
       for (const ticket of pending) {
         const tokenId = BigInt(ticket.tokenId);
         try {
-          await ticketOp({
-            account,
-            orgId: await orgIdOfTicket(tokenId),
-            functionName: 'migrate',
-            args: [tokenId],
-          });
+          await sendAction(
+            'migrate',
+            'ticket',
+            encodeFunctionData({ abi: ticketAbi, functionName: 'migrate', args: [tokenId] }),
+          );
           moved += 1;
         } catch (cause) {
-          failure ||= refusedWith(ticketAbi, cause, 'RotationPending')
+          failure ||= refusedWith(cause, 'RotationPending')
             ? fmt(copy.me.migrateWait, { hours: undoHours })
             : copy.me.migrateFailed;
         }

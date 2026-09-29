@@ -4,7 +4,8 @@ import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { toFunctionSelector } from 'viem';
+import { decodeFunctionData } from 'viem';
+import { identityAbi, ticketAbi } from '../../shared/chain/abis';
 import { DEVICE_COOLDOWN_SECONDS, MIGRATE_DELAY_SECONDS } from '@monti/shared';
 import { ko } from '../../shared/copy/index';
 
@@ -43,16 +44,14 @@ vi.mock('../../shared/chain/reads', async (orig) => ({
   }),
   readTicket: () => ({ migrateDelay, eventOf, eventMeta }),
 }));
-// The real `OpReverted` is kept: both recovery buttons tell a named refusal from anything else
-// by the four bytes that class carries, and a stubbed-out module would make `instanceof` throw.
-const identityOp = vi.fn();
-const ticketOp = vi.fn();
-vi.mock('../../shared/chain/ops', async (orig) => ({
-  ...(await orig<typeof import('../../shared/chain/ops')>()),
-  identityOp,
-  ticketOp,
-}));
+// The relay client is mocked. Both recovery buttons tell a named refusal from anything else by
+// the contract error name the relayer reports in `details.code`.
+const sendAction = vi.fn();
+vi.mock('../../shared/relay/sendAction', () => ({ sendAction }));
 vi.mock('../../shared/chain/accounts', () => ({ getAttendeeAccount: async () => ({ address: ACCOUNT }) }));
+
+/** A relay refusal that names the contract error, the way `sendAction` rejects on a failed doc. */
+const reverted = (code: string) => ({ details: { code } });
 
 // The tickets to migrate are read for the account the rotation pushed aside, not for the
 // signed-in one — `migrate` is what moves them, so until it runs the index still shows the old
@@ -121,7 +120,6 @@ vi.mock('react-router-dom', async (orig) => ({
 
 const { setSession } = await import('../../shared/session');
 const { fmt } = await import('../../shared/i18n');
-const { OpReverted } = await import('../../shared/chain/ops');
 const { DeviceLock } = await import('./DeviceLock');
 const { NewDevice } = await import('./NewDevice');
 const { Profile, KycStatus } = await import('./Profile');
@@ -143,8 +141,7 @@ beforeEach(() => {
   // The plain case: this person has never been rotated, so neither recovery button is offered.
   rotatedFrom.mockReset().mockResolvedValue(NO_ACCOUNT);
   rotatedAt.mockReset().mockResolvedValue(0n);
-  identityOp.mockReset().mockResolvedValue({ success: true });
-  ticketOp.mockReset().mockResolvedValue({ success: true });
+  sendAction.mockReset().mockResolvedValue(undefined);
   loadMyTickets.mockReset().mockResolvedValue([]);
   gql.mockReset();
   loadOrgName.mockReset();
@@ -278,10 +275,11 @@ describe('NewDevice', () => {
     rotatedAt.mockResolvedValue(BigInt(NOW() - 3_600));
     wrap(<NewDevice />);
     await userEvent.click(await screen.findByRole('button', { name: ko.me.undoCta }));
-    // Platform-sponsored (ArgKind 1), which is the whole point of C3: the pushed-aside account
-    // is the one holding nothing, so `orgId` is 0 rather than any organisation's.
-    expect(identityOp).toHaveBeenCalledWith(
-      expect.objectContaining({ orgId: 0n, functionName: 'cancelRotation', args: [] }),
+    // Relayed on the platform's budget: the pushed-aside account holds nothing, and the relayer
+    // pays, so nothing here names an organisation.
+    expect(sendAction).toHaveBeenCalledWith('cancelRotation', 'identity', expect.any(String));
+    expect(decodeFunctionData({ abi: identityAbi, data: sendAction.mock.calls[0]![2] }).functionName).toBe(
+      'cancelRotation',
     );
     expect(await screen.findByText(ko.me.undoDone)).toBeInTheDocument();
   });
@@ -296,9 +294,7 @@ describe('NewDevice', () => {
   it('says the window has closed when the contract refuses the undo', async () => {
     rotatedFrom.mockResolvedValue(ACCOUNT);
     rotatedAt.mockResolvedValue(BigInt(NOW() - 3_600));
-    identityOp.mockRejectedValueOnce(
-      new OpReverted('cancelRotation', toFunctionSelector('NoRotationToCancel()')),
-    );
+    sendAction.mockRejectedValueOnce(reverted('NoRotationToCancel'));
     wrap(<NewDevice />);
     await userEvent.click(await screen.findByRole('button', { name: ko.me.undoCta }));
     expect(await screen.findByText(ko.me.undoGone)).toBeInTheDocument();
@@ -331,11 +327,13 @@ describe('NewDevice', () => {
     // Read for the pushed-aside account, not for the signed-in one: until `migrate` runs, the
     // index still shows the old account holding them.
     expect(loadMyTickets).toHaveBeenCalledWith(OTHER.toLowerCase());
-    expect(ticketOp).toHaveBeenCalledTimes(1);
-    // TokenId-sponsored, so the organisation is the ticket's own event's — never invented here.
-    expect(ticketOp).toHaveBeenCalledWith(
-      expect.objectContaining({ orgId: 9n, functionName: 'migrate', args: [7n] }),
-    );
+    expect(sendAction).toHaveBeenCalledTimes(1);
+    // Relayed, so nothing here derives the ticket's event organisation.
+    expect(sendAction).toHaveBeenCalledWith('migrate', 'ticket', expect.any(String));
+    expect(decodeFunctionData({ abi: ticketAbi, data: sendAction.mock.calls[0]![2] })).toEqual({
+      functionName: 'migrate',
+      args: [7n],
+    });
     expect(await screen.findByText(fmt(ko.me.migrateDone, { count: 1 }))).toBeInTheDocument();
   });
 
@@ -343,7 +341,7 @@ describe('NewDevice', () => {
     rotatedFrom.mockResolvedValue(OTHER);
     rotatedAt.mockResolvedValue(BigInt(NOW() - 2 * DAY));
     loadMyTickets.mockResolvedValue([{ tokenId: '7', state: 'before' }]);
-    ticketOp.mockRejectedValueOnce(new OpReverted('migrate', toFunctionSelector('RotationPending()')));
+    sendAction.mockRejectedValueOnce(reverted('RotationPending'));
     wrap(<NewDevice />);
     await userEvent.click(await screen.findByRole('button', { name: ko.me.migrateCta }));
     expect(await screen.findByText(fmt(ko.me.migrateWait, { hours: UNDO_HOURS }))).toBeInTheDocument();
@@ -440,7 +438,7 @@ describe('the display name', () => {
     await waitFor(() => expect(saveUserProfile).toHaveBeenCalledWith({ displayName: '김민지' }));
 
     // 별명 costs a sponsored write and is unique across everybody; this costs neither.
-    expect(identityOp).not.toHaveBeenCalled();
+    expect(sendAction).not.toHaveBeenCalled();
     expect(nicknameOwner).not.toHaveBeenCalled();
     expect(screen.getByLabelText(ko.me.nickname)).toHaveValue('');
   });

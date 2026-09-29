@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
-import { toFunctionSelector } from 'viem';
+import { decodeFunctionData } from 'viem';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearSession, setSession } from '../../shared/session';
 
@@ -31,14 +31,11 @@ vi.mock('../../shared/api/functions', async (orig) => ({
   api: { createTransferInvite },
 }));
 
-// The operation layer is mocked but the real OpReverted class is kept: a timed-out send and a
-// refused one are told apart by the sentinel reason that class carries.
-const ticketOp = vi.fn();
-vi.mock('../../shared/chain/ops', async (orig) => ({
-  ...(await orig<typeof import('../../shared/chain/ops')>()),
-  ticketOp,
-}));
-vi.mock('../../shared/chain/accounts', () => ({ getAttendeeAccount: async () => ({ address: ME }) }));
+// The relay client is mocked. A determinate refusal carries the contract error name in
+// `details.code`, exactly as `sendAction` rejects on a failed relay doc; an unknown outcome — a
+// dropped relay listener — carries none, and the screen reads that as still confirming.
+const sendAction = vi.fn();
+vi.mock('../../shared/relay/sendAction', () => ({ sendAction }));
 
 const ticket = { eventOf: vi.fn(), eventMeta: vi.fn(), offerOf: vi.fn() };
 vi.mock('../../shared/chain/reads', async (orig) => ({
@@ -49,8 +46,12 @@ vi.mock('../../shared/chain/reads', async (orig) => ({
 const { TransferInvite } = await import('./Invite');
 const { InviteLanding, INVITE_KEY } = await import('./InviteLanding');
 const { CallableError } = await import('../../shared/api/functions');
-const { OpReverted } = await import('../../shared/chain/ops');
-const { MAX_WAIT_TIMEOUT_MS } = await import('../../shared/chain/sendSponsoredOp');
+const { ticketAbi } = await import('../../shared/chain/abis');
+
+/** A relay refusal that names the contract error, the way `sendAction` rejects on a failed doc. */
+const reverted = (code: string) => new CallableError('failed-precondition', code, { code });
+/** An unknown outcome: a dropped relay listener rejects with no `details.code`. */
+const dropped = () => new Error('relay listener dropped');
 
 function Address() {
   return <span data-testid="address">{useLocation().pathname}</span>;
@@ -88,8 +89,8 @@ beforeEach(() => {
   sessionStorage.clear();
   createTransferInvite.mockReset();
   createTransferInvite.mockResolvedValue(INVITE);
-  ticketOp.mockReset();
-  ticketOp.mockResolvedValue({ success: true, txHash: '0x2', blockNumber: 1n });
+  sendAction.mockReset();
+  sendAction.mockResolvedValue(undefined);
   ticket.eventOf.mockResolvedValue(5n);
   ticket.eventMeta.mockResolvedValue({ orgId: 9n, requireKyc: false });
   // Nothing open on chain: an absent offer reads back as the zero struct, not as a failure.
@@ -111,17 +112,15 @@ describe('TransferInvite', () => {
     await send();
 
     expect(createTransferInvite).toHaveBeenCalledWith({ tokenId: '1', phoneE164: PHONE });
-    expect(ticketOp).toHaveBeenCalledWith(
-      expect.objectContaining({
-        orgId: 9n,
-        functionName: 'createOffer',
-        args: [1n, COMMITMENT, BigInt(EXPIRES_AT)],
-        maxTimeoutMs: MAX_WAIT_TIMEOUT_MS,
-      }),
-    );
+    const [kind, target, data] = sendAction.mock.calls[0]!;
+    expect([kind, target]).toEqual(['createOffer', 'ticket']);
+    expect(decodeFunctionData({ abi: ticketAbi, data })).toEqual({
+      functionName: 'createOffer',
+      args: [1n, COMMITMENT, BigInt(EXPIRES_AT)],
+    });
     // The commitment can only come from the server's answer, so the order is not optional.
     expect(createTransferInvite.mock.invocationCallOrder[0]).toBeLessThan(
-      ticketOp.mock.invocationCallOrder[0]!,
+      sendAction.mock.invocationCallOrder[0]!,
     );
     expect(await screen.findByText('초대를 보냈어요. 상대가 가입하면 티켓이 자동으로 전달돼요.')).toBeInTheDocument();
   });
@@ -139,7 +138,7 @@ describe('TransferInvite', () => {
   });
 
   it('shows no sms link when the offer never landed', async () => {
-    ticketOp.mockRejectedValueOnce(new OpReverted('createOffer', '0xdeadbeef'));
+    sendAction.mockRejectedValueOnce(reverted('SomethingUnmapped'));
     renderInvite();
     await send();
 
@@ -148,7 +147,7 @@ describe('TransferInvite', () => {
   });
 
   it('reads a timed-out send as still confirming, and still shows no link', async () => {
-    ticketOp.mockRejectedValueOnce(new OpReverted('createOffer', 'TIMEOUT'));
+    sendAction.mockRejectedValueOnce(dropped());
     renderInvite();
     await send();
 
@@ -161,7 +160,7 @@ describe('TransferInvite', () => {
   });
 
   it('asks the chain again after a timeout and finds the offer landed', async () => {
-    ticketOp.mockRejectedValueOnce(new OpReverted('createOffer', 'TIMEOUT'));
+    sendAction.mockRejectedValueOnce(dropped());
     renderInvite();
     await send();
     await screen.findByText('아직 확인 중이에요. 잠시 뒤 내 티켓에서 확인해 주세요.');
@@ -211,7 +210,7 @@ describe('TransferInvite', () => {
     await userEvent.click(screen.getByRole('button', { name: '문구 다시 받기' }));
     expect(createTransferInvite).toHaveBeenCalledWith({ tokenId: '1', phoneE164: PHONE });
     // The offer is already there, so nothing new goes on chain.
-    expect(ticketOp).not.toHaveBeenCalled();
+    expect(sendAction).not.toHaveBeenCalled();
     expect(await screen.findByRole('link', { name: '문자 앱 열기' })).toHaveAttribute('href', SMS_URI);
   });
 
@@ -231,9 +230,9 @@ describe('TransferInvite', () => {
     const cancel = await screen.findByRole('button', { name: '초대 취소' });
     expect(createTransferInvite).not.toHaveBeenCalled();
     await userEvent.click(cancel);
-    expect(ticketOp).toHaveBeenCalledWith(
-      expect.objectContaining({ orgId: 9n, functionName: 'cancelOffer', args: [1n], maxTimeoutMs: MAX_WAIT_TIMEOUT_MS }),
-    );
+    const [kind, target, data] = sendAction.mock.calls[0]!;
+    expect([kind, target]).toEqual(['cancelOffer', 'ticket']);
+    expect(decodeFunctionData({ abi: ticketAbi, data })).toEqual({ functionName: 'cancelOffer', args: [1n] });
     expect(await screen.findByText('초대를 취소했어요')).toBeInTheDocument();
   });
 });
@@ -254,7 +253,7 @@ describe('an invite the server refuses', () => {
       renderInvite();
       await send();
       expect(await screen.findByText(sentence)).toBeInTheDocument();
-      expect(ticketOp).not.toHaveBeenCalled();
+      expect(sendAction).not.toHaveBeenCalled();
     });
   }
 });
@@ -264,17 +263,17 @@ describe('an invite the server refuses', () => {
  * not mine, the deadline it was given is already behind us — are not in `_update`'s eight.
  */
 const OFFER_REVERTS: ReadonlyArray<readonly [string, string]> = [
-  ['Unauthorized()', '내 티켓이 아니에요.'],
-  ['OfferExpired()', '초대가 만료됐어요. 다시 보내 달라고 해 주세요.'],
-  ['TransfersDisabled()', '이 행사는 친구에게 줄 수 없어요.'],
-  ['AlreadyCheckedIn()', '이미 입장한 티켓이에요.'],
-  ['TransferLimitReached()', '이 티켓은 더 이상 친구에게 줄 수 없어요.'],
+  ['Unauthorized', '내 티켓이 아니에요.'],
+  ['OfferExpired', '초대가 만료됐어요. 다시 보내 달라고 해 주세요.'],
+  ['TransfersDisabled', '이 행사는 친구에게 줄 수 없어요.'],
+  ['AlreadyCheckedIn', '이미 입장한 티켓이에요.'],
+  ['TransferLimitReached', '이 티켓은 더 이상 친구에게 줄 수 없어요.'],
 ];
 
 describe('an offer the contract refuses', () => {
-  for (const [signature, sentence] of OFFER_REVERTS) {
-    it(`names the rule ${signature} is`, async () => {
-      ticketOp.mockRejectedValueOnce(new OpReverted('createOffer', toFunctionSelector(signature)));
+  for (const [name, sentence] of OFFER_REVERTS) {
+    it(`names the rule ${name} is`, async () => {
+      sendAction.mockRejectedValueOnce(reverted(name));
       renderInvite();
       await send();
       expect(await screen.findByText(sentence)).toBeInTheDocument();

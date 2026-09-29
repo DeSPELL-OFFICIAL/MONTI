@@ -2,7 +2,7 @@ import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { toFunctionSelector } from 'viem';
+import { decodeFunctionData } from 'viem';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearSession, setSession } from '../../shared/session';
 
@@ -15,13 +15,11 @@ vi.mock('../../shared/api/functions', async (orig) => ({
   api: { pendingOffers },
 }));
 
-// The real OpReverted stays: the inbox tells a refusal from a send still on its way by it.
-const ticketOp = vi.fn();
-vi.mock('../../shared/chain/ops', async (orig) => ({
-  ...(await orig<typeof import('../../shared/chain/ops')>()),
-  ticketOp,
-}));
-vi.mock('../../shared/chain/accounts', () => ({ getAttendeeAccount: async () => ({ address: ME }) }));
+// The relay client is mocked. A determinate refusal carries the contract error name in
+// `details.code`; an unknown outcome (a dropped relay listener) carries none, and the inbox reads
+// that as still confirming rather than as a refusal.
+const sendAction = vi.fn();
+vi.mock('../../shared/relay/sendAction', () => ({ sendAction }));
 
 // The readable half of an event lives in one IPFS document; the row asks for it by the CID
 // `eventMeta` already handed over, so naming the event costs no extra chain read.
@@ -40,7 +38,13 @@ vi.mock('../../shared/chain/reads', async (orig) => ({
 }));
 
 const { Inbox, acceptPendingOffers } = await import('./Inbox');
-const { OpReverted } = await import('../../shared/chain/ops');
+const { CallableError } = await import('../../shared/api/functions');
+const { ticketAbi } = await import('../../shared/chain/abis');
+
+/** A relay refusal that names the contract error, the way `sendAction` rejects on a failed doc. */
+const reverted = (code: string) => new CallableError('failed-precondition', code, { code });
+/** An unknown outcome: a dropped relay listener rejects with no `details.code`. */
+const dropped = () => new Error('relay listener dropped');
 
 function renderInbox() {
   // Its own client per render: a cached answer from the test before would decide this one.
@@ -63,8 +67,8 @@ beforeEach(() => {
   setSession({ status: 'signedIn', account: ME });
   pendingOffers.mockReset();
   pendingOffers.mockResolvedValue([{ tokenId: '1', attesterSig: SIG, inviteId: 'i1' }]);
-  ticketOp.mockReset();
-  ticketOp.mockResolvedValue({ success: true, txHash: '0x2', blockNumber: 1n });
+  sendAction.mockReset();
+  sendAction.mockResolvedValue(undefined);
   ticket.eventOf.mockResolvedValue(5n);
   ticket.eventMeta.mockResolvedValue({ orgId: 9n, requireKyc: false, imageCid: 'bafkcid' });
   identity.kycLevelOf.mockResolvedValue(0);
@@ -104,7 +108,7 @@ describe('Inbox', () => {
       { tokenId: '1', attesterSig: SIG, inviteId: 'i1' },
       { tokenId: '7', attesterSig: SIG, inviteId: 'i2' },
     ]);
-    ticketOp.mockRejectedValueOnce(new OpReverted('acceptOffer', toFunctionSelector('OfferExpired()')));
+    sendAction.mockRejectedValueOnce(reverted('OfferExpired'));
     renderInbox();
     const rows = await screen.findAllByRole('listitem');
     const expired = '초대가 만료됐어요. 다시 보내 달라고 해 주세요.';
@@ -129,9 +133,9 @@ describe('Inbox', () => {
     expect(await screen.findByText('2장이 기다리고 있어요')).toBeInTheDocument();
 
     await accept();
-    expect(ticketOp).toHaveBeenCalledWith(
-      expect.objectContaining({ orgId: 9n, functionName: 'acceptOffer', args: [1n, SIG] }),
-    );
+    const [kind, target, data] = sendAction.mock.calls[0]!;
+    expect([kind, target]).toEqual(['acceptOffer', 'ticket']);
+    expect(decodeFunctionData({ abi: ticketAbi, data })).toEqual({ functionName: 'acceptOffer', args: [1n, SIG] });
     expect(await screen.findByText('티켓을 받았어요')).toBeInTheDocument();
   });
 
@@ -143,7 +147,7 @@ describe('Inbox', () => {
     expect(screen.queryByRole('button', { name: '받기' })).toBeNull();
     await userEvent.click(screen.getByRole('button', { name: '본인인증 하기' }));
     expect(await screen.findByText('본인인증 화면')).toBeInTheDocument();
-    expect(ticketOp).not.toHaveBeenCalled();
+    expect(sendAction).not.toHaveBeenCalled();
   });
 
   it('keeps the button for a verified attendee on an event that asks for it', async () => {
@@ -151,13 +155,13 @@ describe('Inbox', () => {
     identity.kycLevelOf.mockResolvedValue(1);
     renderInbox();
     await accept();
-    expect(ticketOp).toHaveBeenCalledWith(
-      expect.objectContaining({ functionName: 'acceptOffer', args: [1n, SIG] }),
-    );
+    const [kind, target, data] = sendAction.mock.calls[0]!;
+    expect([kind, target]).toEqual(['acceptOffer', 'ticket']);
+    expect(decodeFunctionData({ abi: ticketAbi, data })).toEqual({ functionName: 'acceptOffer', args: [1n, SIG] });
   });
 
   it('reads a timed-out accept as still confirming, never as a refusal', async () => {
-    ticketOp.mockRejectedValueOnce(new OpReverted('acceptOffer', 'TIMEOUT'));
+    sendAction.mockRejectedValueOnce(dropped());
     renderInbox();
     await accept();
     expect(await screen.findByText('아직 확인 중이에요. 잠시 뒤 내 티켓에서 확인해 주세요.')).toBeInTheDocument();
@@ -167,18 +171,18 @@ describe('Inbox', () => {
 
 /** `acceptOffer` has its own refusals on top of the eight `_update` shares with a handover. */
 const ACCEPT_REVERTS: ReadonlyArray<readonly [string, string]> = [
-  ['NoOffer()', '이 초대는 더 이상 남아 있지 않아요.'],
-  ['OfferExpired()', '초대가 만료됐어요. 다시 보내 달라고 해 주세요.'],
-  ['BadAttesterSig()', '이 초대는 다른 분에게 온 거예요.'],
-  ['KycRequired()', '본인인증 후 받을 수 있어요'],
-  ['NotMember()', '가입을 먼저 마쳐 주세요.'],
-  ['MaxPerWalletExceeded()', '이 행사 티켓을 이미 최대 수만큼 갖고 있어요.'],
+  ['NoOffer', '이 초대는 더 이상 남아 있지 않아요.'],
+  ['OfferExpired', '초대가 만료됐어요. 다시 보내 달라고 해 주세요.'],
+  ['BadAttesterSig', '이 초대는 다른 분에게 온 거예요.'],
+  ['KycRequired', '본인인증 후 받을 수 있어요'],
+  ['NotMember', '가입을 먼저 마쳐 주세요.'],
+  ['MaxPerWalletExceeded', '이 행사 티켓을 이미 최대 수만큼 갖고 있어요.'],
 ];
 
 describe('an accept the contract refuses', () => {
-  for (const [signature, sentence] of ACCEPT_REVERTS) {
-    it(`says what ${signature} means`, async () => {
-      ticketOp.mockRejectedValueOnce(new OpReverted('acceptOffer', toFunctionSelector(signature)));
+  for (const [name, sentence] of ACCEPT_REVERTS) {
+    it(`says what ${name} means`, async () => {
+      sendAction.mockRejectedValueOnce(reverted(name));
       renderInbox();
       await accept();
       expect(await screen.findByText(sentence)).toBeInTheDocument();
@@ -186,7 +190,7 @@ describe('an accept the contract refuses', () => {
   }
 
   it('keeps the generic sentence for a refusal nothing here knows', async () => {
-    ticketOp.mockRejectedValueOnce(new OpReverted('acceptOffer', '0xdeadbeef'));
+    sendAction.mockRejectedValueOnce(reverted('SomethingUnmapped'));
     renderInbox();
     await accept();
     expect(await screen.findByText('티켓을 받지 못했어요. 잠시 뒤 다시 시도해 주세요.')).toBeInTheDocument();
@@ -201,26 +205,27 @@ describe('acceptPendingOffers', () => {
       { tokenId: '3', attesterSig: SIG, inviteId: 'i3' },
     ]);
     // The middle one is gated on a verification this attendee has not done.
-    ticketOp.mockResolvedValueOnce({ success: true, txHash: '0x1', blockNumber: 1n });
-    ticketOp.mockRejectedValueOnce(new OpReverted('acceptOffer', toFunctionSelector('KycRequired()')));
-    ticketOp.mockResolvedValueOnce({ success: true, txHash: '0x3', blockNumber: 1n });
+    sendAction.mockResolvedValueOnce(undefined);
+    sendAction.mockRejectedValueOnce(reverted('KycRequired'));
+    sendAction.mockResolvedValueOnce(undefined);
 
     // One reverting row must not abort the rest of the inbox.
     expect(await acceptPendingOffers()).toBe(2);
-    expect(ticketOp).toHaveBeenCalledTimes(3);
+    expect(sendAction).toHaveBeenCalledTimes(3);
   });
 
   it('counts nothing, and asks the chain nothing, when the inbox is empty', async () => {
     pendingOffers.mockResolvedValue([]);
     expect(await acceptPendingOffers()).toBe(0);
-    expect(ticketOp).not.toHaveBeenCalled();
+    expect(sendAction).not.toHaveBeenCalled();
   });
 
-  it('takes the org the operation is sponsored by from the caller when it is given one', async () => {
-    const orgIdOf = vi.fn(async () => 42n);
-    expect(await acceptPendingOffers(orgIdOf)).toBe(1);
-    expect(orgIdOf).toHaveBeenCalledWith(1n);
-    expect(ticketOp).toHaveBeenCalledWith(expect.objectContaining({ orgId: 42n }));
+  it('relays one acceptOffer per row without deriving the event organisation', async () => {
+    // The relayer sponsors the collect, so nothing here reads the chain for an orgId.
+    expect(await acceptPendingOffers()).toBe(1);
+    expect(sendAction).toHaveBeenCalledTimes(1);
+    const [kind, target] = sendAction.mock.calls[0]!;
+    expect([kind, target]).toEqual(['acceptOffer', 'ticket']);
     expect(ticket.eventOf).not.toHaveBeenCalled();
   });
 });

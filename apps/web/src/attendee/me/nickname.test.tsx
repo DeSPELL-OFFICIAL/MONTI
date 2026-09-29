@@ -1,6 +1,6 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { encodeErrorResult, keccak256, toBytes } from 'viem';
+import { decodeFunctionData, keccak256, toBytes } from 'viem';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { identityAbi } from '../../shared/chain/abis';
 
@@ -13,8 +13,8 @@ const SOMEBODY_ELSE = `0x${'cc'.repeat(20)}`;
 const nicknameOwner = vi.fn(async () => SOMEBODY_ELSE as string);
 vi.mock('../../shared/chain/reads', () => ({ readIdentity: () => ({ nicknameOwner }) }));
 
-const identityOp = vi.fn(async () => ({ success: true, txHash: '0x2', blockNumber: 1n }));
-vi.mock('../../shared/chain/ops', () => ({ identityOp }));
+const sendAction = vi.fn();
+vi.mock('../../shared/relay/sendAction', () => ({ sendAction }));
 vi.mock('../../shared/chain/accounts', () => ({ getAttendeeAccount: async () => ({ address: MINE }) }));
 
 const saveUserProfile = vi.fn(async () => undefined);
@@ -22,14 +22,17 @@ vi.mock('../../shared/api/firestore', () => ({ saveUserProfile }));
 
 const { Nickname, normalizeNickname } = await import('./Nickname');
 
-/** What `OpReverted` carries when the contract named one of its own errors. */
+/** What `sendAction` rejects with on a failed relay doc: the contract error name in details.code. */
 function reverted(errorName: string) {
-  return { revertReason: encodeErrorResult({ abi: identityAbi, errorName }) };
+  return { details: { code: errorName } };
 }
+/** An unknown outcome — a dropped relay listener — carries no details.code. */
+const dropped = () => new Error('relay listener dropped');
 
 beforeEach(() => {
   nicknameOwner.mockResolvedValue(SOMEBODY_ELSE);
-  identityOp.mockResolvedValue({ success: true, txHash: '0x2', blockNumber: 1n });
+  sendAction.mockReset();
+  sendAction.mockResolvedValue(undefined);
 });
 
 /** A fresh screen each time: two of these in one test would give `getByRole` two textboxes. */
@@ -52,14 +55,14 @@ describe('Nickname', () => {
   it('blocks a taken nickname before sending anything', async () => {
     await type('taken_name');
     expect(await screen.findByText('이미 쓰는 별명이에요.')).toBeInTheDocument();
-    expect(identityOp).not.toHaveBeenCalled();
+    expect(sendAction).not.toHaveBeenCalled();
   });
 
   it('says what is wrong with the letters without asking the chain', async () => {
     await type('ab');
     expect(await screen.findByText('영문 소문자, 숫자, 밑줄만 3~20자로 써 주세요.')).toBeInTheDocument();
     expect(nicknameOwner).not.toHaveBeenCalled();
-    expect(identityOp).not.toHaveBeenCalled();
+    expect(sendAction).not.toHaveBeenCalled();
   });
 
   it('sends setNickname with the keccak hash of the name it displays', async () => {
@@ -67,10 +70,12 @@ describe('Nickname', () => {
     await type('alex_01');
     expect(await screen.findByText('별명을 저장했어요')).toBeInTheDocument();
     // The name that was normalised is the name that is sent, and the hash goes with it.
-    const sent = identityOp.mock.calls.at(0)?.at(0) as unknown as { functionName: string; args: unknown[] };
-    expect(sent.functionName).toBe('setNickname');
-    expect(sent.args[1]).toBe('alex_01');
-    expect(sent.args[0]).toBe(keccak256(toBytes('alex_01')));
+    const [kind, target, data] = sendAction.mock.calls[0]!;
+    expect([kind, target]).toEqual(['setNickname', 'identity']);
+    const decoded = decodeFunctionData({ abi: identityAbi, data });
+    expect(decoded.functionName).toBe('setNickname');
+    expect(decoded.args?.[1]).toBe('alex_01');
+    expect(decoded.args?.[0]).toBe(keccak256(toBytes('alex_01')));
     expect(saveUserProfile).toHaveBeenCalledWith({ nickname: 'alex_01' });
   });
 
@@ -78,25 +83,25 @@ describe('Nickname', () => {
     nicknameOwner.mockResolvedValue(MINE);
     await type('alex_01');
     expect(await screen.findByText('이미 쓰고 있는 별명이에요')).toBeInTheDocument();
-    expect(identityOp).not.toHaveBeenCalled();
+    expect(sendAction).not.toHaveBeenCalled();
   });
 
   it('names the rule the chain refused on, not one sentence for every revert', async () => {
     nicknameOwner.mockResolvedValue(ZERO);
-    identityOp.mockRejectedValueOnce(reverted('NicknameTaken'));
+    sendAction.mockRejectedValueOnce(reverted('NicknameTaken'));
     await type('alex_01');
     expect(await screen.findByText('이미 쓰는 별명이에요.')).toBeInTheDocument();
 
-    identityOp.mockRejectedValueOnce(reverted('NotRegistered'));
+    sendAction.mockRejectedValueOnce(reverted('NotRegistered'));
     await type('alex_02');
     expect(await screen.findByText('가입을 먼저 마쳐 주세요.')).toBeInTheDocument();
   });
 
   it('says it is still confirming when the wait timed out, and does not call it a failure', async () => {
     nicknameOwner.mockResolvedValue(ZERO);
-    // The sentinel `OpReverted` carries when `wait` gave up: no `0x`, and the operation is
-    // still on its way. Telling somebody to retry here sends a second setNickname.
-    identityOp.mockRejectedValueOnce({ revertReason: 'TIMEOUT' });
+    // A dropped relay listener leaves the outcome unknown, and the write is still on its way.
+    // Telling somebody to retry here sends a second setNickname.
+    sendAction.mockRejectedValueOnce(dropped());
     await type('alex_01');
     const alert = await screen.findByText('아직 확인 중이에요. 잠시 뒤 다시 열어 확인해 주세요.');
     expect(alert).toBeInTheDocument();
@@ -107,7 +112,7 @@ describe('Nickname', () => {
 
   it('falls back to the generic sentence for a revert nobody here can act on', async () => {
     nicknameOwner.mockResolvedValue(ZERO);
-    identityOp.mockRejectedValueOnce(reverted('NicknameHashMismatch'));
+    sendAction.mockRejectedValueOnce(reverted('NicknameHashMismatch'));
     await type('alex_01');
     expect(await screen.findByText('문제가 생겼어요. 잠시 뒤 다시 시도해 주세요.')).toBeInTheDocument();
   });

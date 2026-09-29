@@ -1,25 +1,24 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+import { encodeFunctionData } from 'viem';
 import type { Hex } from '@monti/shared';
 import { Alert, Button, Screen, Spinner } from '../../shared/ui';
 import { fmt, useCopy } from '../../shared/i18n';
 import { LIST_STAGGER, m, useReducedMotion } from '../../shared/motion';
 import { api, type PendingOffer } from '../../shared/api/functions';
-import { getAttendeeAccount } from '../../shared/chain/accounts';
-import { ticketOp } from '../../shared/chain/ops';
+import { ticketAbi } from '../../shared/chain/abis';
+import { sendAction } from '../../shared/relay/sendAction';
 import { readIdentity, readTicket } from '../../shared/chain/reads';
 import { fetchEventMetadata } from '../../shared/envio/ipfs';
 import { useSession } from '../../shared/session';
 import { acceptFailure, isStillConfirming } from '../transfer/offers';
 
 // The one screen whose reader has never seen the event, so it is the one that has to name it.
-export { acceptPendingOffers, type OrgIdOf } from '../transfer/offers';
+export { acceptPendingOffers } from '../transfer/offers';
 
 export interface InboxRow {
   offer: PendingOffer;
-  /** The event's organisation sponsors the operation that collects the ticket. */
-  orgId: bigint;
   /** Empty when the document did not load; the row then falls back to the ticket number. */
   title: string;
   /** The event asks for identity verification and this attendee has not done it, so
@@ -45,7 +44,6 @@ async function loadInbox(account: Hex): Promise<InboxRow[]> {
       const metadata = await fetchEventMetadata(meta.imageCid).catch(() => null);
       return {
         offer,
-        orgId: meta.orgId,
         title: metadata?.title ?? '',
         needsKyc: meta.requireKyc && kycLevel < 1,
       };
@@ -87,17 +85,20 @@ export function Inbox() {
     setError((current) => withRow(current, key, ''));
     setMessage((current) => withRow(current, key, ''));
     try {
-      await ticketOp({
-        account: await getAttendeeAccount(),
-        orgId: row.orgId,
-        functionName: 'acceptOffer',
-        args: [BigInt(row.offer.tokenId), row.offer.attesterSig],
-      });
+      await sendAction(
+        'acceptOffer',
+        'ticket',
+        encodeFunctionData({
+          abi: ticketAbi,
+          functionName: 'acceptOffer',
+          args: [BigInt(row.offer.tokenId), row.offer.attesterSig],
+        }),
+      );
       setMessage((current) => withRow(current, key, copy.transfer.accepted));
       await queryClient.invalidateQueries({ queryKey: ['pendingOffers'] });
       await queryClient.invalidateQueries({ queryKey: ['tickets'] });
     } catch (cause) {
-      // Still on its way is not a denial: the ticket may well be here in a moment.
+      // An unknown outcome is not a denial: the ticket may well be here in a moment.
       if (isStillConfirming(cause)) {
         setMessage((current) => withRow(current, key, copy.transfer.confirming));
       } else {
