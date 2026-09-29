@@ -26,6 +26,7 @@ const CODE_NONCE = `0x${'77'.repeat(32)}` as Hex;
 const EVENT_ID = 42n;
 const TOKEN_ID = 1234n;
 const GATE_ID = 9n;
+const ORG_ID = 7n;
 
 // 체인 읽기의 가짜 응답. 각 테스트가 beforeEach 뒤에 필요한 값만 덮어쓴다.
 let member = true;
@@ -40,6 +41,7 @@ const readContract = vi.fn(async ({ functionName }: { functionName: string }) =>
   if (functionName === 'isLocked') return locked;
   if (functionName === 'claimNonce') return chainNonce;
   if (functionName === 'usedAt') return usedAtChain;
+  if (functionName === 'eventOrg') return ORG_ID;
   throw new Error(`UNEXPECTED_READ:${functionName}`);
 });
 const estimateContractGas = vi.fn(async () => 215_000n);
@@ -51,6 +53,7 @@ vi.mock('../src/lib/db.js', () => ({
   RELAYS: 'relays',
   ADMISSIONS: 'admissions',
   ADMISSION_TOKENS: 'tokens',
+  USAGE: 'usage',
   USERS: 'users',
   PERSONS: 'persons',
 }));
@@ -144,7 +147,7 @@ const CHECKIN_RELAY_ID = `${EVENT_ID}:${TOKEN_ID}`;
 
 describe('relayClaim', () => {
   it('confirms and returns the minted tokenId when the receipt lands', async () => {
-    waitForTransactionReceipt.mockResolvedValueOnce({ status: 'success', logs: [claimedLog(TOKEN_ID, 0)], blockNumber: 100n });
+    waitForTransactionReceipt.mockResolvedValueOnce({ status: 'success', logs: [claimedLog(TOKEN_ID, 0)], blockNumber: 100n, gasUsed: 100n, effectiveGasPrice: 2n } as never);
     const res = (await claim({ data: claimReq(), auth } as never)) as { relayId: string; status: string; tokenId?: string; txHash?: string };
     expect(res).toEqual({ relayId: RELAY_ID, status: 'confirmed', txHash: TX_HASH, tokenId: TOKEN_ID.toString() });
     expect(sendRelayed).toHaveBeenCalledTimes(1);
@@ -152,6 +155,11 @@ describe('relayClaim', () => {
     expect(doc.get('status')).toBe('confirmed');
     expect(doc.get('tokenId')).toBe(TOKEN_ID.toString());
     expect(doc.get('gasLimit')).toBe(231_000);
+    // 확정 가스가 이벤트의 조직 원장에 집계된다(설계 §4).
+    const usage = fake.snapshot('usage/org:7');
+    expect(usage.get('count')).toBe(1);
+    expect(usage.get('lastKind')).toBe('claim');
+    expect(usage.get('monSpentWei')).toBe('200');
   });
 
   it('returns sent (not an error) when the receipt does not arrive in time', async () => {
@@ -227,12 +235,14 @@ describe('relayClaim', () => {
 
 describe('relayCheckIn', () => {
   it('confirms and returns usedAt from the CheckedIn event', async () => {
-    waitForTransactionReceipt.mockResolvedValueOnce({ status: 'success', logs: [checkedInLog(1730000123n)], blockNumber: 100n });
+    waitForTransactionReceipt.mockResolvedValueOnce({ status: 'success', logs: [checkedInLog(1730000123n)], blockNumber: 100n, gasUsed: 100n, effectiveGasPrice: 2n } as never);
     const res = (await checkIn({ data: checkInReq(), auth } as never)) as { relayId: string; status: string; usedAt?: number };
     expect(res).toEqual({ relayId: CHECKIN_RELAY_ID, status: 'confirmed', txHash: TX_HASH, usedAt: 1730000123 });
     expect(sendRelayed).toHaveBeenCalledTimes(1);
     expect(fake.snapshot(`admissions/${EVENT_ID}/tokens/${TOKEN_ID}`).get('status')).toBe('confirmed');
     expect(fake.snapshot(`relays/${CHECKIN_RELAY_ID}`).get('status')).toBe('confirmed');
+    expect(fake.snapshot('usage/org:7').get('lastKind')).toBe('checkIn');
+    expect(fake.snapshot('usage/org:7').get('monSpentWei')).toBe('200');
   });
 
   it('treats an already-used ticket as a successful pass (no second send)', async () => {

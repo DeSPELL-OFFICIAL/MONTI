@@ -4,11 +4,13 @@ import {
   WaitForTransactionReceiptTimeoutError,
   encodeErrorResult,
   encodeEventTopics,
+  encodeFunctionData,
   getAddress,
   toFunctionSelector,
   type Abi,
 } from 'viem';
 import { identityAbi, organizersAbi, ticketAbi, type Hex } from '@monti/shared';
+import { Timestamp } from 'firebase-admin/firestore';
 import { createFakeFirestore } from './helpers/fakeFirestore.js';
 import { forwarderAbi } from '../src/lib/forwarderAbi.js';
 import { ACTION_ALLOWLIST } from '../src/lib/actionAllowlist.js';
@@ -37,6 +39,7 @@ const fake = createFakeFirestore();
 
 const readContract = vi.fn(async ({ functionName }: { functionName: string }) => {
   if (functionName === 'nonces') return chainNonce;
+  if (functionName === 'eventOrg') return ORG_ID;
   throw new Error(`UNEXPECTED_READ:${functionName}`);
 });
 const estimateContractGas = vi.fn(async () => 215_000n);
@@ -46,6 +49,7 @@ const sendRelayed = vi.fn(async () => ({ hash: TX_HASH, nonce: 7, gasLimit: 231_
 vi.mock('../src/lib/db.js', () => ({
   db: fake.db,
   RELAYS: 'relays',
+  USAGE: 'usage',
   USERS: 'users',
   PERSONS: 'persons',
 }));
@@ -216,6 +220,78 @@ describe('relayAction', () => {
       details: { code: 'TOO_MANY_PENDING' },
     });
     expect(sendRelayed).not.toHaveBeenCalled();
+  });
+});
+
+describe('relayAction — usage ledger + org rate limit (design §4)', () => {
+  const SET_ADMIN = encodeFunctionData({ abi: organizersAbi, functionName: 'setAdmin', args: [ORG_ID, OTHER, 1] });
+  const APPROVE = encodeFunctionData({ abi: ticketAbi, functionName: 'approveClaims', args: [EVENT_ID, [1n, 2n]] });
+  const SET_NICK = ACTION_ALLOWLIST.setNickname!.selector;
+  const GAS = { status: 'success', logs: [] as unknown[], blockNumber: 100n, gasUsed: 210_000n, effectiveGasPrice: 50_000_000_000n };
+
+  function req(kind: string, to: string, data: string, nonce = '0') {
+    return { data: { kind, req: { from: ACCOUNT, to, nonce, deadline: futureDeadline(), data }, deviceSig: DEVICE_SIG }, auth };
+  }
+
+  it('records org-scoped usage as a bigint wei string and stamps orgId on the relay (orgId-first kind)', async () => {
+    waitForTransactionReceipt.mockResolvedValueOnce(GAS);
+    await action(req('setAdmin', ORGANIZERS, SET_ADMIN) as never);
+    const u = fake.snapshot('usage/org:7');
+    expect(u.get('count')).toBe(1);
+    expect(u.get('lastKind')).toBe('setAdmin');
+    // 210000 × 50e9 = 1.05e16 (> 2^53) — 반드시 문자열 bigint 로 남는다.
+    expect(u.get('monSpentWei')).toBe('10500000000000000');
+    expect(typeof u.get('monSpentWei')).toBe('string');
+    expect(fake.snapshot(`relays/${ACCOUNT}:0`).get('orgId')).toBe('7');
+  });
+
+  it('derives the org from eventOrg(eventId) for an eventId-first kind', async () => {
+    waitForTransactionReceipt.mockResolvedValueOnce({ status: 'success', logs: [], blockNumber: 100n, gasUsed: 100n, effectiveGasPrice: 2n } as never);
+    await action(req('approveClaims', TICKET, APPROVE) as never);
+    expect(readContract).toHaveBeenCalledWith(expect.objectContaining({ functionName: 'eventOrg' }));
+    expect(fake.snapshot('usage/org:7').get('monSpentWei')).toBe('200');
+    expect(fake.snapshot(`relays/${ACCOUNT}:0`).get('orgId')).toBe('7');
+  });
+
+  it('records person-scoped usage for a personal kind and stamps no orgId', async () => {
+    waitForTransactionReceipt.mockResolvedValueOnce(GAS);
+    await action(req('setNickname', IDENTITY, SET_NICK) as never);
+    const u = fake.snapshot(`usage/person:${PERSON_ID}`);
+    expect(u.get('count')).toBe(1);
+    expect(u.get('lastKind')).toBe('setNickname');
+    expect(fake.snapshot(`relays/${ACCOUNT}:0`).get('orgId')).toBeUndefined();
+  });
+
+  it('accumulates monSpentWei across two confirmations for the same org', async () => {
+    waitForTransactionReceipt.mockResolvedValueOnce(GAS);
+    await action(req('setAdmin', ORGANIZERS, SET_ADMIN, '0') as never);
+    chainNonce = 1n;
+    waitForTransactionReceipt.mockResolvedValueOnce(GAS);
+    await action(req('setAdmin', ORGANIZERS, SET_ADMIN, '1') as never);
+    const u = fake.snapshot('usage/org:7');
+    expect(u.get('count')).toBe(2);
+    expect(u.get('monSpentWei')).toBe('21000000000000000');
+  });
+
+  it('rejects an org that already has 60 relays in the last hour', async () => {
+    for (let i = 0; i < 60; i += 1) {
+      fake.write(`relays/o-${i}`, { orgId: '7', createdAt: Timestamp.now(), personId: `0x${i.toString().padStart(64, '0')}` });
+    }
+    await expect(action(req('setAdmin', ORGANIZERS, SET_ADMIN) as never)).rejects.toMatchObject({
+      code: 'resource-exhausted',
+      details: { code: 'TOO_MANY_FOR_ORG' },
+    });
+    expect(sendRelayed).not.toHaveBeenCalled();
+  });
+
+  it('counts only the last hour — an old relay does not fill the window', async () => {
+    fake.write('relays/o-old', { orgId: '7', createdAt: Timestamp.fromMillis(Date.now() - 2 * 60 * 60 * 1000), personId: `0x${'01'.repeat(32)}` });
+    for (let i = 0; i < 59; i += 1) {
+      fake.write(`relays/o-${i}`, { orgId: '7', createdAt: Timestamp.now(), personId: `0x${i.toString().padStart(64, '0')}` });
+    }
+    waitForTransactionReceipt.mockResolvedValueOnce(GAS);
+    const res = (await action(req('setAdmin', ORGANIZERS, SET_ADMIN) as never)) as { status: string };
+    expect(res.status).toBe('confirmed');
   });
 });
 

@@ -5,6 +5,7 @@ import {
   BaseError,
   ContractFunctionRevertedError,
   WaitForTransactionReceiptTimeoutError,
+  decodeFunctionData,
   encodeFunctionData,
   getAddress,
   parseEventLogs,
@@ -19,6 +20,7 @@ import { RELAYS, USERS, db } from '../lib/db.js';
 import { getRelayerAccount, sendRelayed } from '../lib/relayer.js';
 import { actionFor, type ActionEntry, type ActionTarget } from '../lib/actionAllowlist.js';
 import { forwarderAbi } from '../lib/forwarderAbi.js';
+import { recordUsage } from '../lib/usage.js';
 
 /**
  * 설계 §4 C1 — **제네릭 릴레이 콜러블**. Phase 1 발급/입장을 뺀 나머지 스폰서드 동작(주최자
@@ -45,6 +47,10 @@ const RELAY_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const RECEIPT_WAIT_MS = 8_000;
 /** 사람당 미확정(pending|sent) 릴레이 상한(설계 §4·§7). relay.ts 와 같은 값. */
 const MAX_PENDING = 5;
+/** 조직당 시간당 대납 상한(설계 §4·§7 "주최자 폭주 방지"). 사람당 5-pending 과 별개다. */
+const MAX_PER_ORG_HOUR = 60;
+/** 조직 레이트리밋 창(1시간). */
+const ORG_WINDOW_MS = 60 * 60 * 1000;
 /** deadline 허용 창: (now, now+15분]. 너무 먼 deadline 은 재생 창을 넓혀 거절한다. */
 const DEADLINE_MAX_S = 15 * 60;
 
@@ -174,6 +180,101 @@ async function assertUnderPendingLimit(personId: Hex): Promise<void> {
   }
 }
 
+/**
+ * kind 별 회계 scope 를 어떻게 얻는가(설계 §4). 조직 동작은 `org:{orgId}`, 관객/신원 동작은
+ * `person:{personId}`. orgId 의 출처가 kind 마다 다르다:
+ *  - orgStruct : createEvent 의 EventInit.orgId (calldata 디코드)
+ *  - orgArg    : setAdmin/setManager 의 첫 인자 orgId (calldata 디코드)
+ *  - event     : 첫 인자 eventId -> `Ticket.eventOrg(eventId)`
+ *  - token     : 첫 인자 tokenId -> `eventOf` -> `eventOrg`
+ *  - gate      : 첫 인자 gateId -> `gateInfo` -> `eventOrg`
+ *  - person    : 관객·신원 동작(양도/오퍼/신청취소/닉네임/기기/주최사생성). 세션 personId.
+ */
+type ScopeSource = 'person' | 'orgStruct' | 'orgArg' | 'event' | 'token' | 'gate';
+const SCOPE_SOURCE: Record<string, ScopeSource> = {
+  createEvent: 'orgStruct',
+  setAdmin: 'orgArg',
+  setManager: 'orgArg',
+  publishEvent: 'event',
+  cancelEvent: 'event',
+  updateEventMeta: 'event',
+  approveClaims: 'event',
+  rejectClaims: 'event',
+  registerGate: 'event',
+  revoke: 'token',
+  requestOverride: 'token',
+  manualOverride: 'token',
+  openGate: 'gate',
+  closeGate: 'gate',
+  revokeGate: 'gate',
+  createOffer: 'person',
+  cancelOffer: 'person',
+  acceptOffer: 'person',
+  safeTransferFrom: 'person',
+  cancelRequest: 'person',
+  migrate: 'person',
+  setNickname: 'person',
+  cancelRotation: 'person',
+  createOrganizer: 'person',
+};
+
+/**
+ * 이 대납의 회계 scope 를 정한다. 시뮬을 통과한 **뒤에** 부르므로 대상 id 는 체인에서 유효하다 -
+ * 디코드·체인 읽기가 그래도 실패하면(예상 밖 calldata) 조직 귀속을 포기하고 `person` scope 로
+ * 떨어져 릴레이 자체는 막지 않는다(집계는 best-effort, 설계 §4).
+ */
+async function deriveScope(
+  kind: string,
+  target: ActionTarget,
+  data: Hex,
+  personId: Hex,
+): Promise<{ scope: string; orgId?: string }> {
+  const source = SCOPE_SOURCE[kind] ?? 'person';
+  if (source === 'person') return { scope: `person:${personId}` };
+  try {
+    const decoded = decodeFunctionData({ abi: targetAbi(target), data });
+    const args = (decoded.args ?? []) as readonly unknown[];
+    if (source === 'orgStruct') {
+      const orgId = (args[0] as { orgId: bigint }).orgId.toString();
+      return { scope: `org:${orgId}`, orgId };
+    }
+    if (source === 'orgArg') {
+      const orgId = (args[0] as bigint).toString();
+      return { scope: `org:${orgId}`, orgId };
+    }
+    const pc = publicClient();
+    const c = deployment();
+    let eventId: bigint;
+    if (source === 'event') {
+      eventId = args[0] as bigint;
+    } else if (source === 'token') {
+      eventId = (await pc.readContract({ address: c.ticket, abi: ticketAbi, functionName: 'eventOf', args: [args[0]] })) as bigint;
+    } else {
+      const gate = (await pc.readContract({ address: c.organizers, abi: organizersAbi, functionName: 'gateInfo', args: [args[0]] })) as readonly [bigint, ...unknown[]];
+      eventId = gate[0];
+    }
+    const orgId = ((await pc.readContract({ address: c.ticket, abi: ticketAbi, functionName: 'eventOrg', args: [eventId] })) as bigint).toString();
+    return { scope: `org:${orgId}`, orgId };
+  } catch (cause) {
+    info('relayAction.scope.fallback', { kind, reason: (cause as Error).message });
+    return { scope: `person:${personId}` };
+  }
+}
+
+/** 조직당 시간당 대납이 상한을 넘으면 거절(설계 §4·§7). 색인: relays (orgId, createdAt). */
+async function assertUnderOrgLimit(orgId: string): Promise<void> {
+  const cutoff = Timestamp.fromMillis(Date.now() - ORG_WINDOW_MS);
+  const snap = await db
+    .collection(RELAYS)
+    .where('orgId', '==', orgId)
+    .where('createdAt', '>', cutoff)
+    .limit(MAX_PER_ORG_HOUR)
+    .get();
+  if (snap.size >= MAX_PER_ORG_HOUR) {
+    throw new HttpsError('resource-exhausted', 'TOO_MANY_FOR_ORG', { code: 'TOO_MANY_FOR_ORG' });
+  }
+}
+
 /** 확정 영수증에서 kind 별 결과를 뽑는다(설계 §4). 못 뽑으면 undefined — 실패로 보지 않는다. */
 function decodeResult(kind: string, logs: readonly unknown[]): RelayActionResult['result'] | undefined {
   try {
@@ -211,15 +312,19 @@ function decodeResult(kind: string, logs: readonly unknown[]): RelayActionResult
  * 설계 §4)이 여기에 붙는다. relayDoc·영수증을 받아 `gasUsed×price` 를 누적할 깨끗한 이음새다.
  */
 async function onConfirmed(
-  relayDoc: { relayId: string; kind: string; personId: Hex; account: Hex },
+  relayDoc: { relayId: string; kind: string; personId: Hex; account: Hex; scope: string },
   receipt: TransactionReceipt,
 ): Promise<void> {
   info('relayAction.onConfirmed', {
     relayId: relayDoc.relayId,
     kind: relayDoc.kind,
+    scope: relayDoc.scope,
     gasUsed: receipt.gasUsed?.toString(),
     txHash: receipt.transactionHash,
   });
+  await recordUsage(relayDoc.scope, relayDoc.kind, receipt).catch((cause) =>
+    info('relayAction.usage.failed', { relayId: relayDoc.relayId, reason: (cause as Error).message }),
+  );
 }
 
 // ─────────────────────────────────────── relayAction
@@ -314,12 +419,17 @@ export const relayAction = onCall({ secrets: [RELAYER_PK] }, async (request): Pr
   }
   const callData = encodeFunctionData({ abi: forwarderAbi, functionName: 'execute', args: [forwardReq, deviceSig] } as never);
 
+  // 회계 scope + 조직 레이트리밋(설계 §4). 시뮬을 통과한 뒤라 대상 id 는 체인에서 유효하다.
+  const { scope, orgId } = await deriveScope(kind, entry.target, data, personId);
+  if (orgId) await assertUnderOrgLimit(orgId);
+
   // 클라 구독 전 문서 존재를 보장한다(규칙이 resource.data.personId 를 읽으므로).
   await ref.set({
     kind,
     personId,
     account,
     to: target,
+    ...(orgId ? { orgId } : {}),
     forwardNonce: nonce.toString(),
     idemKey: relayId,
     status: 'pending',
@@ -364,7 +474,7 @@ export const relayAction = onCall({ secrets: [RELAYER_PK] }, async (request): Pr
   // Forwarded 를 디코딩해 릴레이 성사를 확인하고, 회계용 kind 는 대상 이벤트에서 결과를 뽑는다.
   const forwardedLogs = parseEventLogs({ abi: forwarderAbi, logs: receipt.logs, eventName: 'Forwarded' });
   const result = decodeResult(kind, receipt.logs);
-  await onConfirmed({ relayId, kind, personId, account }, receipt);
+  await onConfirmed({ relayId, kind, personId, account, scope }, receipt);
 
   await ref.set(
     { status: 'confirmed', confirmedAt: FieldValue.serverTimestamp(), ...(result ? { result } : {}) },

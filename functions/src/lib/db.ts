@@ -65,6 +65,12 @@ export const PIN_QUOTA = 'pinQuota';
 export const RECOVERY_QUOTA = 'recoveryQuota';
 /** 서버 내부 상태만 들어간다. 클라이언트는 규칙의 포괄 거부로 닿지 못한다(어테스터 리스). */
 export const SYSTEM = 'system';
+/**
+ * 조직·개인별 대납 가스 사용 원장(설계 §4). 문서 id 는 `org:{orgId}` 또는 `person:{personId}` 이고
+ * 값은 `{ monSpentWei, count, lastAt, lastKind }` 다. **집계 전용** — 지금은 차단하지 않는다
+ * (창업자 판단: 무료·최소 유지). 서버 전용이라 클라이언트는 규칙의 포괄 거부로 닿지 못한다.
+ */
+export const USAGE = 'usage';
 
 /**
  * 릴레이 상태·대기 테이블 컬렉션 이름. 정의는 `relayTypes.ts` 한 곳이고(웹과 공유), 여기서
@@ -96,6 +102,7 @@ export const ALLOWED_COLLECTIONS = [
   PIN_QUOTA,
   RECOVERY_QUOTA,
   SYSTEM,
+  USAGE,
   RELAYS,
   ADMISSIONS,
   ADMISSION_TOKENS,
