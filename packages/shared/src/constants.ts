@@ -178,7 +178,6 @@ export interface Deployment {
    * 배포 파일이 있을 수 있어 **선택 필드**다 — 없으면 relayAction 이 MISSING_FORWARDER 로 거절한다.
    */
   forwarder?: Hex;
-  paymaster: Hex;
   attester: Hex;
   coinbaseFactory: Hex;
   entryPoint: Hex;
@@ -188,7 +187,6 @@ const ADDRESS_FIELDS = [
   'identity',
   'organizers',
   'ticket',
-  'paymaster',
   'attester',
   'coinbaseFactory',
   'entryPoint',
@@ -258,7 +256,6 @@ export const forwarderAddress = (chainId?: number): Hex => {
   if (!forwarder) throw new Error('MISSING_FORWARDER');
   return forwarder;
 };
-export const paymasterAddress = (chainId?: number): Hex => loadDeployment(chainId).paymaster;
 export const attesterAddress = (chainId?: number): Hex => loadDeployment(chainId).attester;
 export const coinbaseFactoryAddress = (chainId?: number): Hex => loadDeployment(chainId).coinbaseFactory;
 export const entryPointAddress = (chainId?: number): Hex => loadDeployment(chainId).entryPoint;
