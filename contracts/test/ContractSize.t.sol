@@ -2,12 +2,9 @@
 pragma solidity 0.8.31;
 
 import {Test} from "forge-std/Test.sol";
-import {IEntryPoint} from "account-abstraction/interfaces/IEntryPoint.sol";
 import {IIdentity} from "../src/interfaces/IIdentity.sol";
-import {IOrganizers} from "../src/interfaces/IOrganizers.sol";
-import {ITicket} from "../src/interfaces/ITicket.sol";
 import {Identity} from "../src/Identity.sol";
-import {MontiPaymaster} from "../src/MontiPaymaster.sol";
+import {MontiForwarder} from "../src/MontiForwarder.sol";
 import {Organizers} from "../src/Organizers.sol";
 import {Ticket} from "../src/Ticket.sol";
 
@@ -29,8 +26,8 @@ contract ContractSizeTest is Test {
 
     function test_ticketFitsUnderMonadsLimit() public {
         Identity identity = new Identity(address(0xA11CE));
-        Organizers organizers = new Organizers();
-        Ticket ticket = new Ticket(address(identity), address(organizers));
+        Organizers organizers = new Organizers(address(0));
+        Ticket ticket = new Ticket(address(identity), address(organizers), address(0));
 
         uint256 runtime = address(ticket).code.length;
         uint256 initcode = type(Ticket).creationCode.length;
@@ -44,32 +41,28 @@ contract ContractSizeTest is Test {
         emit log_named_uint("Monad margin, initcode (B)", MONAD_CODE_SIZE_LIMIT - initcode);
     }
 
-    /// @dev 나머지 셋도 같이 기록한다. 커지는 방향을 놓치지 않기 위한 것이지 한도 걱정은 아니다.
-    ///      단언은 넷 모두에 건다 — .github-checks.sh 가 --sizes 를 더는 돌리지 않으므로,
-    ///      어느 컨트랙트가 Monad 한도를 넘는지 보는 곳이 이 파일 말고는 없다.
+    /// @dev 나머지 셋도 같이 기록한다(Identity, Organizers, 그리고 릴레이 전달자 MontiForwarder).
+    ///      커지는 방향을 놓치지 않기 위한 것이지 한도 걱정은 아니다. 단언은 셋 모두에 건다 --
+    ///      .github-checks.sh 가 --sizes 를 더는 돌리지 않으므로, 어느 컨트랙트가 Monad 한도를
+    ///      넘는지 보는 곳이 이 파일 말고는 없다.
     function test_theOtherThreeAreNowhereNearTheLimit() public {
         Identity identity = new Identity(address(0xA11CE));
-        Organizers organizers = new Organizers();
-        // 페이마스터의 생성자는 0 이 아닌 네 주소만 요구한다. 크기를 재는 데에는 목이면 충분하다.
-        MontiPaymaster paymaster = new MontiPaymaster(
-            IEntryPoint(address(0xE41)),
-            IOrganizers(address(organizers)),
-            ITicket(address(0x71C)),
-            IIdentity(address(identity))
-        );
+        Organizers organizers = new Organizers(address(0));
+        // 전달자의 생성자는 Identity 와 deployer 만 요구한다. 크기를 재는 데에는 이걸로 충분하다.
+        MontiForwarder forwarder = new MontiForwarder(IIdentity(address(identity)), address(this));
 
         emit log_named_uint("Identity runtime size (B)", address(identity).code.length);
         emit log_named_uint("Organizers runtime size (B)", address(organizers).code.length);
-        emit log_named_uint("MontiPaymaster runtime size (B)", address(paymaster).code.length);
+        emit log_named_uint("MontiForwarder runtime size (B)", address(forwarder).code.length);
         emit log_named_uint("Identity initcode size (B)", type(Identity).creationCode.length);
         emit log_named_uint("Organizers initcode size (B)", type(Organizers).creationCode.length);
-        emit log_named_uint("MontiPaymaster initcode size (B)", type(MontiPaymaster).creationCode.length);
+        emit log_named_uint("MontiForwarder initcode size (B)", type(MontiForwarder).creationCode.length);
 
         assertLt(address(identity).code.length, MONAD_CODE_SIZE_LIMIT);
         assertLt(address(organizers).code.length, MONAD_CODE_SIZE_LIMIT);
-        assertLt(address(paymaster).code.length, MONAD_CODE_SIZE_LIMIT);
+        assertLt(address(forwarder).code.length, MONAD_CODE_SIZE_LIMIT);
         assertLt(type(Identity).creationCode.length, MONAD_CODE_SIZE_LIMIT);
         assertLt(type(Organizers).creationCode.length, MONAD_CODE_SIZE_LIMIT);
-        assertLt(type(MontiPaymaster).creationCode.length, MONAD_CODE_SIZE_LIMIT);
+        assertLt(type(MontiForwarder).creationCode.length, MONAD_CODE_SIZE_LIMIT);
     }
 }

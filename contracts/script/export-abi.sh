@@ -25,10 +25,9 @@ OUT="$(cd "$OUT" && pwd)"
 cd "$ROOT"
 forge build --silent
 
-# CoinbaseSmartWalletFactory is compiled out of lib/smart-wallet rather than src/, but forge lays
-# every artifact out the same way, so it needs no special case here. Sub-plan 03 creates accounts
-# through it, which is why it travels with the four MONTI contracts.
-for name in Identity Organizers Ticket MontiPaymaster CoinbaseSmartWalletFactory; do
+# The four first-party contracts. MontiForwarder is the ERC-2771 relay the web app and Functions
+# sign forward requests against, so its ABI travels with the other three.
+for name in Identity Organizers Ticket MontiForwarder; do
   src="$ROOT/out/$name.sol/$name.json"
   [ -f "$src" ] || {
     echo "missing $src -- run forge build" >&2

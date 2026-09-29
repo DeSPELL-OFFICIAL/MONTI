@@ -27,8 +27,12 @@ export const ENVIO_GRAPHQL_URL = defineString('ENVIO_GRAPHQL_URL', {
 export const EXPORT_BUCKET = defineString('EXPORT_BUCKET', { default: 'monti-exports' });
 export const IPFS_GATEWAY = defineString('IPFS_GATEWAY', { default: 'https://gateway.pinata.cloud/ipfs' });
 export const BIGQUERY_DATASET = defineString('BIGQUERY_DATASET', { default: 'monti' });
+/** 릴레이어 EOA 잔액 경보 임계치(MON). 이 값 아래로 떨어지면 relayerHealth 가 system/alerts 에 경보를 남긴다. */
+export const RELAYER_LOW_BALANCE_MON = defineString('RELAYER_LOW_BALANCE_MON', { default: '3' });
 
 export const ATTESTER_PK = defineSecret('ATTESTER_PK');
+/** 릴레이어 EOA 프라이빗 키. 어테스터와 분리된 EOA 다(설계 §5). Secret Manager 에만 있다. */
+export const RELAYER_PK = defineSecret('RELAYER_PK');
 export const PHONE_INDEX_KEY = defineSecret('PHONE_INDEX_KEY');
 export const DIDIT_API_KEY = defineSecret('DIDIT_API_KEY');
 export const DIDIT_WORKFLOW_ID = defineSecret('DIDIT_WORKFLOW_ID');

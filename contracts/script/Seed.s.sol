@@ -8,26 +8,30 @@ import {LibString} from "solady/utils/LibString.sol";
 import {Identity} from "../src/Identity.sol";
 import {Organizers} from "../src/Organizers.sol";
 import {Ticket} from "../src/Ticket.sol";
+import {MontiForwarder} from "../src/MontiForwarder.sol";
 import {P256Vectors} from "../test/utils/P256Vectors.sol";
 
 /// @title Seed
-/// @notice The demo MONTI runs on: one organizer owned by the deployer, one published event with one
-///         free tier, one open gate, and a handful of registered members each holding a ticket on it.
-///         The ids land in `deployments/seed-<chainid>.json`, which is the file sub-plans 03 (attendee
-///         app) and 04 (staff device) open on — their first screens run on these values with nothing
-///         else to set up.
+/// @notice The demo MONTI runs on: one organizer, one published event with one free tier, one open gate,
+///         and a handful of registered members each holding a ticket on it. The ids land in
+///         `deployments/seed-<chainid>.json`, which is the file sub-plans 03 (attendee app) and 04 (staff
+///         device) open on — their first screens run on these values with nothing else to set up.
 ///
 /// @dev    Reads the stack out of Task 30's `deployments/<chainid>.json`, so it is run after Deploy and
 ///         never instead of it.
 ///
-///         Three senders, because the chain will not take these transactions from one account:
-///         `Organizers` and `Ticket` answer to the organizer's owner, `Identity.register` answers to the
-///         attester and nobody else (spec 9.2), and `Ticket.claim` mints to `msg.sender`, so each demo
-///         member has to send their own claim. The members' keys are derived from a public label below
-///         and the deployer wires them enough gas to pay for that one transaction.
+///         Everything runs the way Phase 2 does on chain (design 2026-09-29 relayed phase 2, sections 2
+///         and 3): there is no smart-account pre-deploy and no per-member gas funding. The organizer owner
+///         and every demo member are counterfactual addresses the attester registers in Identity, each
+///         bound to the public demo device key. Organizer actions (createOrganizer, createEvent,
+///         publishEvent, registerGate, openGate) go through `MontiForwarder.execute`, signed by the
+///         owner's device key and submitted by the deployer acting as the relayer. Ticket claims go
+///         through `Ticket.claimFor` with each member's device signature, also submitted by the deployer.
+///         Because both the forward requests and the claims are permissionless, the deployer pays every
+///         transaction and the counterfactual accounts never need a balance.
 ///
 ///         Inputs come from the environment only, so no key is ever written into this repository:
-///           DEPLOYER_PK      broadcast key; owns the demo organizer and pays for the demo members' gas
+///           DEPLOYER_PK      broadcast key; the relayer that submits every forward request and claim
 ///           ATTESTER_PK      the key behind Identity's attester; the only account that may register
 ///           GATE_ACCOUNT     the staff device's account, which becomes this event's open gate
 ///           SEED_GATE_KX     the gate device's P-256 public key X, as 0x-prefixed 32 bytes. The
@@ -38,16 +42,10 @@ import {P256Vectors} from "../test/utils/P256Vectors.sol";
 ///           SEED_IMAGE_CID   the demo event's metadata JSON, pinned to Pinata before the seed is run:
 ///                            `{ name, description, image }`, which is where the attendee app reads the
 ///                            event's name and picture from. Required — the chain has only the hashes
-///           MEMBER_FUND_WEI  optional, defaults to 0.1 MON per demo member
 contract Seed is Script {
     /// @notice Enough demo attendees to show a list rather than a single row, few enough to seed in one
     ///         run on a testnet.
     uint256 public constant DEMO_MEMBERS = 3;
-
-    /// @notice One claim finishes inside this and the rest stays in the account for whatever sub-plan
-    ///         03 demos next. Monad charges `gas_limit x 100 gwei` rather than gas used, so 0.02 MON
-    ///         was not enough: the 2026-09-22 testnet seed had to finish three claims by hand.
-    uint256 public constant DEFAULT_MEMBER_FUND_WEI = 0.1 ether;
 
     /// @notice Spec 9.2's verified level: the demo attendees pass an event that demands ID and face.
     uint8 public constant DEMO_KYC_LEVEL = 1;
@@ -61,22 +59,22 @@ contract Seed is Script {
     uint64 public constant DOORS_IN = 30 days;
     uint64 public constant RUNS_FOR = 1 days;
 
-    /// @dev Demo accounts, and nothing else, ever: the label is public, so anyone can derive these keys.
-    ///      They exist so the seed can send a claim from each member without the founder minding three
-    ///      more secrets, and they hold nothing but a free ticket and a few cents of testnet gas. The
-    ///      real attendee phone registers its own passkey account through the app (sub-plan 03).
-    ///
-    ///      The device keys are just as public: all three demo members are registered with the same
-    ///      P256Vectors.DEVICE_X/Y, whose private key is printed in script/gen-p256-vectors.mjs. Anyone
-    ///      who reads this repository can sign a check-in for any of them. **This must never reach
-    ///      mainnet** -- it is a fixture for sub-plans 03 and 04 to tap against, not an account model.
+    /// @dev Demo accounts, and nothing else, ever: the labels are public, so anyone can derive these keys.
+    ///      The organizer owner and all three members are registered with the same public P-256 device key
+    ///      (P256Vectors.DEVICE_X/Y), whose private key is printed in script/gen-p256-vectors.mjs. Anyone
+    ///      who reads this repository can sign a forward request or a check-in for any of them. **This
+    ///      must never reach mainnet** -- it is a fixture for sub-plans 03 and 04 to tap against, not an
+    ///      account model. The real organizer and attendee phones register their own passkey accounts.
+    string internal constant OWNER_LABEL = "monti.seed.demo.organizer";
     string internal constant MEMBER_LABEL = "monti.seed.demo.member";
     string internal constant PERSON_LABEL = "monti.seed.demo.person";
 
     Identity public identity;
     Organizers public organizers;
     Ticket public ticket;
+    MontiForwarder public forwarder;
 
+    address public organizerOwner;
     address public gateAccount;
     uint256 public orgId;
     uint256 public eventId;
@@ -87,8 +85,6 @@ contract Seed is Script {
 
     /// @notice The deployments file still holds zeros, so Deploy has not run on this chain yet.
     error StackNotDeployed();
-    /// @notice The deployer could not wire a demo member the gas for its own claim.
-    error MemberFundingFailed();
 
     function run() external {
         uint256 deployerPk = vm.envUint("DEPLOYER_PK");
@@ -98,7 +94,6 @@ contract Seed is Script {
         // gate that check-in defence 1 does not cover.
         bytes32 gateKx = vm.envBytes32("SEED_GATE_KX");
         bytes32 gateKy = vm.envBytes32("SEED_GATE_KY");
-        uint256 memberFundWei = vm.envOr("MEMBER_FUND_WEI", DEFAULT_MEMBER_FUND_WEI);
         // No default: an event whose metadata is not pinned yet has no name and no image on the
         // attendee's screen, and the founder is the only one who can pin it.
         string memory imageCid = vm.envString("SEED_IMAGE_CID");
@@ -108,15 +103,16 @@ contract Seed is Script {
             vm.parseJsonAddress(raw, ".identity"),
             vm.parseJsonAddress(raw, ".organizers"),
             vm.parseJsonAddress(raw, ".ticket"),
+            vm.parseJsonAddress(raw, ".forwarder"),
             gate,
             gateKx,
             gateKy,
             imageCid,
             deployerPk,
-            attesterPk,
-            memberFundWei
+            attesterPk
         );
 
+        console2.log("organizerOwner", organizerOwner);
         console2.log("orgId       ", orgId);
         console2.log("eventId     ", eventId);
         console2.log("gateId      ", gateId);
@@ -128,25 +124,26 @@ contract Seed is Script {
         record();
     }
 
-    /// @notice Creates the organizer, the event, the gate and the demo members' tickets.
+    /// @notice Registers the organizer owner and the demo members, then creates the organizer, event and
+    ///         gate through the forwarder and claims a ticket for each member.
     /// @dev    Separate from `run` so the tests can drive it without the deployments file. Re-running is
     ///         part of the job: the founder seeds again with the real staff device's account once it
     ///         exists, because `Organizers.registerGate` takes a gate account exactly once. That second
-    ///         run gets its own organizer, event and gate, and steps over the members and the funding
-    ///         the first run already put in place.
+    ///         run gets its own organizer, event and gate, and steps over the members the first run
+    ///         already registered.
     function seed(
         address identity_,
         address organizers_,
         address ticket_,
+        address forwarder_,
         address gateAccount_,
         bytes32 gateKx_,
         bytes32 gateKy_,
         string memory imageCid_,
         uint256 deployerPk,
-        uint256 attesterPk,
-        uint256 memberFundWei
+        uint256 attesterPk
     ) public {
-        if (identity_ == address(0) || organizers_ == address(0) || ticket_ == address(0)) {
+        if (identity_ == address(0) || organizers_ == address(0) || ticket_ == address(0) || forwarder_ == address(0)) {
             revert StackNotDeployed();
         }
         _requireGateKey(gateKx_, gateKy_);
@@ -155,13 +152,14 @@ contract Seed is Script {
         identity = Identity(identity_);
         organizers = Organizers(organizers_);
         ticket = Ticket(ticket_);
+        forwarder = MontiForwarder(forwarder_);
         gateAccount = gateAccount_;
 
         // Identity.register takes writes from the attester and nobody else, so a mismatched key does not
-        // fail here but eight calls deep, on the first demo member, as an opaque NotAttester.
+        // fail here but many calls deep, on the first member, as an opaque NotAttester.
         require(vm.addr(attesterPk) == identity.attester(), "ATTESTER_PK does not match Identity.attester()");
 
-        address deployer = vm.addr(deployerPk);
+        organizerOwner = vm.addr(ownerKey());
         delete members;
         delete tokenIds;
         for (uint256 i; i < DEMO_MEMBERS; ++i) {
@@ -169,14 +167,41 @@ contract Seed is Script {
         }
 
         // A redeploy keeps the Organizers, whose org and demo gate already exist. SEED_REUSE_ORG makes
-        // the seed reuse org SEED_ORG_ID (default 1, owned by the deployer) instead of creating a second
-        // one -- createOrganizer would otherwise orphan org 1 and misnumber seed-<chainid>.json.
+        // the seed reuse org SEED_ORG_ID (default 1, owned by the demo organizer owner) instead of
+        // creating a second one -- createOrganizer would otherwise orphan org 1 and misnumber
+        // seed-<chainid>.json.
         bool reuseOrg = vm.envOr("SEED_REUSE_ORG", false);
 
-        vm.startBroadcast(deployerPk);
-        orgId = reuseOrg ? vm.envOr("SEED_ORG_ID", uint256(1)) : organizers.createOrganizer(deployer);
-        eventId = ticket.createEvent(_meta(imageCid_), _tiers());
-        ticket.publishEvent(eventId);
+        // The attester registers the organizer owner and every member as counterfactual accounts, all
+        // bound to the public demo device key so their forward-request and claim signatures verify. This
+        // must precede the forward requests: the forwarder rejects a `from` that is not an Identity member.
+        vm.startBroadcast(attesterPk);
+        if (!identity.isMember(organizerOwner)) {
+            identity.register(
+                ownerPersonId(), organizerOwner, P256Vectors.DEVICE_X, P256Vectors.DEVICE_Y, DEMO_KYC_LEVEL
+            );
+        }
+        for (uint256 i; i < members.length; ++i) {
+            if (identity.isMember(members[i])) continue;
+            identity.register(personId(i), members[i], P256Vectors.DEVICE_X, P256Vectors.DEVICE_Y, DEMO_KYC_LEVEL);
+        }
+        vm.stopBroadcast();
+
+        // Organizer actions run through the forwarder, signed by the owner's device key and submitted by
+        // the deployer as the relayer. createOrganizer is permissionless; the rest resolve `_msgSender()`
+        // to the owner, who owns the org and so passes every permission check.
+        if (reuseOrg) {
+            orgId = vm.envOr("SEED_ORG_ID", uint256(1));
+        } else {
+            orgId = abi.decode(
+                _relay(deployerPk, organizers_, abi.encodeCall(Organizers.createOrganizer, (organizerOwner))), (uint256)
+            );
+        }
+        eventId = abi.decode(
+            _relay(deployerPk, ticket_, abi.encodeCall(Ticket.createEvent, (_meta(imageCid_), _tiers()))), (uint256)
+        );
+        _relay(deployerPk, ticket_, abi.encodeCall(Ticket.publishEvent, (eventId)));
+
         // registerGate takes a gate account exactly once (GateAccountInUse). On a kept Organizers the
         // demo gate is already registered and bound to event 1 -- which the new Ticket's first event also
         // is -- so it is reused rather than re-registered; a fresh Organizers has none and registers one.
@@ -184,27 +209,21 @@ contract Seed is Script {
         if (existingGate != 0) {
             gateId = existingGate;
         } else {
-            gateId = organizers.registerGate(eventId, gateAccount, gateKx_, gateKy_);
-            organizers.openGate(gateId);
+            gateId = abi.decode(
+                _relay(
+                    deployerPk,
+                    organizers_,
+                    abi.encodeCall(Organizers.registerGate, (eventId, gateAccount, gateKx_, gateKy_))
+                ),
+                (uint256)
+            );
+            _relay(deployerPk, organizers_, abi.encodeCall(Organizers.openGate, (gateId)));
         }
-        for (uint256 i; i < members.length; ++i) {
-            if (members[i].balance >= memberFundWei) continue;
-            (bool sent,) = payable(members[i]).call{value: memberFundWei - members[i].balance}("");
-            if (!sent) revert MemberFundingFailed();
-        }
-        vm.stopBroadcast();
 
-        vm.startBroadcast(attesterPk);
-        for (uint256 i; i < members.length; ++i) {
-            if (identity.isMember(members[i])) continue;
-            identity.register(personId(i), members[i], P256Vectors.DEVICE_X, P256Vectors.DEVICE_Y, DEMO_KYC_LEVEL);
-        }
-        vm.stopBroadcast();
-
-        // Tier 0, and no voucher: the MVP mints free tiers only (spec 5.2). 릴레이 전환(설계 §3)
-        // 후 발급은 관객 기기 P-256 서명(ClaimAuth)이 증명한다 — 데모 멤버는 모두 공개 데모 기기
-        // 키(P256Vectors.DEVICE_*)로 등록돼 있으므로, 그 개인키(DEVICE_PRIV)로 승인서에 서명하면
-        // 누구든(여기서는 멤버 자신) 대신 제출할 수 있다. **메인넷 금지** — 공개 키 픽스처다.
+        // Tier 0, and no voucher: the MVP mints free tiers only (spec 5.2). Every demo member is
+        // registered with the public demo device key (P256Vectors.DEVICE_*), so signing the ClaimAuth
+        // with that key (DEVICE_PRIV) lets the relayer submit the claim on the member's behalf.
+        // **메인넷 금지** — 공개 키 픽스처다.
         for (uint256 i; i < members.length; ++i) {
             Ticket.ClaimAuth memory auth = Ticket.ClaimAuth({
                 eventId: eventId,
@@ -214,9 +233,8 @@ contract Seed is Script {
                 deadline: uint64(block.timestamp + 1 hours)
             });
             (bytes32 r, bytes32 s) = vm.signP256(P256Vectors.DEVICE_PRIV, ticket.claimAuthDigest(auth));
-            vm.startBroadcast(memberKey(i));
+            vm.broadcast(deployerPk);
             tokenIds.push(ticket.claimFor(auth, abi.encode(r, s)));
-            vm.stopBroadcast();
         }
     }
 
@@ -252,6 +270,11 @@ contract Seed is Script {
         return members.length;
     }
 
+    /// @dev Deterministic so a re-run finds the same organizer instead of stranding the last run's.
+    function ownerKey() public pure returns (uint256) {
+        return uint256(keccak256(abi.encodePacked(OWNER_LABEL)));
+    }
+
     /// @dev Deterministic so a re-run finds the same accounts instead of stranding the last run's.
     function memberKey(uint256 index) public pure returns (uint256) {
         return uint256(keccak256(abi.encodePacked(MEMBER_LABEL, index)));
@@ -259,12 +282,34 @@ contract Seed is Script {
 
     /// @dev Spec 10.2: a personId is 32 opaque bytes and never a hash of anything about the person.
     ///      These are hashes of a demo label and a counter — no PII goes near them.
+    function ownerPersonId() public pure returns (bytes32) {
+        return keccak256(abi.encodePacked(PERSON_LABEL, OWNER_LABEL));
+    }
+
     function personId(uint256 index) public pure returns (bytes32) {
         return keccak256(abi.encodePacked(PERSON_LABEL, index));
     }
 
+    /// @dev Signs a forward request as the organizer owner's device key and submits it as the relayer.
+    ///      The nonce and digest are read outside the broadcast window so the cheatcodes do not consume
+    ///      it; the single broadcast is the `execute` transaction itself. Returns the target's return
+    ///      data (the forwarder bubbles it verbatim), which the caller decodes for createOrganizer /
+    ///      createEvent / registerGate and ignores for the void calls.
+    function _relay(uint256 relayerPk, address to, bytes memory data) internal returns (bytes memory) {
+        MontiForwarder.ForwardRequest memory req = MontiForwarder.ForwardRequest({
+            from: organizerOwner,
+            to: to,
+            nonce: forwarder.nonces(organizerOwner),
+            deadline: uint64(block.timestamp + 1 hours),
+            data: data
+        });
+        (bytes32 r, bytes32 s) = vm.signP256(P256Vectors.DEVICE_PRIV, forwarder.forwardDigest(req));
+        vm.broadcast(relayerPk);
+        return forwarder.execute(req, abi.encode(r, s));
+    }
+
     /// @dev Organizers.registerGate refuses a half-zero key, but only after the organizer, the event
-    ///      and the funding are already on chain, and as an opaque InvalidGateKey. An unset
+    ///      and the gate are already on chain, and as an opaque InvalidGateKey. An unset
     ///      SEED_GATE_KX/KY arrives here as a zero word, so this is where the founder is told which
     ///      variable is empty -- before anything is broadcast.
     function _requireGateKey(bytes32 kx, bytes32 ky) private pure {

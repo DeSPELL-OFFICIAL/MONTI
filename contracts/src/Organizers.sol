@@ -3,11 +3,12 @@ pragma solidity 0.8.31;
 
 import {IOrganizers} from "./interfaces/IOrganizers.sol";
 import {ITicket} from "./interfaces/ITicket.sol";
+import {ERC2771Context} from "@openzeppelin/contracts/metatx/ERC2771Context.sol";
 
 /// @title Organizers
 /// @notice The on-chain allowlist (spec 9.4). A role that is not in here does not exist. Nothing in
 ///         this contract is cached off-chain for authorisation; the indexer reads it for lists only.
-contract Organizers is IOrganizers {
+contract Organizers is IOrganizers, ERC2771Context {
     uint32 public constant PERM_CREATE_EVENT = 1;
     uint32 public constant PERM_MANAGE_GATES = 2;
     uint32 public constant PERM_APPROVE_OVERRIDE = 4;
@@ -63,7 +64,7 @@ contract Organizers is IOrganizers {
     error GateIsRevoked();
     error InvalidGateKey();
 
-    constructor() {
+    constructor(address forwarder_) ERC2771Context(forwarder_) {
         deployer = msg.sender;
     }
 
@@ -84,7 +85,7 @@ contract Organizers is IOrganizers {
     function transferOwner(uint256 orgId, address newOwner) external {
         address current = _owners[orgId];
         if (current == address(0)) revert UnknownOrganizer();
-        if (msg.sender != current) revert NotOwner();
+        if (_msgSender() != current) revert NotOwner();
         if (newOwner == address(0)) revert ZeroAddress();
         _owners[orgId] = newOwner;
         emit OwnerTransferred(orgId, current, newOwner);
@@ -92,7 +93,7 @@ contract Organizers is IOrganizers {
 
     function setAdmin(uint256 orgId, address admin, uint32 permissionBits) external {
         if (_owners[orgId] == address(0)) revert UnknownOrganizer();
-        if (msg.sender != _owners[orgId]) revert NotOwner();
+        if (_msgSender() != _owners[orgId]) revert NotOwner();
         if (admin == address(0)) revert ZeroAddress();
         _adminBits[orgId][admin] = permissionBits;
         emit AdminSet(orgId, admin, permissionBits);
@@ -101,7 +102,7 @@ contract Organizers is IOrganizers {
     /// @notice Spec 9.4: a manager either approves overrides directly or can only file a request.
     function setManager(uint256 orgId, address manager, bool exists, bool canApprove) external {
         if (_owners[orgId] == address(0)) revert UnknownOrganizer();
-        if (!hasPermission(orgId, msg.sender, PERM_MANAGE_MANAGERS)) revert Unauthorized();
+        if (!hasPermission(orgId, _msgSender(), PERM_MANAGE_MANAGERS)) revert Unauthorized();
         if (manager == address(0)) revert ZeroAddress();
 
         _managers[orgId][manager] = Manager({exists: exists, canApprove: exists && canApprove});
@@ -126,7 +127,7 @@ contract Organizers is IOrganizers {
 
         uint256 orgId = ITicket(ticket).eventOrg(eventId);
         if (orgId == 0) revert UnknownOrganizer();
-        if (!hasPermission(orgId, msg.sender, PERM_MANAGE_GATES)) revert Unauthorized();
+        if (!hasPermission(orgId, _msgSender(), PERM_MANAGE_GATES)) revert Unauthorized();
 
         gateId = _nextGateId++;
         _gates[gateId] = Gate({eventId: eventId, account: gateAccount, kx: kx, ky: ky, open: false, revoked: false});
@@ -160,10 +161,9 @@ contract Organizers is IOrganizers {
     }
 
     /// @notice T14 의 대응 수단. 도난당한 단말기를 여기서 끊는다.
-    /// @dev    _gateOf 를 지우는 것이 핵심이다(I3): 남겨두면 (a) MontiPaymaster 가 폐기된 계정을
-    ///         영원히 스폰서된 송신자로 받아 되돌아가는 op 로 예치금을 태울 수 있고, (b) 그 주소를
-    ///         두 번 다시 게이트로 등록할 수 없다. 게이트 기록 자체(gateInfo)는 남으므로 지난
-    ///         입장 기록의 gateId 는 계속 해석된다.
+    /// @dev    _gateOf 를 지우는 것이 핵심이다(I3): 남겨두면 그 주소를 두 번 다시 게이트로 등록할
+    ///         수 없다. 게이트 기록 자체(gateInfo)는 남으므로 지난 입장 기록의 gateId 는 계속
+    ///         해석된다.
     function revokeGate(uint256 gateId) external {
         Gate storage g = _mutateGate(gateId);
         g.revoked = true;
@@ -185,7 +185,7 @@ contract Organizers is IOrganizers {
         if (g.account == address(0)) revert UnknownGate();
         if (g.revoked) revert GateIsRevoked();
         uint256 orgId = ITicket(ticket).eventOrg(g.eventId);
-        if (!hasPermission(orgId, msg.sender, PERM_MANAGE_GATES)) revert Unauthorized();
+        if (!hasPermission(orgId, _msgSender(), PERM_MANAGE_GATES)) revert Unauthorized();
     }
 
     /// @notice The owner implicitly holds every bit; an admin holds exactly the bits set for them.

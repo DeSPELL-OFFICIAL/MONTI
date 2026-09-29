@@ -2,7 +2,6 @@
 pragma solidity 0.8.31;
 
 import {Test} from "forge-std/Test.sol";
-import {EntryPoint} from "account-abstraction/core/EntryPoint.sol";
 import {DeployHarness} from "./Deploy.t.sol";
 import {Seed} from "../script/Seed.s.sol";
 import {Identity} from "../src/Identity.sol";
@@ -10,7 +9,7 @@ import {Organizers} from "../src/Organizers.sol";
 import {Ticket} from "../src/Ticket.sol";
 import {P256Vectors} from "./utils/P256Vectors.sol";
 
-/// @notice The seed, plus the one entry point the tests need and the script must not have.
+/// @notice The seed, plus the one recording entry point the tests need and the script must not have.
 /// @dev    `record()` writes only under a broadcast, and `forge test` is not one. This is how the tests
 ///         reach the writing half without giving the script itself a public entry point that could be
 ///         pointed at the tracked deployments/seed-10143.json.
@@ -26,16 +25,15 @@ contract SeedHarness is Seed {
 ///         tickets that the staff device's own P-256 vectors can check in.
 /// @dev    One test function touches the filesystem; the rest call `seed` directly, which is the same
 ///         code path without the deployments file. The chain id is pinned to 31340 — Deploy.t.sol has
-///         31337 and DeployCoinbaseFactory.t.sol 31338/31339 — so the files written here are the
-///         gitignored local ones and never the tracked 10143 pair.
+///         31337 — so the files written here are the gitignored local ones and never the tracked 10143 pair.
 contract SeedTest is Test {
-    EntryPoint internal entryPoint;
     DeployHarness internal deployScript;
     SeedHarness internal seedScript;
 
     Identity internal identity;
     Organizers internal organizers;
     Ticket internal ticket;
+    address internal forwarder;
 
     uint256 internal constant DEPLOYER_PK = 0xD3910;
     uint256 internal constant ATTESTER_PK = 0xA11CE;
@@ -44,9 +42,6 @@ contract SeedTest is Test {
 
     address internal constant GATE = address(0x6A7E);
     address internal constant SECOND_GATE = address(0x6A7F);
-    /// @dev Matches Seed.DEFAULT_MEMBER_FUND_WEI. Monad charges gas_limit x 100 gwei, so 0.02 MON did
-    ///      not cover a claim on the 2026-09-22 testnet seed.
-    uint256 internal constant FUND = 0.1 ether;
     /// @dev Stands in for the staff device's real P-256 public key. What matters is that it is a value
     ///      the founder supplies, not one this repository can derive.
     bytes32 internal constant GATE_KX = bytes32(uint256(0x6A11));
@@ -62,25 +57,20 @@ contract SeedTest is Test {
         // deployments/seed-10143.json instead of the gitignored local one.
         vm.chainId(31340);
 
-        entryPoint = new EntryPoint();
         deployScript = new DeployHarness();
         seedScript = new SeedHarness();
 
         deployer = vm.addr(DEPLOYER_PK);
         attester = vm.addr(ATTESTER_PK);
 
-        // A broadcast inside `forge test` only re-labels the sender; the value still leaves the script.
-        vm.deal(deployer, 100 ether);
-        vm.deal(address(deployScript), 100 ether);
-        vm.deal(address(seedScript), 100 ether);
-
-        deployScript.deploy(attester, address(entryPoint), 1 ether, 1 ether);
+        deployScript.deploy(attester);
         identity = deployScript.identity();
         organizers = deployScript.organizers();
         ticket = deployScript.ticket();
+        forwarder = address(deployScript.forwarder());
     }
 
-    /// @notice The three ids sub-plans 03 and 04 are built on: an organizer the deployer owns, an event
+    /// @notice The three ids sub-plans 03 and 04 are built on: an organizer the demo owner owns, an event
     ///         that is published with one free tier, and a gate that is open on that event.
     function test_seedCreatesOnePublishedEventWithOneOpenGate() public {
         _seed(GATE);
@@ -90,7 +80,9 @@ contract SeedTest is Test {
         assertEq(seedScript.orgId(), 1, "first organizer");
         assertEq(eventId, 1, "first event");
         assertEq(seedScript.gateId(), 1, "first gate");
-        assertEq(organizers.ownerOf(seedScript.orgId()), deployer, "the deployer owns the demo organizer");
+        assertEq(
+            organizers.ownerOf(seedScript.orgId()), seedScript.organizerOwner(), "the demo owner owns the organizer"
+        );
         assertEq(ticket.eventOrg(eventId), seedScript.orgId(), "the event belongs to that organizer");
 
         assertEq(uint8(ticket.eventStatus(eventId)), uint8(Ticket.EventStatus.Published), "published");
@@ -99,6 +91,18 @@ contract SeedTest is Test {
 
         assertTrue(organizers.isOpenGate(eventId, GATE), "the gate is open on this event");
         assertEq(organizers.gateOf(GATE), seedScript.gateId(), "and is the gate the script recorded");
+    }
+
+    /// @notice The organizer owner is a counterfactual Identity member bound to the public demo device
+    ///         key, which is what lets the forwarder accept its organizer actions.
+    function test_seedRegistersTheOrganizerOwnerAsADeviceKeyMember() public {
+        _seed(GATE);
+
+        address owner = seedScript.organizerOwner();
+        assertTrue(identity.isMember(owner), "the organizer owner is an Identity member");
+        (bytes32 x, bytes32 y) = identity.activeDevice(owner);
+        assertEq(x, P256Vectors.DEVICE_X, "owner device x is the public demo vector key");
+        assertEq(y, P256Vectors.DEVICE_Y, "owner device y is the public demo vector key");
     }
 
     /// @notice The sale has to be open the moment the seed returns, or the first screen of sub-plan 03
@@ -117,8 +121,8 @@ contract SeedTest is Test {
     }
 
     /// @notice Every demo member is a member of Identity, carries the device key the staff-device test
-    ///         vectors sign with, holds one ticket on the seeded event, and has the gas to have claimed
-    ///         it — which on a real testnet is what the funding step buys.
+    ///         vectors sign with, and holds one ticket on the seeded event — claimed by the relayer on
+    ///         the member's behalf, so the member itself never needs a balance.
     function test_seedRegistersDemoMembersWhoEachHoldATicket() public {
         _seed(GATE);
 
@@ -140,7 +144,7 @@ contract SeedTest is Test {
             assertEq(ticket.ownerOf(tokenId), member, "holds the ticket");
             assertEq(ticket.eventOf(tokenId), eventId, "on the seeded event");
             assertEq(ticket.tierOf(tokenId), 0, "in the free tier");
-            assertEq(member.balance, FUND, "funded to pay for its own claim");
+            assertEq(member.balance, 0, "a counterfactual account holds no gas: the relayer paid");
         }
 
         assertEq(uint256(ticket.tiers(eventId)[0].minted), count, "one ticket per demo member");
@@ -180,9 +184,9 @@ contract SeedTest is Test {
         deployScript.recordAt(DEPLOY_PATH);
         assertTrue(vm.exists(DEPLOY_PATH), "the seed reads its stack out of this file");
         assertEq(
-            vm.parseJsonAddress(vm.readFile(DEPLOY_PATH), ".identity"),
-            address(identity),
-            "and this run is what wrote it"
+            vm.parseJsonAddress(vm.readFile(DEPLOY_PATH), ".forwarder"),
+            forwarder,
+            "the seed relays through the forwarder this run recorded"
         );
 
         vm.setEnv("DEPLOYER_PK", vm.toString(DEPLOYER_PK));
@@ -190,14 +194,12 @@ contract SeedTest is Test {
         vm.setEnv("GATE_ACCOUNT", vm.toString(GATE));
         vm.setEnv("SEED_GATE_KX", vm.toString(GATE_KX));
         vm.setEnv("SEED_GATE_KY", vm.toString(GATE_KY));
-        vm.setEnv("MEMBER_FUND_WEI", vm.toString(FUND));
         vm.setEnv("SEED_IMAGE_CID", CID);
 
         // `vm.setEnv` is process-global and forge runs this contract's test functions in parallel, so
         // the unset-variable case lives here rather than in a test of its own: an unset SEED_GATE_KX
         // reaches the script as a zero word, and the founder is told which variable is empty instead of
-        // being handed an InvalidGateKey from eight calls deep, after the organizer and the event are
-        // already on chain.
+        // being handed an InvalidGateKey from deep inside a forward request.
         vm.setEnv("SEED_GATE_KX", vm.toString(bytes32(0)));
         vm.expectRevert(bytes("SEED_GATE_KX and SEED_GATE_KY must be the gate device's P-256 public key"));
         seedScript.run();
@@ -220,6 +222,7 @@ contract SeedTest is Test {
         assertEq(address(seedScript.identity()), address(identity), "identity");
         assertEq(address(seedScript.organizers()), address(organizers), "organizers");
         assertEq(address(seedScript.ticket()), address(ticket), "ticket");
+        assertEq(address(seedScript.forwarder()), forwarder, "forwarder");
         assertEq(seedScript.gateAccount(), GATE, "gate account");
 
         string memory raw = vm.readFile(SEED_PATH);
@@ -264,7 +267,7 @@ contract SeedTest is Test {
     }
 
     /// @notice Identity.register answers to the attester and nobody else, so the wrong key does not fail
-    ///         at the call site but on the first demo member, as an opaque NotAttester from inside
+    ///         at the call site but on the first registration, as an opaque NotAttester from inside
     ///         Identity. The founder is told which key is wrong before anything is broadcast.
     function test_seedRefusesAnAttesterKeyThatIsNotTheAttester() public {
         vm.expectRevert(bytes("ATTESTER_PK does not match Identity.attester()"));
@@ -272,13 +275,13 @@ contract SeedTest is Test {
             address(identity),
             address(organizers),
             address(ticket),
+            forwarder,
             GATE,
             GATE_KX,
             GATE_KY,
             CID,
             DEPLOYER_PK,
-            ATTESTER_PK + 1,
-            FUND
+            ATTESTER_PK + 1
         );
     }
 
@@ -291,13 +294,31 @@ contract SeedTest is Test {
             address(0),
             address(organizers),
             address(ticket),
+            forwarder,
             GATE,
             GATE_KX,
             GATE_KY,
             CID,
             DEPLOYER_PK,
-            ATTESTER_PK,
-            FUND
+            ATTESTER_PK
+        );
+    }
+
+    /// @notice A forwarder address of zero is the same mistimed-run hazard: the seed relays every
+    ///         organizer action through it, so a zero here has to be caught before anything is broadcast.
+    function test_seedRefusesAStackWithNoForwarder() public {
+        vm.expectRevert(Seed.StackNotDeployed.selector);
+        seedScript.seed(
+            address(identity),
+            address(organizers),
+            address(ticket),
+            address(0),
+            GATE,
+            GATE_KX,
+            GATE_KY,
+            CID,
+            DEPLOYER_PK,
+            ATTESTER_PK
         );
     }
 
@@ -318,8 +339,8 @@ contract SeedTest is Test {
     }
 
     /// @notice An unset SEED_GATE_KX/KY reaches `seed` as a zero word. Organizers.registerGate would
-    ///         refuse it too (InvalidGateKey), but eight calls deep and after the organizer and the
-    ///         event are already on chain -- the founder is told which variable is empty before
+    ///         refuse it too (InvalidGateKey), but deep inside a forward request and after the organizer
+    ///         and the event are already on chain -- the founder is told which variable is empty before
     ///         anything is broadcast.
     function test_seedRefusesAGateKeyThatIsMissing() public {
         vm.expectRevert(bytes("SEED_GATE_KX and SEED_GATE_KY must be the gate device's P-256 public key"));
@@ -329,25 +350,18 @@ contract SeedTest is Test {
         _seedWithGateKey(GATE, GATE_KX, bytes32(0));
     }
 
-    /// @notice Monad charges on `gas_limit x 100 gwei`, not on gas used, so a demo member funded with
-    ///         0.02 MON could not send its own claim: the 2026-09-22 testnet seed had to finish three
-    ///         of them by hand with `cast`.
-    function test_theDefaultMemberFundIsEnoughForAClaimOnMonad() public view {
-        assertEq(seedScript.DEFAULT_MEMBER_FUND_WEI(), 0.1 ether, "0.02 MON did not cover a claim");
-    }
-
     function _seedWithCid(string memory cid) private {
         seedScript.seed(
             address(identity),
             address(organizers),
             address(ticket),
+            forwarder,
             GATE,
             GATE_KX,
             GATE_KY,
             cid,
             DEPLOYER_PK,
-            ATTESTER_PK,
-            FUND
+            ATTESTER_PK
         );
     }
 
@@ -360,13 +374,13 @@ contract SeedTest is Test {
             address(identity),
             address(organizers),
             address(ticket),
+            forwarder,
             gateAccount,
             kx,
             ky,
             CID,
             DEPLOYER_PK,
-            ATTESTER_PK,
-            FUND
+            ATTESTER_PK
         );
     }
 }
