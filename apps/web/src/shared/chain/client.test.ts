@@ -31,8 +31,7 @@ beforeEach(() => {
   vi.stubEnv('VITE_CHAIN_ID', '10143');
   vi.stubEnv('VITE_RPC_URLS', 'https://a.example/rpc,https://b.example/rpc');
   vi.stubEnv('VITE_WS_URL', 'wss://ws.example');
-  vi.stubEnv('VITE_BUNDLER_URL', 'https://bundler.example');
-  for (const name of ['IDENTITY', 'ORGANIZERS', 'TICKET', 'PAYMASTER']) {
+  for (const name of ['IDENTITY', 'ORGANIZERS', 'TICKET', 'FORWARDER']) {
     vi.stubEnv(`VITE_ADDR_${name}`, `0x${'11'.repeat(20)}`);
   }
   vi.stubEnv('VITE_ENVIO_URL', 'https://envio.example/v1/graphql');

@@ -17,12 +17,6 @@ vi.mock('qrcode', () => ({ default: { toDataURL } }));
  * same seam the dashboard test uses — the op sender, the staff account, the org read off chain,
  * and the indexer — so `publishEvent` itself runs for real.
  */
-interface SentOp { functionName: string; orgId: bigint; args: readonly unknown[] }
-const ticketOp = vi.fn(async (_options: SentOp) => ({ success: true }));
-vi.mock('../../shared/chain/ops', async (orig) => ({
-  ...(await orig<typeof import('../../shared/chain/ops')>()),
-  ticketOp,
-}));
 vi.mock('../../shared/chain/accounts', () => ({ getStaffAccount: async () => ({ address: `0x${'ab'.repeat(20)}` }) }));
 
 // The relayed publish is mocked at the module seam; lifecycle.test.ts covers the transport.
@@ -83,7 +77,6 @@ const UNFINISHED = {
 beforeEach(() => {
   localStorage.clear();
   toDataURL.mockReset().mockResolvedValue('data:image/png;base64,QQ==');
-  ticketOp.mockReset().mockResolvedValue({ success: true });
   publishEvent.mockReset().mockResolvedValue({ state: 'done' });
   eventOrg.mockReset().mockResolvedValue(9n);
   gql.mockReset().mockResolvedValue({ Event: [{ status: 'Published' }] });

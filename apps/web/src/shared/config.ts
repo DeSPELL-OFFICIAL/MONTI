@@ -1,4 +1,4 @@
-import { DEFAULT_CHAIN_ID, ENTRY_POINT_V06_ADDRESS, type Hex } from '@monti/shared';
+import { DEFAULT_CHAIN_ID, type Hex } from '@monti/shared';
 import { explorerUrlFor } from './config/chainDefaults';
 
 /**
@@ -10,9 +10,7 @@ export interface AppConfig {
   chainId: number;
   rpcUrls: string[];
   wsUrl: string;
-  bundlerUrl: string;
-  entryPoint: Hex;
-  addresses: { identity: Hex; organizers: Hex; ticket: Hex; paymaster: Hex; forwarder: Hex };
+  addresses: { identity: Hex; organizers: Hex; ticket: Hex; forwarder: Hex };
   envioUrl: string;
   rpId: string;
   ipfsGateway: string;
@@ -63,13 +61,10 @@ export function getConfig(): AppConfig {
       .map((url) => url.trim())
       .filter(Boolean),
     wsUrl: requiredEnv('VITE_WS_URL'),
-    bundlerUrl: requiredEnv('VITE_BUNDLER_URL'),
-    entryPoint: ENTRY_POINT_V06_ADDRESS,
     addresses: {
       identity: requiredEnv('VITE_ADDR_IDENTITY') as Hex,
       organizers: requiredEnv('VITE_ADDR_ORGANIZERS') as Hex,
       ticket: requiredEnv('VITE_ADDR_TICKET') as Hex,
-      paymaster: requiredEnv('VITE_ADDR_PAYMASTER') as Hex,
       // The ERC-2771 relay target (design §1). Added for Phase 2; B2 finalises the deployed value.
       forwarder: requiredEnv('VITE_ADDR_FORWARDER') as Hex,
     },

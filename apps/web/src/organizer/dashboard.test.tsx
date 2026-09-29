@@ -5,12 +5,6 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LifecycleResult } from './lifecycle';
 
-interface SentOp { functionName: string; orgId: bigint; args: readonly unknown[] }
-const ticketOp = vi.fn(async (_options: SentOp) => ({ success: true }));
-vi.mock('../shared/chain/ops', async (orig) => ({
-  ...(await orig<typeof import('../shared/chain/ops')>()),
-  ticketOp,
-}));
 
 const ACCOUNT = `0x${'ab'.repeat(20)}` as const;
 vi.mock('../shared/chain/accounts', () => ({ getStaffAccount: async () => ({ address: ACCOUNT }) }));
@@ -91,7 +85,6 @@ function open() {
 beforeEach(() => {
   gql.mockResolvedValue({ Event: [DRAFT_EVENT], Tier: TIERS });
   eventOrg.mockResolvedValue(9n);
-  ticketOp.mockResolvedValue({ success: true });
   publishEvent.mockReset().mockResolvedValue({ state: 'done' });
   cancelEvent.mockReset().mockResolvedValue({ state: 'done' });
 });

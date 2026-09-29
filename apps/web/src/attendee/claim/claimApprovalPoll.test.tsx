@@ -18,11 +18,6 @@ const relayClaim = vi.fn();
 vi.mock('../../shared/api/functions', () => ({ api: { relayClaim } }));
 vi.mock('../../shared/api/firestore', () => ({ watchRelay: vi.fn(() => () => undefined) }));
 
-const ticketOp = vi.fn();
-vi.mock('../../shared/chain/ops', async (orig) => ({
-  ...(await orig<typeof import('../../shared/chain/ops')>()),
-  ticketOp,
-}));
 vi.mock('../../shared/chain/accounts', () => ({ getAttendeeAccount: async () => ({ address: ACCOUNT }) }));
 const navigate = vi.fn();
 vi.mock('react-router-dom', async (orig) => ({
@@ -94,8 +89,6 @@ beforeEach(() => {
   relayClaim.mockReset();
   // The relayer already saw the receipt; the request's own row is what the poll then waits for.
   relayClaim.mockResolvedValue({ relayId: 'r1', status: 'confirmed' });
-  ticketOp.mockReset();
-  ticketOp.mockResolvedValue({ success: true, txHash: '0x2', blockNumber: 1n });
   setSession({ status: 'signedIn', account: ME });
   setHidden(false);
 });

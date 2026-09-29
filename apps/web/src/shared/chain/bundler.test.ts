@@ -6,9 +6,7 @@ vi.mock('../config', () => ({
     chainId: 10143,
     rpcUrls: ['https://rpc.example'],
     wsUrl: 'wss://ws.example',
-    bundlerUrl: 'https://bundler.example',
-    entryPoint: '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789',
-    addresses: { identity: `0x${'11'.repeat(20)}`, organizers: `0x${'22'.repeat(20)}`, ticket: `0x${'33'.repeat(20)}`, paymaster: `0x${'44'.repeat(20)}` },
+    addresses: { identity: `0x${'11'.repeat(20)}`, organizers: `0x${'22'.repeat(20)}`, ticket: `0x${'33'.repeat(20)}`, forwarder: `0x${'55'.repeat(20)}` },
   }),
 }));
 
@@ -20,7 +18,7 @@ vi.mock('viem/account-abstraction', async (importOriginal) => ({
 
 vi.mock('@capacitor/core', () => ({ Capacitor: { isNativePlatform: () => false } }));
 
-const { getBundlerClient, getSmartAccount, bundlerRequest, resetBundler } = await import('./bundler');
+const { getSmartAccount, resetBundler } = await import('./bundler');
 const { getAttendeeAccount } = await import('./accounts');
 const { storeCredential, clearCredential } = await import('../passkey');
 
@@ -96,45 +94,5 @@ describe('getSmartAccount', () => {
     const b = await getSmartAccount(ownerB);
     expect(b).not.toBe(a);
     expect(toCoinbaseSmartAccount).toHaveBeenCalledTimes(2);
-  });
-});
-
-describe('getBundlerClient', () => {
-  it('memoises the client and resetBundler clears it', () => {
-    const first = getBundlerClient();
-    expect(getBundlerClient()).toBe(first);
-    resetBundler();
-    expect(getBundlerClient()).not.toBe(first);
-  });
-
-  it('sends bundler JSON-RPC to config.bundlerUrl with the requested method', async () => {
-    const seen: Array<{ url: string; method: string }> = [];
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const body = JSON.parse(String(init?.body)) as { id: number; method: string };
-        seen.push({ url: String(input), method: body.method });
-        const result = body.method === 'eth_supportedEntryPoints'
-          ? ['0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789']
-          : { preVerificationGas: '0x1', verificationGasLimit: '0x2', callGasLimit: '0x3' };
-        return new Response(JSON.stringify({ jsonrpc: '2.0', id: body.id, result }), {
-          headers: { 'content-type': 'application/json' },
-        });
-      }),
-    );
-
-    const entryPoints = await bundlerRequest<string[]>('eth_supportedEntryPoints', []);
-    expect(entryPoints).toEqual(['0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789']);
-
-    await bundlerRequest('eth_estimateUserOperationGas', [
-      {},
-      '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789',
-    ]);
-
-    expect(seen.every((r) => r.url === 'https://bundler.example')).toBe(true);
-    expect(seen.map((r) => r.method)).toEqual([
-      'eth_supportedEntryPoints',
-      'eth_estimateUserOperationGas',
-    ]);
   });
 });

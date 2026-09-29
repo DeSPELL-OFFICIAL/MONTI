@@ -61,7 +61,7 @@ function readEnvFile(path: string): Map<string, string> {
 const envExample = readEnvFile(resolve(WEB_ROOT, '.env.example'));
 
 /** Every URL-valued `VITE_*` key, in the shape the app actually reads it. */
-const URL_KEYS = ['VITE_RPC_URLS', 'VITE_WS_URL', 'VITE_BUNDLER_URL', 'VITE_ENVIO_URL', 'VITE_IPFS_GATEWAY'] as const;
+const URL_KEYS = ['VITE_RPC_URLS', 'VITE_WS_URL', 'VITE_ENVIO_URL', 'VITE_IPFS_GATEWAY'] as const;
 
 /**
  * Envio Cloud serves the same indexer deployment from two hosts — the free development tier

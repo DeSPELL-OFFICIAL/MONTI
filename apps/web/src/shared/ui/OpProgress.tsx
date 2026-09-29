@@ -27,10 +27,9 @@ export type OpPhase = 'saving' | 'confirming' | 'done';
  * re-checks its `submittedOpHash`, and the others replace rather than add), so pressing again
  * cannot double anything.
  *
- * 45, not 30: a sponsored op on Monad normally settles in seconds, but the paymaster and bundler
- * can add a wholly normal delay, and giving up at 30s turned that into a false alarm. 45 matches
- * `sendSponsoredOp`'s `MAX_WAIT_TIMEOUT_MS`, so the receipt poll and this counter give up together
- * rather than the counter first (persona R2 P0-1 / S1).
+ * 45, not 30: a relayed action on Monad normally settles in seconds, but broadcasting and mining
+ * can add a wholly normal delay, and giving up at 30s turned that into a false alarm. 45 gives the
+ * relay document time to settle before this counter offers the way out (persona R2 P0-1 / S1).
  */
 export const OP_TIMEOUT_SECONDS = 45;
 /** When the reassuring "almost there" line joins the counter. Monad normally settles well before. */

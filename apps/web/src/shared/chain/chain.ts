@@ -23,7 +23,7 @@ import { explorerUrlFor } from '../config/chainDefaults';
  * backstop is the EntryPoint deposit via AA31, and one createEvent's prefund at 202 gwei
  * (~0.77 MON) stays under the 1.0 MON platform deposit. viem 2.38 reads this multiplier from the
  * chain, not from a per-call argument, so it lives here and every `estimateFeesPerGas()` in the
- * app (all of them through `sendSponsoredOp`) inherits it.
+ * app inherits it.
  */
 export const BASE_FEE_MULTIPLIER = 2;
 

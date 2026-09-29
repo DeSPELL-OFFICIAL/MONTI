@@ -1,26 +1,17 @@
-import { http } from 'viem';
 import {
-  createBundlerClient,
   toCoinbaseSmartAccount,
-  type BundlerClient,
   type SmartAccount,
   type WebAuthnAccount,
 } from 'viem/account-abstraction';
-import { getConfig } from '../config';
 import { getPublicClient } from './client';
 
-let bundlerClient: BundlerClient | null = null;
-const smartAccounts = new Map<string, SmartAccount>();
+// Phase 2 retires ERC-4337 on the web: the relayer submits `MontiForwarder.execute` and pays, so
+// there is no bundler client or `eth_sendUserOperation` here any more. What stays is the Coinbase
+// smart account itself — its address is still the on-chain identity a ForwardRequest is `from`, and
+// `accounts.ts`/`gateAccount.ts` derive it here. (The file keeps its name for now; a rename to
+// `smartAccount.ts` is a mechanical follow-up.)
 
-export function getBundlerClient(): BundlerClient {
-  if (bundlerClient) return bundlerClient;
-  const config = getConfig();
-  bundlerClient = createBundlerClient({
-    client: getPublicClient(),
-    transport: http(config.bundlerUrl, { timeout: 30_000, retryCount: 1 }),
-  });
-  return bundlerClient;
-}
+const smartAccounts = new Map<string, SmartAccount>();
 
 /**
  * One passkey owner, nonce 0 — the address is a pure function of the passkey public key,
@@ -57,11 +48,5 @@ export async function getSmartAccount(webAuthnAccount: WebAuthnAccount): Promise
 }
 
 export function resetBundler(): void {
-  bundlerClient = null;
   smartAccounts.clear();
-}
-
-/** Raw bundler JSON-RPC, used for eth_estimateUserOperationGas and eth_sendUserOperation. */
-export async function bundlerRequest<T>(method: string, params: unknown[]): Promise<T> {
-  return (await getBundlerClient().request({ method, params } as never)) as T;
 }
