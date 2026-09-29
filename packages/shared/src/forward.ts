@@ -1,4 +1,5 @@
-import { encodeAbiParameters, encodeFunctionData, keccak256, parseAbi, parseAbiParameters, sha256, toHex } from 'viem';
+import { encodeAbiParameters, encodeFunctionData, keccak256, parseAbiParameters, sha256, toHex } from 'viem';
+import { forwarderAbi } from './abi.js';
 import type { Address } from 'viem';
 import type { Hex } from './types.js';
 
@@ -108,12 +109,9 @@ export function decodeForwardRequestStruct(wire: ForwardRequestWire): ForwardReq
 
 /**
  * `MontiForwarder.execute(ForwardRequest req, bytes deviceSig)` 호출 calldata. 릴레이어가 대신 낼
- * 트랜잭션의 data 다. 지금은 최소 ABI 조각으로 인코딩한다 — Phase 2 B2 가 생성 ABI 로 바꾼다.
+ * 트랜잭션의 data 다. 생성 ABI(`forwarderAbi`, sub-plan 01의 export-abi.sh 산출물)로 인코딩한다.
  * `deviceSig` 는 r‖s 64바이트(`abi.encode(bytes32,bytes32)`)로, 기기 서명 형식은 Phase 1 과 같다.
  */
-const EXECUTE_ABI = parseAbi([
-  'function execute((address from,address to,uint256 nonce,uint64 deadline,bytes data) req, bytes deviceSig) returns (bytes)',
-]);
 
 export function encodeExecuteCalldata(req: ForwardRequest, deviceSig: Hex): Hex {
   assertAddress(req.from, 'BAD_FROM');
@@ -121,7 +119,7 @@ export function encodeExecuteCalldata(req: ForwardRequest, deviceSig: Hex): Hex 
   assertBytes(req.data, 'BAD_DATA');
   assertBytes(deviceSig, 'BAD_DEVICE_SIG');
   return encodeFunctionData({
-    abi: EXECUTE_ABI,
+    abi: forwarderAbi,
     functionName: 'execute',
     args: [{ from: req.from, to: req.to, nonce: req.nonce, deadline: req.deadline, data: req.data }, deviceSig],
   });

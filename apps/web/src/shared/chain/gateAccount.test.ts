@@ -1,4 +1,3 @@
-import { coinbaseFactoryAbi } from '@monti/shared';
 import {
   createPublicClient,
   custom,
@@ -9,6 +8,7 @@ import {
   getContractAddress,
   keccak256,
   pad,
+  parseAbi,
   size,
   type Hex,
 } from 'viem';
@@ -16,6 +16,14 @@ import type { UserOperation, WebAuthnAccount } from 'viem/account-abstraction';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { monadChain } from './chain';
+
+/**
+ * The factory's one view these checks need. The full CoinbaseSmartWalletFactory ABI was retired
+ * from `@monti/shared` in Phase 2 (design §3); `functions/src/functions/registerPasskey.ts` names
+ * the same `getAddress` fragment, so the calldata asserted here and the calldata the server sends
+ * stay byte-identical.
+ */
+const coinbaseFactoryAbi = parseAbi(['function getAddress(bytes[] owners, uint256 nonce) view returns (address)']);
 
 /**
  * `contracts/deployments/10143.json` `coinbaseFactory` — Coinbase Smart Wallet **v1.1**. viem

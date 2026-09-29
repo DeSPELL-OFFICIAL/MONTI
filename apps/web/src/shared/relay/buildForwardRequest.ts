@@ -2,13 +2,13 @@ import {
   encodeForwardRequestStruct,
   forwardDigest,
   forwardPreimage,
+  forwarderAbi,
   joinRs,
   P256_HALF_ORDER,
   type ForwardRequest,
   type ForwardRequestWire,
   type Hex,
 } from '@monti/shared';
-import { parseAbi } from 'viem';
 import { getConfig } from '../config';
 import { getPublicClient } from '../chain/client';
 import { getAttendeeAccount } from '../chain/accounts';
@@ -46,14 +46,11 @@ export interface BuiltForwardRequest {
   kind: string;
 }
 
-// Minimal fragment for the one view this needs; B2 swaps it for the generated `MontiForwarder` ABI.
-const FORWARDER_NONCES_ABI = parseAbi(['function nonces(address account) view returns (uint256)']);
-
 /** `MontiForwarder.nonces(from)`: the per-account single sequence a `ForwardRequest` must carry. */
 function readForwarderNonce(forwarder: Hex, account: Hex): Promise<bigint> {
   return getPublicClient().readContract({
     address: forwarder,
-    abi: FORWARDER_NONCES_ABI,
+    abi: forwarderAbi,
     functionName: 'nonces',
     args: [account],
   }) as Promise<bigint>;

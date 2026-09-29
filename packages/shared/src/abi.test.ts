@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  coinbaseFactoryAbi,
+  forwarderAbi,
   identityAbi,
-  montiPaymasterAbi,
   organizersAbi,
   ticketAbi,
 } from './abi.js';
@@ -70,7 +69,7 @@ describe('Ticket ABI', () => {
     expect(names(ticketAbi, 'function')).toEqual(
       expect.arrayContaining(['ownerOf', 'balanceOf', 'eventOf', 'tierOf', 'eventOrg', 'checkInOf',
         'balanceOfEvent', 'eventMeta', 'eventStatus', 'tiers', 'createOffer', 'cancelOffer', 'acceptOffer', 'offerOf',
-        // 2026-09-29 재배포: 발급·체크인은 릴레이어가 대신 제출한다 — claimFor/requestClaimFor/
+        // 2026-09-30 재배포: 발급·체크인은 릴레이어가 대신 제출한다 — claimFor/requestClaimFor/
         // checkInFor/checkInForLate 와 (event, account) claim nonce 뷰. EIP-712 오퍼 다이제스트,
         // 7워드 기기 다이제스트, 늦은 체크인 창 상수, 계정 회전 이관은 그대로.
         'claimFor', 'requestClaimFor', 'checkInFor', 'checkInForLate', 'claimNonce',
@@ -145,27 +144,32 @@ describe('Ticket ABI', () => {
   });
 });
 
-describe('MontiPaymaster ABI', () => {
-  /**
-   * 01b made the sponsored-selector table writable after deployment. The kill switch and the two
-   * views that read it back are what an operator uses to take a selector off sponsorship without a
-   * redeploy, so they belong in the same net as everything else the app calls.
-   */
-  it('carries the per-selector allow list the 01b kill switch reads and writes', () => {
-    expect(names(montiPaymasterAbi, 'function')).toEqual(
-      expect.arrayContaining(['setAllowed', 'argWordOf', 'argKindOf', 'allowedSelector']),
+describe('MontiForwarder ABI', () => {
+  it('carries execute/nonces/forwardDigest and every custom error relayAction maps', () => {
+    expect(names(forwarderAbi, 'function')).toEqual(
+      expect.arrayContaining(['execute', 'nonces', 'forwardDigest']),
     );
-    expect(names(montiPaymasterAbi, 'event')).toEqual(expect.arrayContaining(['SelectorAllowed']));
+    expect(names(forwarderAbi, 'event')).toEqual(expect.arrayContaining(['Forwarded']));
+    expect(names(forwarderAbi, 'error')).toEqual(
+      expect.arrayContaining([
+        'TargetNotAllowed',
+        'Expired',
+        'BadNonce',
+        'NotMember',
+        'DeviceLocked',
+        'BadDeviceSignature',
+      ]),
+    );
   });
-});
 
-describe('other ABIs', () => {
-  it('exposes the paymaster budget calls and the Coinbase factory getAddress', () => {
-    expect(names(montiPaymasterAbi, 'function')).toEqual(
-      // 01b: 셀렉터 단위 킬 스위치와 인자 워드 조회
-      expect.arrayContaining(['depositPlatform', 'budgetOf', 'setAllowed', 'argWordOf']),
-    );
-    expect(names(montiPaymasterAbi, 'event')).toEqual(expect.arrayContaining(['SelectorAllowed']));
-    expect(names(coinbaseFactoryAbi, 'function')).toEqual(expect.arrayContaining(['getAddress', 'createAccount']));
+  /**
+   * The hand-signed shim declared Forwarded with three fields; the deployed event has four
+   * (a trailing `selector`), so the shim's topic hash never matched a real log. The generated ABI
+   * pins the four-field shape parseEventLogs decodes against.
+   */
+  it('declares Forwarded with from, to, nonce, selector — in that order', () => {
+    const forwarded = event(forwarderAbi, 'Forwarded');
+    expect(forwarded.inputs?.map((i) => i.name)).toEqual(['from', 'to', 'nonce', 'selector']);
+    expect(forwarded.inputs?.map((i) => i.indexed)).toEqual([true, true, false, false]);
   });
 });
