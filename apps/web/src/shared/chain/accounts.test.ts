@@ -42,8 +42,8 @@ const client = createPublicClient({
   }),
 });
 
-const { getAttendeeAccount } = await import('./accounts');
-const { storeCredential } = await import('../passkey');
+const { getAttendeeAccount, resetAccounts } = await import('./accounts');
+const { storeCredential, clearCredential } = await import('../passkey');
 
 describe('getAttendeeAccount', () => {
   it('asks the deployed factory the exact question registerPasskey asks it', async () => {
@@ -74,5 +74,32 @@ describe('getAttendeeAccount', () => {
       }),
     );
     expect(size(OWNER)).toBe(64);
+  });
+});
+
+describe('getAttendeeAccount memo', () => {
+  it('reuses one factory read per credential, and re-derives after a re-login', async () => {
+    resetAccounts();
+    clearCredential();
+    storeCredential({
+      id: 'cred',
+      publicKey: `0x04${X}${Y}`,
+      transports: ['internal'],
+      attestationJson: '{}',
+    });
+
+    const before = calls.length;
+    const first = await getAttendeeAccount();
+    const second = await getAttendeeAccount();
+    // Same credential, one factory getAddress round trip, the same instance both times.
+    expect(second).toBe(first);
+    expect(calls.length).toBe(before + 1);
+
+    // A clearCredential() + re-login drops the memo, so the next read asks the factory again and
+    // the stale account is never resurrected.
+    resetAccounts();
+    const third = await getAttendeeAccount();
+    expect(third).not.toBe(first);
+    expect(calls.length).toBe(before + 2);
   });
 });

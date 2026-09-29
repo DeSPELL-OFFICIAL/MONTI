@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Address } from 'viem';
 
 import { callableFailure, submitPendingGate, type PendingGateSubmission } from '../../shared/api/functions';
-import { getGateAddress } from '../../shared/chain/gateAccount';
+import { gateAccountAddress } from '../../shared/chain/gateAccount';
 import { readOrganizers, readTicket } from '../../shared/chain/reads';
 import { GATE_REGISTRATION_POLL_MS } from '../constants';
 import { ensureGateKey, gateKeyCoordinates } from '../gate/gateKey';
@@ -158,10 +158,10 @@ interface Application {
  * twice, and a second application per mount would be a second row in the organizer's queue.
  */
 async function apply(eventId: string | undefined): Promise<Application> {
-  // The key first: `getGateAddress` is a pure function of it, so a device that cannot hold a
-  // key has no account either and there is nothing to show or submit.
+  // The key first: the address is a pure function of it (`gateAccountAddress`), so a device that
+  // cannot hold a key has no account either and there is nothing to show or submit.
   const key = gateKeyCoordinates(await ensureGateKey());
-  const address = (await getGateAddress()) as Address;
+  const address = gateAccountAddress(key.kx, key.ky);
   if (eventId === undefined) return { address, submitted: false };
 
   const payload: PendingGateSubmission = { eventId, gateAccount: address, ...key };

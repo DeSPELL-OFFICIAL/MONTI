@@ -78,16 +78,12 @@ const stopLogs = vi.fn();
 const subscribeLogs = vi.fn((_watch: { onLog: (log: unknown) => void }) => stopLogs);
 vi.mock('../../shared/chain/subscribeLogs', () => ({ subscribeLogs }));
 
-// --- the bundler -------------------------------------------------------------------------------
+// --- the relay client ---------------------------------------------------------------------------
 // The relay client the override path uses now. Its calldata is decoded off the call; the account it
 // signs from is resolved inside `sendAction` (getStaffAccount, mocked below), never passed here, so
 // a test reads the approver back off the outcome rather than off the operation.
 const sendAction = vi.fn();
 vi.mock('../../shared/relay/sendAction', () => ({ sendAction }));
-vi.mock('../../shared/chain/gateAccount', () => ({
-  getGateSmartAccount: async () => ({ address: GATE_ACCOUNT }),
-  getGateAddress: async () => GATE_ACCOUNT,
-}));
 
 // --- the staff member's own passkey account, which is NOT the gate's --------------------------
 // Check-ins go out as `0xaa…` (the terminal); manual approvals go out as `0xbb…` (the person).

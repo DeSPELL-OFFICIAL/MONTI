@@ -180,7 +180,7 @@ describe('the override operation', () => {
    */
   it('never reaches for the gate account', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/staff/override/route.ts'), 'utf8');
-    expect(source).not.toMatch(/gateAccount|getGateSmartAccount|gateKey/);
+    expect(source).not.toMatch(/gateAccount|gateAccountAddress|gateKey/);
     expect(source).toContain('getStaffAccount');
   });
 });

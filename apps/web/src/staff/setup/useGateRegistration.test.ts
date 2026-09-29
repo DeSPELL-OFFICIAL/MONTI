@@ -3,9 +3,9 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
- * The counterfactual gate account Task 13 pinned against the live factory, and the two key
- * halves Task 11 hands over. They are spelled out rather than generated because the whole
- * point of this screen is that these exact bytes reach the organizer unchanged.
+ * The gate account the derivation returns for this device, and the two key halves Task 11 hands
+ * over. `gateAccountAddress` is mocked below, so the address is a fixed stand-in; the point of this
+ * screen is that these exact bytes reach the organizer unchanged.
  */
 const ADDRESS = '0xCf83795Af2E30a8Bb373610f45563eB97A5aEDb1' as const;
 const KX = `0x${'11'.repeat(32)}` as const;
@@ -16,7 +16,6 @@ const gateOf = vi.fn<(account: string) => Promise<bigint>>();
 const gateInfo = vi.fn();
 const eventOrg = vi.fn<(eventId: bigint) => Promise<bigint>>();
 const ensureGateKey = vi.fn();
-const getGateAddress = vi.fn<() => Promise<string>>();
 
 vi.mock('../../shared/api/functions', () => ({
   submitPendingGate: (payload: unknown) => submitPendingGate(payload),
@@ -31,7 +30,7 @@ vi.mock('../../shared/chain/reads', () => ({
   readOrganizers: () => ({ gateOf, gateInfo }),
   readTicket: () => ({ eventOrg }),
 }));
-vi.mock('../../shared/chain/gateAccount', () => ({ getGateAddress: () => getGateAddress() }));
+vi.mock('../../shared/chain/gateAccount', () => ({ gateAccountAddress: () => ADDRESS }));
 vi.mock('../gate/gateKey', () => ({
   ensureGateKey: () => ensureGateKey(),
   gateKeyCoordinates: (key: { x: string; y: string }) => ({ kx: key.x, ky: key.y }),
@@ -53,7 +52,6 @@ beforeEach(() => {
   gateInfo.mockReset();
   eventOrg.mockReset();
   ensureGateKey.mockReset().mockResolvedValue({ x: KX, y: KY, backing: 'strongBox' });
-  getGateAddress.mockReset().mockResolvedValue(ADDRESS);
 });
 
 describe('gate registration', () => {
@@ -208,7 +206,7 @@ describe('gate registration', () => {
   });
 
   it('stays in creating, and submits nothing, when the device cannot make a key', async () => {
-    getGateAddress.mockRejectedValue(new Error('DeviceKeyUnavailable'));
+    ensureGateKey.mockRejectedValue(new Error('DeviceKeyUnavailable'));
     const { result } = renderHook(() => useGateRegistration({ eventId: '42', pollMs: 5 }));
 
     await waitFor(() => expect(result.current.error).toBe('KEY_UNAVAILABLE'));
