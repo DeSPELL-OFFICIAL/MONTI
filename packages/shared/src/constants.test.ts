@@ -6,7 +6,6 @@ import {
   CODE_WINDOW_SECONDS,
   CREATE2_DEPLOYER_ADDRESS,
   DEVICE_COOLDOWN_SECONDS,
-  ENTRY_POINT_V06_ADDRESS,
   EVENT_CHAT_MESSAGE_MAX_CHARS,
   FIREBASE_REGION,
   GATE_CODE_ROTATE_MS,
@@ -27,9 +26,8 @@ import {
 } from './constants.js';
 
 describe('chain constants', () => {
-  it('pins the Monad testnet id, EntryPoint v0.6 and the P-256 precompile', () => {
+  it('pins the Monad testnet id and the P-256 precompile', () => {
     expect(MONAD_TESTNET_CHAIN_ID).toBe(10143);
-    expect(ENTRY_POINT_V06_ADDRESS).toBe('0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789');
     expect(P256_PRECOMPILE_ADDRESS).toBe('0x0000000000000000000000000000000000000100');
     expect(CREATE2_DEPLOYER_ADDRESS).toBe('0x4e59b44847b379578588920cA78FbF26c0B4956C');
   });
