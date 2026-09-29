@@ -10,8 +10,9 @@ import { loadScenarioState } from '../utils/scenario-state';
  * The production build hardened the per-person limit so that a wallet already at its allotment is
  * stopped BEFORE the tap: ClaimFlow computes `held + pendingSlot >= maxPerWallet` from the indexer
  * (useMyTickets), and when it holds with `held > 0` it renders `copy.claim.alreadyHave`
- * ("이미 받았어요 · 내 티켓에서 확인하세요") and keeps 티켓 받기 disabled — so no
- * `eth_sendUserOperation` is ever issued (live run 6 saw the regression: the pre-block had lost the
+ * ("이미 받았어요 · 내 티켓에서 확인하세요") and keeps 티켓 받기 disabled — so no claim
+ * submission (the `relayClaim` callable; formerly a sponsored `eth_sendUserOperation`) is ever
+ * issued (live run 6 saw the regression: the pre-block had lost the
  * held count, so these same personas tapped through to the chain's revert and read the generic
  * "티켓을 받지 못했어요" instead).
  *
@@ -50,7 +51,7 @@ interface CellResult {
   limitReachedShown: boolean;
   soldOutShown: boolean;
   buttonDisabled: boolean | null;
-  ops: number; // eth_sendUserOperation POSTs observed
+  ops: number; // claim submissions observed — the relayClaim callable now, or a legacy eth_sendUserOperation
   queriedOwner?: string; // the `owner` variable the OwnedTickets query used (lowercased account)
   indexerTickets?: OwnedTicketRow[]; // rows the indexer returned for this event
   alertTexts: string[];
@@ -96,7 +97,9 @@ test.describe('MONTI limit pre-block (live check e, post-fix)', () => {
             try {
               if (req.method() !== 'POST') return;
               const post = req.postData() ?? '';
-              if (post.includes('"eth_sendUserOperation"')) ops += 1;
+              // A claim submission now: the relayClaim callable (a claim no longer emits a sponsored
+              // userOp). Count either, so the pre-block's "nothing was submitted" guarantee still holds.
+              if (post.includes('"eth_sendUserOperation"') || req.url().toLowerCase().includes('relayclaim')) ops += 1;
               if (post.includes('OwnedTickets')) {
                 const m = /"owner"\s*:\s*"(0x[0-9a-fA-F]{40})"/.exec(post);
                 if (m) queriedOwner = m[1];
@@ -180,7 +183,7 @@ test.describe('MONTI limit pre-block (live check e, post-fix)', () => {
             // Assertions (soft, so both events for a persona are always exercised and reported).
             expect.soft(alreadyHaveShown, `${persona.id} · event ${eventId}: 이미 받았어요 pre-block copy renders`).toBe(true);
             expect.soft(buttonDisabled, `${persona.id} · event ${eventId}: 티켓 받기 disabled`).toBe(true);
-            expect.soft(ops, `${persona.id} · event ${eventId}: no eth_sendUserOperation issued`).toBe(0);
+            expect.soft(ops, `${persona.id} · event ${eventId}: no claim submitted (relayClaim/userOp)`).toBe(0);
           } finally {
             page.off('request', onRequest);
             page.off('response', onResponse);

@@ -1,10 +1,44 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { createPublicClient, defineChain, http, type Hex } from 'viem';
+import { ticketAbi } from '@monti/shared';
 import { timed } from '../fixtures/timings';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const POSTER = resolve(HERE, '../assets/poster.jpg');
+
+/**
+ * On-chain truth for publish. The organizer 공개하기 button renders only when the Envio indexer
+ * shows the event as Draft, so "button absent" is NOT the same as "published": an indexer that is
+ * behind the deployed contracts hides a real Draft, and the old harness misread that absence as
+ * success (see task-draft-events-investigation.md). publishEvent now asserts
+ * `Ticket.eventStatus(eventId) == 1` (Published) directly on chain instead of trusting the UI.
+ */
+const RPC_URL = process.env.E2E_RPC_URL ?? 'https://testnet-rpc.monad.xyz';
+const deployments = JSON.parse(
+  readFileSync(resolve(HERE, '../../../../packages/shared/src/deployments/10143.json'), 'utf8'),
+) as { chainId: number; ticket: Hex };
+const TICKET_ADDRESS = (process.env.E2E_TICKET_ADDR ?? deployments.ticket) as Hex;
+const monad = defineChain({
+  id: deployments.chainId,
+  name: 'Monad Testnet',
+  nativeCurrency: { name: 'Monad', symbol: 'MON', decimals: 18 },
+  rpcUrls: { default: { http: [RPC_URL] } },
+});
+const chain = createPublicClient({ chain: monad, transport: http(RPC_URL) });
+
+/** On-chain event lifecycle status. enum Ticket.EventStatus: Draft = 0, Published = 1. */
+async function readEventStatus(eventId: string): Promise<number> {
+  const status = await chain.readContract({
+    address: TICKET_ADDRESS,
+    abi: ticketAbi,
+    functionName: 'eventStatus',
+    args: [BigInt(eventId)],
+  });
+  return Number(status);
+}
 
 /** Copy strings, verbatim from apps/web/src/organizer/copy.ts (scene) and ko.ts. */
 const C = {
@@ -233,38 +267,50 @@ async function gotoCreate(page: Page): Promise<void> {
 /**
  * Publish a draft event so attendees can claim it. `createEvent` makes a Draft and `claim`
  * refuses anything that is not Published, so every claim scenario runs this first.
- * Returns 'published' | 'confirming' — the latter meaning the op is still landing (indexer lag).
+ *
+ * Truth is on chain, never the UI: this reads `Ticket.eventStatus(eventId)` and only returns
+ * 'published' once it reads `1` (Published). 'confirming' means the publish op was submitted but the
+ * chain had not yet flipped to Published inside the retry window (rare — Monad finalises in seconds).
+ * If the 공개하기 button never appears AND the chain still says Draft, it throws naming the indexer,
+ * because that is the exact failure the old "button absent ⇒ published" shortcut hid.
  */
 export async function publishEvent(page: Page, personaId: string, eventId: string): Promise<'published' | 'confirming'> {
   return timed(personaId, 'publish-event', async () => {
+    // Idempotent: already Published on chain (e.g. a re-run) — there is no Draft button to press.
+    if ((await readEventStatus(eventId).catch(() => -1)) === 1) return 'published';
+
     const publishBtn = page.getByRole('button', { name: C.publish, exact: true });
-    // A just-created event is a Draft, and its 발행하기 button appears only once the organizer page
-    // has loaded the newly-indexed event. Right after createEvent the indexer lags a few seconds, so
-    // the page briefly shows neither the button nor the event — and the old shortcut ("button not
-    // visible ⇒ already Published") misread that empty window as published, left the event a Draft
-    // forever, and made every downstream claim fail. Poll the page until the Draft's button appears
-    // before deciding; only conclude "already published" after a generous wait with no button.
+    // A just-created event is a Draft, and its 공개하기 button appears only once the organizer page
+    // has loaded the event FROM THE INDEXER as a Draft. Poll for it; the event may also flip to
+    // Published between checks, so trust the chain over the button's absence rather than assuming
+    // "no button ⇒ published" (the bug that left events Draft forever and failed every claim).
     let draftReady = false;
     const loadDeadline = Date.now() + 120_000;
     while (Date.now() < loadDeadline) {
       await page.goto(`/org/events/${eventId}`);
       await page.waitForTimeout(2000);
       if (await publishBtn.isVisible().catch(() => false)) { draftReady = true; break; }
+      if ((await readEventStatus(eventId).catch(() => -1)) === 1) return 'published';
       await page.waitForTimeout(3000);
     }
-    if (!draftReady) return 'published';
+    if (!draftReady) {
+      const status = await readEventStatus(eventId).catch(() => -1);
+      if (status === 1) return 'published';
+      throw new Error(
+        `publishEvent: the 공개하기 button never appeared for event ${eventId} within 120s and on-chain ` +
+          `eventStatus=${status} (0=Draft, -1=read failed). The organizer dashboard renders publish only for ` +
+          `an event the Envio indexer shows as Draft, so the indexer (VITE_ENVIO_URL) is behind the deployed ` +
+          `Ticket ${TICKET_ADDRESS} — re-deploy/re-sync the Envio indexer to chain head before the persona run.`,
+      );
+    }
     await publishBtn.evaluate((el) => (el as HTMLButtonElement).click());
     await page.getByRole('button', { name: C.publishConfirm, exact: true }).click();
-    // The op's wait can time out; the truth is whether the event left Draft. 발행하기 shows only
-    // for a Draft, so once a reload no longer offers it the event is Published.
-    const done = page.getByText(C.published, { exact: true });
-    const deadline = Date.now() + 5 * 60 * 1000;
-    while (Date.now() < deadline) {
-      if (await done.isVisible().catch(() => false)) return 'published';
-      await page.waitForTimeout(8000);
-      await page.goto(`/org/events/${eventId}`);
-      await page.waitForTimeout(2000);
-      if (!(await publishBtn.isVisible().catch(() => false))) return 'published';
+    // The publish op's UI wait can time out; assert the on-chain status directly instead of the copy.
+    // Poll eventStatus until it reads Published (1), with a short retry window.
+    const confirmDeadline = Date.now() + 90_000;
+    while (Date.now() < confirmDeadline) {
+      if ((await readEventStatus(eventId).catch(() => -1)) === 1) return 'published';
+      await page.waitForTimeout(5000);
     }
     return 'confirming';
   });
