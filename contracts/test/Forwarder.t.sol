@@ -153,6 +153,29 @@ contract ForwarderTest is MontiTest {
         forwarder.execute(r, sig);
     }
 
+    function test_execute_zeroTargetReverts_beforeAndAfterWiring() public {
+        // after wiring (setUp 가 이미 setTargets 로 배선했다): 0 대상은 명시 가드가 먼저 막는다.
+        MontiForwarder.ForwardRequest memory r = _req(ALICE, address(0), _pingData(1));
+        bytes memory sig = _sign(P256Vectors.DEVICE_PRIV, r);
+        vm.expectRevert(MontiForwarder.TargetNotAllowed.selector);
+        forwarder.execute(r, sig);
+
+        // before wiring: setTargets 미호출 → ticket/organizers == address(0). 명시 가드가 없으면
+        // to==0 이 allowlist 를 통과해 버리므로, 이 리버트가 그 누수를 못박는다.
+        MontiForwarder fresh = new MontiForwarder(IIdentity(address(identity)), address(this));
+        MontiForwarder.ForwardRequest memory r2 = MontiForwarder.ForwardRequest({
+            from: ALICE,
+            to: address(0),
+            nonce: fresh.nonces(ALICE),
+            deadline: uint64(block.timestamp + 10 minutes),
+            data: _pingData(1)
+        });
+        (bytes32 sr, bytes32 ss) = vm.signP256(P256Vectors.DEVICE_PRIV, fresh.forwardDigest(r2));
+        bytes memory sig2 = abi.encode(sr, ss);
+        vm.expectRevert(MontiForwarder.TargetNotAllowed.selector);
+        fresh.execute(r2, sig2);
+    }
+
     function test_execute_forgedSignature() public {
         MontiForwarder.ForwardRequest memory r = _req(ALICE, address(target), _pingData(1));
         // ALICE 의 등록된 기기 키가 아닌 키로 서명한다.
