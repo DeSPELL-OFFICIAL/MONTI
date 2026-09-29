@@ -529,15 +529,6 @@ const ko = {
       failed: '사진을 올리지 못했어요. 잠시 뒤 다시 시도해 주세요',
     },
   },
-
-  /**
-   * 페이마스터가 주최자 셀렉터를 아직 허용하지 않을 때만 뜬다. 운영자에게만 보이는 안내이고,
-   * 01b 재배포로 허용 목록이 채워지면 영영 뜨지 않는다.
-   */
-  unsponsored: {
-    notice: '주최자 작업은 지금은 수수료가 들어요',
-    help: '다음 업데이트가 끝나면 MONTI가 대신 내드려요. 그때까지는 담당자에게 문의해 주세요',
-  },
 };
 
 const en: typeof ko = {
@@ -1053,12 +1044,6 @@ const en: typeof ko = {
       notActive: 'Please finish signing up first',
       failed: 'Could not upload the photo. Please try again in a moment',
     },
-  },
-
-  /** See the Korean block: shown only while organiser writes are not sponsored yet. */
-  unsponsored: {
-    notice: 'Organiser actions carry a fee for now',
-    help: 'MONTI will cover them once the next update lands. Until then, please ask your contact',
   },
 };
 

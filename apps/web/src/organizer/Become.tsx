@@ -31,13 +31,10 @@ const RESUME: Readonly<Partial<Record<BecomeProblem, string>>> = {
 /**
  * O0 — one name, one button, and an organisation on the other side.
  *
- * The send goes through `createOrganizerForMe` rather than this person's own account. 01b's
- * redeploy (2026-09-23) did put `Organizers.createOrganizer` (`0x49cd9846`) on the paymaster's
- * allowlist as a Platform-billed selector, so the write is now sponsorable — but this screen
- * deliberately keeps the callable. The callable is what names this person the owner and writes
- * `orgProfiles/{orgId}` in the same breath; routing the write through the attendee's own
- * account would split those two into a pair that can half-land. There is still no
- * `UnsponsoredNotice` here: nothing on this screen costs the organiser anything.
+ * The send goes through `createOrganizerForMe` rather than a relayed write of this person's own.
+ * The callable is what names this person the owner and writes `orgProfiles/{orgId}` in the same
+ * breath; routing the write through the attendee's own account would split those two into a pair
+ * that can half-land.
  *
  * The button locks for the whole call, and that is not decoration: the callable is **not
  * idempotent**, so a second tap is a second organisation and only the limit of three stops it.

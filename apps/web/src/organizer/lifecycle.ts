@@ -21,10 +21,6 @@ export type LifecycleProblem = 'notDraft' | 'closed' | 'notAllowed' | 'schedule'
 export type LifecycleResult =
   /** The chain has it. */
   | { state: 'done' }
-  /** Still settling — kept for the organiser home's indexer poll; the final sweep (F) removes it. */
-  | { state: 'confirming' }
-  /** No longer reachable under the relayer (it pays); kept until the final sweep (F) drops it. */
-  | { state: 'unsponsored' }
   | { state: 'refused'; problem: LifecycleProblem };
 
 type LifecycleWrite = 'publishEvent' | 'cancelEvent' | 'updateEventMeta';

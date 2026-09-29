@@ -13,7 +13,6 @@ import { relayProblem } from '../../shared/relay/relayError';
 import { gql } from '../../shared/envio/client';
 import { GATES_QUERY, type EnvioGate } from '../../shared/envio/queries';
 import { useOrganizerCopy, type OrganizerCopy } from '../copy';
-import { UnsponsoredNotice } from '../Unsponsored';
 import { readGateKey } from './gateKey';
 
 type GateProblem = keyof OrganizerCopy['gates']['problems'];
@@ -50,8 +49,6 @@ export function Gates() {
   const { eventId = '' } = useParams();
   const organizer = useOrganizerCopy();
   const copy = organizer.gates;
-  // The one sentence for "it is still on its way", shared with the lifecycle screens.
-  const lifecycle = organizer.lifecycle;
 
   const [orgId, setOrgId] = useState<bigint | null>(null);
   const [mayManage, setMayManage] = useState<boolean | null>(null);
@@ -60,8 +57,6 @@ export function Gates() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<GateProblem | ''>('');
-  const [confirming, setConfirming] = useState(false);
-  const [unsponsored, setUnsponsored] = useState(false);
   const [paste, setPaste] = useState(EMPTY_PASTE);
   const [reload, setReload] = useState(0);
 
@@ -115,8 +110,6 @@ export function Gates() {
       if (orgId === null) return;
       setBusy(true);
       setProblem('');
-      setConfirming(false);
-      setUnsponsored(false);
       try {
         await sendAction(functionName, 'organizers', encodeFunctionData({ abi: organizersAbi, functionName, args }));
         setPaste(EMPTY_PASTE);
@@ -138,7 +131,6 @@ export function Gates() {
     const read = readGateKey(input);
     if ('problem' in read) {
       setProblem(read.problem);
-      setUnsponsored(false);
       return;
     }
     void send('registerGate', [BigInt(eventId), read.args.gateAccount, read.args.kx, read.args.ky]);
@@ -155,8 +147,6 @@ export function Gates() {
   return (
     <Screen title={copy.title}>
       {problem === '' ? null : <Alert tone="error">{copy.problems[problem]}</Alert>}
-      {confirming ? <Alert tone="info">{lifecycle.confirming}</Alert> : null}
-      {unsponsored ? <UnsponsoredNotice /> : null}
       {busy ? <Alert tone="info">{copy.working}</Alert> : null}
 
       {mayManage === false ? <Alert tone="error">{copy.problems.notAllowed}</Alert> : null}

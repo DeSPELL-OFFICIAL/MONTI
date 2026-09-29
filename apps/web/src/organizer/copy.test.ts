@@ -47,8 +47,4 @@ describe('organizer copy', () => {
     }
   });
 
-  it('states plainly, with no web3 words, that an unsponsored organiser write costs a fee', () => {
-    expect(organizerCopy.ko.unsponsored.notice).toBe('주최자 작업은 지금은 수수료가 들어요');
-    expect(organizerCopy.en.unsponsored.notice).toContain('fee');
-  });
 });

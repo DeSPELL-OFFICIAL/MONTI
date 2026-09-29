@@ -58,7 +58,7 @@ let handed: { draft: EventDraft } | null = null;
 vi.mock('./usePublish', () => ({
   usePublish: (options: { draft: EventDraft }) => {
     handed = options;
-    return { phase: 'idle' as const, problem: '' as const, unsponsored: false, publish };
+    return { phase: 'idle' as const, problem: '' as const, publish };
   },
 }));
 

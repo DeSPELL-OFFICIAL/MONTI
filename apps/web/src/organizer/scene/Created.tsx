@@ -2,21 +2,15 @@ import { useEffect, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { Alert, Button, Card, OpProgress, Screen, StickyBar, Steps, SuccessCheck, posterUrl } from '../../shared/ui';
 import { useCopy } from '../../shared/i18n';
-import { gql } from '../../shared/envio/client';
-import { EVENT_QUERY, type EnvioEvent } from '../../shared/envio/queries';
 import { readTicket } from '../../shared/chain/reads';
 import { useOrganizerCopy } from '../copy';
 import { publishEvent, type LifecycleProblem } from '../lifecycle';
-import { UnsponsoredNotice } from '../Unsponsored';
 import { forgetEventDraft } from '../useEventDraft';
 import { followUpsDone, runFollowUps, type FollowUpResult } from './followUps';
 import type { CreatedEvent } from './usePublish';
 
 /** Big enough to scan off a phone held up across a table, small enough to be a few kilobytes. */
 const QR_WIDTH = 320;
-
-/** How often a confirming publish asks the indexer whether the event has gone public (plan §2c). */
-const CONFIRM_POLL_MS = 3_000;
 
 /**
  * What SCENE 2 hands over when the event exists. It travels in the navigation rather than
@@ -32,10 +26,10 @@ const ALL_SAVED: FollowUpResult = { artSaved: true, venueSaved: true };
 
 /**
  * The publish (Draft → Published) this screen now runs itself, so completion and sharing are one
- * screen with no navigation between them (T-SIMP-6). `saving`/`confirming` are the wait; only at
- * `done` — the event is public — do the share link and the QR appear, in place.
+ * screen with no navigation between them (T-SIMP-6). `saving` is the wait; only at `done` — the
+ * event is public — do the share link and the QR appear, in place.
  */
-type PublishState = 'idle' | 'saving' | 'confirming' | 'done';
+type PublishState = 'idle' | 'saving' | 'done';
 
 export function Created() {
   const scene = useOrganizerCopy().scene;
@@ -54,7 +48,6 @@ export function Created() {
   // stay hidden until it reaches `done`.
   const [publishing, setPublishing] = useState<PublishState>('idle');
   const [problem, setProblem] = useState<LifecycleProblem | ''>('');
-  const [unsponsored, setUnsponsored] = useState(false);
   const published = publishing === 'done';
   const plan = handed.plan;
   const missing = plan !== undefined && !followUpsDone(plan, saved);
@@ -78,23 +71,6 @@ export function Created() {
       live = false;
     };
   }, [link]);
-
-  // A publish whose `wait` gave up is not a failure — it is on its way. Poll the indexer until it
-  // shows Published, then reveal the link on this same screen, with no refresh (plan §2c).
-  useEffect(() => {
-    if (publishing !== 'confirming') return undefined;
-    let live = true;
-    const poll = async (): Promise<void> => {
-      const indexed = await gql<{ Event: EnvioEvent[] }>(EVENT_QUERY, { id: eventId, eventId }).catch(() => null);
-      if (!live || indexed === null) return;
-      if (indexed.Event[0]?.status === 'Published') setPublishing('done');
-    };
-    const timer = setInterval(() => void poll(), CONFIRM_POLL_MS);
-    return () => {
-      live = false;
-      clearInterval(timer);
-    };
-  }, [publishing, eventId]);
 
   /**
    * Runs only the writes that have not landed, against the id the event already has. Both
@@ -120,9 +96,8 @@ export function Created() {
    * wrong one. `publishEvent` replaces rather than adds, so a second press after a timeout is safe.
    */
   async function goPublic(): Promise<void> {
-    if (publishing === 'saving' || publishing === 'confirming') return;
+    if (publishing === 'saving') return;
     setProblem('');
-    setUnsponsored(false);
     setPublishing('saving');
     const orgId = await readTicket().eventOrg(BigInt(eventId)).catch(() => null);
     if (orgId === null || orgId === 0n) {
@@ -133,11 +108,6 @@ export function Created() {
     const result = await publishEvent(BigInt(eventId), orgId);
     if (result.state === 'done') {
       setPublishing('done');
-    } else if (result.state === 'confirming') {
-      setPublishing('confirming');
-    } else if (result.state === 'unsponsored') {
-      setPublishing('idle');
-      setUnsponsored(true);
     } else {
       setPublishing('idle');
       setProblem(result.problem);
@@ -203,13 +173,12 @@ export function Created() {
             <p>
               <span className="badge">{copy.notYetPublic}</span>
             </p>
-            {publishing === 'saving' || publishing === 'confirming' ? (
-              <OpProgress phase={publishing === 'confirming' ? 'confirming' : 'saving'} />
+            {publishing === 'saving' ? (
+              <OpProgress phase="saving" />
             ) : (
               // 안심어: 공개도 무료고, 어려운 건 MONTI가 대신 처리한다(T-SIMP-6). 주행동은 하단 바로.
               <p className="muted">{common.montiHandles}</p>
             )}
-            {unsponsored ? <UnsponsoredNotice /> : null}
             {problem !== '' ? <Alert tone="error">{life[problem]}</Alert> : null}
           </>
         )}
@@ -229,7 +198,7 @@ export function Created() {
           ) : (
             <Button
               onClick={() => void goPublic()}
-              disabled={publishing === 'saving' || publishing === 'confirming'}
+              disabled={publishing === 'saving'}
             >
               {copy.publishNow}
             </Button>

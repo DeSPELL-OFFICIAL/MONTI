@@ -9,7 +9,6 @@ import { readOrganizers } from '../shared/chain/reads';
 import { sendAction } from '../shared/relay/sendAction';
 import { relayProblem } from '../shared/relay/relayError';
 import { useOrganizerCopy, type OrganizerCopy } from './copy';
-import { UnsponsoredNotice } from './Unsponsored';
 
 type Role = 'admin' | 'manager';
 type TeamProblem = keyof OrganizerCopy['team']['problems'];
@@ -81,8 +80,6 @@ function when(seconds: number | undefined): string | null {
 export function Team({ orgId: fixedOrgId }: { orgId?: string } = {}) {
   const organizer = useOrganizerCopy();
   const copy = organizer.team;
-  // The one sentence for "it is still on its way", shared with the lifecycle screens.
-  const lifecycle = organizer.lifecycle;
   const [orgId, setOrgId] = useState(fixedOrgId ?? '');
 
   const [phone, setPhone] = useState('');
@@ -110,8 +107,6 @@ export function Team({ orgId: fixedOrgId }: { orgId?: string } = {}) {
   const [granted, setGranted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<TeamProblem | ''>('');
-  const [confirming, setConfirming] = useState(false);
-  const [unsponsored, setUnsponsored] = useState(false);
 
   // Owner or not is a chain question and the answer decides what this screen offers. An
   // organisation number that is not one yet (`ownerOf` is the zero address) is simply not mine.
@@ -200,7 +195,6 @@ export function Team({ orgId: fixedOrgId }: { orgId?: string } = {}) {
 
   async function invite(): Promise<void> {
     setProblem('');
-    setUnsponsored(false);
     if (!ORG_ID_RE.test(orgId)) return setProblem('orgId');
     if (!PHONE_RE.test(phone.trim())) return setProblem('phone');
     if (role === 'admin' && bits === 0) return setProblem('bits');
@@ -295,8 +289,6 @@ export function Team({ orgId: fixedOrgId }: { orgId?: string } = {}) {
     // The grant belongs to one accepted invitation, so there is nothing to send without one.
     if (granting === null) return;
     setProblem('');
-    setConfirming(false);
-    setUnsponsored(false);
     setGranted(false);
     if (!ORG_ID_RE.test(orgId)) return setProblem('orgId');
     if (!isAddress(account, { strict: true })) return setProblem('account');
@@ -325,8 +317,6 @@ export function Team({ orgId: fixedOrgId }: { orgId?: string } = {}) {
   return (
     <Screen title={copy.title}>
       {problem === '' ? null : <Alert tone="error">{copy.problems[problem]}</Alert>}
-      {confirming ? <Alert tone="info">{lifecycle.confirming}</Alert> : null}
-      {unsponsored ? <UnsponsoredNotice /> : null}
       {busy ? <Alert tone="info">{copy.working}</Alert> : null}
       {/* Narrower than the chain, on purpose: `setManager` accepts any holder of
           `PERM_MANAGE_MANAGERS`, not only the owner. `setAdmin` is owner-only, and one rule for

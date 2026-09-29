@@ -140,22 +140,6 @@ describe('the done screen — going public in place', () => {
     expect(screen.getByRole('heading', { name: '재즈 나이트' })).toBeInTheDocument();
   });
 
-  /** Plan §2c: a publish whose wait gave up shows determinate progress and resolves itself. */
-  it('shows progress on a slow publish and reveals the link once the indexer says it is public', async () => {
-    const user = userEvent.setup();
-    publishEvent.mockResolvedValueOnce({ state: 'confirming' });
-    gql.mockResolvedValue({ Event: [{ status: 'Draft' }] });
-    open();
-    await user.click(screen.getByRole('button', { name: copy.publishNow }));
-
-    await waitFor(() => expect(document.querySelector('.op-progress')).not.toBeNull());
-    expect(screen.queryByText(LINK)).toBeNull();
-
-    // The indexer catches up; the background poll reveals the link on its own — no refresh.
-    gql.mockResolvedValue({ Event: [{ status: 'Published' }] });
-    expect(await screen.findByText(LINK, {}, { timeout: 5_000 })).toBeInTheDocument();
-  });
-
   it('names the rule and keeps 지금 공개하기 when the chain refuses the publish', async () => {
     const user = userEvent.setup();
     publishEvent.mockResolvedValueOnce({ state: 'refused', problem: 'notDraft' });
