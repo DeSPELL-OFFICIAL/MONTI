@@ -117,8 +117,8 @@ test.describe('MONTI persona harness (admin + 9 users)', () => {
     expect(free.eventId).toBeTruthy();
     const freeId = free.eventId!;
     recordEvent('free', { id: freeId, published: false, title: FREE_TITLE });
-    await publishEvent(admin.page, ADMIN.id, freeId);
-    markPublished('free', true);
+    const freeStatus = await publishEvent(admin.page, ADMIN.id, freeId);
+    markPublished('free', freeStatus === 'published');
 
     // Approval-required event — only when the flag AND the build allow it.
     if (APPROVAL) {
@@ -133,8 +133,8 @@ test.describe('MONTI persona harness (admin + 9 users)', () => {
       expect(appr.eventId).toBeTruthy();
       const apprId = appr.eventId!;
       recordEvent('approval', { id: apprId, published: false, title: APPROVAL_TITLE });
-      await publishEvent(admin.page, ADMIN.id, apprId);
-      markPublished('approval', true);
+      const apprStatus = await publishEvent(admin.page, ADMIN.id, apprId);
+      markPublished('approval', apprStatus === 'published');
     }
 
     // Paid tier — expected to hold the create button disabled with the honest block copy.
@@ -249,8 +249,8 @@ test.describe('MONTI persona harness (admin + 9 users)', () => {
     expect(soldOut.eventId).toBeTruthy();
     const soldOutId = soldOut.eventId!;
     recordEvent('soldOut', { id: soldOutId, published: false, title: SOLDOUT_TITLE });
-    await publishEvent(admin.page, ADMIN.id, soldOutId);
-    markPublished('soldOut', true);
+    const soldOutStatus = await publishEvent(admin.page, ADMIN.id, soldOutId);
+    markPublished('soldOut', soldOutStatus === 'published');
 
     const users = await ensureUsers(browser, USER_COUNT);
     // Sequential, with a beat between each, so the indexer's minted count can catch up and the
