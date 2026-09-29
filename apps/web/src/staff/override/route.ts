@@ -16,20 +16,21 @@
 //
 // **Whose account** is not a choice at all: the staff member's own passkey account, always.
 // Check-ins are sent by the gate account (Task 21) because a tap is the terminal's business; an
-// override is a person's. `Ticket.manualOverride` writes `msg.sender` into `ManualOverride` as
+// override is a person's. `Ticket.manualOverride` writes `_msgSender()` into `ManualOverride` as
 // the approver, and an override signed by the terminal would record a *device* where the whole
 // point is to record a person who can be asked about it afterwards. The account is therefore
 // fetched here rather than passed in — a caller that could hand one in is a caller that could
-// hand in a different one from the account whose rights were just measured.
+// hand in a different one from the account whose rights were just measured. The relayer forwards
+// the call (ERC-2771), so the passkey the account holds signs the ForwardRequest and the person,
+// not the terminal, still stands behind the door opening.
 import { encodeFunctionData, type Address } from 'viem';
 
 import { OVERRIDE_ROLE, PERM_APPROVE_OVERRIDE, ticketAbi, type OverrideReasonCode } from '@monti/shared';
 
 import { getStaffAccount } from '../../shared/chain/accounts';
 import type { OverrideCall, OverrideRole, OverrideRoute } from '../types';
-import { getConfig } from '../../shared/config';
 import { readOrganizers } from '../../shared/chain/reads';
-import { sendSponsoredOp, type SponsoredOpHandle } from '../../shared/chain/sendSponsoredOp';
+import { sendAction } from '../../shared/relay/sendAction';
 
 export { PERM_APPROVE_OVERRIDE };
 
@@ -112,24 +113,30 @@ export interface SubmitOverrideParams {
 }
 
 /**
- * The operation, plus everything the console has to show about it. It **is** a
- * {@link SponsoredOpHandle} — `wait()` and all — so a caller that only wants the receipt treats
- * it as one; the four extra fields are the answer to "who let this person in, and why", which
- * is the question the chain event exists to answer and therefore the one the screen must too.
+ * The operation, plus everything the console has to show about it. `route`/`role`/`approver`/
+ * `reason` are the answer to "who let this person in, and why", known the moment the authority is
+ * read, so the console can show them while the relay is still in flight. `settled` is the relay's
+ * verdict: it resolves once the relayer confirms the override, and rejects with the
+ * `sendAction` refusal — a `CallableError` whose `details.code` is the contract/forwarder error
+ * name — that the console maps to a DENY. A rejection carrying no code is an unknown outcome (a
+ * dropped relay listener), which the console reads as still in flight, not as a failure.
  */
-export interface OverrideSubmission extends SponsoredOpHandle {
+export interface OverrideSubmission {
   route: OverrideCall;
   role: OverrideRole;
   approver: Address;
   reason: OverrideReasonCode;
+  settled: Promise<void>;
 }
 
 /**
  * Files or approves one override, from the staff member's own passkey account.
  *
- * The passkey signs the user operation, so a biometric prompt is expected here and is the point:
- * it is the moment a person, not a terminal, stands behind the door opening. The organizer's
- * paymaster pays, the same as a check-in — the budget belongs to the event either way.
+ * The passkey signs the ForwardRequest, so a biometric prompt is expected here and is the point:
+ * it is the moment a person, not a terminal, stands behind the door opening. The MONTI relayer
+ * pays the gas and forwards the call, the same as a check-in — the budget belongs to the event
+ * either way. The authority is read against the account that will sign, never one handed in, so
+ * the console can never print an approver the chain will not record.
  */
 export async function submitOverride(params: SubmitOverrideParams): Promise<OverrideSubmission> {
   const account = await getStaffAccount();
@@ -137,21 +144,13 @@ export async function submitOverride(params: SubmitOverrideParams): Promise<Over
   const { route, role } = await readOverrideAuthority({ orgId: params.orgId, account: approver });
   if (route === 'denied') throw new OverrideDenied();
 
-  const handle = await sendSponsoredOp({
-    account,
-    orgId: params.orgId,
-    calls: [
-      {
-        to: getConfig().addresses.ticket,
-        data: encodeFunctionData({
-          abi: ticketAbi,
-          functionName: route,
-          args: [params.tokenId, params.gateId, params.reason],
-        }),
-      },
-    ],
-  });
+  // Kicked off now, awaited by the caller through `settled`: the passkey prompt and the relay wait
+  // both live on that promise, so the console shows who is approving the moment this returns.
+  const settled = sendAction(
+    route,
+    'ticket',
+    encodeFunctionData({ abi: ticketAbi, functionName: route, args: [params.tokenId, params.gateId, params.reason] }),
+  ).then(() => undefined);
 
-  // `SponsoredOpHandle` is a plain object with no `this`, so the spread carries `wait` as it is.
-  return { ...handle, route, role, approver, reason: params.reason };
+  return { route, role, approver, reason: params.reason, settled };
 }

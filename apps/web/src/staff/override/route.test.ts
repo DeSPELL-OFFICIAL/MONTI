@@ -39,9 +39,9 @@ vi.mock('../../shared/config', () => ({
 const readContract = vi.fn();
 vi.mock('../../shared/chain/client', () => ({ getPublicClient: () => ({ readContract }) }));
 
-const wait = vi.fn(async () => ({ success: true, txHash: `0x${'77'.repeat(32)}`, blockNumber: 12n }));
-const sendSponsoredOp = vi.fn(async (_args: unknown) => ({ userOpHash: `0x${'88'.repeat(32)}`, wait }));
-vi.mock('../../shared/chain/sendSponsoredOp', () => ({ sendSponsoredOp }));
+// The relay client is mocked; `submitOverride` builds the calldata and hands it to `sendAction`.
+const sendAction = vi.fn();
+vi.mock('../../shared/relay/sendAction', () => ({ sendAction }));
 
 const staffAccount = { address: STAFF };
 const getStaffAccount = vi.fn(async () => staffAccount);
@@ -57,14 +57,15 @@ function chainSays(manager: [boolean, boolean], permitted: boolean): void {
   readContract.mockResolvedValueOnce(manager).mockResolvedValueOnce(permitted);
 }
 
-function sentCall(): { to: Hex; data: Hex } {
-  const args = sendSponsoredOp.mock.calls[0]![0] as { calls: Array<{ to: Hex; data: Hex }> };
-  return args.calls[0]!;
+function sentCall(): { kind: string; target: string; data: Hex } {
+  const [kind, target, data] = sendAction.mock.calls[0]! as [string, string, Hex];
+  return { kind, target, data };
 }
 
 beforeEach(() => {
   readContract.mockReset();
-  sendSponsoredOp.mockClear();
+  sendAction.mockReset();
+  sendAction.mockResolvedValue(undefined);
 });
 
 describe('who may approve, asked of the chain', () => {
@@ -113,7 +114,7 @@ describe('who may approve, asked of the chain', () => {
 });
 
 describe('the override operation', () => {
-  it('sends manualOverride from the staff member own account, on the organizer budget', async () => {
+  it('relays manualOverride, from the staff member own account and its measured authority', async () => {
     chainSays([true, true], false);
     const submission = await submitOverride({
       orgId: 5n,
@@ -121,25 +122,23 @@ describe('the override operation', () => {
       gateId: 7n,
       reason: OVERRIDE_REASON.photoChecked,
     });
-
-    const args = sendSponsoredOp.mock.calls[0]![0] as { account: { address: Hex }; orgId: bigint };
-    expect(args.account.address).toBe(STAFF);
-    expect(args.orgId).toBe(5n);
+    await submission.settled;
 
     const call = sentCall();
-    expect(call.to).toBe(TICKET);
+    expect(call.kind).toBe('manualOverride');
+    expect(call.target).toBe('ticket');
     const { functionName, args: callArgs } = decodeFunctionData({ abi: ticketAbi, data: call.data });
     expect(functionName).toBe('manualOverride');
     expect(callArgs).toEqual([123n, 7n, 1]);
 
     expect(submission.route).toBe('manualOverride');
     expect(submission.role).toBe('manager');
+    // The approver is the account whose rights were just measured — never one handed in.
     expect(submission.approver).toBe(STAFF);
     expect(submission.reason).toBe(OVERRIDE_REASON.photoChecked);
-    expect(submission.userOpHash).toBe(`0x${'88'.repeat(32)}`);
   });
 
-  it('sends requestOverride when that is what this account may do', async () => {
+  it('relays requestOverride when that is what this account may do', async () => {
     chainSays([true, false], false);
     const submission = await submitOverride({
       orgId: 5n,
@@ -147,6 +146,7 @@ describe('the override operation', () => {
       gateId: 7n,
       reason: OVERRIDE_REASON.phoneTrouble,
     });
+    await submission.settled;
     const { functionName, args } = decodeFunctionData({ abi: ticketAbi, data: sentCall().data });
     expect(functionName).toBe('requestOverride');
     expect(args).toEqual([9n, 7n, 2]);
@@ -170,7 +170,7 @@ describe('the override operation', () => {
     await expect(
       submitOverride({ orgId: 5n, tokenId: 1n, gateId: 7n, reason: OVERRIDE_REASON.other }),
     ).rejects.toBeInstanceOf(OverrideDenied);
-    expect(sendSponsoredOp).not.toHaveBeenCalled();
+    expect(sendAction).not.toHaveBeenCalled();
   });
 
   /**

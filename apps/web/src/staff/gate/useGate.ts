@@ -49,7 +49,6 @@ import { getStaffAccount } from '../../shared/chain/accounts';
 import { passkeyProblem } from '../../shared/passkey/errors';
 import { readIdentity, readOrganizers, readTicket } from '../../shared/chain/reads';
 import {
-  CHECK_IN_WAIT_MS,
   DEVICE_CHANGE_WINDOW_MS,
   GATE_OPEN_RECHECK_MS,
   GATE_OPEN_STALE_MS,
@@ -75,7 +74,7 @@ import type { GateContext, OverrideOutcome, OverrideReason, PreflightResult } fr
 import { overrideNotice } from '../components/overrideText';
 import { relayCheckIn } from './checkInOp';
 import { matchIssuedCode } from './decodeResponse';
-import { DENY_LABELS, mapCallableDeny, mapRevertToDenyCode } from './denyMap';
+import { DENY_LABELS, mapCallableDeny } from './denyMap';
 import { startGateEmitter, type GateEmitter, type GateTap } from './emitter';
 import {
   createGateMachine,
@@ -87,6 +86,19 @@ import {
 import { admissionsDuplicate, preflight } from './preflight';
 import { watchRelay } from './relayStatus';
 import { watchManualOverride } from './verdict';
+
+/**
+ * The contract/forwarder code a relayed action's refusal carries in `details.code` — the same shape
+ * `sendAction` rejects with on a failed relay doc, and `mapCallableDeny` maps to a DENY. `undefined`
+ * for an unknown outcome (a dropped relay listener), which the override handler keeps in flight
+ * rather than turning into a refusal a staff member would resend over.
+ */
+function relayRefusalCode(error: unknown): string | undefined {
+  const details = (error as { details?: unknown } | null)?.details;
+  if (typeof details !== 'object' || details === null) return undefined;
+  const { code } = details as { code?: unknown };
+  return typeof code === 'string' && code.length > 0 ? code : undefined;
+}
 
 export interface UseGateParams {
   gateId: bigint;
@@ -719,52 +731,43 @@ export function useGate(params: UseGateParams): UseGateResult {
         submission = await sendOverride({ orgId, gateId, tokenId: BigInt(tokenId), reason });
       } catch (error) {
         warn('gate', 'override was not sent', error);
-        // Three endings, because "다시 해 보세요" is wrong advice for two of them. A refusal is
-        // about this account and pressing again cannot change it; a dismissed biometric prompt
-        // did not fail at all, and the sentence has to say what is missing.
+        // Two endings the send helper raises before anything is signed: this account may not
+        // approve (pressing again cannot change it), or the authority read did not come back.
         if (error instanceof OverrideDenied) fail(copy.override.denied);
-        else if (passkeyProblem(error) === 'cancelled') fail(copy.override.cancelled);
         else fail(copy.override.failed);
         return;
       }
 
-      const filed: OverrideOutcome = {
-        status: 'sending',
-        reason,
-        tokenId,
-        displayName,
-        route: submission.route,
-        role: submission.role,
-        approver: submission.approver,
-      };
-      machine.onOverrideResult(filed);
+      // Who is approving, shown while the relay is still in flight — the passkey prompt and the
+      // relay wait both live on `submission.settled`.
+      const who = { route: submission.route, role: submission.role, approver: submission.approver };
+      machine.onOverrideResult({ status: 'sending', reason, tokenId, displayName, ...who });
 
-      let receipt;
       try {
-        receipt = await submission.wait(CHECK_IN_WAIT_MS);
+        await submission.settled;
       } catch (error) {
-        // A rejected `wait()` is not a timeout: the bundler answered with an error, or the RPC
-        // dropped. Swallowing it leaves the dialog on 보내고 있어요 for ever with no ending.
-        warn('gate', 'override receipt could not be read', error);
-        fail(copy.override.unreachable, { route: submission.route, role: submission.role, approver: submission.approver });
-        return;
-      }
-      if (receipt.revertReason === 'TIMEOUT') {
-        // The operation is still out there, exactly as a slow check-in is (spec §7.3). Saying
-        // "실패" here would be a lie a staff member would act on by sending a second one.
-        return;
-      }
-      if (!receipt.success) {
-        fail(mapRevertToDenyCode(receipt.revertReason).detail, {
-          route: submission.route,
-          role: submission.role,
-          approver: submission.approver,
-        });
+        warn('gate', 'override did not settle', error);
+        // A dismissed biometric prompt did not fail — the sentence has to say what is missing.
+        if (passkeyProblem(error) === 'cancelled') {
+          fail(copy.override.cancelled, who);
+          return;
+        }
+        // A named refusal → the same DENY mapping a relayed check-in uses. No code is lost contact
+        // with the relayer (a dropped listener, a network drop): not a rule the door broke, but an
+        // ending all the same — the staff member reads it and the retry lands in 직전 탭.
+        if (relayRefusalCode(error) === undefined) {
+          fail(copy.override.unreachable, who);
+          return;
+        }
+        fail(mapCallableDeny(error).detail, who);
         return;
       }
       machine.onOverrideResult({
-        ...filed,
         status: submission.route === 'manualOverride' ? 'approved' : 'requested',
+        reason,
+        tokenId,
+        displayName,
+        ...who,
       });
     },
     [copy, gateId, machine, orgId],

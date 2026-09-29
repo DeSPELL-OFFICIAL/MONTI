@@ -79,15 +79,11 @@ const subscribeLogs = vi.fn((_watch: { onLog: (log: unknown) => void }) => stopL
 vi.mock('../../shared/chain/subscribeLogs', () => ({ subscribeLogs }));
 
 // --- the bundler -------------------------------------------------------------------------------
-/** `SponsoredOpReceipt` — typed here so a test can hand back a revert or the TIMEOUT sentinel. */
-type Receipt = { success: boolean; txHash: Hex; blockNumber: bigint; revertReason?: Hex | 'TIMEOUT' };
-const OK: Receipt = { success: true, txHash: `0x${'77'.repeat(32)}`, blockNumber: 99n };
-const wait = vi.fn<() => Promise<Receipt>>(async () => OK);
-const sendSponsoredOp = vi.fn(async (_args: { orgId: bigint }) => ({
-  userOpHash: `0x${'88'.repeat(32)}` as Hex,
-  wait,
-}));
-vi.mock('../../shared/chain/sendSponsoredOp', () => ({ sendSponsoredOp, MIN_VERIFICATION_GAS: 150_000n }));
+// The relay client the override path uses now. Its calldata is decoded off the call; the account it
+// signs from is resolved inside `sendAction` (getStaffAccount, mocked below), never passed here, so
+// a test reads the approver back off the outcome rather than off the operation.
+const sendAction = vi.fn();
+vi.mock('../../shared/relay/sendAction', () => ({ sendAction }));
 vi.mock('../../shared/chain/gateAccount', () => ({
   getGateSmartAccount: async () => ({ address: GATE_ACCOUNT }),
   getGateAddress: async () => GATE_ACCOUNT,
@@ -281,8 +277,7 @@ function setRadio(online: boolean): void {
 
 beforeEach(async () => {
   vi.clearAllMocks();
-  wait.mockResolvedValue(OK);
-  sendSponsoredOp.mockResolvedValue({ userOpHash: `0x${'88'.repeat(32)}`, wait });
+  sendAction.mockResolvedValue(undefined);
   subscribeLogs.mockReturnValue(stopLogs);
   relayCheckIn.mockResolvedValue({ relayId: '42:1042', status: 'confirmed' });
   admissionsDuplicate.mockResolvedValue(undefined);
@@ -840,7 +835,7 @@ describe('manual approval', () => {
     const { setPin } = await import('../override/pin');
     await setPin('4821');
     const rendered = await openGate();
-    sendSponsoredOp.mockClear();
+    sendAction.mockClear();
     return rendered;
   }
 
@@ -855,22 +850,16 @@ describe('manual approval', () => {
       tapWith(servedCode());
     });
     await waitFor(() => expect(rendered.result.current.state).toBe('deny'));
-    sendSponsoredOp.mockClear();
+    sendAction.mockClear();
     return rendered;
   }
 
-  /** The override operation, decoded. The check-in has already been cleared off the mock. */
+  /** The relayed override, decoded. The check-in has already been cleared off the mock. */
   async function sentOverride() {
     const { decodeFunctionData } = await import('viem');
     const { ticketAbi } = await import('@monti/shared');
-    const args = sendSponsoredOp.mock.calls.at(-1)?.[0] as unknown as {
-      account: { address: Hex };
-      calls: Array<{ data: Hex }>;
-    };
-    return {
-      sender: args.account.address,
-      ...decodeFunctionData({ abi: ticketAbi, data: args.calls[0]!.data }),
-    };
+    const [kind, target, data] = sendAction.mock.calls.at(-1)! as [string, string, Hex];
+    return { kind, target, ...decodeFunctionData({ abi: ticketAbi, data }) };
   }
 
   it('sends manualOverride from the staff member own account, and records who and why', async () => {
@@ -887,8 +876,8 @@ describe('manual approval', () => {
     });
 
     const sent = await sentOverride();
-    expect(sent.sender).toBe(STAFF_ACCOUNT);
-    expect(sent.sender).not.toBe(GATE_ACCOUNT);
+    expect(sent.kind).toBe('manualOverride');
+    expect(sent.target).toBe('ticket');
     expect(sent.functionName).toBe('manualOverride');
     expect(sent.args).toEqual([BigInt(TOKEN_ID), GATE_ID, 2]);
 
@@ -951,7 +940,7 @@ describe('manual approval', () => {
     await act(async () => {
       await result.current.submitOverride('0000', 1, TOKEN_ID);
     });
-    expect(sendSponsoredOp).not.toHaveBeenCalled();
+    expect(sendAction).not.toHaveBeenCalled();
     expect(result.current.override?.status).toBe('failed');
     expect(result.current.override?.detail).toContain('4');
   });
@@ -970,7 +959,7 @@ describe('manual approval', () => {
     await act(async () => {
       await result.current.submitOverride('4821', 1, TOKEN_ID);
     });
-    expect(sendSponsoredOp).not.toHaveBeenCalled();
+    expect(sendAction).not.toHaveBeenCalled();
     expect(result.current.override?.detail).toBe(staffKo.override.pinLocked.replace('{{seconds}}', '60'));
   });
 
@@ -984,7 +973,7 @@ describe('manual approval', () => {
     await act(async () => {
       await result.current.submitOverride('4821', 1, TOKEN_ID);
     });
-    expect(sendSponsoredOp).not.toHaveBeenCalled();
+    expect(sendAction).not.toHaveBeenCalled();
     expect(result.current.override).toMatchObject({ status: 'failed', detail: staffKo.override.denied });
   });
 
@@ -1073,7 +1062,7 @@ describe('manual approval', () => {
   it('says a dismissed identity check is not a failure', async () => {
     const { result } = await ready();
     const cancelled = Object.assign(new Error('nope'), { name: 'NotAllowedError' });
-    sendSponsoredOp.mockRejectedValueOnce(cancelled);
+    sendAction.mockRejectedValueOnce(cancelled);
     await act(async () => {
       result.current.openOverride();
     });
@@ -1086,10 +1075,11 @@ describe('manual approval', () => {
     });
   });
 
-  /** A rejected `wait()` is not a timeout. Swallowing it left the dialog with no ending at all. */
-  it('gives a receipt it could not read its own sentence', async () => {
+  /** A relay that never settled its doc — lost contact, not a rule the door broke. Swallowing it
+   *  left the dialog with no ending at all, so it gets its own 보낼 수 없었어요 sentence. */
+  it('gives a relay it could not follow its own sentence', async () => {
     const { result } = await ready();
-    wait.mockRejectedValueOnce(new Error('bundler said no'));
+    sendAction.mockRejectedValueOnce(new Error('relayer said no'));
     await act(async () => {
       result.current.openOverride();
     });
