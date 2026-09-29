@@ -4,8 +4,8 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { warn } from 'firebase-functions/logger';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import type { FunctionsErrorCode } from 'firebase-functions/v2/https';
-import { getAddress } from 'viem';
-import { ROTATION_COOLDOWN_SECONDS, coinbaseFactoryAbi, identityAbi, type Hex } from '@monti/shared';
+import { getAddress, parseAbi } from 'viem';
+import { COINBASE_SMART_WALLET_FACTORY_ADDRESS, ROTATION_COOLDOWN_SECONDS, identityAbi, type Hex } from '@monti/shared';
 import { ATTESTER_PK, PHONE_INDEX_KEY, RP_ID, expectedOrigins } from '../config.js';
 import { sendSerialized } from '../lib/attesterLock.js';
 import { awaitFinalized, deployment, publicClient, sendAttesterTx } from '../lib/chain.js';
@@ -20,13 +20,20 @@ import {
   authAdmin,
   db,
 } from '../lib/db.js';
-import { predeployAccount } from '../lib/predeployAccount.js';
 import { hmacPhone } from '../lib/phoneIndex.js';
 import { CHALLENGE_RE, challengeFromClientData, coseToP256, ownerBytes } from '../lib/webauthn.js';
 
 const B32_RE = /^0x[0-9a-fA-F]{64}$/;
 const ZERO32 = `0x${'00'.repeat(32)}`;
 const ZERO_ADDR = '0x0000000000000000000000000000000000000000';
+/**
+ * counterfactual 계정 주소 계산용 최소 팩토리 ABI(설계 §3·§7, registerPasskey 와 동일).
+ * 팩토리 주소는 정적 상수 `COINBASE_SMART_WALLET_FACTORY_ADDRESS`(설계 §7) 다.
+ */
+const coinbaseFactoryAbi = parseAbi([
+  'function getAddress(bytes[] owners, uint256 nonce) view returns (address)',
+]);
+
 /** 사람마다 계정은 하나뿐이라 팩토리 nonce 는 항상 0이다(registerPasskey 와 같은 값). */
 const ACCOUNT_NONCE = 0n;
 /** ES256(P-256) 외의 알고리즘은 받지 않는다. 스마트 계정 검증기가 P-256 밖에 못 쓴다. */
@@ -243,7 +250,7 @@ export const recoverAccess = onCall(
     const contracts = deployment();
     const newAccount = getAddress(
       (await publicClient().readContract({
-        address: contracts.coinbaseFactory,
+        address: COINBASE_SMART_WALLET_FACTORY_ADDRESS,
         abi: coinbaseFactoryAbi,
         functionName: 'getAddress',
         args: [[owner], ACCOUNT_NONCE],
@@ -371,7 +378,6 @@ export const recoverAccess = onCall(
 
     // 20. 세션 클레임·토큰을 새 계정으로 심는다(loginVerify·registerIdentity 와 같은 모양).
     await mintSessionClaims(uid, personId, newAccount);
-    await predeployAccount({ personRef, personId, account: newAccount }).catch(() => {});
     const token = await authAdmin.createCustomToken(uid, { personId, account: newAccount });
 
     // 21.

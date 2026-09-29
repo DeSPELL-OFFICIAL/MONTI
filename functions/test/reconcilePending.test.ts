@@ -204,13 +204,6 @@ vi.mock('../src/lib/chain.js', () => ({
   sendAttesterTx: (...args: unknown[]) => sendAttesterTx(...(args as [Record<string, unknown>])),
 }));
 
-/**
- * 사전 배포 자체는 predeployAccount.test.ts 가 검증한다. 여기서는 이 스윕이 딱지 붙은 사람을
- * 골라 그 함수에 넘기는지, 상한(50)을 지키는지, 계정 주소가 없는 딱지는 스스로 걷는지만 본다.
- */
-const predeployAccount = vi.fn(async (_params: unknown) => {});
-vi.mock('../src/lib/predeployAccount.js', () => ({ predeployAccount }));
-
 // 운영에서는 `lib/chain.js` 가 `../config.js` 를 끌어와 트리거 정의 전에 `setGlobalOptions` 를
 // 돌린다. 그 chain 이 위에서 mock 되므로 여기서 직접 불러 리전이 배포와 같은 순서로 붙게 한다.
 await import('../src/config.js');
@@ -256,7 +249,6 @@ beforeEach(() => {
   readContract.mockResolvedValue(ZERO);
   sendAttesterTx.mockReset();
   sendAttesterTx.mockResolvedValue(KYC_TX);
-  predeployAccount.mockClear();
   write('users/uid-1', { personId: P1 });
   write('users/uid-2', { personId: P2 });
   write('users/uid-3', { personId: P3 });
@@ -839,55 +831,6 @@ describe('reconcilePending — 버려진 본인인증 세션', () => {
   });
 });
 
-describe('reconcilePending — 스마트 계정 사전 배포 재시도', () => {
-  it('hands a flagged person with an account to predeployAccount', async () => {
-    seedPerson(P1, { status: 'active', account: ACCOUNT, chain: { accountDeployPending: true } });
-
-    await run({} as never);
-
-    expect(predeployAccount).toHaveBeenCalledTimes(1);
-    const arg = predeployAccount.mock.calls[0]![0] as {
-      personRef: { path: string };
-      personId: string;
-      account: string;
-    };
-    expect(arg.personId).toBe(P1);
-    expect(arg.account).toBe(ACCOUNT);
-    expect(arg.personRef.path).toBe(`persons/${P1}`);
-  });
-
-  it('clears the flag for a flagged person that has no account, without touching the factory', async () => {
-    seedPerson(P2, { status: 'active', chain: { accountDeployPending: true } });
-
-    await run({} as never);
-
-    expect(predeployAccount).not.toHaveBeenCalled();
-    expect(snapshot(`persons/${P2}`).get('chain.accountDeployPending')).toBeUndefined();
-  });
-
-  it('deploys at most fifty accounts in one run so a backlog cannot drain the attester', async () => {
-    for (let i = 0; i < 60; i += 1) {
-      write(`persons/0xpre${i}`, {
-        status: 'active',
-        account: ACCOUNT,
-        chain: { accountDeployPending: true },
-        updatedAt: stale(),
-      });
-    }
-
-    await run({} as never);
-
-    expect(predeployAccount).toHaveBeenCalledTimes(50);
-  });
-
-  it('never throws out of the scheduler when one deploy blows up', async () => {
-    predeployAccount.mockRejectedValueOnce(new Error('RPC down'));
-    seedPerson(P1, { status: 'active', account: ACCOUNT, chain: { accountDeployPending: true } });
-
-    await expect(run({} as never)).resolves.not.toThrow();
-  });
-});
-
 describe('reconcilePending — 스윕 격리', () => {
   it('runs the later sweeps even when an earlier one throws', async () => {
     failQuery.add('persons');
@@ -931,8 +874,6 @@ describe('reconcilePending — 스윕 격리', () => {
       ['persons', 200],
       // 백필 갈래 — `kyc.openedAt` 이 없는 문서는 위 부등식 질의에 걸리지 않는다.
       ['persons', 200],
-      // 사전 배포 스윕은 한 실행에 50건만 집는다.
-      ['persons', 50],
     ]);
   });
 

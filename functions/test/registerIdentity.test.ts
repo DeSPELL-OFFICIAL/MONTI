@@ -162,13 +162,6 @@ vi.mock('../src/lib/chain.js', () => ({
   deployment: () => ({ identity: IDENTITY }),
 }));
 
-/**
- * 계정 사전 배포는 그 자체 테스트(predeployAccount.test.ts)가 있으므로 여기서는 스파이로 둔다 —
- * 이 파일은 "등록이 끝난 뒤에만, 그리고 등록을 막지 않고 불린다" 만 확인한다.
- */
-const predeployAccount = vi.fn(async (_params: unknown) => {});
-vi.mock('../src/lib/predeployAccount.js', () => ({ predeployAccount }));
-
 const { registerIdentity } = await import('../src/functions/registerIdentity.js');
 const functionsTest = (await import('firebase-functions-test')).default();
 const wrapped = functionsTest.wrap(registerIdentity);
@@ -196,7 +189,6 @@ beforeEach(() => {
   waitForTransactionReceipt.mockClear();
   awaitFinalized.mockClear();
   setCustomUserClaims.mockClear();
-  predeployAccount.mockClear();
   seedCaller();
   seedPerson();
 });
@@ -536,50 +528,5 @@ describe('registerIdentity — the session claims follow the chain', () => {
       'PERSON_MISMATCH',
     );
     expect(setCustomUserClaims).not.toHaveBeenCalled();
-  });
-});
-
-describe('registerIdentity — pre-deploys the smart account (so later ops carry no initCode)', () => {
-  it('pre-deploys the account after a fresh register, keyed on the same person and account', async () => {
-    await call();
-    expect(predeployAccount).toHaveBeenCalledTimes(1);
-    const arg = predeployAccount.mock.calls[0]![0] as {
-      personRef: { path: string };
-      personId: string;
-      account: string;
-    };
-    expect(arg.personId).toBe(PERSON_ID);
-    expect(arg.account).toBe(ACCOUNT);
-    expect(arg.personRef.path).toBe(`persons/${PERSON_ID}`);
-    // 등록이 실제로 나간 뒤에만 불린다.
-    expect(sendAttesterTx).toHaveBeenCalledTimes(1);
-  });
-
-  it('pre-deploys on the already-a-member short circuit too', async () => {
-    readContract.mockResolvedValueOnce(true as never);
-    await expect(call()).resolves.toEqual({ alreadyRegistered: true, claimsUpdated: true });
-    expect(predeployAccount).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not pre-deploy again on the finalized short circuit', async () => {
-    // 이미 완료된 재호출이다. 원래 호출(또는 대사 스윕)이 배포를 맡았으므로 다시 부르지 않는다.
-    write(`persons/${PERSON_ID}`, { chain: { registerTx: OTHER_TX, block: 12 } }, { merge: true });
-    await call();
-    expect(predeployAccount).not.toHaveBeenCalled();
-  });
-
-  it('never pre-deploys when the register transaction reverted', async () => {
-    waitForTransactionReceipt.mockResolvedValueOnce({
-      status: 'reverted',
-      blockNumber: 100n,
-    } as never);
-    await expect(call()).rejects.toThrow('REGISTER_REVERTED');
-    expect(predeployAccount).not.toHaveBeenCalled();
-  });
-
-  it('stays a successful signup even when the pre-deploy step throws', async () => {
-    predeployAccount.mockRejectedValueOnce(new Error('RPC down'));
-    await expect(call()).resolves.toEqual({ txHash: TX, claimsUpdated: true });
-    expect(snapshot(`persons/${PERSON_ID}`).get('status')).toBe('active');
   });
 });

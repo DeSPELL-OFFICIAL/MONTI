@@ -6,7 +6,6 @@ import { sendSerialized } from '../lib/attesterLock.js';
 import { awaitFinalized, deployment, publicClient, sendAttesterTx } from '../lib/chain.js';
 import { mintSessionClaims } from '../lib/claims.js';
 import { DEVICES, PERSONS, USERS, assertStatusTransition, db } from '../lib/db.js';
-import { predeployAccount } from '../lib/predeployAccount.js';
 
 const B32_RE = /^0x[0-9a-fA-F]{64}$/;
 const PLATFORMS = ['ios', 'android', 'web'] as const;
@@ -145,7 +144,6 @@ export const registerIdentity = onCall(
       }
       const txHash = await settle({ personRef, txHash: existingTx, status, account, ...device });
       await mintSessionClaims(uid, personId as Hex, account);
-      await predeployAccount({ personRef, personId: personId as Hex, account }).catch(() => {});
       return { txHash, claimsUpdated: true };
     }
 
@@ -167,7 +165,6 @@ export const registerIdentity = onCall(
       // 콜러블 래퍼가 멀쩡히 가입된 사람에게 실패 화면을 보여 준다.
       // 전송 뒤 죽은 인스턴스를 대신해 재시도한 경우이므로 세션도 여기서 쓸 수 있게 만든다.
       await mintSessionClaims(uid, personId as Hex, account);
-      await predeployAccount({ personRef, personId: personId as Hex, account }).catch(() => {});
       return { alreadyRegistered: true, claimsUpdated: true };
     }
 
@@ -225,7 +222,6 @@ export const registerIdentity = onCall(
 
     const settled = await settle({ personRef, txHash, status, account, ...device });
     await mintSessionClaims(uid, personId as Hex, account);
-    await predeployAccount({ personRef, personId: personId as Hex, account }).catch(() => {});
     return { txHash: settled, claimsUpdated: true };
   },
 );

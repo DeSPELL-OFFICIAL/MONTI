@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash, generateKeyPairSync, randomBytes } from 'node:crypto';
 import { Encoder } from 'cbor-x';
 import { getAddress } from 'viem';
+import { COINBASE_SMART_WALLET_FACTORY_ADDRESS } from '@monti/shared';
 
 process.env.GCP_PROJECT_ID = 'monti-dev';
 process.env.RP_ID = 'monti.app';
@@ -225,7 +226,7 @@ describe('registerPasskey', () => {
       functionName: string;
       args: [string[], bigint];
     };
-    expect(call.address).toBe(FACTORY);
+    expect(call.address).toBe(COINBASE_SMART_WALLET_FACTORY_ADDRESS);
     expect(call.functionName).toBe('getAddress');
     expect(call.args[1]).toBe(0n);
     expect(call.args[0]).toHaveLength(1);

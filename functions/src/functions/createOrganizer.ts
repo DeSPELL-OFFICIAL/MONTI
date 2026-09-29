@@ -53,16 +53,10 @@ function requireName(value: unknown): string {
  * 누구나 부를 수 있고 오너를 인자로 받으므로(contracts/src/Organizers.sol), 어테스터가 보내도
  * 주최사의 주인은 언제나 그 사람이다.
  *
- * **2026-09-23 01b 재배포로 전제 두 가지가 바뀌었다(abi-delta-01b.md §4·§10).**
- *  1. `Organizers` 는 바이트 단위로 그대로다(§4). `createOrganizer(address)` 의 시그니처가
- *     같으므로 이 어테스터 경로는 새 배포본에서도 그대로 동작한다.
- *  2. 새 페이마스터(`0xBDDB…28B2`)가 이 셀렉터를 **후원한다** — `0x49cd9846`, ArgKind 1
- *     (Platform), word 0. 배포된 페이마스터에서 `argKindOf`/`argWordOf` 를 되읽어 확인한 값이다(§10).
- *     즉 관객 키로 직접 보내는 길(클라이언트 전송)이 열렸다.
- *
- * 그래도 이 callable 은 **일부러 남겨 둔다.** 지우는 것은 클라이언트가 UserOperation 을
- * 보내도록 고치는 일과 함께 따로 판단할 변경이지, 이 파일의 부수 효과로 일어날 일이 아니다.
- * 지금은 동작을 바꾸지 않는다.
+ * Phase 2 재배포로 4337(페이마스터·번들러) 경로는 폐기됐다(설계 §3). 주최자 동작은 이제
+ * `relayAction` + ERC-2771 전달자로 대납되고, `Organizers` 는 바이트 단위로 그대로라
+ * `createOrganizer(address)` 의 어테스터 경로는 새 배포본에서도 그대로 동작한다. 이 callable 은
+ * 주최사 이름을 오프체인에 남겨야 해서 그대로 둔다.
  *
  * 체인에는 **이름이 없다**. `orgProfiles/{orgId}` 한 줄이 화면에 그릴 이름의 원본이고,
  * 권한·소유권의 원본은 그대로 체인이다(스펙 §9.4).

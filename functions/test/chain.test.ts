@@ -1,7 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { parseAbi, parseTransaction } from 'viem';
 import {
-  ENTRY_POINT_V06_ADDRESS,
   MONAD_TESTNET_CHAIN_ID,
   MONAD_TESTNET_RPC_URL,
   withGasMargin,
@@ -92,7 +91,7 @@ describe('deployment', () => {
   it('returns the addresses recorded for CHAIN_ID without second-guessing them', () => {
     const current = deployment();
     expect(current.chainId).toBe(MONAD_TESTNET_CHAIN_ID);
-    expect(current.entryPoint).toBe(ENTRY_POINT_V06_ADDRESS);
+    expect(current.forwarder).toMatch(/^0x[0-9a-fA-F]{40}$/);
     // 아직 배포 전이라 주소가 0인 상태 그대로 통과해야 한다. 특별 취급하지 않는다.
     expect(typeof current.attester).toBe('string');
   });

@@ -16,6 +16,7 @@ import { deployment, publicClient } from '../lib/chain.js';
 import { ADMISSIONS, ADMISSION_TOKENS, RELAYS, USERS, db } from '../lib/db.js';
 import { getRelayerAccount, sendRelayed } from '../lib/relayer.js';
 import { checkInRelayId, claimRelayId, type RelayKind } from '../lib/relayTypes.js';
+import { recordEventUsage } from '../lib/usage.js';
 
 /**
  * 설계 §5 Q4 — 관객의 두 고빈도 동작(발급·입장)을 릴레이한다. 관객/게이트 폰은 기기 키로
@@ -354,6 +355,10 @@ export const relayClaim = onCall({ secrets: [RELAYER_PK] }, async (request): Pro
     { status: 'confirmed', confirmedAt: FieldValue.serverTimestamp(), ...(tokenId ? { tokenId } : {}) },
     { merge: true },
   );
+  // 확정 가스를 이벤트의 조직 원장에 집계한다(설계 §4). 실패해도 릴레이는 이미 확정이라 삼킨다.
+  await recordEventUsage(eventId, kind, receipt).catch((cause) =>
+    info('relayClaim.usage.failed', { relayId, reason: (cause as Error).message }),
+  );
   info('relayClaim.confirmed', { relayId, txHash: sent.hash, tokenId });
   return { relayId, status: 'confirmed', txHash: sent.hash, tokenId };
 });
@@ -501,6 +506,9 @@ export const relayCheckIn = onCall({ secrets: [RELAYER_PK] }, async (request): P
       { merge: true },
     ),
   ]);
+  await recordEventUsage(eventId, kind, receipt).catch((cause) =>
+    info('relayCheckIn.usage.failed', { relayId, reason: (cause as Error).message }),
+  );
   info('relayCheckIn.confirmed', { relayId, txHash: sent.hash, usedAt: usedAtSec });
   return { relayId, status: 'confirmed', txHash: sent.hash, usedAt: usedAtSec };
 });

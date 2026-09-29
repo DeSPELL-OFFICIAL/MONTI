@@ -259,6 +259,13 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // 조직·개인별 대납 가스 사용 원장(설계 §4). 서버(Admin SDK)만 읽고 쓴다 — 아직 클라이언트가
+    // 읽는 화면이 없다. 아래 포괄 거부가 이미 막지만, 정산 데이터라 "클라이언트는 닿지 않는다"를
+    // 명시해 둔다. 문서 id 는 `org:{orgId}` 또는 `person:{personId}` 다.
+    match /usage/{scope} {
+      allow read, write: if false;
+    }
+
     // persons, passkeys, kycSessions, invites, phoneIndex, transferInvites, authChallenges 포함 전부 거부.
     match /{document=**} {
       allow read, write: if false;

@@ -640,3 +640,14 @@ describe('admissions/{eventId}/tokens/{tokenId}', () => {
     await assertFails(owner().doc('admissions/7/tokens/99').set({ status: 'passing' }));
   });
 });
+
+describe('usage/{scope}', () => {
+  // 대납 가스 사용 원장(설계 §4). 서버(Admin SDK)만 읽고 쓴다 — 클라이언트는 어느 scope 도 못 본다.
+  it('blocks client reads and writes (server-only ledger)', async () => {
+    const client = env.authenticatedContext('uid-1', { account: ACCOUNT, personId: '0xaa' }).firestore();
+    await assertFails(client.doc('usage/org:7').get());
+    await assertFails(client.doc('usage/person:0xaa').get());
+    await assertFails(client.doc('usage/org:7').set({ monSpentWei: '0', count: 1 }));
+    await assertFails(env.unauthenticatedContext().firestore().doc('usage/org:7').get());
+  });
+});

@@ -44,6 +44,8 @@ function matches(data: Record<string, unknown>, [name, op, value]: Filter): bool
   if (op === '==') return actual === value;
   if (op === '<=') return (actual as number) <= (value as number);
   if (op === '<') return (actual as number) < (value as number);
+  if (op === '>=') return (actual as number) >= (value as number);
+  if (op === '>') return (actual as number) > (value as number);
   if (op === 'in') return Array.isArray(value) && value.includes(actual);
   throw new Error(`UNSUPPORTED_OP:${op}`);
 }
@@ -108,7 +110,27 @@ export function createFakeFirestore() {
     return { ...query(prefix, [], Number.POSITIVE_INFINITY), doc: (id: string) => docRef(`${prefix}/${id}`) };
   }
 
-  return { docs, db: { collection }, write, snapshot };
+  async function runTransaction<T>(
+    fn: (tx: {
+      get: (ref: { path: string }) => Promise<ReturnType<typeof snapshot>>;
+      set: (ref: { path: string }, data: Record<string, unknown>, options?: { merge?: boolean }) => void;
+      update: (ref: { path: string }, data: Record<string, unknown>) => void;
+      delete: (ref: { path: string }) => void;
+    }) => Promise<T>,
+  ): Promise<T> {
+    const tx = {
+      get: async (ref: { path: string }) => snapshot(ref.path),
+      set: (ref: { path: string }, data: Record<string, unknown>, options?: { merge?: boolean }) =>
+        write(ref.path, data, options),
+      update: (ref: { path: string }, data: Record<string, unknown>) => write(ref.path, data, { merge: true }),
+      delete: (ref: { path: string }) => {
+        docs.delete(ref.path);
+      },
+    };
+    return fn(tx);
+  }
+
+  return { docs, db: { collection, runTransaction }, write, snapshot };
 }
 
 export type FakeFirestore = ReturnType<typeof createFakeFirestore>;

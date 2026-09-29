@@ -73,9 +73,6 @@ vi.mock('../src/lib/attesterLock.js', () => ({
 const mintSessionClaims = vi.fn(async () => {});
 vi.mock('../src/lib/claims.js', () => ({ mintSessionClaims }));
 
-const predeployAccount = vi.fn(async () => {});
-vi.mock('../src/lib/predeployAccount.js', () => ({ predeployAccount }));
-
 /** 결정적 HMAC. 진짜 키 없이도 "같은 번호 → 같은 값" 만 지키면 된다. */
 vi.mock('../src/lib/phoneIndex.js', () => ({ hmacPhone: (phone: string, _key: string) => `H:${phone}` }));
 
@@ -358,7 +355,6 @@ beforeEach(() => {
   sendAttesterTx.mockResolvedValue(ROTATE_TX);
   awaitFinalized.mockClear();
   mintSessionClaims.mockClear();
-  predeployAccount.mockClear();
   createCustomToken.mockClear();
   setCustomUserClaims.mockClear();
   warn.mockClear();
@@ -409,7 +405,6 @@ describe('recoverAccess — the happy path', () => {
 
     // 세션·토큰은 새 계정으로 심는다.
     expect(mintSessionClaims).toHaveBeenCalledWith(auth.uid, PERSON_ID, NEW_ACCOUNT);
-    expect(predeployAccount).toHaveBeenCalledTimes(1);
     expect(createCustomToken).toHaveBeenCalledWith(auth.uid, { personId: PERSON_ID, account: NEW_ACCOUNT });
 
     expect(result.token).toBe('token:uid-1');
