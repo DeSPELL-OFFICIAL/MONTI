@@ -6,6 +6,7 @@ import { readTicket } from '../../shared/chain/reads';
 import { useOrganizerCopy } from '../copy';
 import { publishEvent, type LifecycleProblem } from '../lifecycle';
 import { forgetEventDraft } from '../useEventDraft';
+import { useEventStatusWithFallback } from '../useEventStatusWithFallback';
 import { followUpsDone, runFollowUps, type FollowUpResult } from './followUps';
 import type { CreatedEvent } from './usePublish';
 
@@ -48,7 +49,12 @@ export function Created() {
   // stay hidden until it reaches `done`.
   const [publishing, setPublishing] = useState<PublishState>('idle');
   const [problem, setProblem] = useState<LifecycleProblem | ''>('');
-  const published = publishing === 'done';
+  // The event's status from the indexer, or the chain while it lags. It is what stops this screen
+  // offering 지금 공개하기 for an event that is already public — reopened from history, or published
+  // in another tab — where the publish would only revert `NotDraft`.
+  const chainStatus = useEventStatusWithFallback(eventId);
+  const alreadyPublic = chainStatus.status === 'Published' || chainStatus.status === 'Ended';
+  const published = publishing === 'done' || alreadyPublic;
   const plan = handed.plan;
   const missing = plan !== undefined && !followUpsDone(plan, saved);
 

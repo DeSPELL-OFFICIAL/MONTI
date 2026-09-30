@@ -1,13 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
 import { encodeFunctionData, type Hex } from 'viem';
 import { Alert, Button, Field, KycBadge, OpProgress, Screen, Sheet, Spinner } from '../../shared/ui';
 import { useCopy } from '../../shared/i18n';
-import { gql } from '../../shared/envio/client';
 import { describeFailure } from '../../shared/errors';
-import { EVENT_QUERY, type EnvioEvent, type EnvioTier } from '../../shared/envio/queries';
 import { useMyRequest } from '../../shared/envio/claimRequests';
+import { useClaimEventData } from './useClaimEventData';
 import { ticketAbi } from '../../shared/chain/abis';
 import { sendAction } from '../../shared/relay/sendAction';
 import { getAttendeeAccount } from '../../shared/chain/accounts';
@@ -144,11 +142,11 @@ export function ClaimFlow({ eventId, present }: ClaimFlowProps) {
   const [awaitTimedOut, setAwaitTimedOut] = useState(false);
   const [appearNonce, setAppearNonce] = useState(0);
 
-  const { data, isLoading, isError, error: loadError, refetch } = useQuery({
-    queryKey: ['claim', eventId],
-    // `id` is the text primary key, `eventId` the numeric column the tiers hang off.
-    queryFn: () => gql<{ Event: EnvioEvent[]; Tier: EnvioTier[] }>(EVENT_QUERY, { id: eventId, eventId }),
-  });
+  // The event and its ticket kinds from the indexer, or from the chain while the indexer lags, so a
+  // published event can be claimed even before its row is indexed (`source === 'direct'` then).
+  const {
+    event, tiers, source, isLoading, isError, error: loadError, refetch, chainHeld, chainHeldLoading,
+  } = useClaimEventData(eventId);
   const { data: myTickets, isLoading: ticketsLoading } = useMyTickets();
   // The attendee's own request, for an event that takes requests. Refetched after a request or a
   // cancel lands, since the indexer needs a moment to catch up to the transaction.
@@ -156,8 +154,6 @@ export function ClaimFlow({ eventId, present }: ClaimFlowProps) {
   const refetchRequestRef = useRef(refetchRequest);
   refetchRequestRef.current = refetchRequest;
 
-  const event = data?.Event[0];
-  const tiers = data?.Tier ?? [];
   const selected = tiers[tier];
   // Approval mode: the event takes requests rather than direct claims, so this screen mirrors the
   // request's state from the indexer. A self-cancel and an organiser's rejection both land on
@@ -174,7 +170,11 @@ export function ClaimFlow({ eventId, present }: ClaimFlowProps) {
   // it is spent or voided — this mirrors Ticket.balanceOfEvent, which only a transfer decrements.
   // Counting the held tickets (and a live pending request) is what makes the pre-block below fire
   // before a 받기 the chain would only revert — the count this pre-block had lost (live-run 6 / D5).
-  const held = (myTickets ?? []).filter((mine) => mine.eventId === eventId && mine.state !== 'transferred').length;
+  // From the chain (`balanceOfEvent`) when the event came from the chain — the indexer's ticket list
+  // is unavailable then too — and from the indexer otherwise. Both count per event, transfers aside.
+  const held = source === 'direct'
+    ? chainHeld ?? 0
+    : (myTickets ?? []).filter((mine) => mine.eventId === eventId && mine.state !== 'transferred').length;
   const pendingSlot = pending ? 1 : 0;
   // Unguarded on purpose: the chain compares the same way, so a tier with maxPerWallet 0 lets
   // nobody claim rather than everybody.
@@ -188,7 +188,11 @@ export function ClaimFlow({ eventId, present }: ClaimFlowProps) {
   // request) is known. On a cold load — the first paint after login — those queries have not
   // answered yet and `held` reads 0, so a fast tap would send a claim the chain only reverts (live
   // check e). The button waits: disabled with a quiet 확인 중… until both counts have resolved.
-  const countsResolved = !ticketsLoading && !(approval && requestLoading);
+  // In the chain-fallback path the held count is the chain read (`chainHeld`), not the indexer's
+  // ticket list — which lags with the event row — so the gate waits on that read instead.
+  const countsResolved = source === 'direct'
+    ? !chainHeldLoading
+    : !ticketsLoading && !(approval && requestLoading);
 
   // The button is down for every state but the two the person acts from.
   const busy = phase === 'saving' || phase === 'sent';

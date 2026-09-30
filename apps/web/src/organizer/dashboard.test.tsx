@@ -16,9 +16,12 @@ const cancelEvent = vi.fn<(eventId: bigint, orgId: bigint) => Promise<LifecycleR
 vi.mock('./lifecycle', () => ({ publishEvent, cancelEvent }));
 
 const eventOrg = vi.fn(async () => 9n);
+// The chain fallback the status hook reads when the indexer has no row: `eventOrg` (0 means no such
+// event) and `eventStatus` (0 = Draft). Both default to a real Draft event the indexer knows about.
+const eventStatus = vi.fn(async () => 0);
 vi.mock('../shared/chain/reads', async (orig) => ({
   ...(await orig<typeof import('../shared/chain/reads')>()),
-  readTicket: () => ({ eventOrg }),
+  readTicket: () => ({ eventOrg, eventStatus }),
 }));
 
 const listAttendees = vi.fn(async () => [
@@ -85,6 +88,7 @@ function open() {
 beforeEach(() => {
   gql.mockResolvedValue({ Event: [DRAFT_EVENT], Tier: TIERS });
   eventOrg.mockResolvedValue(9n);
+  eventStatus.mockResolvedValue(0);
   publishEvent.mockReset().mockResolvedValue({ state: 'done' });
   cancelEvent.mockReset().mockResolvedValue({ state: 'done' });
 });
@@ -210,15 +214,44 @@ describe('publishing and cancelling', () => {
 
 describe('an event the indexer has no row for', () => {
   /**
-   * A mistyped number on the home screen, or an event created a moment ago. Neither read
-   * failed, so the old code showed a blank screen with no writes offered and no reason.
+   * A mistyped number on the home screen: neither the indexer nor the chain has the event
+   * (`eventOrg` is 0), so this says so rather than rendering a blank screen with no reason.
    */
-  it('says the number is unknown or not indexed yet rather than rendering blank', async () => {
+  it('says the number is unknown when the chain has no such event either', async () => {
     gql.mockResolvedValue({ Event: [], Tier: [] });
     listAttendees.mockResolvedValue([]);
+    eventOrg.mockResolvedValue(0n);
     open();
     expect(await screen.findByText(dash.notIndexed)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: life.publish })).not.toBeInTheDocument();
+  });
+
+  /**
+   * The resilience this task adds: a real event the organiser just made, which the chain has as a
+   * Draft while the hosted indexer is still catching up. The row is rendered from the chain status,
+   * so 발행하기 is offered rather than a blank "아직 색인 전" screen with nothing to do.
+   */
+  it('offers 발행하기 from the chain status while the indexer has no row yet', async () => {
+    gql.mockResolvedValue({ Event: [], Tier: [] });
+    listAttendees.mockResolvedValue([]);
+    eventOrg.mockResolvedValue(9n);
+    eventStatus.mockResolvedValue(0); // Draft on chain
+    open();
+    expect(await screen.findByRole('button', { name: life.publish })).toBeInTheDocument();
+    expect(screen.queryByText(dash.notIndexed)).not.toBeInTheDocument();
+  });
+
+  /**
+   * Precedence: the chain says Published (a publish that landed) while the indexer still has the
+   * event as Draft. The chain wins — 발행하기 is gone and only 취소하기 is left.
+   */
+  it('prefers the chain when it is ahead of a stale indexer row', async () => {
+    gql.mockResolvedValue({ Event: [{ ...DRAFT_EVENT, status: 'Draft' }], Tier: TIERS });
+    eventStatus.mockResolvedValue(1); // Published on chain
+    open();
+    await screen.findByText(dash.attendees);
+    expect(screen.queryByRole('button', { name: life.publish })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: life.cancel })).toBeInTheDocument();
   });
 
   it('shows the load failure instead when both reads threw', async () => {
