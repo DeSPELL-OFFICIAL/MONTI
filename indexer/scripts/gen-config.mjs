@@ -34,6 +34,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { computeStartBlock } from './start-block.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..', '..');
@@ -215,12 +216,15 @@ const rpcBlock = rpcUrl
 `
   : '';
 
-// Identity/Organizers 는 재배포 없이 유지될 수 있다(01c: Ticket·paymaster 만 교체). 그 계약들의
-// 과거 이벤트(주최사 생성, 게이트 등록, 사람 등록)는 이전 배포 블록부터 있으므로 start_block 은
-// 현재 블록과 `previous[].block` 중 가장 이른 값이다. 옛 Ticket 주소는 config 에 없어 스캔되지 않는다.
-const startBlock = Math.min(
-  deployment.block,
-  ...(deployment.previous ?? []).map((p) => p.block).filter((b) => Number.isFinite(b)),
+// start_block 규칙은 scripts/start-block.mjs 에 있다: 주소를 유지한 이전 배포만 시작 블록을
+// 되돌린다(01c 처럼 Identity·Organizers 를 두고 Ticket 만 교체하는 경우). 전면 재배포는 자기
+// 블록에서 시작한다 — 옛 주소는 config 에 없어 스캔되지 않고 그 구간엔 새 주소의 이벤트가 없다.
+const { startBlock, kept: keptPrevious } = computeStartBlock(deployment);
+console.log(
+  keptPrevious.length > 0
+    ? `[gen-config] start_block ${startBlock}: 주소를 유지한 이전 배포 ` +
+        `${keptPrevious.map((p) => `블록 ${p.block}`).join(', ')} 까지 되돌림`
+    : `[gen-config] start_block ${startBlock}: 전면 재배포 — 유지된 계약이 없어 자기 블록에서 시작`,
 );
 
 const config = `# 생성 파일. 직접 고치지 말고 scripts/gen-config.mjs 를 고치세요.

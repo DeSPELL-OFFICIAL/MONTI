@@ -4,6 +4,9 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 // config.yaml 과 **같은 배포 파일**에서 나온 복제본이다(scripts/gen-config.mjs 생성물).
 import { deployment } from '../src/vendored/deployment.json';
+// 생성기와 **같은** 규칙으로 기대 start_block 을 뽑는다(빌드 스크립트 헬퍼 .mjs).
+// @ts-ignore -- .mjs 빌드 스크립트라 tsc 선언이 없다; vitest 런타임에선 그대로 동작한다.
+import { computeStartBlock } from '../scripts/start-block.mjs';
 
 /**
  * 드리프트 가드를 테스트 경로에도 물려 둔다. `pnpm indexer:check` 를 따로 기억하지
@@ -49,12 +52,12 @@ describe('config.yaml pins the current deployment', () => {
       expect(config).not.toContain(past.ticket);
     }
 
-    // start_block 은 손으로 적은 상수가 아니라 규칙의 산물이다: 현재 블록과 previous[].block
-    // 중 **가장 이른** 값(scripts/gen-config.mjs). 계약을 유지하는 재배포는 옛 배포 블록부터
-    // 그 계약들의 과거 이벤트를 다시 봐야 하므로 이전 블록이 이긴다.
-    const earliest = Math.min(deployment.block, ...deployment.previous.map((p) => p.block));
-    expect(earliest).toBeLessThan(deployment.block); // 현재 블록이 아니라 이전 블록이 이긴다
-    expect(config).toContain(`start_block: ${earliest}`);
+    // start_block 은 손으로 적은 상수가 아니라 규칙의 산물이다(scripts/start-block.mjs):
+    // 현재 배포와 주소를 하나라도 공유하는 previous[] 항목까지만 되돌린다. 유지된 계약이 없는
+    // 전면 재배포면 start_block 은 현재 블록이다 — 옛 주소는 스캔되지 않고 그 구간엔 새 주소의
+    // 이벤트가 하나도 없다. 규칙 자체는 test/start-block.test.ts 가 못 박는다.
+    const { startBlock } = computeStartBlock(deployment);
+    expect(config).toContain(`start_block: ${startBlock}`);
 
     // 배포 파일에 있는 셋 말고는 아무 주소도 감시하지 않는다 — 다음 재배포 때 이 테스트가
     // 저절로 따라온다.

@@ -109,3 +109,5 @@ RPC_URL=https://testnet-rpc.monad.xyz pnpm dev
 | `pnpm dev` | codegen → 로컬 인덱서 (Docker 필요) |
 | `pnpm test` | vitest (핸들러 + 스키마 + 자기완결성 가드) |
 | `pnpm typecheck` | `tsc --noEmit` |
+
+<!-- hosted deployment note: 2026-09-30 redeploy (Ticket 0x7E1f…51Cf) — rebuild triggered 2026-09-30 14:06 KST because the first hosted build (ae91e90) never started its fetcher -->
