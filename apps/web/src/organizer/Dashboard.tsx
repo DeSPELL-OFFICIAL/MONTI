@@ -13,6 +13,8 @@ import { Announce } from './Announce';
 import { useOrganizerCopy } from './copy';
 import { EventArt } from './EventArt';
 import { cancelEvent, publishEvent, type LifecycleResult } from './lifecycle';
+import { createdDraftFor } from './useEventDraft';
+import { useEventStatusWithFallback } from './useEventStatusWithFallback';
 import { KR_REGIONS } from './scene/regions';
 
 /** Which confirmation is open, if any. Neither write happens without one. */
@@ -44,6 +46,9 @@ export function Dashboard() {
   // The pending count beside the 신청 관리 link. Only an approvalRequired event has any, so an
   // ordinary event's empty answer (or an indexer that has not caught up) simply hides the count.
   const { requests: pendingRequests } = useEventRequests(eventId, 'Pending');
+  // The status the 발행/취소 actions gate on, from the indexer when it has the row and from the
+  // chain while it lags — so a just-created event offers 발행 before the indexer has caught up.
+  const chainStatus = useEventStatusWithFallback(eventId);
 
   const [event, setEvent] = useState<EnvioEvent | null>(null);
   const [tiers, setTiers] = useState<EnvioTier[]>([]);
@@ -122,7 +127,12 @@ export function Dashboard() {
     setOutcome({ ...result, which });
     setBusy(false);
     setPending('');
-    if (result.state === 'done') setReload((count) => count + 1);
+    if (result.state === 'done') {
+      setReload((count) => count + 1);
+      // The chain has moved; re-read it so the actions reflect the new status even while the
+      // indexer is still behind (otherwise a just-published event still offers 발행).
+      chainStatus.refetch();
+    }
   }
 
   if (loading) {
@@ -134,12 +144,18 @@ export function Dashboard() {
   }
 
   const entered = attendees.filter((row) => row.checkedIn).length;
-  const status = event?.status ?? '';
+  // The indexer's status when it has the row, the chain's while it lags. `chainStatus` already
+  // applies the precedence (the indexer wins once it is not older than the chain), so it is the
+  // source of truth for the actions even before the indexer's own row has reached this screen.
+  const status = chainStatus.status || event?.status || '';
+  // For an event the indexer has no row for yet, the readable title and start time are not on the
+  // chain — they are in the organiser's own draft of the event they just made.
+  const draftFallback = event === null ? createdDraftFor(eventId) : null;
 
   // The publish summary, best-effort from what the indexer and the gateway gave. It is the
   // organiser's own view, so it shows the full start time; place follows the hide flag — the
   // region alone when the venue is for ticket holders (plan §2b).
-  const startsAtMs = Number(event?.startsAt ?? 0) * 1000;
+  const startsAtMs = Number(event?.startsAt ?? draftFallback?.startsAt ?? 0) * 1000;
   const publishDate = Number.isFinite(startsAtMs) && startsAtMs > 0
     ? new Date(startsAtMs).toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' })
     : '';
@@ -152,10 +168,12 @@ export function Dashboard() {
   return (
     <Screen title={dash.title}>
       {failed ? <Alert tone="error">{dash.failed}</Alert> : null}
-      {/* Both reads answered, and the indexer simply has no row: a number that was mistyped on
-          the home screen, or an event created a moment ago. Neither is a failure, and neither
-          is a blank screen with no writes offered and no reason given. */}
-      {!failed && event === null ? <Alert tone="warn">{dash.notIndexed}</Alert> : null}
+      {/* The indexer has no row and the chain has no such event either: a number that was mistyped
+          on the home screen. When the chain *does* have it (an event created a moment ago), the row
+          below is rendered from the chain status instead — no warning, and the writes are offered. */}
+      {!failed && event === null && chainStatus.source === 'none' && !chainStatus.loading ? (
+        <Alert tone="warn">{dash.notIndexed}</Alert>
+      ) : null}
 
       {outcome?.state === 'refused' ? <Alert tone="error">{life[outcome.problem]}</Alert> : null}
       {/* The sentence comes from the write that ran, not from an indexer that may be behind. */}
@@ -187,7 +205,7 @@ export function Dashboard() {
           <dl className="publish-summary">
             <div>
               <dt>{life.summary.title}</dt>
-              <dd>{title === '' ? dash.art.untitled : title}</dd>
+              <dd>{title || draftFallback?.title || dash.art.untitled}</dd>
             </div>
             <div>
               <dt>{life.summary.date}</dt>
@@ -258,8 +276,8 @@ export function Dashboard() {
       <EventArt
         eventId={eventId}
         tiers={tiers}
-        title={title === '' ? dash.art.untitled : title}
-        startsAt={Number(event?.startsAt ?? 0)}
+        title={title || draftFallback?.title || dash.art.untitled}
+        startsAt={Number(event?.startsAt ?? draftFallback?.startsAt ?? 0)}
       />
 
       <Announce eventId={eventId} />

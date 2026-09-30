@@ -223,6 +223,20 @@ function newDraftId(): string {
 }
 
 /**
+ * The device's draft for a just-created event, or null. `createEvent` stamps `createdEventId` on
+ * the draft before anything that can fail, so for the seconds between the chain confirming the
+ * event and the indexer showing its row, this is where the organiser's own title and start time
+ * still are — the dashboard reuses them to render the row from the chain status. Best-effort: the
+ * done screen deletes the draft once its follow-ups land, so a match is not guaranteed.
+ */
+export function createdDraftFor(eventId: string): { title: string; startsAt: number } | null {
+  if (eventId === '') return null;
+  const mirror = readMirror();
+  if (mirror === null || mirror.draft.createdEventId !== eventId) return null;
+  return { title: mirror.draft.title, startsAt: mirror.draft.startsAt };
+}
+
+/**
  * Throws one draft away from outside the scene that was editing it — what the done screen does
  * once the writes it was keeping the draft for have finally landed. The device copy only goes
  * if it is a copy of *this* draft; another scene's mirror is not this caller's to clear.

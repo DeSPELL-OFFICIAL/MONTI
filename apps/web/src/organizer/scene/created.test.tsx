@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LifecycleResult } from '../lifecycle';
 
@@ -23,11 +24,14 @@ vi.mock('../../shared/chain/accounts', () => ({ getStaffAccount: async () => ({ 
 const publishEvent = vi.fn<(eventId: bigint, orgId: bigint) => Promise<LifecycleResult>>(async () => ({ state: 'done' }));
 vi.mock('../lifecycle', () => ({ publishEvent }));
 const eventOrg = vi.fn(async () => 9n);
+// The status hook reads `eventStatus` (0 = Draft) as its chain fallback; a just-created event is a
+// Draft, so this screen offers 지금 공개하기 until a publish moves it on.
+const eventStatus = vi.fn(async () => 0);
 vi.mock('../../shared/chain/reads', async (orig) => ({
   ...(await orig<typeof import('../../shared/chain/reads')>()),
-  readTicket: () => ({ eventOrg }),
+  readTicket: () => ({ eventOrg, eventStatus }),
 }));
-const gql = vi.fn(async (): Promise<Record<string, unknown>> => ({ Event: [{ status: 'Published' }] }));
+const gql = vi.fn(async (): Promise<Record<string, unknown>> => ({ Event: [{ status: 'Draft' }] }));
 vi.mock('../../shared/envio/client', () => ({ gql }));
 
 /** The two writes the retry button runs, and the draft it is holding open until they land. */
@@ -59,11 +63,13 @@ const LINK = `${window.location.origin}/events/12`;
 
 function open(state: unknown = { posterCid: 'bafkposter', title: '재즈 나이트', followUpFailed: false }): void {
   render(
-    <MemoryRouter initialEntries={[{ pathname: '/org/new/done/12', state }]}>
-      <Routes>
-        <Route path="/org/new/done/:eventId" element={<Created />} />
-      </Routes>
-    </MemoryRouter>,
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <MemoryRouter initialEntries={[{ pathname: '/org/new/done/12', state }]}>
+        <Routes>
+          <Route path="/org/new/done/:eventId" element={<Created />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -79,7 +85,8 @@ beforeEach(() => {
   toDataURL.mockReset().mockResolvedValue('data:image/png;base64,QQ==');
   publishEvent.mockReset().mockResolvedValue({ state: 'done' });
   eventOrg.mockReset().mockResolvedValue(9n);
-  gql.mockReset().mockResolvedValue({ Event: [{ status: 'Published' }] });
+  eventStatus.mockReset().mockResolvedValue(0);
+  gql.mockReset().mockResolvedValue({ Event: [{ status: 'Draft' }] });
   saveEventArt.mockReset().mockResolvedValue({ ok: true });
   setEventPrivate.mockReset().mockResolvedValue({ ok: true });
   deleteEventDraft.mockReset().mockResolvedValue(undefined);
@@ -119,6 +126,21 @@ describe('the done screen — before it is public', () => {
     // Decorative, so it carries an empty alt and has no role: the title beside it is the name.
     expect(document.querySelector('.poster-card__filled img'))
       .toHaveAttribute('src', 'https://gw.test/bafkposter');
+  });
+});
+
+describe('the done screen — an event that is already public', () => {
+  /**
+   * Reopened from history, or published in another tab: the status hook reads Published, so the
+   * shareable state is shown straight away rather than offering a 지금 공개하기 the chain would
+   * only revert with NotDraft.
+   */
+  it('shows the share link directly and offers no re-publish', async () => {
+    gql.mockResolvedValue({ Event: [{ status: 'Published' }] });
+    open();
+    expect(await screen.findByText(LINK)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: copy.publishNow })).toBeNull();
+    expect(publishEvent).not.toHaveBeenCalled();
   });
 });
 
