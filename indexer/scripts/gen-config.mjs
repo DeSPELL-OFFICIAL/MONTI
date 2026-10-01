@@ -38,6 +38,8 @@ import { computeStartBlock } from './start-block.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..', '..');
+/** 커밋된 `indexer/` 루트. 벤더된 ABI 소스는 임시 출력 디렉터리가 아니라 여기서 읽는다. */
+const indexerRoot = join(here, '..');
 /** 기본은 `indexer/`. 드리프트 검사만 임시 디렉터리로 돌린다. */
 const outRoot = process.env.GEN_OUT_DIR ? resolve(process.env.GEN_OUT_DIR) : join(here, '..');
 const chainId = process.env.CHAIN_ID ?? '10143';
@@ -115,6 +117,37 @@ const CONTRACTS = [
     // 바꾸지 않아 실제로 나지 않는다(01b 델타 §2).
     ignored: ['Approval', 'ApprovalForAll', 'EIP712DomainChanged'],
   },
+  {
+    // SettlementVault — 프로그래머블 정산 레이어(설계 2026-10-01). 코어 넷과 달리 공유 ABI
+    // 내보내기가 아직 없어 ABI 를 indexer/ 안에 벤더해 두고 거기서 읽는다
+    // (src/vendored/settlement-vault-abi.json). 배포 파일에 `settlementVault` 키가 없으면
+    // (아직 배포 전) 조용히 건너뛴다 — 코어 인덱싱은 그대로다. 키가 들어오면 그때 구독한다.
+    name: 'SettlementVault',
+    addressKey: 'settlementVault',
+    optional: true,
+    abiFile: join('src', 'vendored', 'settlement-vault-abi.json'),
+    abiKey: 'abi',
+    // 금고는 코어 재배포(블록 66724502)보다 **나중에** 배포되므로 자기 시작 블록이 따로 있다.
+    // Envio 는 컨트랙트별 start_block 을 지원한다(evm.schema.json) — 네트워크 start_block 은
+    // 코어 그대로 두고 금고만 자기 배포 블록부터 스캔한다. 배포 파일의 `settlementVaultBlock`
+    // 을 쓰고, 없으면 코어 `block` 으로 안전하게 내려간다(금고는 그 전에 이벤트가 없다).
+    startBlockKey: 'settlementVaultBlock',
+    events: [
+      'PolicySet',
+      'Deposited',
+      'Released',
+      'NoShowSettled',
+      'Refunded',
+      'Paid',
+      'PayoutDeferred',
+      'Withdrawn',
+      'TokenAllowed',
+      'DepositorSet',
+    ],
+    reserved: [],
+    // 일시정지 토글은 운영 사건이고 공개 정산 페이지가 쓰는 엔티티가 없다.
+    ignored: ['PausedSet'],
+  },
 ];
 
 /** ABI 이벤트 하나를 Envio 가 받는 사람이 읽을 수 있는 시그니처로. */
@@ -131,9 +164,23 @@ function signatureOf(abiEvent) {
   return `${abiEvent.name}(${args.join(', ')})`;
 }
 
-async function eventsOf(contractName, wanted, reserved, ignored) {
-  const path = join(repoRoot, 'packages', 'shared', 'src', 'abi', `${contractName}.json`);
-  const abi = JSON.parse(await readFile(path, 'utf8'));
+/**
+ * 컨트랙트의 ABI 를 읽는다. 기본은 커밋된 공유 ABI 내보내기(packages/shared/src/abi).
+ * `abiFile` 이 있으면 indexer/ 안의 벤더 소스에서 읽는다 — 아직 공유로 내보내지 않은
+ * SettlementVault 용이다. 임시 출력 디렉터리가 아니라 커밋된 indexerRoot 에서 읽어야
+ * 드리프트 검사(GEN_OUT_DIR 로 다시 뽑기)도 같은 소스를 본다.
+ */
+async function loadContractAbi(contract) {
+  if (contract.abiFile) {
+    const path = join(indexerRoot, contract.abiFile);
+    const parsed = JSON.parse(await readFile(path, 'utf8'));
+    return { abi: contract.abiKey ? parsed[contract.abiKey] : parsed, path };
+  }
+  const path = join(repoRoot, 'packages', 'shared', 'src', 'abi', `${contract.name}.json`);
+  return { abi: JSON.parse(await readFile(path, 'utf8')), path };
+}
+
+function eventsOf(contractName, abi, path, wanted, reserved, ignored) {
   const byName = new Map(
     abi.filter((item) => item.type === 'event').map((item) => [item.name, item]),
   );
@@ -171,9 +218,12 @@ async function eventsOf(contractName, wanted, reserved, ignored) {
   return { lines, skipped };
 }
 
-const deployment = JSON.parse(
-  await readFile(join(repoRoot, 'contracts', 'deployments', `${chainId}.json`), 'utf8'),
-);
+// 배포 파일 경로. 기본은 contracts/deployments/${chainId}.json; DEPLOYMENT_FILE 로 덮으면 그
+// 파일을 읽는다(gen-config 테스트가 금고 유/무 배포를 먹일 때 쓴다).
+const deploymentPath = process.env.DEPLOYMENT_FILE
+  ? resolve(process.env.DEPLOYMENT_FILE)
+  : join(repoRoot, 'contracts', 'deployments', `${chainId}.json`);
+const deployment = JSON.parse(await readFile(deploymentPath, 'utf8'));
 
 const contractBlocks = [];
 const networkBlocks = [];
@@ -181,10 +231,21 @@ const pending = [];
 for (const contract of CONTRACTS) {
   const address = deployment[contract.addressKey];
   if (!address) {
+    // optional 컨트랙트(= 금고)는 배포 전이면 조용히 건너뛴다. 코어 넷은 반드시 있어야 하므로
+    // 없으면 예전처럼 크게 실패한다.
+    if (contract.optional) {
+      console.log(
+        `[gen-config] ${contract.name} 미배포 — 배포 파일에 "${contract.addressKey}" 키가 없어 건너뛴다.`,
+      );
+      continue;
+    }
     throw new Error(`[gen-config] 배포 파일에 "${contract.addressKey}" 키가 없다.`);
   }
-  const { lines, skipped } = await eventsOf(
+  const { abi, path } = await loadContractAbi(contract);
+  const { lines, skipped } = eventsOf(
     contract.name,
+    abi,
+    path,
     contract.events,
     contract.reserved,
     contract.ignored,
@@ -199,9 +260,20 @@ for (const contract of CONTRACTS) {
       ...lines.map((line) => `      - event: ${line}`),
     ].join('\n'),
   );
-  networkBlocks.push(
-    [`      - name: ${contract.name}`, '        address:', `          - "${address}"`].join('\n'),
-  );
+
+  // 금고처럼 startBlockKey 가 있는 컨트랙트만 자기 start_block 을 단다. 배포 파일에 그 블록이
+  // 있으면 그 값, 없으면 코어 `block` 으로 안전하게 내려간다. 코어 넷은 네트워크 start_block 을
+  // 그대로 쓴다(컨트랙트 start_block 없음).
+  const networkLines = [
+    `      - name: ${contract.name}`,
+    '        address:',
+    `          - "${address}"`,
+  ];
+  if (contract.startBlockKey) {
+    const contractStart = deployment[contract.startBlockKey] ?? deployment.block;
+    networkLines.push(`        start_block: ${contractStart}`);
+  }
+  networkBlocks.push(networkLines.join('\n'));
 }
 
 // RPC 를 주 소스로 쓸 때만 나온다. 없으면 HyperSync 가 소스다.

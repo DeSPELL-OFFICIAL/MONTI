@@ -33,6 +33,11 @@ export const RELAYER_LOW_BALANCE_MON = defineString('RELAYER_LOW_BALANCE_MON', {
 export const ATTESTER_PK = defineSecret('ATTESTER_PK');
 /** 릴레이어 EOA 프라이빗 키. 어테스터와 분리된 EOA 다(설계 §5). Secret Manager 에만 있다. */
 export const RELAYER_PK = defineSecret('RELAYER_PK');
+/**
+ * 트레저리 EOA 프라이빗 키(설계 §2). USDC 를 들고 금고에 예치하는 전용 계정이라 릴레이어와
+ * **분리된 EOA** 다 — 침해 반경을 나눈다(설계 §8: 전용 EOA + 소액 float). Secret Manager 에만 있다.
+ */
+export const TREASURY_PK = defineSecret('TREASURY_PK');
 export const PHONE_INDEX_KEY = defineSecret('PHONE_INDEX_KEY');
 export const DIDIT_API_KEY = defineSecret('DIDIT_API_KEY');
 export const DIDIT_WORKFLOW_ID = defineSecret('DIDIT_WORKFLOW_ID');

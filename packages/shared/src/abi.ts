@@ -2,6 +2,7 @@ import type { Abi } from 'viem';
 import identityAbiJson from './abi/Identity.json';
 import montiForwarderAbiJson from './abi/MontiForwarder.json';
 import organizersAbiJson from './abi/Organizers.json';
+import settlementVaultAbiJson from './abi/SettlementVault.json';
 import ticketAbiJson from './abi/Ticket.json';
 
 /**
@@ -16,3 +17,4 @@ export const identityAbi = identityAbiJson as Abi;
 export const organizersAbi = organizersAbiJson as Abi;
 export const ticketAbi = ticketAbiJson as Abi;
 export const forwarderAbi = montiForwarderAbiJson as Abi;
+export const settlementVaultAbi = settlementVaultAbiJson as Abi;

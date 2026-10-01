@@ -64,6 +64,11 @@ try {
         name.slice(`src${sep}vendored${sep}`.length),
       ),
     );
+    // 벤더된 **소스** — 생성기가 내지 않지만 커밋해 두는 ABI 다. SettlementVault 는 아직
+    // packages/shared/src/abi 로 내보내지 않아 Foundry 빌드에서 한 번 벤더해 두고
+    // (src/vendored/settlement-vault-abi.json) 생성기·핸들러가 거기서 읽는다. 공유로
+    // 내보낸 뒤에는 생성기가 다른 벤더처럼 내게 하고 이 예외를 지운다.
+    expected.add('settlement-vault-abi.json');
     for (const entry of await readdir(vendored).catch(() => [])) {
       if (!expected.has(entry)) {
         failures.push(`src/vendored/${entry} 은 생성기가 내지 않는 파일이다 — 지우세요.`);

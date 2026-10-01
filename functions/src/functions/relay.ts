@@ -219,26 +219,25 @@ async function assertUnderPendingLimit(personId: Hex): Promise<void> {
  * 자기 계정만·isMember·!isLocked·nonce 재대조·시뮬을 통과해야 가스를 쓴다. 멱등키는
  * `(account,eventId,nonce)` — 같은 승인서를 두 번 보내도 트랜잭션은 한 번이다.
  */
-export const relayClaim = onCall({ secrets: [RELAYER_PK] }, async (request): Promise<RelayClaimResult> => {
-  // 수령 계정 = 호출자 계정. **요청 본문의 account 는 신뢰하지 않는다** — 언제나 세션에서 온
-  // 계정으로만 발급한다(설계 §5 "자기 것만 claim", consistency 스캔의 규약). 관객 기기가 서명한
-  // claimAuthDigest 도 이 계정을 담으므로, 다른 계정을 넣으면 온체인 서명 검증이 실패한다.
-  const account = await resolveCallerAccount(request);
-  const personId = await callerPersonId(request);
-  const body = (request.data ?? {}) as Partial<RelayClaimRequest>;
+/** `runRelayClaim` 의 입력. 콜러블이 요청을 파싱해 이 모양으로 넘긴다(세션에서 온 account·personId 포함). */
+export interface RunRelayClaim {
+  account: Hex;
+  personId: Hex;
+  mode: 'claim' | 'request';
+  eventId: bigint;
+  tier: number;
+  nonce: bigint;
+  deadline: bigint;
+  deviceSig: Hex;
+}
 
-  const mode = body.mode === 'claim' || body.mode === 'request' ? body.mode : undefined;
-  if (!mode) throw new HttpsError('invalid-argument', 'BAD_MODE');
-  const a = body.auth;
-  if (!a || typeof a !== 'object') throw new HttpsError('invalid-argument', 'BAD_AUTH');
-  const eventId = toBigInt(a.eventId, 'BAD_EVENT_ID');
-  const nonce = toBigInt(a.nonce, 'BAD_NONCE_ARG');
-  const deadline = toBigInt(a.deadline, 'BAD_DEADLINE');
-  if (typeof a.tier !== 'number' || !Number.isInteger(a.tier) || a.tier < 0 || a.tier > 255) {
-    throw new HttpsError('invalid-argument', 'BAD_TIER');
-  }
-  const tier = a.tier;
-  const deviceSig = requireSig(body.deviceSig, 'BAD_DEVICE_SIG');
+/**
+ * 발급 릴레이의 알맹이(설계 §5). `relayClaim` 콜러블과 `purchaseTicket`(settlement.ts) 이 함께
+ * 쓰라고 뽑아 둔다 — 요청 파싱만 콜러블이 하고, 자기 계정 발급·시뮬·전송·확정은 전부 여기 한 곳이다.
+ * 멱등키는 `(account,eventId,nonce)` 로, 같은 승인서를 두 번 보내도 트랜잭션은 한 번이다.
+ */
+export async function runRelayClaim(p: RunRelayClaim): Promise<RelayClaimResult> {
+  const { account, personId, mode, eventId, tier, nonce, deadline, deviceSig } = p;
 
   // deadline 미래.
   const nowSec = BigInt(Math.floor(Date.now() / 1000));
@@ -361,6 +360,32 @@ export const relayClaim = onCall({ secrets: [RELAYER_PK] }, async (request): Pro
   );
   info('relayClaim.confirmed', { relayId, txHash: sent.hash, tokenId });
   return { relayId, status: 'confirmed', txHash: sent.hash, tokenId };
+}
+
+/**
+ * 관객이 자기 스마트 계정으로 티켓을 받는다(발급) 또는 승인제 신청을 낸다.
+ * 요청을 파싱해 세션 계정으로 `runRelayClaim` 에 넘긴다 — 수령 계정은 언제나 세션에서 온다
+ * (요청 본문의 account 는 신뢰하지 않는다, consistency 스캔의 규약).
+ */
+export const relayClaim = onCall({ secrets: [RELAYER_PK] }, async (request): Promise<RelayClaimResult> => {
+  const account = await resolveCallerAccount(request);
+  const personId = await callerPersonId(request);
+  const body = (request.data ?? {}) as Partial<RelayClaimRequest>;
+
+  const mode = body.mode === 'claim' || body.mode === 'request' ? body.mode : undefined;
+  if (!mode) throw new HttpsError('invalid-argument', 'BAD_MODE');
+  const a = body.auth;
+  if (!a || typeof a !== 'object') throw new HttpsError('invalid-argument', 'BAD_AUTH');
+  const eventId = toBigInt(a.eventId, 'BAD_EVENT_ID');
+  const nonce = toBigInt(a.nonce, 'BAD_NONCE_ARG');
+  const deadline = toBigInt(a.deadline, 'BAD_DEADLINE');
+  if (typeof a.tier !== 'number' || !Number.isInteger(a.tier) || a.tier < 0 || a.tier > 255) {
+    throw new HttpsError('invalid-argument', 'BAD_TIER');
+  }
+  const tier = a.tier;
+  const deviceSig = requireSig(body.deviceSig, 'BAD_DEVICE_SIG');
+
+  return runRelayClaim({ account, personId, mode, eventId, tier, nonce, deadline, deviceSig });
 });
 
 // ─────────────────────────────────────── relayCheckIn
@@ -510,5 +535,10 @@ export const relayCheckIn = onCall({ secrets: [RELAYER_PK] }, async (request): P
     info('relayCheckIn.usage.failed', { relayId, reason: (cause as Error).message }),
   );
   info('relayCheckIn.confirmed', { relayId, txHash: sent.hash, usedAt: usedAtSec });
+  // 입장 확정 직후 그 토큰의 예치 에스크로를 분배한다(설계 §3, 체감 ~1초). 정산 레이어와의 결합은
+  // 동적 import 로 느슨하게 두고, 실패해도 입장 응답을 막지 않는다 — settlementSweep 이 백업한다.
+  await import('./settlement.js')
+    .then((m) => m.onCheckInConfirmed(eventId, tokenId))
+    .catch((cause) => info('relayCheckIn.release.failed', { relayId, reason: (cause as Error).message }));
   return { relayId, status: 'confirmed', txHash: sent.hash, usedAt: usedAtSec };
 });

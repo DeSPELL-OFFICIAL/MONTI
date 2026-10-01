@@ -54,6 +54,8 @@ beforeEach(async () => {
     await db.doc('eventChats/12/members/uid-1').set({ account: ACCOUNT, joinedAt: 1 });
     await db.doc('relays/r1').set({ personId: '0xaa', account: ACCOUNT, kind: 'claim', status: 'sent' });
     await db.doc('admissions/7/tokens/42').set({ status: 'passing', gateId: 'g1', relayId: 'r1' });
+    await db.doc('settlements/42').set({ policyHash: '0x00', policy: { recipients: [], platformBps: 2000 } });
+    await db.doc('orders/o1').set({ personId: '0xaa', account: ACCOUNT, eventId: '42', tier: 0, status: 'deposited' });
   });
 });
 
@@ -649,5 +651,41 @@ describe('usage/{scope}', () => {
     await assertFails(client.doc('usage/person:0xaa').get());
     await assertFails(client.doc('usage/org:7').set({ monSpentWei: '0', count: 1 }));
     await assertFails(env.unauthenticatedContext().firestore().doc('usage/org:7').get());
+  });
+});
+
+describe('settlements/{eventId}', () => {
+  it('lets anyone (even anonymous) read the public settlement mirror', async () => {
+    await assertSucceeds(owner().doc('settlements/42').get());
+    await assertSucceeds(env.unauthenticatedContext().firestore().doc('settlements/42').get());
+  });
+
+  it('blocks client writes (server-only)', async () => {
+    await assertFails(owner().doc('settlements/42').set({ policyHash: '0xff' }, { merge: true }));
+    await assertFails(owner().doc('settlements/99').set({ policyHash: '0x01' }));
+  });
+});
+
+describe('orders/{orderId}', () => {
+  function buyer() {
+    return env.authenticatedContext('uid-1', { account: ACCOUNT, personId: '0xaa' }).firestore();
+  }
+
+  it('lets the owning person read their own order', async () => {
+    await assertSucceeds(buyer().doc('orders/o1').get());
+  });
+
+  it("blocks reading another person's order", async () => {
+    const other = env.authenticatedContext('uid-2', { account: '0x02', personId: '0xbb' }).firestore();
+    await assertFails(other.doc('orders/o1').get());
+  });
+
+  it('blocks an anonymous read', async () => {
+    await assertFails(env.unauthenticatedContext().firestore().doc('orders/o1').get());
+  });
+
+  it('blocks client writes even by the owner (server-only)', async () => {
+    await assertFails(buyer().doc('orders/o1').set({ status: 'refunded' }, { merge: true }));
+    await assertFails(buyer().doc('orders/o2').set({ personId: '0xaa', status: 'pending' }));
   });
 });

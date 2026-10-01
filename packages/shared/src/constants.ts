@@ -6,6 +6,14 @@ export const MONAD_MAINNET_CHAIN_ID = 143;
 export const MONAD_TESTNET_RPC_URL = 'https://testnet-rpc.monad.xyz';
 export const MONAD_MAINNET_RPC_URL = 'https://rpc.monad.xyz';
 
+/**
+ * Circle 공식 테스트 USDC(Monad 테스트넷 10143). 6 decimals. 배포 JSON 의 `usdc` 키가 없으면
+ * 정산 레이어는 이 주소를 기본 토큰으로 쓴다(설계 선례: Circle USDC, 토큰 주소는 설정 가능).
+ */
+export const CIRCLE_TESTNET_USDC = '0x534b2f3A21130d7a60830c2Df862319e593943A3' as Hex;
+/** USDC 는 6 decimals. 전 금액을 6dp 로 다룬다(설계 §8: 18 가정 금지). */
+export const USDC_DECIMALS = 6;
+
 /** 로직에 체인 id를 박지 않는다. CHAIN_ID / VITE_CHAIN_ID 하나로 메인넷으로 넘어간다. */
 export const DEFAULT_CHAIN_ID = Number(
   (typeof process !== 'undefined' ? process.env?.CHAIN_ID : undefined) ?? MONAD_TESTNET_CHAIN_ID,
@@ -183,6 +191,13 @@ export interface Deployment {
   /** Phase 2 ERC-2771 전달자(설계 §1). 2026-09-30 재배포부터 배포 파일의 필수 키다. */
   forwarder: Hex;
   attester: Hex;
+  /**
+   * 프로그래머블 정산 금고(설계 2026-10-01). 핵심 4 컨트랙트와 **독립 배포**라 선택적 키다 —
+   * A4 가 배포하기 전까지는 없고, 없으면 `settlementVaultAddress` 가 `MISSING_SETTLEMENT_VAULT` 로 크게 실패한다.
+   */
+  settlementVault?: Hex;
+  /** 정산 토큰(USDC). 비어 있으면 `usdcAddress` 가 Circle 공식 테스트 USDC 로 떨어진다. */
+  usdc?: Hex;
 }
 
 const ADDRESS_FIELDS = [
@@ -208,6 +223,15 @@ export function parseDeployment(raw: unknown, expectedChainId?: number): Deploym
   const out: Record<string, unknown> = { chainId: value.chainId, block: value.block };
   for (const field of ADDRESS_FIELDS) {
     const address = value[field];
+    if (typeof address !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(address)) {
+      throw new Error(`BAD_DEPLOYMENT_FIELD:${field}`);
+    }
+    out[field] = address as Hex;
+  }
+  // 선택 키(정산 레이어). 있으면 주소 모양을 검증하고, 없으면 그대로 비워 둔다.
+  for (const field of ['settlementVault', 'usdc'] as const) {
+    const address = value[field];
+    if (address === undefined) continue;
     if (typeof address !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(address)) {
       throw new Error(`BAD_DEPLOYMENT_FIELD:${field}`);
     }
@@ -248,12 +272,6 @@ export const forwarderAddress = (chainId?: number): Hex => loadDeployment(chainI
 export const attesterAddress = (chainId?: number): Hex => loadDeployment(chainId).attester;
 
 /**
- * Circle USDC 의 소수 자릿수. 정산 금고에 예치되는 토큰 금액(usdCents → 토큰 최소단위)을
- * 환산할 때 쓴다. 웹과 (나중의) 릴레이어가 같은 상수를 보도록 shared 에 둔다.
- */
-export const USDC_DECIMALS = 6;
-
-/**
  * 분배 비율 합(= 100%)의 basis-point 값. `BPS_DENOMINATOR`(bigint)의 number 판으로, 정산
  * 편집기가 수령인 비율 합이 10000 인지 UI 에서 검증할 때 쓴다.
  */
@@ -264,3 +282,15 @@ export const BPS_TOTAL = 10_000;
  * 정산 편집기의 고정 플랫폼 행이 이 값으로 시작한다. 올릴 수는 있어도 이 아래로는 못 내린다.
  */
 export const DEFAULT_PLATFORM_BPS = 500;
+
+/**
+ * 정산 금고 주소. 핵심 4 와 달리 배포 JSON 의 선택 키라, 없으면 `MISSING_SETTLEMENT_VAULT` 로
+ * 크게 실패한다(A4 배포 전). 폴백은 없다 — 틀린 금고로 돈을 보내는 것보다 멈추는 것이 낫다.
+ */
+export const settlementVaultAddress = (chainId?: number): Hex => {
+  const vault = loadDeployment(chainId).settlementVault;
+  if (vault === undefined) throw new Error('MISSING_SETTLEMENT_VAULT');
+  return vault;
+};
+/** 정산 토큰 주소. 배포 JSON 에 `usdc` 가 있으면 그것을, 없으면 Circle 공식 테스트 USDC 를 쓴다. */
+export const usdcAddress = (chainId?: number): Hex => loadDeployment(chainId).usdc ?? CIRCLE_TESTNET_USDC;

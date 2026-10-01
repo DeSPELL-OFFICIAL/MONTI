@@ -885,7 +885,12 @@ describe('reconcilePending — 스윕 격리', () => {
       timeZone: 'Asia/Seoul',
     });
     expect(endpoint.region).toEqual([FIREBASE_REGION]);
-    // 재전송이 어테스터로 나가므로 시크릿이 붙어 있어야 한다.
-    expect(endpoint.secretEnvironmentVariables).toEqual([{ key: 'ATTESTER_PK' }]);
+    // kyc_ok 재전송은 어테스터로, 정산 스윕의 deposit/release 는 트레저리·릴레이어로 나가므로
+    // 세 시크릿이 모두 붙어 있어야 한다(settlementSweep 추가, 설계 2026-10-01 §3).
+    expect(endpoint.secretEnvironmentVariables).toEqual([
+      { key: 'ATTESTER_PK' },
+      { key: 'RELAYER_PK' },
+      { key: 'TREASURY_PK' },
+    ]);
   });
 });
