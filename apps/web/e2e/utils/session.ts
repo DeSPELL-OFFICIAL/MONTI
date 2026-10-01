@@ -28,6 +28,22 @@ export interface PersonaSession {
   auth: VirtualAuthenticator;
   /** True when a persisted storage state was loaded (a previous run signed this persona up). */
   hasState: boolean;
+  /**
+   * True when this persona reached its signed-in state through `/recover` (its number was already
+   * active on chain and had to re-issue the passkey) rather than a first-time signup. Persisted in
+   * the per-persona meta file so a later run's reuse logic knows how this account came to be.
+   */
+  recovered: boolean;
+}
+
+/**
+ * A little per-persona metadata that outlives a single run but is not part of the browser storage
+ * state — currently just whether the account was recovered. Kept in its own file so the Playwright
+ * storage state and the authenticator credentials stay exactly what they were.
+ */
+interface PersonaMeta {
+  recovered?: boolean;
+  recoveredAt?: string;
 }
 
 /**
@@ -64,6 +80,22 @@ async function prepareContext(context: BrowserContext): Promise<void> {
 
 const statePath = (p: Persona): string => `${STATE_DIR}/${p.id}.state.json`;
 const credsPath = (p: Persona): string => `${STATE_DIR}/${p.id}.creds.json`;
+const metaPath = (p: Persona): string => `${STATE_DIR}/${p.id}.meta.json`;
+
+/** Read the per-persona meta file, or an empty record if it is missing/unreadable. Never throws. */
+function readMeta(p: Persona): PersonaMeta {
+  try {
+    return JSON.parse(readFileSync(metaPath(p), 'utf8')) as PersonaMeta;
+  } catch {
+    return {};
+  }
+}
+
+/** Merge a patch into the per-persona meta file. */
+function writeMeta(p: Persona, patch: PersonaMeta): void {
+  mkdirSync(STATE_DIR, { recursive: true });
+  writeFileSync(metaPath(p), JSON.stringify({ ...readMeta(p), ...patch }, null, 2));
+}
 
 /** New browser context for a persona, its passkey store restored and authenticator attached. */
 export async function openPersona(browser: Browser, persona: Persona): Promise<PersonaSession> {
@@ -80,7 +112,7 @@ export async function openPersona(browser: Browser, persona: Persona): Promise<P
     const creds = JSON.parse(readFileSync(credsPath(persona), 'utf8')) as CdpCredential[];
     await auth.importCredentials(creds);
   }
-  return { persona, context, page, auth, hasState };
+  return { persona, context, page, auth, hasState, recovered: readMeta(persona).recovered === true };
 }
 
 /** Sign the persona in: reuse a persisted passkey if there is one, otherwise sign up fresh. */
@@ -102,7 +134,11 @@ export async function ensureAccount(session: PersonaSession): Promise<void> {
     // The account is already registered on chain, so a fresh signup would only bounce to /login.
     throw new Error(`login reuse failed for ${session.persona.id}: passkey session did not hold`);
   }
-  await signUp(session.page, session.persona);
+  // Fresh: first-time signup, or — for a re-registered number whose on-chain identity outlived its
+  // Firestore person — recovery. `signUp` branches on where Verify lands and tells us which it was.
+  const { recovered } = await signUp(session.page, session.persona);
+  session.recovered = recovered;
+  if (recovered) writeMeta(session.persona, { recovered: true, recoveredAt: new Date().toISOString() });
   await persist(session);
 }
 
