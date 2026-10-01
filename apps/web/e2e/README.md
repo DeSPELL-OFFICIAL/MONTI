@@ -22,6 +22,8 @@ fnm exec --using=22 pnpm -F web e2e e2e/tests/01-public-surface.spec.ts   # 로�
 | `E2E_BASE_URL` | 대상 URL | `https://monti.despell.io` |
 | `E2E_HEADLESS=1` | 헤드리스 강제 | 헤디드 |
 | `E2E_APPROVAL=1` | 승인제 시나리오(d) 및 승인 행사 생성 활성화 | off |
+| `E2E_ADMIN` | 관리자/주최자로 쓸 테스트 번호 인덱스(`01`…`10`, `persona-05`·`5` 도 허용) | `01` |
+| `E2E_USER_FROM` | 이용자 풀 시작 인덱스(…10 다음은 …01 로 순환, 관리자 번호는 건너뜀) | 관리자 다음 번호 |
 
 ## 릴레이 경로 (2026-09-30 재배포)
 
@@ -65,6 +67,27 @@ fnm exec --using=22 pnpm -F web e2e e2e/tests/01-public-surface.spec.ts   # 로�
   있으나(`apps/web/.env.example`·`packages/shared/src/deployments/10143.json` 의 current), 활성
   프로덕션 config 가 아직 이전 배포를 가리키는 동안에는 릴레이/자금이 신규 배포에 있어 서명
   도메인이 어긋나므로 실행하지 말 것.
+
+## 관리자 선택과 재등록 번호(/recover)
+
+- **관리자 선택(`E2E_ADMIN`)**: 기본은 …01 이 주최자이고 …02–…10 이 이용자 9명이다. 어떤 테스트
+  번호든 주최자 자리에 앉힐 수 있다 — `E2E_ADMIN=05` 면 …05 가 주최자, 이용자 풀은 …06–…10 뒤에
+  …01–…04 로 순환해 항상 9명을 채운다(관리자 제외). `E2E_USER_FROM` 으로 이용자 시작 번호만 따로
+  바꿀 수 있다. 선택 로직은 순수 함수 `selectPersonas`/`parsePersonaIndex`(`e2e/fixtures/personas.ts`)
+  이고 `e2e/fixtures/personas.test.ts` 가 단위 테스트한다(`pnpm -F web test`). 상태 파일은 번호 id
+  (`persona-05.*`)로 저장되므로, 소프트 삭제돼 못 쓰게 된 …01 대신 다른 번호를 골라 깨끗한 런을 돌린다.
+
+- **재등록 번호 → `/recover` 처리**: 온체인 신원은 남았는데 Firestore person 은 소프트 삭제된 번호는
+  이미 `active` 상태라, 새 가입이 `getSignupStatus()` 판정으로 `/signup/register` 가 아니라 `/recover`
+  (분실/기기교체 재설정)로 간다. 하니스의 `signUp`(`utils/signup.ts`)은 인증 후 착지 지점을 보고
+  분기한다: `/recover` 면 사용자가 하듯 **새로 설정하기** 를 눌러 가상 인증자로 새 패스키를 만들고,
+  디바이스 키를 다시 발급하고, `recoverAccess`(체인 소유자 교체 + 세션 발급, 단일 `confirming` 단계)
+  가 끝나 `/tickets` 로 넘어갈 때까지 기다린다. 실패 시 화면은 **다시 시도** 버튼을 내밀고, 하니스는
+  제한된 횟수만 재시도한 뒤 화면 사유(ROTATION_COOLDOWN·RECOVERY_RATE_LIMIT 등)를 담아 던진다.
+  성공하면 앱이 `markDeviceHealthy()` 를 호출하므로 `shared/deviceHealth.ts` 가드가 바로 통과한다.
+  이렇게 복구된 계정은 `e2e/.state/<persona>.meta.json` 에 `recovered` 플래그로 기록돼(세션의
+  `recovered`), 다음 런의 재사용 로직이 이 계정의 내력을 안다.
+  (라이브 실행 금지 작업이라 `/recover` 경로는 실제로 돌려 보지 않고 `Recover.tsx` 를 읽어 구현·검증했다.)
 
 ## 세션 재사용
 

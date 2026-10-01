@@ -16,17 +16,33 @@ const C = {
   nameLabel: '어떻게 불러 드릴까요?',
   doneCta: '시작하기',
   alreadyTitle: '다시 오셨네요', // /login lands here if the number is already registered
+  // Recover.tsx (recover.* / common.retry) — a returning number on a fresh device lands here.
+  recoverTitle: '휴대폰으로 다시 설정하기',
+  recoverCta: '새로 설정하기',
+  recoverRetry: '다시 시도',
 } as const;
 
 /** How long the one-tap register chain (passkey → device key → on-chain identity) may take. */
 const REGISTER_TIMEOUT_MS = Number(process.env.E2E_REGISTER_TIMEOUT_MS ?? 4 * 60 * 1000);
 
+/** What `signUp` actually did — a first-time registration, or a recovery of a re-registered number. */
+export interface SignupResult {
+  /** True when the number was already active on chain and we drove `/recover` instead of register. */
+  recovered: boolean;
+}
+
 /**
  * The full first-time signup, exactly as a person does it:
  * phone → SMS code 123456 → 계정 만들기 (one tap: 잠금 + 휴대폰 등록 + 신원 등록) → optional name.
  * The passkey ceremony resolves against the context's WebAuthn virtual authenticator.
+ *
+ * A number whose on-chain identity outlived its Firestore person (a soft-deleted admin that a
+ * backend reset could not touch) is already `active`, so Verify sends it to `/recover` rather than
+ * `/signup/register` — `getSignupStatus()` tells the two apart. The same SMS flow then re-issues the
+ * passkey + device key through `recoverAccess`, so the harness branches on where Verify lands and
+ * drives recovery as a user would. `recovered` in the result lets reuse logic record what happened.
  */
-export async function signUp(page: Page, persona: Persona): Promise<void> {
+export async function signUp(page: Page, persona: Persona): Promise<SignupResult> {
   await timed(persona.id, 'signup.phone', async () => {
     await page.goto('/signup/phone');
     await page.getByLabel(C.phoneLabel, { exact: true }).fill(persona.phone);
@@ -37,12 +53,23 @@ export async function signUp(page: Page, persona: Persona): Promise<void> {
     await expect(page).toHaveURL(/\/signup\/verify/, { timeout: 60_000 });
   });
 
-  await timed(persona.id, 'signup.verify', async () => {
+  const landed = await timed(persona.id, 'signup.verify', async () => {
     await page.getByLabel(C.codeLabel, { exact: true }).fill(OTP_CODE);
     await page.getByRole('button', { name: C.verify, exact: true }).click();
-    // finishSignup writes persons/{id}; the guard then routes to the combined register screen.
-    await expect(page).toHaveURL(/\/signup\/register/, { timeout: 60_000 });
+    // Verify routes a first-time number to the combined register screen, and a number that is
+    // already `active` on chain (re-registered: on-chain identity outlived its Firestore person) to
+    // `/recover`. Wait for whichever it is — anything else (e.g. a bounce to /login for an
+    // already-registered number) throws here with the actual URL in the message.
+    await page.waitForURL(/\/signup\/register(\/|$|\?)|\/recover(\/|$|\?)/, { timeout: 60_000 });
+    return /\/recover/.test(page.url()) ? 'recover' : 'register';
   });
+
+  if (landed === 'recover') {
+    await timed(persona.id, 'signup.recover', async () => {
+      await runRecover(page);
+    });
+    return { recovered: true };
+  }
 
   await timed(persona.id, 'signup.register', async () => {
     await runRegister(page);
@@ -57,6 +84,8 @@ export async function signUp(page: Page, persona: Persona): Promise<void> {
     // Fresh signup lands on 탐색 ('/'); an invited one on the inbox.
     await expect(page).toHaveURL(/(\/|\/tickets\/inbox)$/, { timeout: 30_000 });
   });
+
+  return { recovered: false };
 }
 
 /**
@@ -89,6 +118,44 @@ async function runRegister(page: Page): Promise<void> {
     await page.waitForTimeout(1500);
   }
   await expect(page, 'register chain did not reach /signup/done in time').toHaveURL(/\/signup\/done/);
+}
+
+/**
+ * Drive the lost-device/recovery screen (Recover.tsx) exactly as a returning person does it: one tap
+ * on 새로 설정하기 mints a fresh passkey (resolved against the virtual authenticator) and device key
+ * and hands them to `recoverAccess`, which rotates the account's owner on chain, waits for finality
+ * and mints a Firebase session — all inside that single call, so it is one `confirming` phase, not a
+ * stepper. On success the screen calls `markDeviceHealthy()` and navigates to `/tickets`, so the
+ * device-health guard passes and does not bounce the recovered person straight back here.
+ *
+ * On failure the screen shows the reason and turns the button into 다시 시도; pressing it re-runs the
+ * same recovery (a fresh challenge each time), so a bounded retry is safe. A ROTATION_COOLDOWN /
+ * RECOVERY_RATE_LIMIT reason is terminal for this run — it never clears within the window — so the
+ * throw surfaces the on-screen reason instead of looping silently.
+ */
+async function runRecover(page: Page): Promise<void> {
+  await expect(page.getByRole('heading', { name: C.recoverTitle })).toBeVisible({ timeout: 30_000 });
+  const cta = page.getByRole('button', { name: C.recoverCta, exact: true });
+  const retry = page.getByRole('button', { name: C.recoverRetry, exact: true });
+
+  await cta.click();
+  const deadline = Date.now() + REGISTER_TIMEOUT_MS;
+  let attempts = 1;
+  while (Date.now() < deadline) {
+    // Success: recoverAccess landed and the screen navigated to 내 티켓.
+    if (/\/tickets(\/|$)/.test(page.url())) return;
+    // A fresh tab opened straight on /recover with no person to recover is sent to /login; that
+    // should not happen here (Verify wrote the personId first), but if it does, stop and say so.
+    if (/\/login(\/|$)/.test(page.url())) break;
+    if (attempts < 4 && (await retry.isVisible().catch(() => false))) {
+      attempts += 1;
+      await retry.click();
+    }
+    await page.waitForTimeout(1500);
+  }
+  if (/\/tickets(\/|$)/.test(page.url())) return;
+  const reason = (await page.locator('[role="alert"], .alert').first().innerText().catch(() => '')) || '(no on-screen reason)';
+  throw new Error(`recover did not reach /tickets within the window (url=${page.url()}); screen said: ${reason.trim()}`);
 }
 
 /**
