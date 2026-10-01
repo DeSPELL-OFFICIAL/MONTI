@@ -3,7 +3,7 @@ import { error, info } from 'firebase-functions/logger';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { TransactionReceiptNotFoundError } from 'viem';
 import { identityAbi, type Hex, type PersonStatus } from '@monti/shared';
-import { ATTESTER_PK } from '../config.js';
+import { ATTESTER_PK, RELAYER_PK, TREASURY_PK } from '../config.js';
 import { deployment, publicClient } from '../lib/chain.js';
 import { mintSessionClaims } from '../lib/claims.js';
 import {
@@ -17,6 +17,7 @@ import {
 } from '../lib/db.js';
 import { sendSetKycLevel } from '../lib/kycLevel.js';
 import { sweepRelays } from './reconcileRelays.js';
+import { settlementSweep } from './settlement.js';
 
 const ZERO = '0x0000000000000000000000000000000000000000';
 /** 이보다 오래 그대로인 문서만 본다. 살아 있는 호출이 마무리 중인 문서는 건드리지 않는다. */
@@ -503,7 +504,7 @@ async function sweepAbandonedKyc(): Promise<void> {
  * 어테스터 키가 필요한 이유는 하나뿐이다: 멈춘 `kyc_ok` 의 `setKycLevel` 재전송.
  */
 export const reconcilePending = onSchedule(
-  { schedule: SCHEDULE, timeZone: 'Asia/Seoul', timeoutSeconds: 300, secrets: [ATTESTER_PK] },
+  { schedule: SCHEDULE, timeZone: 'Asia/Seoul', timeoutSeconds: 300, secrets: [ATTESTER_PK, RELAYER_PK, TREASURY_PK] },
   async () => {
     const sweeps = [
       ['persons', sweepPersons],
@@ -512,6 +513,7 @@ export const reconcilePending = onSchedule(
       ['pendingGates', sweepPendingGates],
       ['abandonedKyc', sweepAbandonedKyc],
       ['relays', sweepRelays],
+      ['settlement', settlementSweep],
     ] as const;
 
     for (const [name, sweep] of sweeps) {

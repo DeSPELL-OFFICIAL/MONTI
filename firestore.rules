@@ -266,6 +266,23 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // 공개 정산 거울(설계 2026-10-01 §5). **누구나 읽는다** — 공개 정산 현황 페이지는 로그인하지
+    // 않은 사람도 열람한다("누구나 본다" 요구). 권위는 온체인/인덱서이고 이 문서는 표시용 거울일
+    // 뿐이라 공개해도 조작 위험이 없다(사유 원문의 keccak 을 체인 reasonHash 와 대조하면 위변조가
+    // 드러난다). 쓰는 길은 서버(`relaySetPolicy`) 하나다.
+    match /settlements/{eventId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // 관객 주문(설계 §2). **주문자 본인만 읽는다** — 로그인 토큰의 personId 클레임과 문서의
+    // personId 가 같아야 한다(relays 와 같은 모양). 주최자의 주문 열람은 뒤의 콜러블 몫이다.
+    // 쓰기는 서버(purchaseTicket·refundOrder·스윕) 전용이다.
+    match /orders/{orderId} {
+      allow read: if signedIn() && request.auth.token.personId == resource.data.personId;
+      allow write: if false;
+    }
+
     // persons, passkeys, kycSessions, invites, phoneIndex, transferInvites, authChallenges 포함 전부 거부.
     match /{document=**} {
       allow read, write: if false;
