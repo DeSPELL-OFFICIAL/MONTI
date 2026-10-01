@@ -22,6 +22,8 @@ export interface AppConfig {
     forwarder: Hex;
     settlementVault?: Hex;
     usdc?: Hex;
+    /** The MONTI platform fee recipient — the fixed `platform`-tagged row in a split policy. */
+    platform?: Hex;
   };
   envioUrl: string;
   rpId: string;
@@ -94,6 +96,9 @@ export function getConfig(): AppConfig {
       // gates every screen that reads them, so an unset build never touches them.
       settlementVault: optionalEnv('VITE_ADDR_SETTLEMENT_VAULT') as Hex | undefined,
       usdc: optionalEnv('VITE_ADDR_USDC') as Hex | undefined,
+      // The MONTI platform fee wallet the organiser split's fixed `platform` row pays to. Optional:
+      // the settlement screens read it only when `settlementEnabled()` is already true.
+      platform: optionalEnv('VITE_ADDR_PLATFORM') as Hex | undefined,
     },
     envioUrl: requiredEnv('VITE_ENVIO_URL'),
     rpId: requiredEnv('VITE_RP_ID'),

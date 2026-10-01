@@ -46,7 +46,16 @@ vi.mock('../shared/api/functions', async (orig) => ({
 const loadEventArt = vi.fn(async () => [{ preset: 'c' as const }]);
 /** The ticket preview prints whose ticket it is, so this screen reads the profile too. */
 const loadMyProfile = vi.fn(async () => ({ displayName: '박주최' }));
-vi.mock('../shared/api/firestore', () => ({ loadEventArt, loadMyProfile }));
+// The 정산 설정 section (Batch D) this screen now embeds reads these on mount. Stubbed to a
+// no-policy event so the dashboard renders as before; settlement.test.tsx covers the section itself.
+const getSettlement = vi.fn(async () => null);
+const watchSettlement = vi.fn(() => () => undefined);
+const watchRelayStatus = vi.fn(() => () => undefined);
+vi.mock('../shared/api/firestore', () => ({ loadEventArt, loadMyProfile, getSettlement, watchSettlement, watchRelayStatus }));
+vi.mock('../shared/chain/settlementReads', () => ({
+  readChainPolicy: vi.fn(async () => ({ recipients: [], platformBps: 0, reserveBps: 0, noShowRefund: false, frozen: false, version: 0 })),
+  readPolicyNonce: vi.fn(async () => 0n),
+}));
 
 const fetchEventMetadata = vi.fn(async (): Promise<Record<string, unknown>> => ({ title: '재즈 나이트', tags: [] }));
 vi.mock('../shared/envio/ipfs', async (orig) => ({
