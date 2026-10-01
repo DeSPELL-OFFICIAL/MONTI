@@ -1,9 +1,21 @@
 import { expect, test } from '@playwright/test';
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { createPublicClient, http } from 'viem';
 import { ADMIN } from '../fixtures/personas';
 import { closePersona, ensureAccount, openPersona } from '../utils/session';
-import { createOrganizerAndEvent } from '../utils/organizer';
+import { createOrganizerAndEvent, publishEvent } from '../utils/organizer';
 import { recordEvent } from '../utils/scenario-state';
+
+/**
+ * Per-op relayer cost is read straight off the relayer EOA's balance via RPC (every write is
+ * relayer-sponsored; see e2e/README.md). The harness logs the balance at each on-chain phase so the
+ * operator gets setPolicy/createEvent/publish deltas without pausing the single-command run.
+ */
+const RELAYER = '0xFA93A9dB40a4396a8CdcF63991FA8615d1A35fFd' as const;
+const BAL_RPC = process.env.E2E_RPC_URL ?? 'https://testnet-rpc.monad.xyz';
+const balClient = createPublicClient({ transport: http(BAL_RPC) });
+const relayerMon = (): Promise<bigint> => balClient.getBalance({ address: RELAYER });
+const fmtMon = (wei: bigint): string => (Number(wei) / 1e18).toFixed(9);
 
 /**
  * Batch H — programmable-settlement demo, step 1 (정산 규칙 확정) live against production.
@@ -41,6 +53,9 @@ test('50 · settlement step 1 — organiser confirms the $30 split policy', asyn
     // 1b. Create the event that will carry the settlement overlay. Paid tiers are still blocked at
     // the create scene, so the on-chain event is a free tier; the "$30" lives entirely in the
     // settlement policy configured below.
+    const balStart = await relayerMon().catch(() => 0n);
+    (diag as Record<string, string>).relayerMonStart = fmtMon(balStart);
+    console.log(`[50] relayer MON (before create): ${fmtMon(balStart)}`);
     const created = await createOrganizerAndEvent(page, {
       personaId: ADMIN.id,
       orgName: '몬티 정산 테스트',
@@ -55,6 +70,10 @@ test('50 · settlement step 1 — organiser confirms the $30 split policy', asyn
     expect(created.eventId, 'event should be created').not.toBeNull();
     const eventId = created.eventId!;
     recordEvent('free', { id: eventId, published: false, title: '정산 데모 공연 H' });
+    const balAfterCreate = await relayerMon().catch(() => 0n);
+    (diag as Record<string, string>).relayerMonAfterCreate = fmtMon(balAfterCreate);
+    (diag as Record<string, string>).costCreate = fmtMon(balStart - balAfterCreate);
+    console.log(`[50] relayer MON (after create): ${fmtMon(balAfterCreate)} · createEvent=${fmtMon(balStart - balAfterCreate)}`);
 
     // 1c. Open the organiser dashboard and wait for the 정산 설정 section + its price field (which
     // only renders once the indexer has surfaced the event's tier).
@@ -119,17 +138,42 @@ test('50 · settlement step 1 — organiser confirms the $30 split policy', asyn
       console.log(`[50] sum=${JSON.stringify(diag.sumText)} confirmDisabled=${diag.confirmDisabled} alert=${JSON.stringify(diag.alertText)}`);
       console.log(`[50] platformRow inputs=${diag.platformRowHasAccountInput} text=${JSON.stringify(diag.platformRowText)}`);
 
-      // 1g. If the editor lets us, press 확정 and capture the outcome (confirmed vs error).
-      if (diag.confirmDisabled === false) {
-        await confirmBtn.click().catch(() => undefined);
-        await page.waitForTimeout(8000);
-        diag.afterConfirmAlert = (await card.locator('.alert, [role="alert"]').allInnerTexts().catch(() => [])).join(' | ');
-        diag.afterConfirmUrl = page.url();
-        console.log(`[50] after 확정: alert=${JSON.stringify(diag.afterConfirmAlert)}`);
-      }
-    }
+      // Capture the editor state (sum/rows/alert) before acting, so the artifact exists regardless.
+      await page.screenshot({ path: `${ARTIFACTS}/50-settlement-section.png`, fullPage: true }).catch(() => undefined);
 
-    await page.screenshot({ path: `${ARTIFACTS}/50-settlement-section.png`, fullPage: true }).catch(() => undefined);
+      // 1g. With VITE_ADDR_PLATFORM configured, the locked MONTI row seeds with a valid account, so
+      // 정산 규칙 확정 must now be ENABLED. Press it → device signs → relaySetPolicy → the relay doc is
+      // followed until the policy confirms (phase 'done' swaps the editor for the 정산 규칙 확정됨 alert
+      // and the 정산 내역 보기 link).
+      expect(diag.confirmDisabled, '정산 규칙 확정 must be enabled once VITE_ADDR_PLATFORM is set').toBe(false);
+      await confirmBtn.click();
+      const publicLink = card.getByRole('link', { name: '정산 내역 보기', exact: true });
+      const confirmedChip = card.getByText('정산 규칙 확정됨', { exact: true });
+      let policyConfirmed = false;
+      const confirmDeadline = Date.now() + 100_000;
+      while (Date.now() < confirmDeadline) {
+        if (await publicLink.isVisible().catch(() => false)) { policyConfirmed = true; break; }
+        if (await confirmedChip.isVisible().catch(() => false)) { policyConfirmed = true; break; }
+        await page.waitForTimeout(3000);
+      }
+      diag.policyConfirmed = policyConfirmed;
+      diag.afterConfirmAlert = (await card.locator('.alert, [role="alert"]').allInnerTexts().catch(() => [])).join(' | ');
+      const balAfterPolicy = await relayerMon().catch(() => 0n);
+      (diag as Record<string, string>).relayerMonAfterPolicy = fmtMon(balAfterPolicy);
+      (diag as Record<string, string>).costSetPolicy = fmtMon(balAfterCreate - balAfterPolicy);
+      console.log(`[50] policy confirmed=${policyConfirmed} · relaySetPolicy=${fmtMon(balAfterCreate - balAfterPolicy)} MON · alert=${JSON.stringify(diag.afterConfirmAlert)}`);
+      await page.screenshot({ path: `${ARTIFACTS}/50-settlement-confirmed.png`, fullPage: true }).catch(() => undefined);
+      expect(policyConfirmed, 'relaySetPolicy should confirm within 100s').toBe(true);
+
+      // 1h. Publish the event so step 2's attendee purchase path exists.
+      const publishResult = await publishEvent(page, ADMIN.id, eventId);
+      diag.publishResult = publishResult;
+      recordEvent('free', { id: eventId, published: publishResult === 'published', title: '정산 데모 공연 H' });
+      const balAfterPublish = await relayerMon().catch(() => 0n);
+      (diag as Record<string, string>).relayerMonAfterPublish = fmtMon(balAfterPublish);
+      (diag as Record<string, string>).costPublish = fmtMon(balAfterPolicy - balAfterPublish);
+      console.log(`[50] publish=${publishResult} · publish cost=${fmtMon(balAfterPolicy - balAfterPublish)} MON · relayer now ${fmtMon(balAfterPublish)}`);
+    }
   } finally {
     diag.finishedAt = new Date().toISOString();
     writeFileSync(DIAG_PATH, JSON.stringify(diag, null, 2));
