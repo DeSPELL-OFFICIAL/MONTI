@@ -246,3 +246,9 @@ export const ticketAddress = (chainId?: number): Hex => loadDeployment(chainId).
 /** Phase 2 전달자 주소. 2026-09-30 재배포부터 필수 키라 loadDeployment 가 부재를 이미 막는다. */
 export const forwarderAddress = (chainId?: number): Hex => loadDeployment(chainId).forwarder;
 export const attesterAddress = (chainId?: number): Hex => loadDeployment(chainId).attester;
+
+/**
+ * Circle USDC 의 소수 자릿수. 정산 금고에 예치되는 토큰 금액(usdCents → 토큰 최소단위)을
+ * 환산할 때 쓴다. 웹과 (나중의) 릴레이어가 같은 상수를 보도록 shared 에 둔다.
+ */
+export const USDC_DECIMALS = 6;
