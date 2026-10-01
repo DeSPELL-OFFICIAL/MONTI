@@ -299,6 +299,55 @@ export interface RelayActionResponse {
   result?: RelayActionResult;
 }
 
+/**
+ * web → backend contract for setting an event's split policy through the relayer
+ * (functions/src/functions/relaySetPolicy.ts). The server authorises it against the organiser's
+ * device signature over the settlement digest, writes the policy to `settlements/{eventId}`, and
+ * relays `SettlementVault.setPolicy`.
+ *
+ * `priceUsdCentsByTier` rides in this payload on purpose: it is the ONLY path by which the
+ * organiser's per-tier USD price reaches the backend's `settlements/{eventId}` document — there is
+ * no on-chain price for a free-mint tier — keyed by tier index as a decimal string.
+ */
+export interface RelaySetPolicyRequest {
+  eventId: string;
+  policy: {
+    recipients: { account: Hex; bps: number; reason: string; tag: string }[];
+    platformBps?: number;
+  };
+  priceUsdCentsByTier: Record<string, number>;
+  auth: { nonce: string; deadline: string };
+  deviceSig: Hex;
+}
+
+export interface RelaySetPolicyResponse {
+  relayId: string;
+  status: string;
+  txHash?: Hex;
+}
+
+/**
+ * web → backend contract for buying one ticket (functions/src/functions/purchaseTicket.ts): the
+ * backend mints the ticket for `auth.account` and deposits the USDC into escrow. `payment` is the
+ * mock card charge for the demo; `auth` is the attendee's device-signed {@link ClaimAuthWire} and
+ * `deviceSig` its signature.
+ */
+export interface PurchaseTicketRequest {
+  eventId: string;
+  tier: number;
+  auth: ClaimAuthWire;
+  deviceSig: Hex;
+  payment: { method: 'card-mock'; amountUsdCents: number };
+}
+
+export interface PurchaseTicketResponse {
+  orderId: string;
+  relayId: string;
+  status: 'minted' | 'deposited' | 'sent';
+  tokenId?: string;
+  depositTxHash?: Hex;
+}
+
 export const api = {
   /**
    * The relayed ticket claim (design §5). The attendee device key signed a `ClaimAuth` digest; the
@@ -630,6 +679,27 @@ export const api = {
   requestAccountDeletion: call<void, { scheduledFor: number; onChainRetained: true }>(
     'requestAccountDeletion',
   ),
+  /**
+   * Sets an event's split policy through the relayer (functions/src/functions/relaySetPolicy.ts).
+   * Organiser-only, authorised server-side by the device signature over the settlement digest. The
+   * server writes `settlements/{eventId}` — including `priceUsdCentsByTier`, the web→backend price
+   * contract (see {@link RelaySetPolicyRequest}) — and relays `SettlementVault.setPolicy`. The
+   * answer carries a `relayId` to follow and, once it lands, a `txHash`.
+   */
+  relaySetPolicy: call<RelaySetPolicyRequest, RelaySetPolicyResponse>('relaySetPolicy'),
+  /**
+   * Buys one ticket (functions/src/functions/purchaseTicket.ts): the backend mints it for the
+   * attendee and deposits the USDC into the settlement escrow. The answer's `relayId` is the one
+   * `watchRelayStatus` follows for the mint, and `orderId` is what `watchOrder` follows for the
+   * escrow — both in `shared/api/firestore.ts`.
+   */
+  purchaseTicket: call<PurchaseTicketRequest, PurchaseTicketResponse>('purchaseTicket'),
+  /**
+   * Refunds one order's escrowed deposit before it is released
+   * (functions/src/functions/refundOrder.ts). Owner of the order only; idempotent on an already
+   * refunded order.
+   */
+  refundOrder: call<{ orderId: string }, { status: string }>('refundOrder'),
 };
 
 /**

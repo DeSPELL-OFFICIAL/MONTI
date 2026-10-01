@@ -128,6 +128,7 @@ import { ChatRoom } from './attendee/chats/ChatRoom';
 import { Profile } from './attendee/me/Profile';
 import { OrganizerRoutes } from './organizer/Layout';
 import { StaffRoutes } from './staff/StaffRoutes';
+import { Settlement } from './public/settlement/Settlement';
 
 export const routes: RouteObject[] = [
   {
@@ -135,6 +136,8 @@ export const routes: RouteObject[] = [
     children: [
       { path: '/', element: <Discover /> },
       { path: '/events/:eventId', element: <EventDetail /> },
+      // Public on purpose: a shareable, no-login record of how one event's revenue is split.
+      { path: '/settlement/:eventId', element: <Settlement /> },
       { path: '/login', element: <Login /> },
       { path: '/signup/phone', element: <Phone /> },
       { path: '/signup/verify', element: <Verify /> },

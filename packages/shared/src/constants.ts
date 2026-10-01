@@ -246,3 +246,21 @@ export const ticketAddress = (chainId?: number): Hex => loadDeployment(chainId).
 /** Phase 2 전달자 주소. 2026-09-30 재배포부터 필수 키라 loadDeployment 가 부재를 이미 막는다. */
 export const forwarderAddress = (chainId?: number): Hex => loadDeployment(chainId).forwarder;
 export const attesterAddress = (chainId?: number): Hex => loadDeployment(chainId).attester;
+
+/**
+ * Circle USDC 의 소수 자릿수. 정산 금고에 예치되는 토큰 금액(usdCents → 토큰 최소단위)을
+ * 환산할 때 쓴다. 웹과 (나중의) 릴레이어가 같은 상수를 보도록 shared 에 둔다.
+ */
+export const USDC_DECIMALS = 6;
+
+/**
+ * 분배 비율 합(= 100%)의 basis-point 값. `BPS_DENOMINATOR`(bigint)의 number 판으로, 정산
+ * 편집기가 수령인 비율 합이 10000 인지 UI 에서 검증할 때 쓴다.
+ */
+export const BPS_TOTAL = 10_000;
+
+/**
+ * MONTI 플랫폼 수수료 기본 비율(5%). `SettlementVault.MIN_PLATFORM_BPS` 와 같은 하한이며,
+ * 정산 편집기의 고정 플랫폼 행이 이 값으로 시작한다. 올릴 수는 있어도 이 아래로는 못 내린다.
+ */
+export const DEFAULT_PLATFORM_BPS = 500;

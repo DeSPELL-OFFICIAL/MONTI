@@ -19,7 +19,7 @@ vi.mock('./buildClaimAuth', () => ({ buildClaimAuth }));
 
 const relayClaim = vi.fn();
 vi.mock('../../shared/api/functions', () => ({ api: { relayClaim } }));
-vi.mock('../../shared/api/firestore', () => ({ watchRelay: vi.fn(() => () => undefined) }));
+vi.mock('../../shared/api/firestore', () => ({ watchRelay: vi.fn(() => () => undefined), getSettlement: vi.fn(async () => null) }));
 vi.mock('../../shared/relay/sendAction', () => ({ sendAction: vi.fn() }));
 vi.mock('../../shared/chain/accounts', () => ({ getAttendeeAccount: async () => ({ address: ACCOUNT }) }));
 vi.mock('react-router-dom', async (orig) => ({

@@ -1,0 +1,247 @@
+/* The public settlement page. It reuses the app's glass tokens (theme.css) so it sits in the same
+   world as the signed-in screens, and adds only the few pieces this page needs: the stacked share
+   bar, the four stat tiles, the live payout list and its arrival highlight. */
+
+.settle-header {
+  margin-bottom: var(--s-4);
+}
+.settle-header__top {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  flex-wrap: wrap;
+}
+.settle-title {
+  margin: 0;
+  font-size: var(--t-title);
+  line-height: var(--t-title-lh);
+}
+.settle-date {
+  margin: var(--s-1) 0 0;
+}
+.settle-note {
+  margin: var(--s-3) 0 0;
+  color: var(--brand-ink);
+  font-weight: 600;
+  font-size: var(--t-cap);
+  line-height: var(--t-cap-lh);
+}
+.settle-empty-body {
+  text-align: center;
+  margin-top: var(--s-2);
+}
+.settle-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-6) 0;
+}
+.settle-retry {
+  margin-top: var(--s-3);
+  min-height: var(--tap);
+  padding: 0 var(--s-4);
+  border: 1px solid var(--glass-hairline);
+  border-radius: var(--r-pill);
+  background: var(--glass-bg-strong);
+  color: var(--brand-ink);
+  font-weight: 600;
+}
+
+/* ── the test badge ───────────────────────────────────────────────────────────────────────── */
+.test-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px var(--s-2);
+  border-radius: var(--r-pill);
+  background: var(--warn-tint);
+  color: var(--warn);
+  font-size: var(--t-cap);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* ── the stacked share bar + rows ─────────────────────────────────────────────────────────── */
+.split-bar {
+  display: flex;
+  width: 100%;
+  height: 16px;
+  border-radius: var(--r-pill);
+  overflow: hidden;
+  background: var(--bg-deep);
+}
+.split-bar__seg {
+  height: 100%;
+  min-width: 2px;
+}
+.split-example {
+  margin: var(--s-3) 0 var(--s-2);
+  font-size: var(--t-cap);
+}
+.split-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.split-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2) 0;
+  border-top: 1px solid var(--glass-hairline);
+}
+.split-row:first-child {
+  border-top: none;
+}
+.split-row__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--r-pill);
+}
+.split-row__name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.split-row__pct {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+.split-row__amt {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  min-width: 56px;
+  text-align: right;
+}
+
+/* ── live stat tiles ──────────────────────────────────────────────────────────────────────── */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--s-2);
+}
+.stat-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--s-3);
+  border-radius: var(--r-md);
+  background: var(--glass-bg-strong);
+  border: 1px solid var(--glass-hairline);
+}
+.stat-tile--success {
+  border-color: var(--success-tint);
+  background: var(--success-tint);
+}
+.stat-tile__label {
+  font-size: var(--t-cap);
+  font-weight: 600;
+  color: var(--muted);
+}
+.stat-tile__amt {
+  font-size: var(--t-head);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.stat-tile__count,
+.stat-tile__sub {
+  font-size: var(--t-cap);
+}
+
+/* ── live payout list ─────────────────────────────────────────────────────────────────────── */
+.payouts-head {
+  margin: var(--s-4) 0 var(--s-2);
+  font-size: var(--t-head);
+  line-height: var(--t-head-lh);
+}
+.payout-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.payout-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-2);
+  border-radius: var(--r-sm);
+  border-top: 1px solid var(--glass-hairline);
+}
+.payout-row:first-child {
+  border-top: none;
+}
+.payout-row__time {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  font-size: var(--t-cap);
+}
+.payout-row__role {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.payout-row__amt {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--success);
+}
+.payout-row.is-new {
+  animation: payout-arrive 1.8s var(--ease);
+}
+@keyframes payout-arrive {
+  0% {
+    background: var(--brand-tint-strong);
+  }
+  100% {
+    background: transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .payout-row.is-new {
+    animation: none;
+    background: var(--brand-tint);
+  }
+}
+
+/* ── the 상세 fold ────────────────────────────────────────────────────────────────────────── */
+.settle-details {
+  margin-top: var(--s-4);
+}
+.settle-details summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--muted);
+  padding: var(--s-2) 0;
+}
+.detail-list {
+  margin: var(--s-2) 0 0;
+}
+.detail-list > div {
+  padding: var(--s-2) 0;
+  border-top: 1px solid var(--glass-hairline);
+}
+.detail-list dt {
+  font-size: var(--t-cap);
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+.detail-list dd {
+  margin: 0;
+}
+.detail-addrs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--t-cap);
+  word-break: break-all;
+}

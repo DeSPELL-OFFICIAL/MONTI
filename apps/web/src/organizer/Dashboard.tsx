@@ -10,6 +10,7 @@ import { EVENT_QUERY, type EnvioEvent, type EnvioTier } from '../shared/envio/qu
 import { fetchEventMetadata, type EventMetadata } from '../shared/envio/ipfs';
 import { useEventRequests } from '../shared/envio/claimRequests';
 import { Announce } from './Announce';
+import { SettlementSection } from './settlement/SettlementSection';
 import { useOrganizerCopy } from './copy';
 import { EventArt } from './EventArt';
 import { cancelEvent, publishEvent, type LifecycleResult } from './lifecycle';
@@ -279,6 +280,10 @@ export function Dashboard() {
         title={title || draftFallback?.title || dash.art.untitled}
         startsAt={Number(event?.startsAt ?? draftFallback?.startsAt ?? 0)}
       />
+
+      {/* 정산 설정 (Batch D): per-tier price + revenue split, set before publish and read-only once the
+          first ticket sells. Hidden by SettlementSection itself unless the feature is wired. */}
+      <SettlementSection eventId={eventId} tiers={tiers} />
 
       <Announce eventId={eventId} />
 

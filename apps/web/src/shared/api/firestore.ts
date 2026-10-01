@@ -13,9 +13,11 @@ import { getDb, getFirebaseAuth } from './firebase';
  * drafts under `eventDrafts/{uid}/drafts` — the fourth, and the only one it may also delete,
  * because a draft is written every two seconds and a callable per keystroke costs both money
  * and latency.
- * It also reads two collections it may never write, both open to any signed-in reader and
- * written by the server alone: `orgProfiles/{orgId}`, the organiser display names the chain
- * has no room for, and `eventArt/{eventId}`, the ticket pictures `Tier` has no column for.
+ * It also reads server-written collections it may never write, each open to the readers the rules
+ * allow and written by the server alone: `orgProfiles/{orgId}` (organiser display names the chain
+ * has no room for), `eventArt/{eventId}` (the ticket pictures `Tier` has no column for),
+ * `settlements/{eventId}` (the split policy, its hash and the per-tier USD price), `orders/{orderId}`
+ * (one buyer's escrow, owner-readable) and `relays/{relayId}` (a relayed write's progress).
  * Everything else goes through a callable in ./functions.
  */
 
@@ -469,4 +471,120 @@ export async function saveEventDraft(draftId: string, draft: EventDraft): Promis
 
 export async function deleteEventDraft(draftId: string): Promise<void> {
   await deleteDoc(doc(getDb(), ...draftsPath(), draftId));
+}
+
+
+/**
+ * One event's settlement, as the server writes it to `settlements/{eventId}` — the split policy,
+ * its on-chain hash, and the per-tier USD price the chain has no room for. The rules open it to any
+ * signed-in reader and the server alone writes it (`relaySetPolicy`), the same shape
+ * `orgProfiles`/`eventArt` have.
+ *
+ * The field names are stable on purpose: `priceUsdCentsByTier`, `policyHash` and the recipient
+ * shape are the web→backend contract the organiser and attendee settlement screens read back.
+ */
+export interface SettlementView {
+  policy: {
+    recipients: { account: Hex; bps: number; reason: string; tag: string }[];
+    platformBps: number;
+  };
+  policyHash: Hex;
+  priceUsdCentsByTier: Record<string, number>;
+  setBy?: Hex;
+  txHash?: Hex;
+  updatedAt?: number;
+}
+
+/**
+ * One read of an event's settlement, for a screen that has no reason to hold a live listener.
+ * `null` means missing or not permitted — swallowed the way {@link loadOrgName} swallows its own,
+ * because a settlement a screen could not read is simply one it does not draw.
+ */
+export async function getSettlement(eventId: string): Promise<SettlementView | null> {
+  try {
+    const snapshot = await getDoc(doc(getDb(), 'settlements', eventId));
+    const data = snapshot.data() as (SettlementView & { updatedAt?: unknown }) | undefined;
+    return data ? ({ ...data, updatedAt: toMillis(data.updatedAt) } as SettlementView) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The live view of an event's settlement, for the organiser screen that just relayed a policy and
+ * waits for it to land. `null` is the ordinary pre-policy state. Modelled on {@link watchChatRoom}.
+ */
+export function watchSettlement(
+  eventId: string,
+  onChange: (settlement: SettlementView | null) => void,
+  onError?: (error: unknown) => void,
+): () => void {
+  return onSnapshot(
+    doc(getDb(), 'settlements', eventId),
+    (snapshot) => {
+      const data = snapshot.data() as (SettlementView & { updatedAt?: unknown }) | undefined;
+      onChange(data ? ({ ...data, updatedAt: toMillis(data.updatedAt) } as SettlementView) : null);
+    },
+    (error) => onError?.(error),
+  );
+}
+
+/**
+ * One buyer's order, as the server writes it to `orders/{orderId}`: the escrow behind a purchased
+ * ticket. The rules open it to its owner, so a listener that is refused calls `onError` and
+ * detaches — the same terminal answer {@link watchChatMessages} documents. `null` is a missing
+ * order (a wrong or not-yet-created id).
+ */
+export interface OrderView {
+  orderId: string;
+  eventId: string;
+  tier: number;
+  tokenId?: string;
+  amountUsdCents: number;
+  status: 'deposited' | 'released' | 'refunded' | 'pending' | 'minted';
+  createdAt?: number;
+  depositTxHash?: Hex;
+  receiptTxHash?: Hex;
+}
+
+export function watchOrder(
+  orderId: string,
+  onChange: (order: OrderView | null) => void,
+  onError?: (error: unknown) => void,
+): () => void {
+  return onSnapshot(
+    doc(getDb(), 'orders', orderId),
+    (snapshot) => {
+      const data = snapshot.data() as (OrderView & { createdAt?: unknown }) | undefined;
+      onChange(data ? ({ ...data, orderId: snapshot.id, createdAt: toMillis(data.createdAt) } as OrderView) : null);
+    },
+    (error) => onError?.(error),
+  );
+}
+
+/**
+ * A relayed write's progress, as the server writes it to `relays/{relayId}`. `purchaseTicket`
+ * answers with a `relayId` the attendee follows here for the mint; `relaySetPolicy` answers with
+ * one too. `null` is a relay id that has no document yet. Modelled on {@link watchChatRoom}.
+ */
+export interface RelayStatusView {
+  status: 'pending' | 'sent' | 'confirmed' | 'failed';
+  txHash?: Hex;
+  tokenId?: string;
+  error?: { code: string };
+}
+
+export function watchRelayStatus(
+  relayId: string,
+  onChange: (relay: RelayStatusView | null) => void,
+  onError?: (error: unknown) => void,
+): () => void {
+  return onSnapshot(
+    doc(getDb(), 'relays', relayId),
+    (snapshot) => {
+      const data = snapshot.data() as RelayStatusView | undefined;
+      onChange(data ?? null);
+    },
+    (error) => onError?.(error),
+  );
 }

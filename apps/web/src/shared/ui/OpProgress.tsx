@@ -58,9 +58,15 @@ export interface OpProgressProps {
    * 보내는 중…" during a send-layer resend. Shown only before the timeout, never in place of a step.
    */
   note?: string;
+  /**
+   * The three step names, when a flow wants its own words in place of the default 저장 → 확인 → 완료 —
+   * the purchase path's 결제 확인 → 티켓 발급 → 보관 완료. Still three steps and the same phase mapping;
+   * only the labels change, so every other caller keeps the shared wording by leaving this out.
+   */
+  labels?: [string, string, string];
 }
 
-export function OpProgress({ phase, onRetry, onLater, laterLabel, timeoutMessage, note }: OpProgressProps) {
+export function OpProgress({ phase, onRetry, onLater, laterLabel, timeoutMessage, note, labels }: OpProgressProps) {
   const copy = useCopy();
   const [seconds, setSeconds] = useState(0);
   const done = phase === 'done';
@@ -80,7 +86,7 @@ export function OpProgress({ phase, onRetry, onLater, laterLabel, timeoutMessage
   return (
     <div className="op-progress">
       <Steps
-        labels={[copy.op.saving, copy.op.confirming, copy.op.done]}
+        labels={labels ?? [copy.op.saving, copy.op.confirming, copy.op.done]}
         at={PHASE_STEP[phase]}
         running={!done && !timedOut}
       />

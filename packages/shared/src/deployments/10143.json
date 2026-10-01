@@ -33,5 +33,8 @@
       "paymaster": "0xBDDBDaA9811C8944AF82319b19169A209A0928B2",
       "block": 64921775
     }
-  ]
+  ],
+  "settlementVault": "0xA84FDb64C9DDc3B25eF8BDeA58561BDbE53ABD69",
+  "usdc": "0x534b2f3A21130d7a60830c2Df862319e593943A3",
+  "settlementVaultBlock": 67253867
 }
