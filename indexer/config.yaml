@@ -82,4 +82,4 @@ networks:
       - name: SettlementVault
         address:
           - "0xA84FDb64C9DDc3B25eF8BDeA58561BDbE53ABD69"
-        start_block: 66724502
+        start_block: 67253867
