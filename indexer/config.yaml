@@ -53,6 +53,19 @@ contracts:
       - event: OfferCreated(uint256 indexed tokenId, address indexed from, bytes32 recipientCommitment, uint64 expiresAt)
       - event: OfferCancelled(uint256 indexed tokenId)
       - event: OfferAccepted(uint256 indexed tokenId, address indexed from, address indexed to)
+  - name: SettlementVault
+    handler: src/EventHandlers.ts
+    events:
+      - event: PolicySet(uint256 indexed eventId, address indexed organizer, bytes32 policyHash, uint32 version)
+      - event: Deposited(uint256 indexed eventId, uint256 indexed tokenId, address token, uint128 amount, address payer)
+      - event: Released(uint256 indexed eventId, uint256 indexed tokenId, address token, uint256 amount)
+      - event: NoShowSettled(uint256 indexed eventId, uint256 indexed tokenId, address token, uint256 amount)
+      - event: Refunded(uint256 indexed eventId, uint256 indexed tokenId, address token, uint256 amount, address payer)
+      - event: Paid(uint256 indexed eventId, uint256 indexed tokenId, address indexed recipient, uint256 amount, bytes32 reasonHash)
+      - event: PayoutDeferred(uint256 indexed eventId, uint256 indexed tokenId, address indexed recipient, address token, uint256 amount)
+      - event: Withdrawn(address indexed recipient, address indexed token, uint256 amount)
+      - event: TokenAllowed(address indexed token, bool allowed)
+      - event: DepositorSet(address indexed account, bool allowed)
 networks:
   - id: 10143
     start_block: 66724502
@@ -66,3 +79,7 @@ networks:
       - name: Ticket
         address:
           - "0x7E1fdfCB3688C5b0539101cEAE6a7Ee5bD9b51Cf"
+      - name: SettlementVault
+        address:
+          - "0xA84FDb64C9DDc3B25eF8BDeA58561BDbE53ABD69"
+        start_block: 66724502

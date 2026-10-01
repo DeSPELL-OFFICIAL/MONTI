@@ -8,6 +8,8 @@
     "identity": "0x10Fa9977363c40240381BEEfFc2D997BC9Edcd6b",
     "organizers": "0xAF80CbfDD08284E3aae67FFaaf20A27E281C360A",
     "ticket": "0x7E1fdfCB3688C5b0539101cEAE6a7Ee5bD9b51Cf",
+    "settlementVault": "0xA84FDb64C9DDc3B25eF8BDeA58561BDbE53ABD69",
+    "usdc": "0x534b2f3A21130d7a60830c2Df862319e593943A3",
     "previous": [
       {
         "identity": "0x3EfdbdbD2d8CaFf096bB68401ed464c2d4A3f034",

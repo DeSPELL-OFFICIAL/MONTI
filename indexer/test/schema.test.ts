@@ -10,6 +10,9 @@ describe('schema.graphql', () => {
     for (const entity of [
       'Organizer', 'Admin', 'Manager', 'Gate', 'Event', 'Tier',
       'Ticket', 'CheckIn', 'Override', 'IdentityAccount', 'Offer',
+      // SettlementVault (프로그래머블 정산, 설계 2026-10-01)
+      'SettlementPolicy', 'Escrow', 'Payout', 'PendingWithdrawal',
+      'EventSettlement', 'SettlementToken', 'SettlementDepositor',
     ]) {
       expect(schema).toMatch(new RegExp(`type ${entity}\\b`));
     }

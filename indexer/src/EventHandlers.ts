@@ -755,3 +755,273 @@ Ticket.ClaimRejected.handler(async ({ event, context }) => {
   });
   if (current.status === 'Pending') await decrementPending(context, event.params.eventId);
 });
+
+// ──────────────────────────── SettlementVault ────────────────────────────
+
+/**
+ * 프로그래머블 정산 레이어(설계 2026-10-01). 공개 정산 페이지가 읽을 정책·에스크로·지급을
+ * 인덱싱한다. 금고는 코어 넷과 **분리된** 스탠드얼론이라, 아직 배포되지 않았거나(설정에 없음)
+ * 배포되었어도 코어 인덱싱과 독립적으로 붙는다.
+ *
+ * **등록은 조건부다.** `generated.SettlementVault` 는 config.yaml 에 금고 컨트랙트가 들어온
+ * 뒤(= 배포 + 재생성)에만 존재한다. 그 전에는 `undefined` 라 여기서 아무 핸들러도 달지
+ * 않는다 — codegen·tsc 가 그대로 green 이고(엔티티는 schema 에 늘 있으므로 타입은 난다),
+ * 금고가 배포되면 재생성만으로 인덱싱이 켜진다. ABI(`getPolicy` 호출용)는 아직 공유로
+ * 내보내지 않아 `src/vendored/settlement-vault-abi.json` 에 벤더해 두고 거기서 읽는다.
+ */
+const settlementContract = (require('generated') as Record<string, unknown>).SettlementVault as
+  | Record<string, { handler: (fn: (args: { event: SettlementEvent; context: handlerContext }) => Promise<void>) => void }>
+  | undefined;
+const { abi: settlementAbi } = require('./vendored/settlement-vault-abi.json') as { abi: Abi };
+const settlementVaultAddress = (deployment as { settlementVault?: `0x${string}` }).settlementVault;
+
+/** 핸들러가 읽는 금고 이벤트의 느슨한 모양. params 는 이벤트마다 달라 Record 로 둔다. */
+interface SettlementEvent {
+  params: Record<string, string | bigint | boolean | number>;
+  block: { number: number; timestamp: number };
+  transaction: { hash: string };
+  logIndex: number;
+}
+
+/** `getPolicy(eventId)` 가 돌려주는 SplitPolicy 튜플. uint16/32 는 number, 나머지는 보이는 대로. */
+interface ChainRecipient {
+  account: string;
+  bps: number;
+  reasonHash: string;
+  tag: string;
+}
+interface ChainPolicy {
+  recipients: ChainRecipient[];
+  platformBps: number;
+  reserveBps: number;
+  noShowRefund: boolean;
+  frozen: boolean;
+  version: number;
+}
+
+const chainRecipientSchema = S.schema({
+  account: S.string,
+  bps: S.number,
+  reasonHash: S.string,
+  tag: S.string,
+});
+const chainPolicySchema = S.schema({
+  recipients: S.array(chainRecipientSchema),
+  platformBps: S.number,
+  reserveBps: S.number,
+  noShowRefund: S.boolean,
+  frozen: S.boolean,
+  version: S.number,
+});
+
+/**
+ * 정책의 수취인별 분배는 **이벤트에 실리지 않는다**(`PolicySet` 은 policyHash·version 만).
+ * bps·tag 까지 보여 주려면 체인에서 읽어야 하므로, `Ticket.eventMeta` 와 똑같은 방식으로
+ * setPolicy 가 난 **블록에 고정해** `getPolicy(eventId)` 를 한 번 읽는다(재싱크에도 값이 고정).
+ */
+const readPolicy = createEffect(
+  {
+    name: 'settlementPolicy',
+    input: { eventId: S.bigint, blockNumber: S.bigint },
+    output: chainPolicySchema,
+    rateLimit: false,
+    cache: true,
+  },
+  async ({ input }: { input: { eventId: bigint; blockNumber: bigint } }) => {
+    if (!settlementVaultAddress) throw new Error('NO_SETTLEMENT_VAULT');
+    return (await rpc().readContract({
+      address: settlementVaultAddress,
+      abi: settlementAbi,
+      functionName: 'getPolicy',
+      args: [input.eventId],
+      blockNumber: input.blockNumber,
+    })) as ChainPolicy;
+  },
+);
+
+/**
+ * 이벤트별 집계(`EventSettlement`)를 get-or-create 로 갱신한다. 금고 핸들러는 어느 것이든
+ * 먼저 올 수 있어(입금 전에 정책, 또는 구독 시작 블록을 걸친 경우) 늘 없으면 0 에서 만든다.
+ * totalReleased 는 Released·NoShowSettled 를 함께 세고(둘 다 수취인 분배), totalRefunded 는
+ * Refunded 를, payoutCount 는 Paid 줄 수를 센다.
+ */
+async function bumpSettlement(
+  context: handlerContext,
+  eventId: bigint,
+  delta: { deposited?: bigint; released?: bigint; refunded?: bigint; payouts?: number },
+): Promise<void> {
+  const id = eventId.toString();
+  const cur = await context.EventSettlement.get(id);
+  const base = cur ?? {
+    id,
+    totalDeposited: 0n,
+    totalReleased: 0n,
+    totalRefunded: 0n,
+    payoutCount: 0,
+  };
+  context.EventSettlement.set({
+    id,
+    totalDeposited: base.totalDeposited + (delta.deposited ?? 0n),
+    totalReleased: base.totalReleased + (delta.released ?? 0n),
+    totalRefunded: base.totalRefunded + (delta.refunded ?? 0n),
+    payoutCount: base.payoutCount + (delta.payouts ?? 0),
+  });
+}
+
+/** 에스크로를 종결 상태로 옮긴다(Released/Refunded/NoShowSettled). 입금이 구독 시작보다 앞서
+ *  행이 없으면 지나간다 — 그 돈은 우리 창 밖에서 이미 흘렀다. */
+async function settleEscrow(
+  context: handlerContext,
+  event: SettlementEvent,
+  status: string,
+): Promise<void> {
+  const cur = await context.Escrow.get(String(event.params.tokenId));
+  if (!cur) return;
+  context.Escrow.set({
+    ...cur,
+    status,
+    releasedAt: BigInt(event.block.timestamp),
+    settleTxHash: event.transaction.hash,
+  });
+}
+
+/** 수취인의 pull 잔액(= PendingWithdrawal)을 올린다. id = recipient-token. */
+async function creditPending(
+  context: handlerContext,
+  recipientRaw: string,
+  tokenRaw: string,
+  amount: bigint,
+): Promise<void> {
+  const recipient = addr(recipientRaw);
+  const token = addr(tokenRaw);
+  const id = `${recipient}-${token}`;
+  const cur = await context.PendingWithdrawal.get(id);
+  context.PendingWithdrawal.set({ id, recipient, token, amount: (cur?.amount ?? 0n) + amount });
+}
+
+if (settlementContract) {
+  const SettlementVault = settlementContract;
+
+  // PolicySet(eventId, organizer, policyHash, version). 수취인 분배는 getPolicy 로 읽어 JSON 으로.
+  SettlementVault.PolicySet.handler(async ({ event, context }) => {
+    const eventId = event.params.eventId as bigint;
+    const policy = await context.effect(readPolicy, {
+      eventId,
+      blockNumber: BigInt(event.block.number),
+    });
+    const recipients = policy.recipients.map((r) => ({
+      account: addr(r.account),
+      bps: r.bps,
+      reasonHash: r.reasonHash,
+      tag: r.tag,
+    }));
+    context.SettlementPolicy.set({
+      id: eventId.toString(),
+      eventId,
+      organizer: addr(String(event.params.organizer)),
+      policyHash: String(event.params.policyHash),
+      version: Number(event.params.version),
+      platformBps: policy.platformBps,
+      reserveBps: policy.reserveBps,
+      noShowRefund: policy.noShowRefund,
+      recipients: JSON.stringify(recipients),
+      setAt: BigInt(event.block.timestamp),
+      txHash: event.transaction.hash,
+    });
+    await bumpSettlement(context, eventId, {}); // 집계 행을 먼저 세워 둔다.
+  });
+
+  // Deposited(eventId, tokenId, token, amount, payer) — 에스크로를 Held 로 연다.
+  SettlementVault.Deposited.handler(async ({ event, context }) => {
+    const eventId = event.params.eventId as bigint;
+    const amount = BigInt(event.params.amount as bigint);
+    context.Escrow.set({
+      id: String(event.params.tokenId),
+      eventId,
+      token: addr(String(event.params.token)),
+      amount,
+      payer: addr(String(event.params.payer)),
+      status: 'Deposited',
+      depositedAt: BigInt(event.block.timestamp),
+      releasedAt: undefined,
+      depositTxHash: event.transaction.hash,
+      settleTxHash: undefined,
+    });
+    await bumpSettlement(context, eventId, { deposited: amount });
+  });
+
+  // Released(eventId, tokenId, token, amount) — 입장 뒤 분배. 수취인 줄은 Paid 가 따로 낸다.
+  SettlementVault.Released.handler(async ({ event, context }) => {
+    await settleEscrow(context, event, 'Released');
+    await bumpSettlement(context, event.params.eventId as bigint, {
+      released: BigInt(event.params.amount as bigint),
+    });
+  });
+
+  // NoShowSettled(eventId, tokenId, token, amount) — 노쇼 몫을 수취인에게(환불 아님) 분배.
+  SettlementVault.NoShowSettled.handler(async ({ event, context }) => {
+    await settleEscrow(context, event, 'NoShowSettled');
+    await bumpSettlement(context, event.params.eventId as bigint, {
+      released: BigInt(event.params.amount as bigint),
+    });
+  });
+
+  // Refunded(eventId, tokenId, token, amount, payer) — 취소/노쇼환불로 payer 에게 되돌림.
+  SettlementVault.Refunded.handler(async ({ event, context }) => {
+    await settleEscrow(context, event, 'Refunded');
+    await bumpSettlement(context, event.params.eventId as bigint, {
+      refunded: BigInt(event.params.amount as bigint),
+    });
+  });
+
+  // Paid(eventId, tokenId, recipient, amount, reasonHash) — 분배의 수취인 한 줄.
+  SettlementVault.Paid.handler(async ({ event, context }) => {
+    context.Payout.set({
+      id: `${event.transaction.hash}-${event.logIndex}`,
+      eventId: event.params.eventId as bigint,
+      tokenId: event.params.tokenId as bigint,
+      recipient: addr(String(event.params.recipient)),
+      amount: BigInt(event.params.amount as bigint),
+      reasonHash: String(event.params.reasonHash),
+      at: BigInt(event.block.timestamp),
+      txHash: event.transaction.hash,
+    });
+    await bumpSettlement(context, event.params.eventId as bigint, { payouts: 1 });
+  });
+
+  // PayoutDeferred(eventId, tokenId, recipient, token, amount) — push 실패분을 pull 로 적립.
+  SettlementVault.PayoutDeferred.handler(async ({ event, context }) => {
+    await creditPending(
+      context,
+      String(event.params.recipient),
+      String(event.params.token),
+      BigInt(event.params.amount as bigint),
+    );
+  });
+
+  // Withdrawn(recipient, token, amount) — withdraw() 는 그 토큰 잔액을 통째로 뺀다 → 적립분을 뺀다.
+  SettlementVault.Withdrawn.handler(async ({ event, context }) => {
+    const recipient = addr(String(event.params.recipient));
+    const token = addr(String(event.params.token));
+    const id = `${recipient}-${token}`;
+    const cur = await context.PendingWithdrawal.get(id);
+    const amount = cur ? cur.amount - BigInt(event.params.amount as bigint) : 0n;
+    context.PendingWithdrawal.set({ id, recipient, token, amount: amount > 0n ? amount : 0n });
+  });
+
+  // TokenAllowed(token, allowed) — USDC(및 향후 스테이블) 허용 목록.
+  SettlementVault.TokenAllowed.handler(async ({ event, context }) => {
+    context.SettlementToken.set({
+      id: addr(String(event.params.token)),
+      allowed: Boolean(event.params.allowed),
+    });
+  });
+
+  // DepositorSet(account, allowed) — 트레저리/PG 어댑터 허용 목록.
+  SettlementVault.DepositorSet.handler(async ({ event, context }) => {
+    context.SettlementDepositor.set({
+      id: addr(String(event.params.account)),
+      allowed: Boolean(event.params.allowed),
+    });
+  });
+}
