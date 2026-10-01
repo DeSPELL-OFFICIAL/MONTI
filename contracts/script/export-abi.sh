@@ -25,9 +25,10 @@ OUT="$(cd "$OUT" && pwd)"
 cd "$ROOT"
 forge build --silent
 
-# The four first-party contracts. MontiForwarder is the ERC-2771 relay the web app and Functions
-# sign forward requests against, so its ABI travels with the other three.
-for name in Identity Organizers Ticket MontiForwarder; do
+# The first-party contracts. MontiForwarder is the ERC-2771 relay the web app and Functions sign
+# forward requests against; SettlementVault is the programmable-settlement layer (plan 2026-10-01) the
+# web app, Functions and indexer read policy/escrow/ledger events from.
+for name in Identity Organizers Ticket MontiForwarder SettlementVault; do
   src="$ROOT/out/$name.sol/$name.json"
   [ -f "$src" ] || {
     echo "missing $src -- run forge build" >&2
