@@ -30,7 +30,7 @@ const watchRelay = vi.fn((_relayId: string, onChange: (relay: RelayView | null) 
     relayListener = null;
   };
 });
-vi.mock('../../shared/api/firestore', () => ({ watchRelay }));
+vi.mock('../../shared/api/firestore', () => ({ watchRelay, getSettlement: vi.fn(async () => null) }));
 async function emitRelay(relay: RelayView): Promise<void> {
   await act(async () => {
     relayListener?.(relay);

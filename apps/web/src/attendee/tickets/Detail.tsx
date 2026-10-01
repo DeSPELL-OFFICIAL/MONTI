@@ -5,6 +5,7 @@ import { describeFailure } from '../../shared/errors';
 import { useTicketArtProps } from './useTicketArt';
 import { useMyTickets } from './useTickets';
 import { useStateLabel } from './List';
+import { Receipt } from '../purchase/Receipt';
 
 /**
  * A12 — one ticket, its state, and the way in.
@@ -75,6 +76,9 @@ export function TicketDetail() {
       <p>
         <Link to={`/events/${ticket.eventId}`}>{copy.discover.title}</Link>
       </p>
+      {/* The receipt for a paid ticket (Batch F): amount, status, by-role split and — before the
+          event — a refund. Renders nothing for a free ticket (no order recorded on this device). */}
+      <Receipt tokenId={tokenId} eventId={ticket.eventId} canRefund={ticket.state === 'before'} />
       {canEnter ? (
         <StickyBar status={<span>{labels[ticket.state]}</span>}>
           <Button onClick={() => navigate(`/tickets/${tokenId}/enter`)}>{copy.tickets.enter}</Button>

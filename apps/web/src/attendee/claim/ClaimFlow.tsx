@@ -10,7 +10,10 @@ import { ticketAbi } from '../../shared/chain/abis';
 import { sendAction } from '../../shared/relay/sendAction';
 import { getAttendeeAccount } from '../../shared/chain/accounts';
 import { api } from '../../shared/api/functions';
-import { watchRelay } from '../../shared/api/firestore';
+import { getSettlement, watchRelay, type SettlementView } from '../../shared/api/firestore';
+import { settlementEnabled } from '../../shared/config';
+import { formatUsdCents } from '../../shared/money';
+import { PurchaseSheet } from '../purchase/PurchaseSheet';
 import { useKycLevel } from '../me/useKycLevel';
 import { useMyTickets } from '../tickets/useTickets';
 import { buildClaimAuth } from './buildClaimAuth';
@@ -131,6 +134,10 @@ export function ClaimFlow({ eventId, present }: ClaimFlowProps) {
   // A cancel op's send-layer resend is under way ("잠시 붐벼요…"). Only meaningful while `saving`.
   const [retrying, setRetrying] = useState(false);
   const [needsKyc, setNeedsKyc] = useState(false);
+  // A priced event's settlement mirror, loaded once: its per-tier price turns the free 받기 into a
+  // 결제하고 받기 $X that opens the purchase sheet (Batch F). A free event leaves this null.
+  const [settlement, setSettlement] = useState<SettlementView | null>(null);
+  const [purchasing, setPurchasing] = useState(false);
   const resumed = useRef(false);
   // The relay doc this claim is following, or null. The subscription effect below drives 확인 → 완료
   // from it; a fresh submission or a retry replaces it.
@@ -196,6 +203,11 @@ export function ClaimFlow({ eventId, present }: ClaimFlowProps) {
 
   // The button is down for every state but the two the person acts from.
   const busy = phase === 'saving' || phase === 'sent';
+
+  // The selected tier's settlement price, when this is a priced event. A direct-claim event with a
+  // price becomes a purchase (Batch F); approval events and free events keep the free claim path.
+  const price = settlementEnabled() ? settlement?.priceUsdCentsByTier?.[String(tier)] : undefined;
+  const priced = !approval && price !== undefined && price > 0;
 
   // A cancel op's real failure sentence. Approval mode is the only place cancel runs, so this is
   // describeFailure (offline, indexer, generic); an unknown outcome is handled before it.
@@ -305,6 +317,19 @@ export function ClaimFlow({ eventId, present }: ClaimFlowProps) {
       setPhase('idle');
     }
   }, [event, myRequest, eventId, refetchRequest, opFailure]);
+
+  // Loads the event's settlement mirror once (Batch F), so a priced tier can offer a purchase. A
+  // free event (or an unwired build) simply leaves it null and the free claim path stands.
+  useEffect(() => {
+    if (!settlementEnabled() || eventId === '') return undefined;
+    let live = true;
+    void getSettlement(eventId).then((loaded) => {
+      if (live) setSettlement(loaded);
+    });
+    return () => {
+      live = false;
+    };
+  }, [eventId]);
 
   // Follows the relay doc while a claim is confirming. `confirmed` settles it (완료, or the request
   // appearance wait); `failed` shows the code's sentence and hands the button back; pending/sent
@@ -543,20 +568,49 @@ export function ClaimFlow({ eventId, present }: ClaimFlowProps) {
         ) : null}
         {/* Still confirming counts as busy: the submission is already on its way and a second tap
             would ask twice — `held` cannot have caught up yet to stop it. */}
-        <Button onClick={() => void run()} disabled={phase !== 'idle' || blocked || !countsResolved}>
-          {!countsResolved
-            ? copy.claim.checking
-            : approval
-              ? busy
-                ? copy.claim.requesting
-                : copy.claim.requestCta
-              : busy
-                ? copy.claim.working
-                : copy.claim.cta}
-        </Button>
-        {/* Reassurance right by the button (plan C 여정 A): free, and MONTI does the hard part.
-            The detail sheet says "무료예요 · 돈 안 들어요"; the route keeps the create-path wording. */}
-        <p className="muted">{reassurance}</p>
+        {priced ? (
+          <>
+            {/* A priced event: 결제하고 받기 $X opens the mock card sheet (Batch F). KYC is checked
+                first — the same gate the free claim applies — so a doomed charge is never started. */}
+            <Button
+              onClick={() => {
+                if (event.requireKyc && kycLevel < VERIFIED_LEVEL) {
+                  setNeedsKyc(true);
+                  return;
+                }
+                setPurchasing(true);
+              }}
+              disabled={phase !== 'idle' || blocked || !countsResolved}
+            >
+              {!countsResolved ? copy.claim.checking : `${copy.purchase.cta} ${formatUsdCents(price ?? 0)}`}
+            </Button>
+            {purchasing ? (
+              <PurchaseSheet
+                eventId={eventId}
+                tier={tier}
+                amountUsdCents={price ?? 0}
+                onClose={() => setPurchasing(false)}
+              />
+            ) : null}
+          </>
+        ) : (
+          <>
+            <Button onClick={() => void run()} disabled={phase !== 'idle' || blocked || !countsResolved}>
+              {!countsResolved
+                ? copy.claim.checking
+                : approval
+                  ? busy
+                    ? copy.claim.requesting
+                    : copy.claim.requestCta
+                  : busy
+                    ? copy.claim.working
+                    : copy.claim.cta}
+            </Button>
+            {/* Reassurance right by the button (plan C 여정 A): free, and MONTI does the hard part.
+                The detail sheet says "무료예요 · 돈 안 들어요"; the route keeps the create-path wording. */}
+            <p className="muted">{reassurance}</p>
+          </>
+        )}
       </>
     ),
   );

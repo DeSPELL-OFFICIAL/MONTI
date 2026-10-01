@@ -16,7 +16,7 @@ vi.mock('./buildClaimAuth', () => ({ buildClaimAuth: vi.fn(async () => ({ auth: 
 
 const relayClaim = vi.fn();
 vi.mock('../../shared/api/functions', () => ({ api: { relayClaim } }));
-vi.mock('../../shared/api/firestore', () => ({ watchRelay: vi.fn(() => () => undefined) }));
+vi.mock('../../shared/api/firestore', () => ({ watchRelay: vi.fn(() => () => undefined), getSettlement: vi.fn(async () => null) }));
 
 vi.mock('../../shared/chain/accounts', () => ({ getAttendeeAccount: async () => ({ address: ACCOUNT }) }));
 const navigate = vi.fn();
