@@ -1,71 +1,12 @@
-import { encodeAbiParameters, keccak256, parseAbi, stringToHex, toHex, type Hex } from 'viem';
+import { encodeAbiParameters, keccak256, stringToHex, toHex, type Hex } from 'viem';
+import { settlementVaultAbi } from '@monti/shared';
 
 /**
- * SettlementVault 의 ABI(설계 2026-10-01 §3). **인터페이스에서 손으로 뽑은 parseAbi** 다 —
- * 컨트랙트(01b 워크트리의 `contracts/src/interfaces/ISettlementVault.sol`)가 아직 재배포 전이라
- * 생성 ABI(`packages/shared/src/abi/SettlementVault.json`)가 없다. B2 가 컴파일 산출물을 뽑아
- * 이 모듈을 그 생성 ABI 로 교체한다 — 그때까지 함수/이벤트/에러 시그니처는 인터페이스와 1:1 이다.
+ * SettlementVault 의 ABI — 01b 가 컴파일 산출물에서 뽑아 `packages/shared/src/abi/SettlementVault.json`
+ * 으로 내보낸 **생성 ABI** 다(B2 에서 손으로 적던 parseAbi 자리표시자를 교체). 함수·이벤트·에러
+ * 시그니처는 `functions/test/settlementAbi.test.ts` 가 참조 목록과 selector 로 드리프트를 막는다.
  */
-export const settlementAbi = parseAbi([
-  'struct Recipient { address account; uint16 bps; bytes32 reasonHash; bytes32 tag; }',
-  'struct SplitPolicy { Recipient[] recipients; uint16 platformBps; uint16 reserveBps; bool noShowRefund; bool frozen; uint32 version; }',
-  'struct PolicyAuth { address organizer; uint256 nonce; uint64 deadline; }',
-  'function setPolicy(uint256 eventId, SplitPolicy policy, PolicyAuth auth, bytes deviceSig)',
-  'function hashPolicy(SplitPolicy policy) pure returns (bytes32)',
-  'function setPolicyDigest(uint256 eventId, bytes32 policyHash, uint256 nonce, uint64 deadline) view returns (bytes32)',
-  'function getPolicy(uint256 eventId) view returns (SplitPolicy)',
-  'function policyNonce(address organizer) view returns (uint256)',
-  'function escrowOf(uint256 tokenId) view returns (address token, uint128 amount, address payer, uint64 depositedAt, uint8 status)',
-  'function deposit(uint256 eventId, uint256 tokenId, address token, uint128 amount)',
-  'function release(uint256 tokenId)',
-  'function releaseMany(uint256[] tokenIds)',
-  'function settleNoShows(uint256 eventId, uint256[] tokenIds)',
-  'function refund(uint256 tokenId)',
-  'function withdraw(address token)',
-  'function setTokenAllowed(address token, bool allowed)',
-  'function setDepositor(address account, bool allowed)',
-  'function setPaused(bool paused)',
-  'event PolicySet(uint256 indexed eventId, address indexed organizer, bytes32 policyHash, uint32 version)',
-  'event Deposited(uint256 indexed eventId, uint256 indexed tokenId, address token, uint128 amount, address payer)',
-  'event Released(uint256 indexed eventId, uint256 indexed tokenId, address token, uint256 amount)',
-  'event NoShowSettled(uint256 indexed eventId, uint256 indexed tokenId, address token, uint256 amount)',
-  'event Refunded(uint256 indexed eventId, uint256 indexed tokenId, address token, uint256 amount, address payer)',
-  'event Paid(uint256 indexed eventId, uint256 indexed tokenId, address indexed recipient, uint256 amount, bytes32 reasonHash)',
-  'event PayoutDeferred(uint256 indexed eventId, uint256 indexed tokenId, address indexed recipient, address token, uint256 amount)',
-  'event Withdrawn(address indexed recipient, address indexed token, uint256 amount)',
-  'event TokenAllowed(address indexed token, bool allowed)',
-  'event DepositorSet(address indexed account, bool allowed)',
-  'event PausedSet(bool paused)',
-  'error NotOwner()',
-  'error NotDepositor()',
-  'error NotPolicyAuthorizer()',
-  'error Paused()',
-  'error UnknownEvent()',
-  'error EventMismatch()',
-  'error TokenNotAllowed()',
-  'error ZeroAmount()',
-  'error AlreadyDeposited()',
-  'error NoPolicy()',
-  'error PolicyFrozen()',
-  'error AuthExpired()',
-  'error BadNonce()',
-  'error BadDeviceSignature()',
-  'error InvalidRecipients()',
-  'error ZeroRecipient()',
-  'error ZeroBps()',
-  'error BadSplitSum()',
-  'error PlatformShareTooLow()',
-  'error PlatformMirrorMismatch()',
-  'error BadReserve()',
-  'error NoEscrow()',
-  'error NotCheckedIn()',
-  'error AlreadySettled()',
-  'error EventNotEnded()',
-  'error EventEnded()',
-  'error AlreadyCheckedIn()',
-  'error NothingToRefund()',
-  'error NothingToWithdraw()',
-]);
+export const settlementAbi = settlementVaultAbi;
 
 /** 금고가 쓰는 escrow status 코드(ISettlementVault.Escrow.status). */
 export const ESCROW_STATUS = { none: 0, held: 1, released: 2, refunded: 3 } as const;
