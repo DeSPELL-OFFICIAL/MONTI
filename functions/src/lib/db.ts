@@ -73,6 +73,21 @@ export const SYSTEM = 'system';
 export const USAGE = 'usage';
 
 /**
+ * 공연별 **정산 장부 미러**(설계 2026-10-01 §5). 문서 id 는 `eventId`(십진 문자열)이고 값은
+ * `{ policy:{recipients:[{account,bps,reason,tag}],platformBps}, policyHash, priceUsdCentsByTier,
+ * setBy, txHash, updatedAt }` 다. **공개 읽기**(공개 정산 현황 페이지) — 권위는 온체인/인덱서이고
+ * 이 문서는 표시용 거울이다. 쓰는 길은 서버(`relaySetPolicy`) 하나다.
+ */
+export const SETTLEMENTS = 'settlements';
+/**
+ * 관객 **주문**(설계 §2 결제→민팅→예치 흐름). 문서 id 는 멱등키 `${account}:${eventId}:${nonce}`
+ * (= claim relayId)라 같은 승인서로 두 번 사도 주문은 하나다. 값은 `{ personId, account, eventId,
+ * tier, amountUsdCents, method, status, tokenId?, depositTxHash?, releaseTxHash?, refundTxHash?,
+ * createdAt, updatedAt }`. **본인만 읽는다**(firestore.rules), 쓰는 길은 서버 전용이다.
+ */
+export const ORDERS = 'orders';
+
+/**
  * 릴레이 상태·대기 테이블 컬렉션 이름. 정의는 `relayTypes.ts` 한 곳이고(웹과 공유), 여기서
  * 다시 내보내 정적 일관성 스캔(허용 목록)이 `db.ts` 상수로 해석할 수 있게 한다.
  */
@@ -103,6 +118,8 @@ export const ALLOWED_COLLECTIONS = [
   RECOVERY_QUOTA,
   SYSTEM,
   USAGE,
+  SETTLEMENTS,
+  ORDERS,
   RELAYS,
   ADMISSIONS,
   ADMISSION_TOKENS,

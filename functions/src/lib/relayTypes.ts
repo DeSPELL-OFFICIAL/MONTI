@@ -17,7 +17,7 @@ export const ADMISSIONS = 'admissions';
 /** `admissions/{eventId}/tokens/{tokenId}` — 토큰별 대기 상태(이 이름에 TTL 을 건다). */
 export const ADMISSION_TOKENS = 'tokens';
 
-export type RelayKind = 'claim' | 'request' | 'checkIn' | 'checkInLate';
+export type RelayKind = 'claim' | 'request' | 'checkIn' | 'checkInLate' | 'setPolicy';
 export type RelayStatus = 'pending' | 'sent' | 'confirmed' | 'failed';
 
 /** 결정적 거절/실패 사유. 코드는 기존 deny/limit 이름을, message 는 사람이 읽을 한 줄. */
@@ -86,6 +86,11 @@ export function claimRelayId(account: Hex, eventId: string | bigint, nonce: numb
 /** checkIn 의 relayId. tokenId 하나에 입장 한 번(1회 입장 불변식과 같은 키). */
 export function checkInRelayId(eventId: string | bigint, tokenId: string | bigint): string {
   return `${eventId}:${tokenId}`;
+}
+
+/** setPolicy 의 relayId. 주최자 + policyNonce 가 곧 멱등키다(nonce 는 설정 1회마다 체인에서 증가). */
+export function setPolicyRelayId(organizer: Hex, nonce: number | bigint): string {
+  return `setPolicy:${organizer}:${nonce}`;
 }
 
 /** 이 릴레이가 게이트 입장인가. 확정/실패 시 대기 테이블도 함께 옮겨야 하는지 가른다. */
