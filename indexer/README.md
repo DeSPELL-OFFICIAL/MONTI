@@ -111,3 +111,5 @@ RPC_URL=https://testnet-rpc.monad.xyz pnpm dev
 | `pnpm typecheck` | `tsc --noEmit` |
 
 <!-- hosted deployment note: 2026-09-30 redeploy (Ticket 0x7E1f…51Cf) — rebuild triggered 2026-09-30 14:06 KST because the first hosted build (ae91e90) never started its fetcher -->
+
+<!-- hosted deployment note: 2026-10-09 20:17 KST — rebuild triggered after both hosted deployments were deleted; config unchanged since 9626cd6 (SettlementVault @67253867) -->
