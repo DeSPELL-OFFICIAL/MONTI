@@ -144,6 +144,7 @@ function RunningGate({ gateId, eventId, orgId, gateAccount, open, revoked }: Run
       canApprove={gate.canApprove}
       gateOpenStale={gate.gateOpenStale}
       onOverrideSearch={gate.searchGuests}
+      onOverrideResolve={gate.searchGuestsOnChain}
       onOverrideSubmit={(pin, reason, tokenId) => void gate.submitOverride(pin, reason, tokenId)}
       // Cancelling is the way out of the dialog, and it is `retry` — the same press that clears
       // any other settled screen — so the result lands in 직전 탭 on the way back to waiting.

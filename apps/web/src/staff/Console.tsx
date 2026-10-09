@@ -72,6 +72,11 @@ export interface GateConsoleProps {
   /** 명단에서 사람을 찾는 법. 탭이 없어도 수동 승인이 열리므로 창이 이것을 쓴다(04 T32). */
   onOverrideSearch?: (query: string) => readonly SnapshotTicket[];
   /**
+   * 명단이 못 찾을 때의 두 번째 길 — 숫자(표 번호)로 체인에 한 번 물어 세운다. 얼어붙은
+   * 인덱서로 만든 명단에 없는, 방금 발급된 표를 위한 길이다. 창은 동기 검색이 비었을 때만 쓴다.
+   */
+  onOverrideResolve?: (query: string) => Promise<SnapshotTicket | undefined>;
+  /**
    * 문이 열려 있다는 답을 이번 회차에 받지 못해, 이 단말기가 기억한 지난 답으로 열려 있다.
    * 판정이 아니라 상태이므로 `OfflineBadge`·`QueueBanner` 와 같은 배너 자리에 산다.
    */
@@ -108,6 +113,7 @@ export function GateConsole({
   actions,
   canApprove,
   onOverrideSearch,
+  onOverrideResolve,
   gateOpenStale,
   onDone,
   onOverrideSubmit,
@@ -166,6 +172,7 @@ export function GateConsole({
             canApprove={canApprove ?? false}
             ticket={ticket}
             onSearch={onOverrideSearch}
+            onResolve={onOverrideResolve}
             outcome={context.override}
             onSubmit={onOverrideSubmit ?? noop}
             onCancel={onOverrideCancel ?? noop}
