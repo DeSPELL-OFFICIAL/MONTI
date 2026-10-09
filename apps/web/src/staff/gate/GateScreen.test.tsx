@@ -24,6 +24,7 @@ vi.mock('../setup/useGateRegistration', () => ({ useGateRegistration: () => regi
 const handleResponse = vi.fn(async () => undefined);
 const openOverride = vi.fn(() => true);
 const searchGuests = vi.fn(() => []);
+const searchGuestsOnChain = vi.fn(async () => undefined);
 const submitOverride = vi.fn(async () => undefined);
 const gate = vi.fn<() => UseGateResult>();
 /** What the screen handed the hook. `enabled` is the guard, so it is asserted rather than read. */
@@ -95,6 +96,7 @@ function running(over: Partial<UseGateResult> = {}): UseGateResult {
     canApprove: false,
     openOverride,
     searchGuests,
+    searchGuestsOnChain,
     submitOverride,
     handleResponse,
     retry: vi.fn(),

@@ -74,6 +74,7 @@ import type { GateContext, OverrideOutcome, OverrideReason, PreflightResult } fr
 import { overrideNotice } from '../components/overrideText';
 import { relayCheckIn } from './checkInOp';
 import { matchIssuedCode } from './decodeResponse';
+import { resolveTicketOnChain } from './overrideLookup';
 import { DENY_LABELS, mapCallableDeny } from './denyMap';
 import { startGateEmitter, type GateEmitter, type GateTap } from './emitter';
 import {
@@ -176,6 +177,12 @@ export type UseGateResult = GateContext & {
   openOverride(): boolean;
   /** Finds somebody in the held guest list by name or ticket number, for the dialog's search. */
   searchGuests(query: string): readonly SnapshotTicket[];
+  /**
+   * The fallback for a ticket number the snapshot does not carry — a just-minted ticket the
+   * frozen indexer never listed. Reads the chain for that one number; resolves `undefined` when
+   * it is not a number, not this event's, revoked, or unreadable.
+   */
+  searchGuestsOnChain(query: string): Promise<SnapshotTicket | undefined>;
   /**
    * The PIN, then the chain. `tokenId` is whoever the dialog picked; without one it falls back to
    * the tap on screen. Never throws: every outcome is a sentence in the dialog.
@@ -691,6 +698,18 @@ export function useGate(params: UseGateParams): UseGateResult {
   const searchGuests = useCallback((query: string) => searchSnapshot(query), []);
 
   /**
+   * The second path for when the snapshot cannot find them. The guest list is built from the
+   * indexer's `Ticket` table, so a frozen indexer leaves a just-minted ticket off it — and the
+   * dialog's search comes back empty for a ticket number that is on the chain. This asks the
+   * chain for that one number (`overrideLookup`), kept async and separate so the sync search
+   * above stays what existing callers and tests read.
+   */
+  const searchGuestsOnChain = useCallback(
+    (query: string) => resolveTicketOnChain(query, eventId),
+    [eventId],
+  );
+
+  /**
    * One manual approval, start to finish. Nothing here decides anything: the PIN decides whether
    * the dialog may act at all, and `Organizers` decides which call goes out and whether one goes
    * out. What this function owns is the **order**, and it is the same shape as a tap's — every
@@ -807,6 +826,7 @@ export function useGate(params: UseGateParams): UseGateResult {
     canApprove,
     openOverride,
     searchGuests,
+    searchGuestsOnChain,
     submitOverride,
     handleResponse,
     retry,

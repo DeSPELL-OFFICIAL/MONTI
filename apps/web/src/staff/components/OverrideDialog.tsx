@@ -1,4 +1,4 @@
-import { useState, type ReactElement } from 'react';
+import { useEffect, useState, type ReactElement } from 'react';
 
 import { OVERRIDE_REASONS } from '@monti/shared';
 
@@ -30,6 +30,12 @@ export interface OverrideDialogProps {
    * 명단을 읽지 않는다. 명단 한 줄이 무슨 뜻인지 정하는 곳은 `snapshot/lookup.ts` 하나다.
    */
   onSearch?: (query: string) => readonly SnapshotTicket[];
+  /**
+   * 명단이 못 찾을 때의 두 번째 길(`gate/overrideLookup.ts`). 숫자(표 번호)만 입력됐고 위
+   * `onSearch` 가 비어 돌아왔을 때만 체인에 한 번 물어, 얼어붙은 인덱서가 빠뜨린 방금 발급된
+   * 표를 세운다. 없으면 `undefined` — 창은 '명단에 없음'으로 남는다.
+   */
+  onResolve?: (query: string) => Promise<SnapshotTicket | undefined>;
   /** 이 승인이 어떻게 됐는지(04 T32). 창을 닫지 않고 여기서 그대로 보여준다. */
   outcome?: OverrideOutcome;
   onSubmit: (pin: string, reason: OverrideReason, tokenId?: string) => void;
@@ -60,6 +66,7 @@ export function OverrideDialog({
   canApprove,
   ticket,
   onSearch,
+  onResolve,
   outcome,
   onSubmit,
   onCancel,
@@ -82,7 +89,30 @@ export function OverrideDialog({
     if (pin !== '') setPin('');
   }
 
-  const matches = query.trim() === '' ? [] : (onSearch?.(query) ?? []);
+  const trimmed = query.trim();
+  const matches = trimmed === '' ? [] : (onSearch?.(query) ?? []);
+
+  // 명단이 못 찾은 표 번호를 체인에서 한 장 세우는 두 번째 길. 숫자만 입력됐고 동기 검색이
+  // 비었을 때만 물어본다 — `onResolve` 는 비동기라 결과를 상태로 받아 그리고, 입력이 바뀌면
+  // 지난 조회의 답은 버린다(`live`).
+  const digits = /^[0-9]+$/.test(trimmed);
+  const [chainMatch, setChainMatch] = useState<SnapshotTicket | undefined>(undefined);
+  useEffect(() => {
+    if (onResolve === undefined || matches.length > 0 || !digits) {
+      setChainMatch(undefined);
+      return;
+    }
+    let live = true;
+    void onResolve(trimmed).then((found) => {
+      if (live) setChainMatch(found);
+    });
+    return () => {
+      live = false;
+    };
+  }, [onResolve, trimmed, digits, matches.length]);
+
+  // 명단이 찾았으면 그 줄, 못 찾았고 체인이 세웠으면 그 한 줄. 스태프는 어느 쪽이든 똑같이 눌러 고른다.
+  const shown = matches.length > 0 ? matches : chainMatch ? [chainMatch] : [];
 
   return (
     <div className="gate-dialog" role="dialog" aria-modal="true" aria-label={copy.override.title}>
@@ -101,13 +131,13 @@ export function OverrideDialog({
               onChange={(event) => setQuery(event.target.value)}
             />
           </label>
-          {query.trim() === '' ? (
+          {trimmed === '' ? (
             <p className="gate-dialog__hint">{copy.override.searchHint}</p>
-          ) : matches.length === 0 ? (
+          ) : shown.length === 0 ? (
             <p className="gate-dialog__hint">{copy.override.searchEmpty}</p>
           ) : (
             <ul className="gate-dialog__matches">
-              {matches.map((match) => (
+              {shown.map((match) => (
                 <li key={match.tokenId}>
                   <Button variant="ghost" onClick={() => setPicked(match)}>
                     {`${match.displayName} ${maskTicketId(match.tokenId)}`}

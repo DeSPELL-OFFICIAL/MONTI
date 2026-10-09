@@ -179,6 +179,9 @@ export function readTicket() {
   const call = reader('Ticket', getConfig().addresses.ticket);
   return {
     eventOf: (tokenId: bigint) => call<bigint>('eventOf', [tokenId]),
+    /** The address holding this token now. `ownerOf` reverts for a token that was never minted,
+     *  so a deep link to a non-existent id throws rather than naming a zero owner. */
+    ownerOf: (tokenId: bigint) => call<Hex>('ownerOf', [tokenId]),
     /** The organisation an event belongs to. Zero means there is no such event — the same
      *  answer the backend turns into `UNKNOWN_EVENT` rather than "you have no permission". */
     eventOrg: (eventId: bigint) => call<bigint>('eventOrg', [eventId]),

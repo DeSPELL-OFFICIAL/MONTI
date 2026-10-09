@@ -45,6 +45,9 @@ export const USED_ABI = {
   Ticket: {
     eventOf: 1, eventOrg: 1, tierOf: 1, eventStatus: 1, isRevoked: 1, transfersOf: 1, balanceOfEvent: 2,
     checkInOf: 1, eventMeta: 1, tiers: 1, offerOf: 1,
+    // 딥링크된 표 상세를 체인에서 세울 때, 그 표가 정말 이 세션 계정의 것인지 확인하는 ERC-721
+    // 소유자 읽기. 없는 번호면 `ownerOf` 가 revert 하므로, 잘못 친 번호는 '없음'으로 남는다.
+    ownerOf: 1,
     // Manual approval (04 T32). Both are sent from the staff member's OWN passkey account and
     // never from the gate account: the chain records `msg.sender` as the approver, and a gate
     // terminal is a device rather than a person who can stand behind letting somebody in.

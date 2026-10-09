@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { Hex } from 'viem';
 import { gql } from '../../shared/envio/client';
 import { readTicket } from '../../shared/chain/reads';
+import { tierStructToEnvioTier } from '../../shared/chain/tiers';
 import { useSession } from '../../shared/session';
 import { EVENT_QUERY, type EnvioEvent, type EnvioTier } from '../../shared/envio/queries';
 
@@ -56,17 +57,7 @@ async function readEventFromChain(eventId: string): Promise<{ event: EnvioEvent;
     requireKyc: meta.requireKyc,
     approvalRequired: meta.approvalRequired,
   };
-  const tiers: EnvioTier[] = chainTiers.map((tier, idx) => ({
-    id: `${eventId}-${idx}`,
-    eventId,
-    idx,
-    name: tier.name,
-    priceUsdCents: String(tier.priceUsdCents),
-    supply: String(tier.supply),
-    minted: String(tier.minted),
-    maxPerWallet: String(tier.maxPerWallet),
-    seated: tier.seated,
-  }));
+  const tiers: EnvioTier[] = chainTiers.map((tier, idx) => tierStructToEnvioTier(tier, idx, eventId));
   return { event, tiers };
 }
 

@@ -16,6 +16,7 @@ import { EventArt } from './EventArt';
 import { cancelEvent, publishEvent, type LifecycleResult } from './lifecycle';
 import { createdDraftFor } from './useEventDraft';
 import { useEventStatusWithFallback } from './useEventStatusWithFallback';
+import { useEventTiersWithFallback } from './useEventTiersWithFallback';
 import { KR_REGIONS } from './scene/regions';
 
 /** Which confirmation is open, if any. Neither write happens without one. */
@@ -52,7 +53,7 @@ export function Dashboard() {
   const chainStatus = useEventStatusWithFallback(eventId);
 
   const [event, setEvent] = useState<EnvioEvent | null>(null);
-  const [tiers, setTiers] = useState<EnvioTier[]>([]);
+  const [indexerTiers, setIndexerTiers] = useState<EnvioTier[]>([]);
   const [attendees, setAttendees] = useState<AttendeeRow[]>([]);
   const [title, setTitle] = useState('');
   // The full metadata, kept for the publish summary sheet — venue, region and the two hide flags
@@ -77,7 +78,7 @@ export function Dashboard() {
       ]);
       if (cancelled) return;
       setEvent(indexed?.Event[0] ?? null);
-      setTiers(indexed?.Tier ?? []);
+      setIndexerTiers(indexed?.Tier ?? []);
       setAttendees(rows ?? []);
       setFailed(indexed === null && rows === null);
       setLoading(false);
@@ -108,6 +109,12 @@ export function Dashboard() {
       cancelled = true;
     };
   }, [imageCid]);
+
+  // 정산 설정's price inputs are keyed to the tiers, and the tiers exist on the chain the moment
+  // the event is created — but the hosted indexer can lag it by minutes. Read them from the chain
+  // while the indexer has no Tier row yet, so a fresh event's price fields appear and the policy
+  // can be confirmed; the indexer's (richer) rows take over the moment they arrive.
+  const { tiers } = useEventTiersWithFallback(eventId, loading ? undefined : indexerTiers);
 
   async function run(which: Exclude<Pending, ''>): Promise<void> {
     setBusy(true);
