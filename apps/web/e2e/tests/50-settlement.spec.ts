@@ -80,7 +80,11 @@ test('50 · settlement step 1 — organiser confirms the $30 split policy', asyn
     const card = page.locator('section.card', { has: page.getByRole('heading', { name: '정산 설정', exact: true }) });
     const priceInput = page.locator('input[placeholder="30"]');
     let sectionReady = false;
-    const deadline = Date.now() + 120_000;
+    // Run 4: widened from 120s. The price field only renders once the indexer surfaces the
+    // just-created event's tier, and cross-command session reuse fails (passkey session does not
+    // hold) — so create → 정산 설정 → 확정 → publish must all land in THIS one session; give the
+    // indexer up to 5 min to catch up rather than splitting into a second command.
+    const deadline = Date.now() + 300_000;
     while (Date.now() < deadline) {
       await page.goto(`/org/events/${eventId}`);
       await page.waitForTimeout(2500);
