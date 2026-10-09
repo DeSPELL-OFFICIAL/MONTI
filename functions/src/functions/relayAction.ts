@@ -475,6 +475,18 @@ export const relayAction = onCall({ secrets: [RELAYER_PK] }, async (request): Pr
   const result = decodeResult(kind, receipt.logs);
   await onConfirmed({ relayId, kind, personId, account, scope }, receipt);
 
+  // 스태프 수동입장(manualOverride)도 usedAt 을 체인에 쓰지만 분배는 settlementSweep(5분) 전까지 밀린다.
+  // 게이트 경로(relay.ts §3)처럼 입장 확정 직후 그 토큰 에스크로를 분배한다 — tokenId 는 calldata 에서,
+  // eventId 는 토큰 레이아웃(상위 160비트 = tokenId >> 96)에서. 느슨한 결합·실패 무시, sweep 이 백업한다.
+  if (kind === 'manualOverride') {
+    await import('./settlement.js')
+      .then((m) => {
+        const tokenId = ((decodeFunctionData({ abi: ticketAbi, data }).args ?? []) as readonly unknown[])[0] as bigint;
+        return m.onCheckInConfirmed(tokenId >> 96n, tokenId);
+      })
+      .catch((cause) => info('relayAction.release.failed', { relayId, reason: (cause as Error).message }));
+  }
+
   await ref.set(
     { status: 'confirmed', confirmedAt: FieldValue.serverTimestamp(), ...(result ? { result } : {}) },
     { merge: true },
