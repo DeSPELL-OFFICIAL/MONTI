@@ -44,6 +44,7 @@ const readContract = vi.fn(async ({ functionName }: { functionName: string }) =>
 const estimateContractGas = vi.fn(async () => 215_000n);
 const waitForTransactionReceipt = vi.fn(async () => ({ status: 'success', logs: [] as unknown[], blockNumber: 100n }));
 const sendRelayed = vi.fn(async () => ({ hash: TX_HASH, nonce: 7, gasLimit: 231_000n, sentAt: Date.now() }));
+const onCheckInConfirmed = vi.fn(async () => {});
 
 vi.mock('../src/lib/db.js', () => ({
   db: fake.db,
@@ -62,6 +63,8 @@ vi.mock('../src/lib/relayer.js', () => ({
   sendRelayed,
   getRelayerAccount: () => ({ address: RELAYER }),
 }));
+
+vi.mock('../src/functions/settlement.js', () => ({ onCheckInConfirmed }));
 
 const { relayAction } = await import('../src/functions/relayAction.js');
 const functionsTest = (await import('firebase-functions-test')).default();
@@ -112,6 +115,7 @@ beforeEach(() => {
   estimateContractGas.mockClear();
   waitForTransactionReceipt.mockClear();
   sendRelayed.mockClear();
+  onCheckInConfirmed.mockClear();
   waitForTransactionReceipt.mockResolvedValue({ status: 'success', logs: [], blockNumber: 100n });
   estimateContractGas.mockResolvedValue(215_000n);
   sendRelayed.mockResolvedValue({ hash: TX_HASH, nonce: 7, gasLimit: 231_000n, sentAt: Date.now() });
@@ -291,6 +295,29 @@ describe('relayAction — usage ledger + org rate limit (design §4)', () => {
     waitForTransactionReceipt.mockResolvedValueOnce(GAS);
     const res = (await action(req('setAdmin', ORGANIZERS, SET_ADMIN) as never)) as { status: string };
     expect(res.status).toBe('confirmed');
+  });
+});
+
+describe('relayAction — settlement release on manualOverride confirm (design §3)', () => {
+  const TOKEN_ID = (EVENT_ID << 96n) | 123n; // eventId 는 상위 160비트 = tokenId >> 96
+  const OVERRIDE = encodeFunctionData({ abi: ticketAbi, functionName: 'manualOverride', args: [TOKEN_ID, GATE_ID, 3] });
+  const PUBLISH = encodeFunctionData({ abi: ticketAbi, functionName: 'publishEvent', args: [EVENT_ID] });
+
+  function req(kind: string, data: string) {
+    return { data: { kind, req: { from: ACCOUNT, to: TICKET, nonce: '0', deadline: futureDeadline(), data }, deviceSig: DEVICE_SIG }, auth };
+  }
+
+  it('releases the token escrow inline once when a manualOverride confirms', async () => {
+    waitForTransactionReceipt.mockResolvedValueOnce({ status: 'success', logs: [], blockNumber: 100n });
+    await action(req('manualOverride', OVERRIDE) as never);
+    expect(onCheckInConfirmed).toHaveBeenCalledTimes(1);
+    expect(onCheckInConfirmed).toHaveBeenCalledWith(EVENT_ID, TOKEN_ID);
+  });
+
+  it('does not release escrow for a non-admission kind (publishEvent)', async () => {
+    waitForTransactionReceipt.mockResolvedValueOnce({ status: 'success', logs: [], blockNumber: 100n });
+    await action(req('publishEvent', PUBLISH) as never);
+    expect(onCheckInConfirmed).not.toHaveBeenCalled();
   });
 });
 
