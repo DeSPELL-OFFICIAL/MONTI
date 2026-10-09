@@ -24,6 +24,7 @@ fnm exec --using=22 pnpm -F web e2e e2e/tests/01-public-surface.spec.ts   # 로�
 | `E2E_APPROVAL=1` | 승인제 시나리오(d) 및 승인 행사 생성 활성화 | off |
 | `E2E_ADMIN` | 관리자/주최자로 쓸 테스트 번호 인덱스(`01`…`10`, `persona-05`·`5` 도 허용) | `01` |
 | `E2E_USER_FROM` | 이용자 풀 시작 인덱스(…10 다음은 …01 로 순환, 관리자 번호는 건너뜀) | 관리자 다음 번호 |
+| `E2E_PERSONA_OFFSET` | 다이얼 번호 오프셋(인덱스+오프셋 → 뒷자리). 기본 10 이면 인덱스 1…10 = `+821000000011`…`+821000000020`(원래 `…0001`–`…0010` 블록은 전부 소진). id 는 `persona-01…10` 그대로, `.state` 파일은 오프셋별로 분리됨(`persona-09@10.*`). `0` 이면 원래 블록 | `10` |
 
 ## 릴레이 경로 (2026-09-30 재배포)
 
@@ -74,8 +75,9 @@ fnm exec --using=22 pnpm -F web e2e e2e/tests/01-public-surface.spec.ts   # 로�
   번호든 주최자 자리에 앉힐 수 있다 — `E2E_ADMIN=05` 면 …05 가 주최자, 이용자 풀은 …06–…10 뒤에
   …01–…04 로 순환해 항상 9명을 채운다(관리자 제외). `E2E_USER_FROM` 으로 이용자 시작 번호만 따로
   바꿀 수 있다. 선택 로직은 순수 함수 `selectPersonas`/`parsePersonaIndex`(`e2e/fixtures/personas.ts`)
-  이고 `e2e/fixtures/personas.test.ts` 가 단위 테스트한다(`pnpm -F web test`). 상태 파일은 번호 id
-  (`persona-05.*`)로 저장되므로, 소프트 삭제돼 못 쓰게 된 …01 대신 다른 번호를 골라 깨끗한 런을 돌린다.
+  이고 `e2e/fixtures/personas.test.ts` 가 단위 테스트한다(`pnpm -F web test`). 상태 파일은 번호 id 와
+  다이얼 오프셋(`E2E_PERSONA_OFFSET`, 기본 10)으로 저장되므로(`persona-05@10.*`), 번호가 로테이션되면
+  이전 오프셋에 저장된 소진 번호의 세션을 되살리지 않고 항상 새 가입으로 시작한다.
 
 - **재등록 번호 → `/recover` 처리**: 온체인 신원은 남았는데 Firestore person 은 소프트 삭제된 번호는
   이미 `active` 상태라, 새 가입이 `getSignupStatus()` 판정으로 `/signup/register` 가 아니라 `/recover`

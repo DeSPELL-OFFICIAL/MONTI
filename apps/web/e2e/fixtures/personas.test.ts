@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PERSONA_COUNT, parsePersonaIndex, selectPersonas } from './personas';
+import { PERSONA_COUNT, parsePersonaIndex, parsePersonaOffset, selectPersonas } from './personas';
 
 /**
  * Pure persona-selection logic (no browser, no env side effects): E2E_ADMIN / E2E_USER_FROM map a
@@ -23,6 +23,22 @@ describe('parsePersonaIndex', () => {
     expect(parsePersonaIndex('11', 3)).toBe(3);
     expect(parsePersonaIndex('-2', 3)).toBe(3);
     expect(parsePersonaIndex('2.5', 3)).toBe(3);
+  });
+});
+
+describe('parsePersonaOffset', () => {
+  it('defaults to 10 and accepts a non-negative integer', () => {
+    expect(parsePersonaOffset(undefined)).toBe(10);
+    expect(parsePersonaOffset('0')).toBe(0);
+    expect(parsePersonaOffset('10')).toBe(10);
+    expect(parsePersonaOffset(' 20 ')).toBe(20);
+  });
+
+  it('falls back to 10 on empty, non-numeric, negative or fractional input', () => {
+    expect(parsePersonaOffset('')).toBe(10);
+    expect(parsePersonaOffset('abc')).toBe(10);
+    expect(parsePersonaOffset('-5')).toBe(10);
+    expect(parsePersonaOffset('2.5')).toBe(10);
   });
 });
 
@@ -83,12 +99,27 @@ describe('selectPersonas', () => {
     }
   });
 
-  it('builds E.164 + national numbers from the index', () => {
+  it('builds E.164 + national numbers from the index plus the default offset (10)', () => {
     const { admin } = selectPersonas({ E2E_ADMIN: '05' });
     expect(admin.phone).toMatch(/^\+82100000\d{4}$/);
-    expect(admin.phone.endsWith('0005')).toBe(true);
+    expect(admin.phone.endsWith('0015')).toBe(true); // index 5 + default offset 10
     expect(admin.national).toMatch(/^0100000\d{4}$/);
-    expect(admin.national.endsWith('0005')).toBe(true);
+    expect(admin.national.endsWith('0015')).toBe(true);
+  });
+
+  it('shifts the dialled digits by E2E_PERSONA_OFFSET while keeping the id', () => {
+    const original = selectPersonas({ E2E_ADMIN: '01', E2E_PERSONA_OFFSET: '0' });
+    expect(original.admin.id).toBe('persona-01');
+    expect(original.admin.phone).toBe('+821000000001'); // the original (burned) block
+    expect(original.admin.national).toBe('01000000001');
+
+    const live = selectPersonas({ E2E_ADMIN: '01', E2E_PERSONA_OFFSET: '10' });
+    expect(live.admin.id).toBe('persona-01'); // id is unchanged by the offset
+    expect(live.admin.phone).toBe('+821000000011'); // the rotated live block
+    expect(selectPersonas({ E2E_ADMIN: '10', E2E_PERSONA_OFFSET: '10' }).admin.phone).toBe('+821000000020');
+
+    // The offset shifts only the dialled digits — the state-file keys (ids) stay put.
+    expect(live.users.map((u) => u.id)).toEqual(original.users.map((u) => u.id));
   });
 
   it('falls back to the defaults on a bad E2E_ADMIN', () => {
