@@ -1,7 +1,7 @@
 import type { Browser, BrowserContext, Page } from '@playwright/test';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { attachAuthenticator, type CdpCredential, type VirtualAuthenticator } from '../fixtures/webauthn';
-import type { Persona } from '../fixtures/personas';
+import { PERSONA_OFFSET, type Persona } from '../fixtures/personas';
 import { login, signUp } from './signup';
 
 const STATE_DIR = 'e2e/.state';
@@ -78,9 +78,11 @@ async function prepareContext(context: BrowserContext): Promise<void> {
   });
 }
 
-const statePath = (p: Persona): string => `${STATE_DIR}/${p.id}.state.json`;
-const credsPath = (p: Persona): string => `${STATE_DIR}/${p.id}.creds.json`;
-const metaPath = (p: Persona): string => `${STATE_DIR}/${p.id}.meta.json`;
+// State/creds/meta are namespaced by the dialled offset (`persona-01@10.*`): rotating the TEST
+// numbers must never restore a burned number's passkey session saved under a prior offset.
+const statePath = (p: Persona): string => `${STATE_DIR}/${p.id}@${PERSONA_OFFSET}.state.json`;
+const credsPath = (p: Persona): string => `${STATE_DIR}/${p.id}@${PERSONA_OFFSET}.creds.json`;
+const metaPath = (p: Persona): string => `${STATE_DIR}/${p.id}@${PERSONA_OFFSET}.meta.json`;
 
 /** Read the per-persona meta file, or an empty record if it is missing/unreadable. Never throws. */
 function readMeta(p: Persona): PersonaMeta {
