@@ -3,7 +3,7 @@ import { Alert, Button, Screen, Spinner, StickyBar, TicketArt } from '../../shar
 import { useCopy } from '../../shared/i18n';
 import { describeFailure } from '../../shared/errors';
 import { useTicketArtProps } from './useTicketArt';
-import { useMyTickets } from './useTickets';
+import { useTicketDetail } from './useTicketDetail';
 import { useStateLabel } from './List';
 import { Receipt } from '../purchase/Receipt';
 
@@ -20,8 +20,10 @@ export function TicketDetail() {
   const labels = useStateLabel();
   const navigate = useNavigate();
   const { tokenId = '' } = useParams();
-  const { data, isLoading, isError, error, refetch } = useMyTickets();
-  const ticket = (data ?? []).find((entry) => entry.tokenId === tokenId);
+  // The indexer's list first; when it has settled without this ticket (a just-minted deep link
+  // and a frozen indexer), the one ticket is read from the chain so the receipt and refund below
+  // still mount. `isError`/`!ticket` keep "could not read" and "no such ticket" apart as before.
+  const { ticket, isLoading, isError, error, refetch } = useTicketDetail(tokenId);
   // Before the three branches below, because a hook cannot be called after a return — and for
   // this one ticket only, so a deep link into a ticket does not read every event's picture.
   const artPropsOf = useTicketArtProps(ticket ? [ticket] : []);
