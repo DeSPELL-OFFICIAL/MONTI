@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { encodeFunctionData, getAddress } from 'viem';
@@ -13,10 +14,13 @@ vi.mock('../../shared/chain/accounts', () => ({ getStaffAccount: async () => ({ 
 
 const eventOrg = vi.fn(async () => 9n);
 const hasPermission = vi.fn(async () => true);
+const gateInfo = vi.fn(async () => ({
+  eventId: 0n, account: '0x0000000000000000000000000000000000000000', kx: '0x0', ky: '0x0', open: false, revoked: false,
+}));
 vi.mock('../../shared/chain/reads', async (orig) => ({
   ...(await orig<typeof import('../../shared/chain/reads')>()),
   readTicket: () => ({ eventOrg }),
-  readOrganizers: () => ({ hasPermission }),
+  readOrganizers: () => ({ hasPermission, gateInfo }),
 }));
 
 // EIP-55, the form the backend's queue hands back (`getAddress(doc.id)`) and the form
@@ -42,12 +46,15 @@ const data = (functionName: 'registerGate' | 'openGate' | 'closeGate' | 'revokeG
   encodeFunctionData({ abi: organizersAbi, functionName, args });
 
 function open() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
-    <MemoryRouter initialEntries={['/org/events/5/gates']}>
-      <Routes>
-        <Route path="/org/events/:eventId/gates" element={<Gates />} />
-      </Routes>
-    </MemoryRouter>,
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={['/org/events/5/gates']}>
+        <Routes>
+          <Route path="/org/events/:eventId/gates" element={<Gates />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 

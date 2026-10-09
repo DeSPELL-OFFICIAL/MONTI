@@ -14,6 +14,7 @@ import { gql } from '../../shared/envio/client';
 import { GATES_QUERY, type EnvioGate } from '../../shared/envio/queries';
 import { useOrganizerCopy, type OrganizerCopy } from '../copy';
 import { readGateKey } from './gateKey';
+import { useEventGatesWithFallback } from '../useEventGatesWithFallback';
 
 type GateProblem = keyof OrganizerCopy['gates']['problems'];
 
@@ -53,12 +54,16 @@ export function Gates() {
   const [orgId, setOrgId] = useState<bigint | null>(null);
   const [mayManage, setMayManage] = useState<boolean | null>(null);
   const [pending, setPending] = useState<PendingGate[]>([]);
-  const [registered, setRegistered] = useState<EnvioGate[]>([]);
+  const [indexerGates, setIndexerGates] = useState<EnvioGate[] | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<GateProblem | ''>('');
   const [paste, setPaste] = useState(EMPTY_PASTE);
   const [reload, setReload] = useState(0);
+
+  // 인덱서가 0행으로 정착하면 체인 로그(GateRegistered)에서 등록된 단말기를 직접 세운다 — 방금
+  // 등록한 게이트의 열기 버튼이 인덱서(Envio)를 기다리지 않게. 인덱서에 행이 있으면 그대로 쓴다.
+  const { gates: registered } = useEventGatesWithFallback(eventId, indexerGates);
 
   // The queue is members-only and the indexer is public, so neither failure may take the other
   // down: an organiser with a sleeping indexer must still be able to approve a terminal.
@@ -68,6 +73,7 @@ export function Gates() {
 
     void (async () => {
       setLoading(true);
+      setIndexerGates(undefined);
       // The staff console bootstrap reads the same `eventOrg` to pass `orgId` into sub-plan
       // 04's `useGate`; the permission bit is the one `registerGate` itself demands.
       const org = await readTicket()
@@ -96,7 +102,7 @@ export function Gates() {
       ]);
       if (cancelled) return;
       setPending(queue);
-      setRegistered(gates.Gate);
+      setIndexerGates(gates.Gate);
       setLoading(false);
     })();
 
