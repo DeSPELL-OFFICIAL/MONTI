@@ -12,7 +12,9 @@ import { describeFailure } from '../../shared/errors';
 import { EVENT_QUERY, type EnvioEvent, type EnvioTier } from '../../shared/envio/queries';
 import { fetchEventMetadata, type EventMetadata } from '../../shared/envio/ipfs';
 import { api } from '../../shared/api/functions';
-import { loadEventArt } from '../../shared/api/firestore';
+import { getSettlement, loadEventArt } from '../../shared/api/firestore';
+import { settlementEnabled } from '../../shared/config';
+import { formatUsdCents } from '../../shared/money';
 import { useSession } from '../../shared/session';
 import { useKycLevel } from '../me/useKycLevel';
 import { useMyTickets } from '../tickets/useTickets';
@@ -132,6 +134,18 @@ export function EventDetail() {
     enabled: eventId !== '',
   });
 
+  // The per-kind price, from the same settlement mirror the claim sheet reads (Batch F). A free
+  // event — or a build without settlement — has none, and the list shows no price at all.
+  const { data: settlement } = useQuery({
+    queryKey: ['settlement', eventId],
+    queryFn: () => getSettlement(eventId),
+    enabled: eventId !== '' && settlementEnabled(),
+  });
+  const priceOf = (idx: number): number | undefined => {
+    const cents = settlement?.priceUsdCentsByTier?.[String(idx)];
+    return cents !== undefined && cents > 0 ? cents : undefined;
+  };
+
   const metadata: EventMetadata | null = data?.metadata ?? null;
   const hidden = metadata !== null && (metadata.venueHidden || metadata.timeHidden);
   const priv = usePrivateDetails(eventId, hidden);
@@ -167,6 +181,14 @@ export function EventDetail() {
   const timeHidden = metadata?.timeHidden === true && !maySeePrivate;
   // The callable has a cold start, so only the line that is waiting on it says so.
   const venueWaiting = metadata?.venueHidden === true && signedIn && priv.isLoading;
+  // A paid event says so on the button, with the price the claim sheet opens on (its first kind) —
+  // the same 결제하고 받기 $X the sheet shows. Approval events keep the free request path.
+  const firstPrice = event.approvalRequired ? undefined : priceOf(tiers[0]?.idx ?? 0);
+  const getLabel = event.approvalRequired
+    ? copy.discover.requestTicket
+    : firstPrice !== undefined
+      ? `${copy.purchase.cta} ${formatUsdCents(firstPrice)}`
+      : copy.discover.getTicket;
 
   return (
     <Screen title={metadata?.title || copy.discover.untitled}>
@@ -223,9 +245,10 @@ export function EventDetail() {
         <ul className="tier-list">
           {tiers.map((tier) => {
             const left = Number(tier.supply) - Number(tier.minted);
+            const cents = priceOf(tier.idx);
             return (
               <li key={tier.id}>
-                <span>{tier.name}</span>
+                <span>{cents === undefined ? tier.name : `${tier.name} · ${formatUsdCents(cents)}`}</span>
                 <span className="muted">
                   {left > 0 ? fmt(copy.discover.remaining, { count: left }) : copy.discover.soldOut}
                 </span>
@@ -265,13 +288,11 @@ export function EventDetail() {
             </Link>
           ) : signedIn ? (
             // 로그인한 사람은 이 자리에서 시트로 받는다 — 한 탭, 라우트 홉 없음(plan B1·여정 A).
-            <Button onClick={() => setClaiming(true)}>
-              {event.approvalRequired ? copy.discover.requestTicket : copy.discover.getTicket}
-            </Button>
+            <Button onClick={() => setClaiming(true)}>{getLabel}</Button>
           ) : (
             // 로그인 전에는 /claim 라우트로 보내 로그인을 먼저 마치게 하고, 그 뒤 라우트가 이어받는다.
             <Link to={`/claim/${event.id}`} className="btn btn--primary btn--link">
-              {event.approvalRequired ? copy.discover.requestTicket : copy.discover.getTicket}
+              {getLabel}
             </Link>
           )}
         </StickyBar>

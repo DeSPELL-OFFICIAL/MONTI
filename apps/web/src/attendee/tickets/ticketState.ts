@@ -38,6 +38,8 @@ export interface DetailView {
   canTransfer: boolean;
   /** The paid order behind this ticket was refunded: it can no longer get anyone in. */
   refunded: boolean;
+  /** The ticket has been used to get in — by its own check-in record, or by its order's release. */
+  entered: boolean;
 }
 
 /**
@@ -45,11 +47,17 @@ export interface DetailView {
  * order (`orders/{orderId}.status`), not on the ticket — so a refunded ticket still reads `before`
  * and would keep offering 입장하기 and 친구에게 주기. The order status, when there is one, has the
  * last word. `null` is a free ticket or an order not read yet.
+ *
+ * Likewise a `released` order means the ticket was admitted (the escrow pays out on check-in) even
+ * while the indexer has not caught up with the check-in record — so it reads 입장 완료, with no door
+ * guide and no 입장하기. A used ticket cannot be handed over either: `createOffer` reverts
+ * `AlreadyCheckedIn` (Ticket.sol), so 친구에게 주기 goes too.
  */
 export function deriveDetailView(state: TicketState, orderStatus: string | null): DetailView {
   const refunded = orderStatus === 'refunded';
-  const waiting = state === 'before' && !refunded;
-  return { canEnter: waiting, canTransfer: waiting, refunded };
+  const entered = !refunded && (state === 'entered' || (state === 'before' && orderStatus === 'released'));
+  const waiting = state === 'before' && !refunded && !entered;
+  return { canEnter: waiting, canTransfer: waiting, refunded, entered };
 }
 
 /** How many trailing digits the gate staff match a ticket by in manual approval. */

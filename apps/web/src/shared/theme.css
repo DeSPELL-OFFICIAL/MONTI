@@ -201,8 +201,11 @@ input, select, textarea { scroll-margin-bottom: calc(var(--sticky-bar-h) + var(-
 /* A tab-less detail screen (the ticket) that pins its primary action in a sticky bar has to
    reserve the bar's height too, or the last line sits under it. */
 .screen:has(.sticky-bar) {
-  padding-bottom: calc(var(--sab) + var(--sticky-bar-h) + var(--s-5));
+  padding-bottom: calc(var(--sab) + var(--sticky-bar-h) + var(--s-6) + var(--s-5));
 }
+/* The receipt card on the ticket detail sits near the foot: a jump or focus into it stops above
+   the bar rather than under it. */
+.screen:has(.sticky-bar) .receipt { scroll-margin-bottom: calc(var(--sab) + var(--sticky-bar-h) + var(--s-5)); }
 .screen h1 {
   font-size: var(--t-large);
   line-height: var(--t-large-lh);

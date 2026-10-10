@@ -58,7 +58,7 @@ test('51 · settlement step 3 — public rules render + attendee 결제하고 �
 
     // 3c. Tap it → the mock card sheet (결제) opens. Do NOT submit (treasury USDC = 0 → BLOCKED-USDC).
     await payCta.click();
-    const sheetTitle = page.getByRole('heading', { name: '결제', exact: true });
+    const sheetTitle = page.getByRole('heading', { name: '카드 결제', exact: true });
     await expect(sheetTitle).toBeVisible({ timeout: 10_000 });
     const cardField = page.getByPlaceholder('0000 0000 0000 0000 (테스트)');
     diag.sheetOpened = await cardField.isVisible().catch(() => false);

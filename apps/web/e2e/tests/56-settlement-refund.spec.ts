@@ -68,16 +68,17 @@ test('56 · settlement step 5 — attendee B buys then refunds before admission'
     await shot(page, 'refund-attendee-claim-paid-cta');
     expect((await payCta.innerText()).trim(), `CTA shows $${PRICE}`).toContain(`$${PRICE}`);
     await payCta.click();
-    const sheet = page.getByRole('dialog', { name: '결제' });
+    const sheet = page.getByRole('dialog', { name: '카드 결제' });
     await expect(sheet).toBeVisible({ timeout: 10_000 });
     await page.getByPlaceholder('0000 0000 0000 0000 (테스트)').fill('4242424242424242');
-    const payBtn = sheet.getByRole('button', { name: /결제하고 받기/ });
+    // The sheet's own button reads "$30.00 결제하기"; the claim CTA behind it keeps 결제하고 받기.
+    const payBtn = sheet.getByRole('button', { name: /결제하기/ });
     await expect(payBtn).toBeEnabled({ timeout: 10_000 });
     await shot(page, 'refund-attendee-payment-card-filled');
     const payClickAt = Date.now();
     await payBtn.click();
     const doneAlert = sheet.getByText('결제 완료 · 티켓을 받았어요', { exact: true });
-    const toTickets = sheet.getByRole('link', { name: '내 티켓 보기', exact: true });
+    const toTickets = sheet.getByRole('link', { name: /^(영수증 보기|내 티켓 보기)$/ });
     let purchased = false; const pd = Date.now() + 180_000;
     while (Date.now() < pd) { if (await doneAlert.isVisible().catch(() => false) || await toTickets.isVisible().catch(() => false)) { purchased = true; break; } await page.waitForTimeout(2000); }
     diag.purchased = purchased; diag.wire = { ...wire };
@@ -91,7 +92,7 @@ test('56 · settlement step 5 — attendee B buys then refunds before admission'
 
     await page.goto(`/tickets/${tokenId}`);
     await expect(page.getByRole('heading', { name: '영수증', exact: true })).toBeVisible({ timeout: 45_000 });
-    const heldLine = page.getByText('보관 중 · 입장하면 정산돼요', { exact: true });
+    const heldLine = page.getByText('결제 금액 보관 중 · 입장하면 자동으로 나눠 보내요', { exact: true });
     let held = false; const hd = Date.now() + 60_000;
     while (Date.now() < hd) { if (await heldLine.isVisible().catch(() => false)) { held = true; break; } await page.waitForTimeout(2000); }
     diag.receiptHeld = held;

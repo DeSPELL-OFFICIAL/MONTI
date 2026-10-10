@@ -29,9 +29,12 @@ const EVENT_ID = process.env.EVENT_ID ?? '';
 const CARD_PLACEHOLDER = '0000 0000 0000 0000 (테스트)';
 const SHEET_NAME = '결제';
 const PAY_RE = /결제하고 받기/;
+/** The sheet's own pay button reads "$30.00 결제하기" (the claim CTA keeps 결제하고 받기). */
+const SHEET_PAY_RE = /결제하기/;
 const DONE_TEXT = '결제 완료 · 티켓을 받았어요';
-const TO_TICKETS = '내 티켓 보기';
-const STATUS_HELD = '보관 중 · 입장하면 정산돼요';
+/** The done link opens the new ticket's receipt; 내 티켓 보기 only when no token id came back yet. */
+const TO_TICKETS = /^(영수증 보기|내 티켓 보기)$/;
+const STATUS_HELD = '결제 금액 보관 중 · 입장하면 자동으로 나눠 보내요';
 const RECEIPT_TITLE = '영수증';
 
 interface PurchaseWire {
@@ -109,7 +112,7 @@ test('52 · settlement step 2 — attendee pays $30 and the receipt reads 보관
     const cardField = page.getByPlaceholder(CARD_PLACEHOLDER);
     await expect(cardField).toBeVisible({ timeout: 10_000 });
     await cardField.fill('4242424242424242');
-    const payBtn = sheet.getByRole('button', { name: PAY_RE });
+    const payBtn = sheet.getByRole('button', { name: SHEET_PAY_RE });
     await expect(payBtn).toBeEnabled({ timeout: 10_000 });
     console.log(`[52] submitting mock purchase for ${attendee.id} on event ${EVENT_ID}`);
     await payBtn.click();
@@ -117,7 +120,7 @@ test('52 · settlement step 2 — attendee pays $30 and the receipt reads 보관
     // Wait for 결제 완료 (the done state) or a determinate error. The mint + deposit runs through
     // the relayer, so give it room; a failure Alert surfaces inside the sheet.
     const doneAlert = sheet.getByText(DONE_TEXT, { exact: true });
-    const toTickets = sheet.getByRole('link', { name: TO_TICKETS, exact: true });
+    const toTickets = sheet.getByRole('link', { name: TO_TICKETS });
     const errorAlert = sheet.locator('.alert, [role="alert"]');
     let purchased = false;
     const payDeadline = Date.now() + 150_000;
@@ -138,9 +141,12 @@ test('52 · settlement step 2 — attendee pays $30 and the receipt reads 보관
     // detail route segment, the authoritative UI source of it.
     await toTickets.click();
     await page.waitForURL(/\/tickets(\/|$)/, { timeout: 30_000 });
-    const ticketRow = page.locator('a.ticket-row').first();
-    await expect(ticketRow).toBeVisible({ timeout: 45_000 });
-    await ticketRow.click();
+    // 영수증 보기 lands on the detail itself; 내 티켓 보기 lands on the list, one tap away.
+    if (!/\/tickets\/\d+/.test(page.url())) {
+      const ticketRow = page.locator('a.ticket-row').first();
+      await expect(ticketRow).toBeVisible({ timeout: 45_000 });
+      await ticketRow.click();
+    }
     await page.waitForURL(/\/tickets\/\d+/, { timeout: 30_000 });
     const tokenIdFromUrl = page.url().match(/\/tickets\/(\d+)/)?.[1];
     diag.tokenIdFromUrl = tokenIdFromUrl;

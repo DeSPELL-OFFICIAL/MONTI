@@ -259,6 +259,7 @@ describe('TicketDetail', () => {
   it('drops the entry and handover buttons once the ticket is used', async () => {
     renderDetail('2');
     expect(await screen.findByText('입장 완료')).toBeInTheDocument();
+    expect(screen.queryByText('입구에서 입장하기를 누르고 60초 안에 단말기에 휴대폰을 대세요.')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '입장하기' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '친구에게 주기' })).not.toBeInTheDocument();
   });

@@ -244,12 +244,13 @@ test('55 · settlement chain — organiser + attendee + staff, one process', asy
     await shot(aPage, 'attendee-claim-paid-cta');
     expect(diag.ctaText as string, `CTA shows $${PRICE}`).toContain(`$${PRICE}`);
     await payCta.click();
-    const sheet = aPage.getByRole('dialog', { name: '결제' });
+    const sheet = aPage.getByRole('dialog', { name: '카드 결제' });
     await expect(sheet).toBeVisible({ timeout: 10_000 });
     await aPage.waitForTimeout(800);
     await shot(aPage, 'attendee-payment-sheet');
     await aPage.getByPlaceholder('0000 0000 0000 0000 (테스트)').fill('4242424242424242');
-    const payBtn = sheet.getByRole('button', { name: /결제하고 받기/ });
+    // The sheet's own button reads "$30.00 결제하기"; the claim CTA behind it keeps 결제하고 받기.
+    const payBtn = sheet.getByRole('button', { name: /결제하기/ });
     await expect(payBtn).toBeEnabled({ timeout: 10_000 });
     await shot(aPage, 'attendee-payment-card-filled');
     const payClickAt = Date.now();
@@ -257,7 +258,7 @@ test('55 · settlement chain — organiser + attendee + staff, one process', asy
     await aPage.waitForTimeout(1000);
     await shot(aPage, 'attendee-payment-processing');
     const doneAlert = sheet.getByText('결제 완료 · 티켓을 받았어요', { exact: true });
-    const toTickets = sheet.getByRole('link', { name: '내 티켓 보기', exact: true });
+    const toTickets = sheet.getByRole('link', { name: /^(영수증 보기|내 티켓 보기)$/ });
     let purchased = false;
     const pd = Date.now() + 180_000;
     while (Date.now() < pd) {
@@ -276,7 +277,7 @@ test('55 · settlement chain — organiser + attendee + staff, one process', asy
     // Go straight to the detail by captured tokenId (the LIST has no chain fallback).
     await aPage.goto(`/tickets/${tokenId}`);
     await expect(aPage.getByRole('heading', { name: '영수증', exact: true })).toBeVisible({ timeout: 45_000 });
-    const heldLine = aPage.getByText('보관 중 · 입장하면 정산돼요', { exact: true });
+    const heldLine = aPage.getByText('결제 금액 보관 중 · 입장하면 자동으로 나눠 보내요', { exact: true });
     let held = false; const hd = Date.now() + 60_000;
     while (Date.now() < hd) { if (await heldLine.isVisible().catch(() => false)) { held = true; break; } await aPage.waitForTimeout(2000); }
     diag.receiptHeld = held;
@@ -460,7 +461,7 @@ test('55 · settlement chain — organiser + attendee + staff, one process', asy
 
     // =========================== STEP 4 — receipt flips to 정산 완료 (inline release) ===========
     await aPage.goto(`/tickets/${tokenId}`);
-    const releasedLine = aPage.getByText('정산 완료 · 각자에게 보냈어요', { exact: true });
+    const releasedLine = aPage.getByText('정산 완료 · 정해진 비율대로 나눠 보냈어요', { exact: true });
     let released = false; const rd = Date.now() + 120_000;
     while (Date.now() < rd) { if (await releasedLine.isVisible().catch(() => false)) { released = true; break; } await aPage.goto(`/tickets/${tokenId}`); await aPage.waitForTimeout(4000); }
     diag.receiptReleased = released;

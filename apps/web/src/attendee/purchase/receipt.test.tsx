@@ -77,7 +77,7 @@ describe('Receipt', () => {
   it('shows the amount, the held status and the by-role split from the policy × amount', async () => {
     renderReceipt();
     expect(await screen.findByText('$30.00')).toBeTruthy();
-    expect(screen.getByText('보관 중 · 입장하면 정산돼요')).toBeTruthy();
+    expect(screen.getByText('결제 금액 보관 중 · 입장하면 자동으로 나눠 보내요')).toBeTruthy();
     // 90% / 10% of $30 → $27 / $3, floor with dust to the last row.
     expect(await screen.findByText('아티스트 · $27.00')).toBeTruthy();
     expect(screen.getByText('MONTI 플랫폼 · $3.00')).toBeTruthy();
@@ -116,7 +116,7 @@ describe('Receipt', () => {
   it('shows the settled status and offers no refund once released', async () => {
     currentOrder = { ...currentOrder!, status: 'released' };
     renderReceipt(true);
-    expect(await screen.findByText('정산 완료 · 각자에게 보냈어요')).toBeTruthy();
+    expect(await screen.findByText('정산 완료 · 정해진 비율대로 나눠 보냈어요')).toBeTruthy();
     expect(screen.queryByRole('button', { name: '환불받기' })).toBeNull();
   });
 

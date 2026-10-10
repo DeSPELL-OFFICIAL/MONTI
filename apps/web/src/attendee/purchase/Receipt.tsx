@@ -92,7 +92,8 @@ export function Receipt({ tokenId, eventId, canRefund, onStatus }: ReceiptProps)
   const explorer = getConfig().explorerUrl;
 
   return (
-    <section className="receipt">
+    // A card of its own (the `.card` glass pane), so the receipt reads as one block on the detail.
+    <section className="card receipt">
       <h2>{copy.purchase.receiptTitle}</h2>
       <p className="receipt-amount">{formatUsdCents(order.amountUsdCents)}</p>
       {paidAt ? <p className="muted">{copy.purchase.paidAt}: {paidAt}</p> : null}

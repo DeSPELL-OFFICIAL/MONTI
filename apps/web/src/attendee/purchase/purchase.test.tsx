@@ -1,4 +1,4 @@
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -51,13 +51,13 @@ describe('PurchaseSheet', () => {
     renderSheet();
     expect(screen.getByText('테스트 환경')).toBeTruthy();
     expect(screen.getByText('테스트 결제예요 · 실제로 돈이 빠져나가지 않아요')).toBeTruthy();
-    expect(screen.getByRole('button', { name: '결제하고 받기 $30.00' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '$30.00 결제하기' })).toBeTruthy();
   });
 
   it('calls purchaseTicket with the mock card payment and lands on 완료', async () => {
     const user = userEvent.setup();
     renderSheet();
-    await user.click(screen.getByRole('button', { name: '결제하고 받기 $30.00' }));
+    await user.click(screen.getByRole('button', { name: '$30.00 결제하기' }));
 
     await waitFor(() => expect(mocks.purchaseTicket).toHaveBeenCalledTimes(1));
     expect(mocks.purchaseTicket).toHaveBeenCalledWith(
@@ -66,14 +66,40 @@ describe('PurchaseSheet', () => {
     // A minted order remembers the token so the receipt can surface on the ticket detail.
     expect(mocks.rememberOrder).toHaveBeenCalledWith('o1', { eventId: '5', tokenId: '42' });
     expect(await screen.findByText('결제 완료 · 티켓을 받았어요')).toBeTruthy();
-    expect(screen.getByRole('link', { name: '내 티켓 보기' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: '영수증 보기' })).toHaveAttribute('href', '/tickets/42');
+  });
+
+  it('titles the sheet as a card payment', () => {
+    renderSheet();
+    expect(screen.getByRole('dialog', { name: '카드 결제' })).toBeTruthy();
+  });
+
+  it('lets the person leave a long wait, pointing at 내 티켓 rather than paying twice', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.purchaseTicket.mockResolvedValue({ orderId: 'o1', relayId: 'o1', status: 'sent' });
+      renderSheet();
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '$30.00 결제하기' }));
+      });
+      expect(screen.getByRole('button', { name: '닫기' })).toBeDisabled();
+      await act(async () => {
+        vi.advanceTimersByTime(46_000);
+      });
+      expect(screen.getByText('시간이 걸리고 있어요. 결제는 진행 중이고 티켓은 곧 내 티켓에 나타나요.')).toBeTruthy();
+      expect(screen.getByRole('button', { name: '닫기' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: '내 티켓에서 확인하기' })).toBeTruthy();
+      expect(mocks.purchaseTicket).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('follows the relay doc to 완료 when the mint is still in flight', async () => {
     const user = userEvent.setup();
     mocks.purchaseTicket.mockResolvedValue({ orderId: 'o1', relayId: 'o1', status: 'sent' });
     renderSheet();
-    await user.click(screen.getByRole('button', { name: '결제하고 받기 $30.00' }));
+    await user.click(screen.getByRole('button', { name: '$30.00 결제하기' }));
 
     // 'sent' keeps the wait open until the relay doc confirms the mint.
     await waitFor(() => expect(relayListener).not.toBeNull());
@@ -86,7 +112,7 @@ describe('PurchaseSheet', () => {
     const user = userEvent.setup();
     mocks.purchaseTicket.mockRejectedValue({ code: 'failed-precondition', details: { code: 'PRICE_MISMATCH' } });
     renderSheet();
-    await user.click(screen.getByRole('button', { name: '결제하고 받기 $30.00' }));
+    await user.click(screen.getByRole('button', { name: '$30.00 결제하기' }));
 
     expect(await screen.findByText('티켓 값이 바뀌었어요. 새로고침 후 다시 시도해 주세요')).toBeTruthy();
   });

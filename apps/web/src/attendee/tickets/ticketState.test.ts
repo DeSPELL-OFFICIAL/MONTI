@@ -27,17 +27,26 @@ describe('deriveTicketState', () => {
 
 describe('deriveDetailView', () => {
   it('offers the way in and the handover on a ticket waiting at the door', () => {
-    expect(deriveDetailView('before', null)).toEqual({ canEnter: true, canTransfer: true, refunded: false });
-    expect(deriveDetailView('before', 'deposited')).toEqual({ canEnter: true, canTransfer: true, refunded: false });
+    expect(deriveDetailView('before', null)).toEqual({ canEnter: true, canTransfer: true, refunded: false, entered: false });
+    expect(deriveDetailView('before', 'deposited')).toEqual({ canEnter: true, canTransfer: true, refunded: false, entered: false });
   });
 
   it('takes both actions away once the order is refunded', () => {
-    expect(deriveDetailView('before', 'refunded')).toEqual({ canEnter: false, canTransfer: false, refunded: true });
+    expect(deriveDetailView('before', 'refunded')).toEqual({ canEnter: false, canTransfer: false, refunded: true, entered: false });
+  });
+
+  it('reads a used ticket as 입장 완료, with neither action', () => {
+    expect(deriveDetailView('entered', null)).toEqual({ canEnter: false, canTransfer: false, refunded: false, entered: true });
+    expect(deriveDetailView('entered', 'released')).toEqual({ canEnter: false, canTransfer: false, refunded: false, entered: true });
+  });
+
+  it('trusts a released order over an indexer that has not seen the check-in yet', () => {
+    expect(deriveDetailView('before', 'released')).toEqual({ canEnter: false, canTransfer: false, refunded: false, entered: true });
   });
 
   it('offers neither on a ticket that is no longer waiting', () => {
-    expect(deriveDetailView('entered', 'released')).toEqual({ canEnter: false, canTransfer: false, refunded: false });
-    expect(deriveDetailView('cancelled', null)).toEqual({ canEnter: false, canTransfer: false, refunded: false });
+    expect(deriveDetailView('cancelled', null)).toEqual({ canEnter: false, canTransfer: false, refunded: false, entered: false });
+    expect(deriveDetailView('transferred', 'released')).toEqual({ canEnter: false, canTransfer: false, refunded: false, entered: false });
   });
 });
 
