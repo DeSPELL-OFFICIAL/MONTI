@@ -3,7 +3,7 @@ import type { TransactionReceipt } from 'viem';
 import { privateKeyToAccount, type PrivateKeyAccount } from 'viem/accounts';
 import { TREASURY_PK } from '../config.js';
 import { publicClient, sendRelayerTx } from './chain.js';
-import { relayGasLimitFor, relayerFees } from './relayer.js';
+import { isRetryableSendError, relayGasLimitFor, relayerFees } from './relayer.js';
 import { withLease } from './txLease.js';
 
 /**
@@ -15,8 +15,7 @@ import { withLease } from './txLease.js';
 const PRIVATE_KEY_RE = /^0x[0-9a-fA-F]{64}$/;
 const TREASURY_LEASE_DOC = 'treasury';
 const RECEIPT_TIMEOUT_MS = 30_000;
-/** 재전송해도 안전한 유일한 거절(우리 tx 가 밀렸다는 뜻이라 다시 보내도 쓰기는 한 번). */
-const NONCE_TOO_LOW = /nonce (is )?too low/i;
+/** 재시도 판정은 릴레이어와 같은 `isRetryableSendError`(우리 tx 가 풀에 못 들어간 거절만). */
 const NONCE_RETRY_DELAY_MS = 300;
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -78,7 +77,7 @@ export async function sendFromTreasury(req: TreasuryRequest): Promise<SentTreasu
     try {
       return await broadcast();
     } catch (error) {
-      if (!NONCE_TOO_LOW.test((error as Error)?.message ?? '')) throw error;
+      if (!isRetryableSendError(error)) throw error;
       await sleep(NONCE_RETRY_DELAY_MS);
       return broadcast();
     }

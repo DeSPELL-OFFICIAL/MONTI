@@ -126,6 +126,12 @@ describe('clients', () => {
   it('signs with the attester account', () => {
     expect(walletClient().account.address).toBe(ANVIL_ADDRESS);
   });
+
+  // 블록타임이 없는 체인 정의면 viem 기본 폴링이 4 s 라 영수증 대기가 블록(≈0.4–1 s)보다 3 s 늦다.
+  it('polls receipts every 1 s, not the 4 s viem default', () => {
+    expect(publicClient().pollingInterval).toBe(1_000);
+    expect(walletClient().pollingInterval).toBe(1_000);
+  });
 });
 
 describe('sendAttesterTx', () => {

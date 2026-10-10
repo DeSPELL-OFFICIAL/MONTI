@@ -19,8 +19,19 @@ export function deployment(): Deployment {
   return loadDeployment(Number(CHAIN_ID.value()));
 }
 
+/**
+ * 영수증 대기(`waitForTransactionReceipt`)의 폴링 간격. 체인 정의에 blockTime 이 없으면 viem 은
+ * 12 s 블록을 가정해 4 s 로 폴링한다 — Monad 블록(≈0.4–1 s)에 tx 가 들어가도 확인이 ~3 s 늦는다.
+ * 1 s 로 둔다(500 ms 는 RPC 부하 대비 이득이 작다).
+ */
+const POLLING_INTERVAL_MS = 1_000;
+
 export function publicClient() {
-  return createPublicClient({ chain: monadChain(), transport: http(RPC_URL.value()) });
+  return createPublicClient({
+    chain: monadChain(),
+    transport: http(RPC_URL.value()),
+    pollingInterval: POLLING_INTERVAL_MS,
+  });
 }
 
 export function walletClient() {
@@ -28,6 +39,7 @@ export function walletClient() {
     account: getAttesterAccount(),
     chain: monadChain(),
     transport: http(RPC_URL.value()),
+    pollingInterval: POLLING_INTERVAL_MS,
   });
 }
 
