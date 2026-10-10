@@ -4,6 +4,7 @@ import { error, info } from 'firebase-functions/logger';
 import {
   BaseError,
   ContractFunctionRevertedError,
+  TransactionReceiptNotFoundError,
   WaitForTransactionReceiptTimeoutError,
   encodeFunctionData,
   erc20Abi,
@@ -676,6 +677,24 @@ export async function settlementSweep(): Promise<void> {
   await sweepDeposited();
 }
 
+/**
+ * claim 영수증의 Ticket.Claimed 로그에서 tokenId 를 읽는다(relay.ts 콜러블과 같은 파싱).
+ * 영수증이 아직 없거나 되돌아갔거나 로그가 없으면 undefined — 스윕이 다음 틱에 다시 본다.
+ * "영수증 없음" 외의 RPC 오류는 그대로 올려 문서별 catch 가 로그만 남기게 한다.
+ */
+async function claimedTokenIdOf(hash: Hex): Promise<string | undefined> {
+  let receipt: TransactionReceipt;
+  try {
+    receipt = await publicClient().getTransactionReceipt({ hash });
+  } catch (cause) {
+    if (cause instanceof TransactionReceiptNotFoundError) return undefined;
+    throw cause;
+  }
+  if (receipt.status !== 'success') return undefined;
+  const logs = parseEventLogs({ abi: ticketAbi, logs: receipt.logs, eventName: 'Claimed' }) as { args: { tokenId?: bigint } }[];
+  return logs[0]?.args.tokenId?.toString();
+}
+
 async function sweepMintedPending(): Promise<void> {
   const cutoff = Timestamp.fromMillis(Date.now() - SWEEP_STALE_MS);
   const snapshot = await db
@@ -691,10 +710,22 @@ async function sweepMintedPending(): Promise<void> {
       const eventId = BigInt(doc.get('eventId') as string);
       const amountUsdCents = doc.get('amountUsdCents') as number;
       let tokenIdStr = doc.get('tokenId') as string | undefined;
-      // 발급이 'sent' 로 멈췄다 확정됐으면 claim 릴레이에 tokenId 가 찍혀 있다(대사가 채운다).
       if (!tokenIdStr) {
+        // 콜러블이 확정을 본 claim 이면 릴레이 문서에 tokenId 가 있다. 콜러블이 8 s 안에 못 보고
+        // 대사(reconcileRelays)가 confirmed 로 닫은 claim 은 tokenId 가 없다 — 대사는 상태만 닫는다.
+        // 그때는 claim 영수증의 Claimed 로그에서 직접 되찾아 주문에 박는다.
         const claim = await relayRef(doc.id).get();
         tokenIdStr = claim.get('tokenId') as string | undefined;
+        const claimTx = claim.get('txHash') as Hex | undefined;
+        if (!tokenIdStr && claimTx) {
+          tokenIdStr = await claimedTokenIdOf(claimTx);
+          if (tokenIdStr) {
+            await doc.ref.set({ tokenId: tokenIdStr }, { merge: true });
+            info('settlement.sweep.tokenIdRecovered', { orderId: doc.id, tokenId: tokenIdStr, txHash: claimTx });
+          } else {
+            info('settlement.sweep.noClaimedLog', { orderId: doc.id, txHash: claimTx });
+          }
+        }
       }
       if (!tokenIdStr) continue; // 아직 tokenId 모름 — 다음 틱에 다시 본다
       await depositForOrder(doc.ref, eventId, BigInt(tokenIdStr), amountUsdCents);

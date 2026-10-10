@@ -23,9 +23,23 @@ export function relayGasLimitFor(estimate: bigint): bigint {
 }
 /** 영수증을 기다리는 상한. registerIdentity 와 동일하게 맞춘다. */
 const RECEIPT_TIMEOUT_MS = 30_000;
-/** 재전송해도 안전한 유일한 거절. 우리 트랜잭션이 거절됐다는 뜻이라 다시 보내도 쓰기는 한 번이다. */
-const NONCE_TOO_LOW = /nonce (is )?too low/i;
+/**
+ * pending nonce 를 다시 읽어 재서명해도 안전한 거절. 둘 다 **우리 tx 가 풀에 들어가지 못했다**는
+ * 뜻이라 다시 보내도 쓰기는 한 번이다:
+ *  - `nonce too low`  — 그 nonce 가 이미 채굴됐다(직전 전송이 앞섰다).
+ *  - `underpriced`    — 같은 nonce 의 다른 tx 가 이미 풀에 있다(`replacement transaction underpriced`,
+ *                       동시 탭에서 pending 읽기가 한 박자 늦은 경우).
+ * `already known` 은 일부러 뺀다 — 바로 그 서명된 tx 가 이미 풀에 있다는 뜻이라, 새 nonce 로
+ * 재서명하면 같은 calldata 가 두 번 나간다(트레저리 예치/환불이면 이중 지급).
+ */
+const RETRYABLE_SEND_ERROR = /nonce (is )?too low|underpriced/i;
 const NONCE_RETRY_DELAY_MS = 300;
+
+/** 이 전송 실패가 pending nonce 재조회 + 재서명 1회로 다시 보내도 되는 거절인가. */
+export function isRetryableSendError(error: unknown): boolean {
+  const message = (error as { message?: unknown } | null | undefined)?.message;
+  return typeof message === 'string' && RETRYABLE_SEND_ERROR.test(message);
+}
 /**
  * 릴레이어 리스 문서(`system/relayer`). 어테스터와 **분리된 EOA** 라 nonce 레인이 겹치지 않게
  * 리스 문서도 따로 둔다(설계 §5). 리스 구현 자체는 공용 `txLease.ts` 의 `withLease` 하나뿐이라
@@ -102,8 +116,8 @@ export interface SentRelayed {
  * **pending nonce 명시 읽기 + 서명 + 브로드캐스트**만 한다 — 임계구역이 짧을수록 버스트
  * (~50건/10초)를 큐잉으로 흡수한다. 브로드캐스트가 끝나면 finality 를 기다리지 않고 반납한다.
  *
- * `nonce too low` 는 직전 전송이 아직 풀에 있어 우리 nonce 가 밀린 경우라 pending nonce 를
- * 다시 읽어 **1회만** 재시도한다(기존 `sendSerialized` 규약).
+ * `nonce too low`·`underpriced` 는 우리 nonce 가 밀린 경우라 pending nonce 를 다시 읽어
+ * **1회만** 재시도한다(`isRetryableSendError`, 기존 `sendSerialized` 규약).
  *
  * gasLimit 은 raw estimate 를 받아 `relayGasLimitFor`(+3%)로 얹는다 — Monad 는 한도로 과금하므로
  * 한도를 이보다 더 부풀리지 않는다. `to`/`data` 는 C2 가 claimFor/checkInFor 로 인코딩해 넘긴다.
@@ -135,7 +149,7 @@ export async function sendRelayed(req: RelayedRequest): Promise<SentRelayed> {
     try {
       return await broadcast();
     } catch (error) {
-      if (!NONCE_TOO_LOW.test((error as Error)?.message ?? '')) throw error;
+      if (!isRetryableSendError(error)) throw error;
       await sleep(NONCE_RETRY_DELAY_MS);
       return broadcast();
     }

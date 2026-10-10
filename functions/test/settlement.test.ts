@@ -9,6 +9,7 @@ import {
   keccak256,
   type Hex,
 } from 'viem';
+import { ticketAbi } from '@monti/shared';
 import { createFakeFirestore } from './helpers/fakeFirestore.js';
 import { reasonHashOf, settlementAbi, tagToBytes32 } from '../src/lib/settlementAbi.js';
 
@@ -53,6 +54,7 @@ const readContract = vi.fn(async ({ functionName }: { functionName: string }) =>
 });
 const estimateContractGas = vi.fn(async () => 200_000n);
 const waitForTransactionReceipt = vi.fn(async () => ({ status: 'success', logs: [] as unknown[] }));
+const getTransactionReceipt = vi.fn(async (): Promise<unknown> => ({ status: 'success', logs: [] as unknown[] }));
 const sendRelayed = vi.fn(async () => ({ hash: TX, nonce: 3, gasLimit: 206_000n, sentAt: Date.now() }));
 const sendFromTreasury = vi.fn(async () => ({ hash: DEP_TX, nonce: 5, gasLimit: 103_000n, sentAt: Date.now() }));
 const waitTreasury = vi.fn(async () => ({ status: 'success', logs: [] }));
@@ -69,7 +71,7 @@ vi.mock('../src/lib/db.js', () => ({
   USERS: 'users',
 }));
 vi.mock('../src/lib/chain.js', () => ({
-  publicClient: () => ({ readContract, estimateContractGas, waitForTransactionReceipt }),
+  publicClient: () => ({ readContract, estimateContractGas, waitForTransactionReceipt, getTransactionReceipt }),
   deployment: () => ({ ticket: TICKET, settlementVault: VAULT, usdc: USDC }),
 }));
 vi.mock('../src/lib/relayer.js', () => ({ sendRelayed, getRelayerAccount: () => ({ address: RELAYER }) }));
@@ -165,6 +167,8 @@ beforeEach(() => {
   estimateContractGas.mockResolvedValue(200_000n);
   waitForTransactionReceipt.mockClear();
   waitForTransactionReceipt.mockResolvedValue({ status: 'success', logs: [] });
+  getTransactionReceipt.mockClear();
+  getTransactionReceipt.mockResolvedValue({ status: 'success', logs: [] });
   sendRelayed.mockClear();
   sendRelayed.mockResolvedValue({ hash: TX, nonce: 3, gasLimit: 206_000n, sentAt: Date.now() });
   sendFromTreasury.mockClear();
@@ -318,7 +322,63 @@ describe('settlementSweep', () => {
     expect(sendFromTreasury).toHaveBeenCalledTimes(1);
     expect(fake.snapshot(`orders/${ACCOUNT}:${EVENT_ID}:0`).get('status')).toBe('deposited');
   });
+
+  // 대사(reconcileRelays)는 claim 릴레이를 confirmed 로만 닫고 tokenId 를 쓰지 않는다 →
+  // 스윕이 claim 영수증의 Claimed 로그에서 직접 tokenId 를 되찾아야 주문이 영영 멈추지 않는다.
+  it('recovers tokenId from the claim receipt when neither the order nor the relay has it', async () => {
+    const id = `${ACCOUNT}:${EVENT_ID}:0`;
+    fake.write(`orders/${id}`, { status: 'minted-pending', eventId: EVENT_ID.toString(), amountUsdCents: 3000, relayId: id, updatedAt: stale() });
+    fake.write(`relays/${id}`, { kind: 'claim', status: 'confirmed', txHash: TX });
+    getTransactionReceipt.mockResolvedValue({ status: 'success', logs: [{ address: TICKET, ...claimedLog(TOKEN_ID) }] });
+
+    await settlement.settlementSweep();
+
+    expect(getTransactionReceipt).toHaveBeenCalledWith({ hash: TX });
+    expect(sendFromTreasury).toHaveBeenCalledTimes(1);
+    const order = fake.snapshot(`orders/${id}`);
+    expect(order.get('tokenId')).toBe(TOKEN_ID.toString());
+    expect(order.get('status')).toBe('deposited');
+  });
+
+  it('keeps skipping when the claim receipt has no Claimed log', async () => {
+    const id = `${ACCOUNT}:${EVENT_ID}:0`;
+    fake.write(`orders/${id}`, { status: 'minted-pending', eventId: EVENT_ID.toString(), amountUsdCents: 3000, relayId: id, updatedAt: stale() });
+    fake.write(`relays/${id}`, { kind: 'claim', status: 'confirmed', txHash: TX });
+    getTransactionReceipt.mockResolvedValue({ status: 'success', logs: [] });
+
+    await settlement.settlementSweep();
+
+    expect(sendFromTreasury).not.toHaveBeenCalled();
+    const order = fake.snapshot(`orders/${id}`);
+    expect(order.get('tokenId')).toBeUndefined();
+    expect(order.get('status')).toBe('minted-pending');
+  });
+
+  it('does not read a receipt when the claim relay has no tx hash yet', async () => {
+    const id = `${ACCOUNT}:${EVENT_ID}:0`;
+    fake.write(`orders/${id}`, { status: 'minted-pending', eventId: EVENT_ID.toString(), amountUsdCents: 3000, relayId: id, updatedAt: stale() });
+    fake.write(`relays/${id}`, { kind: 'claim', status: 'pending' });
+
+    await settlement.settlementSweep();
+
+    expect(getTransactionReceipt).not.toHaveBeenCalled();
+    expect(sendFromTreasury).not.toHaveBeenCalled();
+  });
 });
+
+/** claimFor 영수증에 넣을 Ticket.Claimed 로그(tokenId 복구 확인용). */
+function claimedLog(tokenId: bigint) {
+  return {
+    topics: encodeEventTopics({ abi: ticketAbi, eventName: 'Claimed', args: { tokenId, eventId: EVENT_ID, to: ACCOUNT } }),
+    data: encodeAbiParameters([{ type: 'uint8' }], [0]),
+    blockNumber: 1n,
+    blockHash: `0x${'bb'.repeat(32)}`,
+    transactionHash: TX,
+    transactionIndex: 0,
+    logIndex: 0,
+    removed: false,
+  };
+}
 
 /** settleNoShows 영수증에 넣을 NoShowSettled 로그(토큰 반영 확인용). */
 function noShowLog(tokenId: bigint) {

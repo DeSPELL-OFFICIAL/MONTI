@@ -43,6 +43,7 @@ vi.mock('../src/lib/db.js', () => ({
 
 const {
   getRelayerAccount,
+  isRetryableSendError,
   relayerFees,
   sendRelayed,
   RELAYER_MAX_PRIORITY_FEE_WEI,
@@ -128,6 +129,36 @@ describe('relayerFees — 순수 수수료 정책 (설계 §5)', () => {
   });
 });
 
+describe('isRetryableSendError — pending nonce 를 다시 읽어 재서명해도 쓰기가 한 번인 거절만', () => {
+  it.each([
+    // 우리 tx 가 거절됐다(같은 nonce 가 이미 쓰였거나 풀에 다른 tx 가 있다) → 새 nonce 로 다시 보내도 안전.
+    ['nonce too low', true],
+    ['Nonce is too low', true],
+    ['Details: nonce too low\nVersion: viem@2', true],
+    ['replacement transaction underpriced', true],
+    ['REPLACEMENT TRANSACTION UNDERPRICED', true],
+    ['transaction underpriced', true],
+    // "already known" = 바로 그 서명된 tx 가 이미 풀에 있다(트랜스포트 재시도 등). 새 nonce 로
+    // 재서명하면 같은 calldata 가 두 번 나간다(트레저리 예치/환불이면 이중 지급) → 재시도 금지.
+    ['already known', false],
+    ['Details: already known', false],
+    ['transaction already imported', false],
+    // nonce 가 앞서 있다 = pending 읽기가 틀린 게 아니라 RPC/노드 문제. 다시 읽어도 같은 값.
+    ['nonce too high', false],
+    ['insufficient funds for gas * price + value', false],
+    ['execution reverted', false],
+    ['', false],
+  ])('%j → %s', (message, expected) => {
+    expect(isRetryableSendError(new Error(message))).toBe(expected);
+  });
+
+  it('tolerates non-Error throwables', () => {
+    expect(isRetryableSendError(undefined)).toBe(false);
+    expect(isRetryableSendError('nonce too low')).toBe(false);
+    expect(isRetryableSendError({ message: 'replacement transaction underpriced' })).toBe(true);
+  });
+});
+
 describe('getRelayerAccount', () => {
   it('derives the relayer account from RELAYER_PK', () => {
     expect(getRelayerAccount().address).toBe(ANVIL_ADDRESS);
@@ -196,6 +227,46 @@ describe('sendRelayed', () => {
     expect(parseTransaction(raw as Hex).nonce).toBe(6);
     // nonce 를 두 번 이상 읽었다 = 재시도가 pending nonce 를 다시 읽었다.
     expect(calls.filter((c) => c.method === 'eth_getTransactionCount').length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('retries once on replacement-transaction-underpriced (stale pending nonce under concurrent taps)', async () => {
+    let nonceReads = 0;
+    let sends = 0;
+    stubRpc({
+      eth_chainId: () => `0x${MONAD_TESTNET_CHAIN_ID.toString(16)}`,
+      eth_getBlockByNumber: () => block(BASE_FEE),
+      eth_getTransactionCount: () => {
+        nonceReads += 1;
+        return nonceReads === 1 ? '0x5' : '0x6';
+      },
+      eth_sendRawTransaction: (params) => {
+        sends += 1;
+        const tx = parseTransaction(params[0] as Hex);
+        if ((tx.nonce ?? 0) < 6) return { __rpcError: { code: -32000, message: 'replacement transaction underpriced' } };
+        return TX_HASH;
+      },
+    });
+
+    const sent = await sendRelayed({ to: TICKET, data: DATA, gasLimit: 200_000n });
+
+    expect(sent.nonce).toBe(6);
+    expect(sends).toBe(2);
+  });
+
+  it('does not retry already-known (the same signed tx is already pooled)', async () => {
+    let sends = 0;
+    stubRpc({
+      eth_chainId: () => `0x${MONAD_TESTNET_CHAIN_ID.toString(16)}`,
+      eth_getBlockByNumber: () => block(BASE_FEE),
+      eth_getTransactionCount: () => '0x5',
+      eth_sendRawTransaction: () => {
+        sends += 1;
+        return { __rpcError: { code: -32000, message: 'already known' } };
+      },
+    });
+
+    await expect(sendRelayed({ to: TICKET, data: DATA, gasLimit: 200_000n })).rejects.toThrow();
+    expect(sends).toBe(1);
   });
 
   it('releases the lease when the broadcast fails with a non-retryable error', async () => {
