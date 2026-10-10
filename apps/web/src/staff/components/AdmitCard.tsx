@@ -48,7 +48,6 @@ export interface AdmitCardProps {
   tierLabel?: string;
   seat?: string;
   entryNumber?: number;
-  blockNumber?: bigint;
   finalized: boolean;
   deviceChangedRecently?: boolean;
   onDone?: () => void;
@@ -72,7 +71,6 @@ export function AdmitCard({
   tierLabel,
   seat,
   entryNumber,
-  blockNumber,
   finalized,
   deviceChangedRecently,
   onDone,
@@ -96,11 +94,6 @@ export function AdmitCard({
               <span>{copy.admit.entryLabel}</span>
               <span className="gate-card__value">{fmt(copy.admit.entryValue, { count: entryNumber })}</span>
             </>
-          )}
-          {blockNumber === undefined ? null : (
-            <span>
-              {copy.admit.blockLabel} {String(blockNumber)}
-            </span>
           )}
         </p>
         <p className="gate-card__line">{finalized ? copy.admit.settled : copy.admit.recording}</p>

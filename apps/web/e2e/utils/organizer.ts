@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { createPublicClient, defineChain, http, type Hex } from 'viem';
 import { ticketAbi } from '@monti/shared';
 import { timed } from '../fixtures/timings';
+import { shot } from './shots';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const POSTER = resolve(HERE, '../assets/poster.jpg');
@@ -136,6 +137,8 @@ function futureLocal(days: number, hour: number): string {
 export async function createOrganizerAndEvent(page: Page, spec: EventSpec): Promise<CreateResult> {
   return timed(spec.personaId, 'create-event', async () => {
     await gotoCreate(page);
+    await page.waitForTimeout(1000);
+    await shot(page, 'org-create-form-empty');
 
     // R2 change (was: addLocatorHandler auto-dismiss mid-action): the creation scene now renders
     // **inert** behind a resume sheet whenever a prior draft exists — `<div className="scene"
@@ -219,11 +222,14 @@ export async function createOrganizerAndEvent(page: Page, spec: EventSpec): Prom
     }
 
     await expect(createBtn).toBeEnabled({ timeout: 30_000 });
+    await shot(page, 'org-create-form-filled');
     // The sticky action bar can sit under the 더 설정하기 <details>, which intercepts the pointer;
     // fire the button's own click so the publish starts regardless of the overlap.
     const doneRe = /\/org\/new\/done\/(\d+)/;
     const confirming = page.getByText(C.createConfirming);
     await createBtn.evaluate((el) => (el as HTMLButtonElement).click());
+    await page.waitForTimeout(1200);
+    await shot(page, 'org-create-submitting');
     const deadline = Date.now() + 6 * 60 * 1000;
     while (Date.now() < deadline && !doneRe.test(page.url())) {
       // A slow on-chain create makes the client's wait give up into "만드는 중이에요…", which keeps
@@ -237,6 +243,8 @@ export async function createOrganizerAndEvent(page: Page, spec: EventSpec): Prom
     }
     await expect(page).toHaveURL(doneRe, { timeout: 90_000 });
     const eventId = page.url().match(doneRe)?.[1] ?? null;
+    await page.waitForTimeout(1500);
+    await shot(page, 'org-create-done');
     return { eventId, blocked: false };
   });
 }
@@ -303,7 +311,10 @@ export async function publishEvent(page: Page, personaId: string, eventId: strin
           `Ticket ${TICKET_ADDRESS} — re-deploy/re-sync the Envio indexer to chain head before the persona run.`,
       );
     }
+    await shot(page, 'org-dashboard-before-publish');
     await publishBtn.evaluate((el) => (el as HTMLButtonElement).click());
+    await page.waitForTimeout(800);
+    await shot(page, 'org-publish-confirm');
     await page.getByRole('button', { name: C.publishConfirm, exact: true }).click();
     // The publish op's UI wait can time out; assert the on-chain status directly instead of the copy.
     // Poll eventStatus until it reads Published (1), with a short retry window.

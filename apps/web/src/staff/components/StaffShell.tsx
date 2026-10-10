@@ -14,6 +14,9 @@ const FRESH_MS = 60_000;
  * 읽는다.
  */
 export function snapshotAgeLine(copy: StaffCopy, snapshotAgeMs: number): string {
+  // No list on this device yet (`snapshotAgeMs` answers +∞): there is no age to put a number on,
+  // and "Infinity분 전" is what the division would print.
+  if (!Number.isFinite(snapshotAgeMs)) return copy.shell.snapshotNone;
   return snapshotAgeMs < FRESH_MS
     ? copy.shell.snapshotFresh
     : fmt(copy.shell.snapshotAge, { minutes: Math.floor(snapshotAgeMs / FRESH_MS) });
@@ -23,7 +26,6 @@ export interface StaffShellProps {
   gateName: string;
   eventTitle: string;
   staffName?: string;
-  blockNumber?: bigint;
   finalized: boolean;
   online: boolean;
   snapshotAgeMs: number;
@@ -51,7 +53,6 @@ export function StaffShell({
   gateName,
   eventTitle,
   staffName,
-  blockNumber,
   finalized,
   online,
   snapshotAgeMs,
@@ -81,11 +82,6 @@ export function StaffShell({
         </p>
         <p className="gate__stage">
           <span className="gate__stage-word">{stage}</span>
-          {blockNumber === undefined ? null : (
-            <span className="gate__block">
-              {copy.shell.blockLabel} {String(blockNumber)}
-            </span>
-          )}
         </p>
         <p className="gate__list">
           <span>{copy.shell.snapshotLabel}</span>

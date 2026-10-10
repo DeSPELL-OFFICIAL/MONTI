@@ -5,7 +5,8 @@ import { useCopy } from '../../shared/i18n';
 import { MAX_DISPLAY_NAME_CHARS, saveUserProfile } from '../../shared/api/firestore';
 import { acceptPendingOffers } from '../transfer/offers';
 import { takeInvite } from '../transfer/InviteLanding';
-import { clearSignup } from './useSignup';
+import { safeReturnTo } from '../../shared/returnTo';
+import { clearSignup, readSignup } from './useSignup';
 
 /**
  * The end of signup: the phone number, the lock and this phone are all attached.
@@ -28,6 +29,8 @@ export function Done() {
   async function finish(): Promise<void> {
     // Nothing in there is needed again, and leaving it behind would let a reload drop the
     // attendee back into a half-finished signup.
+    // Read before the clear: a claim link opened signed out is where this person was going.
+    const next = safeReturnTo(readSignup().next, '/');
     clearSignup();
     const invited = takeInvite() !== null;
     setBusy(true);
@@ -38,7 +41,7 @@ export function Done() {
     // Awaited: the inbox this lands on queries the same rows, and a ticket collected a moment
     // later would still be listed there with a 받기 button that answers "no longer there".
     await acceptPendingOffers().catch(() => undefined);
-    navigate(invited ? '/tickets/inbox' : '/');
+    navigate(invited ? '/tickets/inbox' : next);
   }
 
   return (

@@ -1,7 +1,8 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { Alert, Button, Field, OpProgress, Sheet } from '../../shared/ui';
-import { useCopy } from '../../shared/i18n';
+import { OP_TIMEOUT_SECONDS } from '../../shared/ui/OpProgress';
+import { fmt, useCopy } from '../../shared/i18n';
 import { formatUsdCents } from '../../shared/money';
 import { usePurchase } from './usePurchase';
 
@@ -15,16 +16,37 @@ export interface PurchaseSheetProps {
 /**
  * The mock card sheet and the determinate purchase wait (Batch F). It opens on a card form that
  * says in plain words this is a test charge — no real money moves — then runs `purchaseTicket` and
- * shows the 결제 확인 → 티켓 발급 → 보관 완료 steps over {@link OpProgress}. On success it points at 내
- * 티켓, where the receipt and refund live; a determinate refusal shows its sentence and the retry.
+ * shows the 결제 확인 → 티켓 발급 → 결제 금액 보관 steps over {@link OpProgress}. On success it points at
+ * the new ticket's receipt; a determinate refusal shows its sentence and the retry.
  * The card number is never read — it is a demo field — so nothing here collects a real credential.
+ *
+ * Past {@link OP_TIMEOUT_SECONDS} the wait stops holding the person: 닫기 opens up and the way out is
+ * 내 티켓, where the ticket lands on its own. It is deliberately not a second purchase — a re-run is
+ * a second charge, not an idempotent retry — so the "retry" is to go and look.
  */
 export function PurchaseSheet({ eventId, tier, amountUsdCents, onClose }: PurchaseSheetProps) {
   const copy = useCopy();
+  const navigate = useNavigate();
   const purchase = usePurchase({ eventId, tier, amountUsdCents });
   const [card, setCard] = useState('');
+  const [slow, setSlow] = useState(false);
   const busy = purchase.phase === 'paying' || purchase.phase === 'minting';
   const labels: [string, string, string] = [copy.purchase.steps.pay, copy.purchase.steps.mint, copy.purchase.steps.store];
+  const amount = formatUsdCents(amountUsdCents);
+
+  useEffect(() => {
+    if (!busy) {
+      setSlow(false);
+      return undefined;
+    }
+    const timer = setTimeout(() => setSlow(true), OP_TIMEOUT_SECONDS * 1000);
+    return () => clearTimeout(timer);
+  }, [busy]);
+
+  const checkTickets = (): void => {
+    onClose();
+    navigate('/tickets');
+  };
 
   return (
     <Sheet label={copy.purchase.sheetTitle} onDismiss={onClose}>
@@ -36,13 +58,18 @@ export function PurchaseSheet({ eventId, tier, amountUsdCents, onClose }: Purcha
       {purchase.phase === 'done' ? (
         <>
           <Alert tone="info">{copy.purchase.done}</Alert>
-          <Link to="/tickets" className="btn btn--primary btn--link" onClick={onClose}>
-            {copy.purchase.toTickets}
+          {/* The receipt lives on the ticket itself; without a token id yet, 내 티켓 is where it is. */}
+          <Link
+            to={purchase.tokenId !== undefined ? `/tickets/${purchase.tokenId}` : '/tickets'}
+            className="btn btn--primary btn--link"
+            onClick={onClose}
+          >
+            {purchase.tokenId !== undefined ? copy.purchase.toReceipt : copy.purchase.toTickets}
           </Link>
         </>
       ) : (
         <>
-          <p className="purchase-amount">{copy.purchase.amountLabel}: {formatUsdCents(amountUsdCents)}</p>
+          <p className="purchase-amount">{copy.purchase.amountLabel}: {amount}</p>
           <p className="muted">{copy.purchase.testNotice}</p>
 
           {/* A demo card field: never read, never sent. It is here so the step reads as a payment. */}
@@ -57,12 +84,20 @@ export function PurchaseSheet({ eventId, tier, amountUsdCents, onClose }: Purcha
           </Field>
 
           {purchase.phase === 'error' && purchase.error ? <Alert tone="error">{purchase.error}</Alert> : null}
-          {busy ? <OpProgress phase={purchase.phase === 'minting' ? 'confirming' : 'saving'} labels={labels} /> : null}
+          {busy ? (
+            <OpProgress
+              phase={purchase.phase === 'minting' ? 'confirming' : 'saving'}
+              labels={labels}
+              timeoutMessage={copy.purchase.slow}
+              onLater={checkTickets}
+              laterLabel={copy.purchase.slowCheck}
+            />
+          ) : null}
 
           <Button disabled={busy} onClick={() => void purchase.run()}>
-            {busy ? copy.purchase.paying : `${copy.purchase.pay} ${formatUsdCents(amountUsdCents)}`}
+            {busy ? copy.purchase.paying : fmt(copy.purchase.pay, { amount })}
           </Button>
-          <Button variant="ghost" disabled={busy} onClick={onClose}>{copy.common.close}</Button>
+          <Button variant="ghost" disabled={busy && !slow} onClick={onClose}>{copy.common.close}</Button>
         </>
       )}
     </Sheet>

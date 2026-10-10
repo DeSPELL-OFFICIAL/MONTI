@@ -7,6 +7,10 @@ import { ADMIN, USERS } from '../fixtures/personas';
 import { closePersona, ensureAccount, openPersona, type PersonaSession } from '../utils/session';
 import { createOrganizerAndEvent, publishEvent } from '../utils/organizer';
 import { recordEvent } from '../utils/scenario-state';
+import { shot } from '../utils/shots';
+
+/** Ticket price in USD set in 정산 설정 and asserted on the CTA. Default unchanged ($30). */
+const PRICE = process.env.E2E_PRICE_USD ?? '30';
 
 /**
  * Batch H — Run 5. The WHOLE settlement money path, steps 1→4, in ONE in-process command.
@@ -106,7 +110,13 @@ test('55 · settlement chain — organiser + attendee + staff, one process', asy
 
   try {
     const page = admin.page;
+    await page.goto('/');
+    await page.waitForTimeout(3000);
+    await shot(page, 'landing');
     await ensureAccount(admin);
+    await page.goto('/org');
+    await page.waitForTimeout(3000);
+    await shot(page, 'org-home-before-create');
 
     // =========================== STEP 1 — organiser policy + publish ===========================
     const b0 = await relayerMon().catch(() => 0n);
@@ -144,7 +154,8 @@ test('55 · settlement chain — organiser + attendee + staff, one process', asy
     console.log(`[55] STEP1 price field ready=${priceReady} in ${diag.priceFieldRenderMs}ms (fallback under test)`);
     expect(priceReady, '정산 설정 price field must render (chain fallback)').toBe(true);
 
-    await priceInput.first().fill('30');
+    await shot(page, 'org-dashboard-settlement-empty');
+    await priceInput.first().fill(PRICE);
     const addRow = page.getByRole('button', { name: '수령인 추가', exact: true });
     for (let i = 0; i < RECIPIENTS.length; i++) { await addRow.click().catch(() => undefined); await page.waitForTimeout(300); }
     const rows = page.locator('li.split-row');
@@ -161,7 +172,11 @@ test('55 · settlement chain — organiser + attendee + staff, one process', asy
     await page.waitForTimeout(800);
     diag.sumText = (await card.locator('.settlement-sum').first().innerText().catch(() => '')) || '';
     expect(await confirmBtn.isDisabled().catch(() => true), '정산 규칙 확정 must be enabled').toBe(false);
+    await shot(page, 'org-policy-form-filled');
+    const policyClickAt = Date.now();
     await confirmBtn.click();
+    await page.waitForTimeout(1000);
+    await shot(page, 'org-policy-confirming');
     const publicLink = card.getByRole('link', { name: '정산 내역 보기', exact: true });
     const confirmedChip = card.getByText('정산 규칙 확정됨', { exact: true });
     let policyConfirmed = false;
@@ -171,13 +186,20 @@ test('55 · settlement chain — organiser + attendee + staff, one process', asy
       await page.waitForTimeout(3000);
     }
     diag.policyConfirmed = policyConfirmed;
+    diag.policyLatencyMs = Date.now() - policyClickAt;
+    await shot(page, 'org-policy-confirmed');
     const b2 = await relayerMon().catch(() => 0n);
     diag.costSetPolicy = fmt(b1 - b2);
     console.log(`[55] STEP1 policy confirmed=${policyConfirmed} setPolicy=${fmt(b1 - b2)} MON`);
     expect(policyConfirmed, 'relaySetPolicy must confirm').toBe(true);
 
+    const publishAt = Date.now();
     const publishResult = await publishEvent(page, ADMIN.id, eventId);
     diag.publishResult = publishResult;
+    diag.publishLatencyMs = Date.now() - publishAt;
+    await page.goto(`/org/events/${eventId}`);
+    await page.waitForTimeout(3000);
+    await shot(page, 'org-dashboard-published');
     recordEvent('free', { id: eventId, published: publishResult === 'published', title: '정산 데모 공연 H5' });
     const b3 = await relayerMon().catch(() => 0n);
     diag.costPublish = fmt(b2 - b3);
@@ -211,21 +233,32 @@ test('55 · settlement chain — organiser + attendee + staff, one process', asy
       })();
     });
     await ensureAccount(userA);
+    await aPage.goto(`/events/${eventId}`);
+    await aPage.waitForTimeout(4000);
+    await shot(aPage, 'attendee-event-detail');
     await aPage.goto(`/claim/${eventId}`);
     const payCta = aPage.getByRole('button', { name: /결제하고 받기/ });
     await expect(payCta).toBeVisible({ timeout: 60_000 });
     await expect(payCta).toBeEnabled({ timeout: 30_000 });
     diag.ctaText = (await payCta.innerText()).trim();
-    expect(diag.ctaText as string, 'CTA shows $30').toContain('$30');
+    await shot(aPage, 'attendee-claim-paid-cta');
+    expect(diag.ctaText as string, `CTA shows $${PRICE}`).toContain(`$${PRICE}`);
     await payCta.click();
-    const sheet = aPage.getByRole('dialog', { name: '결제' });
+    const sheet = aPage.getByRole('dialog', { name: '카드 결제' });
     await expect(sheet).toBeVisible({ timeout: 10_000 });
+    await aPage.waitForTimeout(800);
+    await shot(aPage, 'attendee-payment-sheet');
     await aPage.getByPlaceholder('0000 0000 0000 0000 (테스트)').fill('4242424242424242');
-    const payBtn = sheet.getByRole('button', { name: /결제하고 받기/ });
+    // The sheet's own button reads "$30.00 결제하기"; the claim CTA behind it keeps 결제하고 받기.
+    const payBtn = sheet.getByRole('button', { name: /결제하기/ });
     await expect(payBtn).toBeEnabled({ timeout: 10_000 });
+    await shot(aPage, 'attendee-payment-card-filled');
+    const payClickAt = Date.now();
     await payBtn.click();
+    await aPage.waitForTimeout(1000);
+    await shot(aPage, 'attendee-payment-processing');
     const doneAlert = sheet.getByText('결제 완료 · 티켓을 받았어요', { exact: true });
-    const toTickets = sheet.getByRole('link', { name: '내 티켓 보기', exact: true });
+    const toTickets = sheet.getByRole('link', { name: /^(영수증 보기|내 티켓 보기)$/ });
     let purchased = false;
     const pd = Date.now() + 180_000;
     while (Date.now() < pd) {
@@ -233,7 +266,9 @@ test('55 · settlement chain — organiser + attendee + staff, one process', asy
       await aPage.waitForTimeout(2000);
     }
     diag.purchased = purchased; diag.wire = { ...wire };
-    console.log(`[55] STEP2 purchased=${purchased} wire=${JSON.stringify(wire)}`);
+    diag.purchaseLatencyMs = Date.now() - payClickAt;
+    await shot(aPage, 'attendee-payment-done');
+    console.log(`[55] STEP2 purchased=${purchased} latency=${diag.purchaseLatencyMs}ms wire=${JSON.stringify(wire)}`);
     expect(purchased, 'purchase reaches 결제 완료').toBe(true);
     expect(wire.tokenId, 'tokenId captured from purchaseTicket').toBeTruthy();
     const tokenId = wire.tokenId!;
@@ -242,12 +277,16 @@ test('55 · settlement chain — organiser + attendee + staff, one process', asy
     // Go straight to the detail by captured tokenId (the LIST has no chain fallback).
     await aPage.goto(`/tickets/${tokenId}`);
     await expect(aPage.getByRole('heading', { name: '영수증', exact: true })).toBeVisible({ timeout: 45_000 });
-    const heldLine = aPage.getByText('보관 중 · 입장하면 정산돼요', { exact: true });
+    const heldLine = aPage.getByText('결제 금액 보관 중 · 입장하면 자동으로 나눠 보내요', { exact: true });
     let held = false; const hd = Date.now() + 60_000;
     while (Date.now() < hd) { if (await heldLine.isVisible().catch(() => false)) { held = true; break; } await aPage.waitForTimeout(2000); }
     diag.receiptHeld = held;
     console.log(`[55] STEP2 receipt 보관 중=${held}`);
     await aPage.screenshot({ path: `${ARTIFACTS}/55-step2-receipt-held.png`, fullPage: true }).catch(() => undefined);
+    await shot(aPage, 'attendee-receipt-held');
+    await aPage.goto('/tickets');
+    await aPage.waitForTimeout(4000);
+    await shot(aPage, 'attendee-ticket-list');
     const b4 = await relayerMon().catch(() => 0n);
     diag.costPurchase = fmt(b3 - b4);
     console.log(`[55] STEP2 purchase(mint+deposit) relayer=${fmt(b3 - b4)} MON`);
@@ -284,10 +323,12 @@ test('55 · settlement chain — organiser + attendee + staff, one process', asy
     const eventField = page.getByLabel('행사 번호');
     await expect(eventField).toBeVisible({ timeout: 30_000 });
     await eventField.fill(eventId);
+    await shot(page, 'staff-setup-event-number');
     await page.getByRole('button', { name: '이 행사에 등록 요청', exact: true }).click();
     await expect(page.getByText('등록을 요청했어요. 관리자가 승인하면 이 화면이 저절로 넘어가요.', { exact: true })
       .or(page.getByText('게이트 계정 주소', { exact: true })).first()).toBeVisible({ timeout: 45_000 });
     await page.waitForTimeout(2000);
+    await shot(page, 'staff-setup-pending');
     if (!gateAccount) {
       // fallback: read the shown account value off the setup screen
       gateAccount = (await page.locator('input[value^="0x"]').first().inputValue().catch(() => '')) || undefined;
@@ -301,27 +342,47 @@ test('55 · settlement chain — organiser + attendee + staff, one process', asy
     await expect(page.getByRole('heading', { name: '승인을 기다리는 단말기', exact: true })).toBeVisible({ timeout: 30_000 });
     const registerBtn = page.getByRole('button', { name: '등록', exact: true }).first();
     await expect(registerBtn).toBeVisible({ timeout: 30_000 });
+    await shot(page, 'org-gates-pending-register');
+    const registerClickAt = Date.now();
     await registerBtn.click();
     console.log('[55] STEP3-B registerGate sent; polling chain for gateId');
     let gateId = 0n; const gd = Date.now() + 120_000;
     while (Date.now() < gd) { gateId = await gateOf(gateAccount as Hex).catch(() => 0n); if (gateId !== 0n) break; await page.waitForTimeout(4000); }
     diag.gateId = gateId.toString();
-    console.log(`[55] STEP3-B registered gateId=${gateId}`);
+    diag.registerLatencyMs = Date.now() - registerClickAt;
+    await shot(page, 'org-gates-after-register');
+    console.log(`[55] STEP3-B registered gateId=${gateId} in ${diag.registerLatencyMs}ms`);
     expect(gateId, 'registerGate landed on chain').not.toBe(0n);
     const b5 = await relayerMon().catch(() => 0n);
     diag.costRegister = fmt(b4 - b5);
 
-    // Inject the registered gate so the 열기 button renders, then open it (real write).
-    injectGate = { id: gateId.toString(), account: gateAccount as string, isOpen: false };
-    await page.goto(`/org/events/${eventId}/gates`);
+    // The registered list now has a chain fallback (gateInfo probing) and the indexer is live, so
+    // first try the REAL list; inject the registered gate only if 열기 does not render natively.
     const openBtn = page.getByRole('button', { name: '열기', exact: true }).first();
+    let nativeOpen = false; const nd = Date.now() + 60_000;
+    while (Date.now() < nd) {
+      await page.goto(`/org/events/${eventId}/gates`);
+      if (await openBtn.waitFor({ state: 'visible', timeout: 10_000 }).then(() => true).catch(() => false)) { nativeOpen = true; break; }
+      await page.waitForTimeout(3000);
+    }
+    diag.gateListNative = nativeOpen;
+    if (!nativeOpen) {
+      console.log('[55] STEP3-B 열기 not rendered natively in 60s — injecting gate row (fallback)');
+      injectGate = { id: gateId.toString(), account: gateAccount as string, isOpen: false };
+      await page.goto(`/org/events/${eventId}/gates`);
+    }
     await expect(openBtn).toBeVisible({ timeout: 30_000 });
+    await shot(page, 'org-gates-registered-open-button');
+    const openClickAt = Date.now();
     await openBtn.click();
     console.log('[55] STEP3-B openGate sent; polling chain for open=true');
     let opened = false; const od = Date.now() + 120_000;
     while (Date.now() < od) { if (await gateOpen(gateId).catch(() => false)) { opened = true; break; } await page.waitForTimeout(4000); }
-    injectGate.isOpen = true;
+    if (injectGate) injectGate.isOpen = true;
     diag.gateOpened = opened;
+    diag.openLatencyMs = Date.now() - openClickAt;
+    await page.waitForTimeout(2000);
+    await shot(page, 'org-gates-opened');
     const b6 = await relayerMon().catch(() => 0n);
     diag.costOpen = fmt(b5 - b6);
     console.log(`[55] STEP3-B gate open=${opened} openGate=${fmt(b5 - b6)} MON`);
@@ -330,23 +391,27 @@ test('55 · settlement chain — organiser + attendee + staff, one process', asy
     // PHASE C — staff setup now reads registered+open from chain; set PIN; open console.
     await page.goto('/staff/setup');
     await expect(page.getByRole('heading', { name: '등록됐어요', exact: true })).toBeVisible({ timeout: 60_000 });
+    await shot(page, 'staff-setup-registered');
     await page.getByLabel('새 PIN').fill(PIN);
     await page.getByLabel('한 번 더').fill(PIN);
     await page.getByRole('button', { name: 'PIN 저장', exact: true }).click();
     await expect(page.getByText('PIN을 저장했어요.', { exact: true })).toBeVisible({ timeout: 15_000 });
     const startBtn = page.getByRole('button', { name: '입장 받기 시작', exact: true });
     await expect(startBtn).toBeVisible({ timeout: 90_000 });
+    await shot(page, 'staff-setup-pin-saved');
     await startBtn.click();
     await page.waitForURL(/\/staff\/gate/, { timeout: 20_000 });
+    await page.waitForTimeout(2500);
+    await shot(page, 'staff-console');
     console.log('[55] STEP3-C console opened');
 
     // PHASE D — manual override by tokenId (chain fallback resolves the just-minted ticket).
     const openOverrideBtn = page.getByRole('button', { name: '수동 승인하기', exact: true });
-    let approved = false; let lastDetail = '';
+    let approved = false; let lastDetail = ''; let approveClickAt = 0;
     for (let attempt = 0; attempt < 4 && !approved; attempt++) {
       await expect(openOverrideBtn).toBeVisible({ timeout: 60_000 });
       await openOverrideBtn.click();
-      const searchBox = page.getByLabel('이름 또는 표 번호');
+      const searchBox = page.getByLabel('이름 또는 티켓 번호');
       await expect(searchBox).toBeVisible({ timeout: 10_000 });
       await searchBox.fill(tokenId);
       const match = page.locator('.gate-dialog__matches li button').first();
@@ -357,12 +422,18 @@ test('55 · settlement chain — organiser + attendee + staff, one process', asy
         await page.getByRole('button', { name: '취소', exact: true }).click().catch(() => undefined);
         await page.goto('/staff/gate'); await page.waitForTimeout(6000); continue;
       }
+      await shot(page, 'staff-override-search-match');
       await match.click();
       await expect(page.getByText('들여보낼 사람', { exact: true })).toBeVisible({ timeout: 5000 });
       await page.getByLabel('PIN').fill(PIN);
       const approveBtn = page.getByRole('button', { name: '수동 승인', exact: true });
       await expect(approveBtn).toBeVisible({ timeout: 20_000 });
+      await shot(page, 'staff-override-confirm-dialog');
+      approveClickAt = Date.now();
+      diag.overrideClickedAt = new Date(approveClickAt).toISOString();
       await approveBtn.click();
+      await page.waitForTimeout(800);
+      await shot(page, 'staff-override-sending');
       const approvedLine = page.getByText('들여보냈어요.', { exact: true });
       const failedLine = page.getByText('보내지 못했어요. 다시 해 보세요.', { exact: true });
       const deniedLine = page.getByText('이 계정에는 손으로 들여보낼 권한이 없어요. 관리자에게 문의하세요.', { exact: true });
@@ -378,7 +449,10 @@ test('55 · settlement chain — organiser + attendee + staff, one process', asy
     }
     diag.overrideApproved = approved; diag.lastDetail = lastDetail;
     diag.overrideRelay = relaySubs[relaySubs.length - 1] ?? null;
+    diag.relaySubs = relaySubs;
     diag.overrideConfirmedAt = new Date().toISOString();
+    diag.overrideLatencyMs = approveClickAt ? Date.now() - approveClickAt : null;
+    await shot(page, 'staff-override-approved');
     const b7 = await relayerMon().catch(() => 0n);
     diag.costOverride = fmt(b6 - b7);
     console.log(`[55] STEP3-D approved=${approved} override=${fmt(b6 - b7)} MON relay=${JSON.stringify(diag.overrideRelay)}`);
@@ -387,13 +461,21 @@ test('55 · settlement chain — organiser + attendee + staff, one process', asy
 
     // =========================== STEP 4 — receipt flips to 정산 완료 (inline release) ===========
     await aPage.goto(`/tickets/${tokenId}`);
-    const releasedLine = aPage.getByText('정산 완료 · 각자에게 보냈어요', { exact: true });
+    const releasedLine = aPage.getByText('정산 완료 · 정해진 비율대로 나눠 보냈어요', { exact: true });
     let released = false; const rd = Date.now() + 120_000;
     while (Date.now() < rd) { if (await releasedLine.isVisible().catch(() => false)) { released = true; break; } await aPage.goto(`/tickets/${tokenId}`); await aPage.waitForTimeout(4000); }
     diag.receiptReleased = released;
     diag.releaseObservedAt = new Date().toISOString();
+    diag.releaseUiLatencyFromOverrideClickMs = approveClickAt ? Date.now() - approveClickAt : null;
     console.log(`[55] STEP4 receipt 정산 완료=${released}`);
     await aPage.screenshot({ path: `${ARTIFACTS}/55-step4-receipt-released.png`, fullPage: true }).catch(() => undefined);
+    await shot(aPage, 'attendee-receipt-settled');
+    await aPage.goto(`/settlement/${eventId}`);
+    await aPage.waitForTimeout(5000);
+    await shot(aPage, 'public-settlement-page');
+    await page.goto(`/org/events/${eventId}`);
+    await page.waitForTimeout(4000);
+    await shot(page, 'org-dashboard-after-settlement');
     // best-effort (release is verified on chain regardless); do not fail the chain on a slow mirror
     if (!released) console.log('[55] STEP4 receipt not yet flipped in-window — verify release on chain');
   } finally {

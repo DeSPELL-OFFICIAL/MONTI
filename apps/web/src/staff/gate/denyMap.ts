@@ -87,7 +87,7 @@ const DENY_DETAILS: Partial<Record<CheckInError, string>> = {
   DeviceLocked: '관객 기기 키가 잠겨 있습니다. 관객에게 앱 재설정을 안내하세요.',
   NotMember: '이 단말기가 주최 팀에 등록돼 있지 않습니다. 관객 잘못이 아니니 주최자에게 문의하세요.',
   Unauthorized: '이 단말기에게 그 권한이 없습니다. 관객 잘못이 아니니 주최자에게 문의하세요.',
-  BadGateSignature: '이 단말기의 게이트 서명 키가 등록된 키와 다릅니다. 관객 잘못이 아니니 주최자에게 문의하세요.',
+  BadGateSignature: '이 단말기의 게이트 인증 키가 등록된 키와 다릅니다. 관객 잘못이 아니니 주최자에게 문의하세요.',
 };
 
 /** `name` → 4-byte selector, computed from the generated ABI's own parameter types. */

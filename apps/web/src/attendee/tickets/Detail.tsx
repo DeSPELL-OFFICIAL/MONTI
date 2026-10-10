@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Alert, Button, Screen, Spinner, StickyBar, TicketArt } from '../../shared/ui';
 import { useCopy } from '../../shared/i18n';
@@ -5,6 +6,7 @@ import { describeFailure } from '../../shared/errors';
 import { useTicketArtProps } from './useTicketArt';
 import { useTicketDetail } from './useTicketDetail';
 import { useStateLabel } from './List';
+import { deriveDetailView, splitTicketNumber } from './ticketState';
 import { Receipt } from '../purchase/Receipt';
 
 /**
@@ -27,6 +29,18 @@ export function TicketDetail() {
   // Before the three branches below, because a hook cannot be called after a return — and for
   // this one ticket only, so a deep link into a ticket does not read every event's picture.
   const artPropsOf = useTicketArtProps(ticket ? [ticket] : []);
+  // A refund lives on the order the receipt below watches, not on the ticket; it reports it up.
+  const [orderStatus, setOrderStatus] = useState<string | null>(null);
+  const [numberCopied, setNumberCopied] = useState(false);
+
+  async function copyNumber(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(tokenId);
+      setNumberCopied(true);
+    } catch {
+      // No clipboard on this device: the number is on screen to read out.
+    }
+  }
 
   if (isLoading) {
     return (
@@ -61,16 +75,47 @@ export function TicketDetail() {
   // "입장 전 → [입장하기]", the way in is the bar's one primary action, and 친구에게 주기 sits
   // below the card as the quieter choice (visual R1-1). Every other state keeps the state word
   // in the body, where there is no bar.
-  const canEnter = ticket.state === 'before';
+  // A refunded or used ticket takes both away and says why (deriveDetailView).
+  const { canEnter, canTransfer, refunded, entered } = deriveDetailView(ticket.state, orderStatus);
+  const number = splitTicketNumber(tokenId);
   return (
     <Screen title={props.titleLoading ? copy.tickets.title : props.title}>
       <div className="ticket-detail-art">
         <TicketArt {...props} animated />
       </div>
-      {canEnter ? null : <p>{labels[ticket.state]}</p>}
-      <p>{copy.tickets.detailGuide}</p>
+      {/* The number staff search by in manual approval; they read back the last four digits. */}
+      <p className="ticket-number">
+        {copy.tickets.ticketNumber}{' '}
+        <span className="ticket-number__digits">
+          {number.head}
+          <strong>{number.tail}</strong>
+        </span>{' '}
+        <button type="button" className="ticket-number__copy" onClick={() => void copyNumber()}>
+          {numberCopied ? copy.tickets.numberCopied : copy.tickets.copyNumber}
+        </button>
+      </p>
+      {refunded ? (
+        <p>{copy.tickets.refundedState}</p>
+      ) : entered ? (
+        <p>{labels.entered}</p>
+      ) : canEnter ? null : (
+        <p>{labels[ticket.state]}</p>
+      )}
+      {/* The receipt for a paid ticket (Batch F), as its own card above the door guide: amount,
+          status, by-role split and — before the event — a refund. Renders nothing for a free
+          ticket (no order recorded on this device). */}
+      <Receipt
+        tokenId={tokenId}
+        eventId={ticket.eventId}
+        // A called-off event is refundable too: the vault lets anyone refund a cancelled event's
+        // deposit (SettlementVault.refund), which is what the organiser's cancel warning promises.
+        canRefund={(ticket.state === 'before' && !entered) || ticket.state === 'cancelled'}
+        onStatus={setOrderStatus}
+      />
+      {/* The door guide is for a ticket that can still get in — not a used or refunded one. */}
+      {canEnter ? <p>{copy.tickets.detailGuide}</p> : null}
       <p className="muted">{copy.tickets.noBarcode}</p>
-      {canEnter ? (
+      {canTransfer ? (
         <Button variant="ghost" onClick={() => navigate(`/tickets/${tokenId}/transfer`)}>
           {copy.tickets.transfer}
         </Button>
@@ -78,9 +123,6 @@ export function TicketDetail() {
       <p>
         <Link to={`/events/${ticket.eventId}`}>{copy.discover.title}</Link>
       </p>
-      {/* The receipt for a paid ticket (Batch F): amount, status, by-role split and — before the
-          event — a refund. Renders nothing for a free ticket (no order recorded on this device). */}
-      <Receipt tokenId={tokenId} eventId={ticket.eventId} canRefund={ticket.state === 'before'} />
       {canEnter ? (
         <StickyBar status={<span>{labels[ticket.state]}</span>}>
           <Button onClick={() => navigate(`/tickets/${tokenId}/enter`)}>{copy.tickets.enter}</Button>

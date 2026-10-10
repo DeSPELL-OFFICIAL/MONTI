@@ -86,7 +86,7 @@ describe('the unfinished-signup guard', () => {
     setSession({ status: 'anonymous' });
     const router = routerAt('/me/verify');
 
-    expect(await screen.findByRole('heading', { name: '다시 오셨네요' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '로그인' })).toBeInTheDocument();
     expect(router.state.location.pathname).toBe('/login');
     expect(getSignupStatus).not.toHaveBeenCalled();
   });

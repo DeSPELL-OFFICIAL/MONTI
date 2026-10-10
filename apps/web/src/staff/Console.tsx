@@ -138,7 +138,6 @@ export function GateConsole({
             tierLabel={ticket?.tierName}
             seat={ticket?.seat}
             entryNumber={entriesCount}
-            blockNumber={context.blockNumber}
             finalized={context.finalized}
             deviceChangedRecently={deviceChangedRecently}
             onDone={onDone}
@@ -186,7 +185,6 @@ export function GateConsole({
       gateName={gateName}
       eventTitle={eventTitle}
       staffName={staffName}
-      blockNumber={context.blockNumber}
       finalized={context.finalized}
       online={context.online}
       snapshotAgeMs={context.snapshotAgeMs}

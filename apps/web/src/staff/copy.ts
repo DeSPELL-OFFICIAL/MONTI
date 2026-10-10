@@ -59,7 +59,7 @@ export const staffKo = {
      * 갈 수 없다 — 수동 승인 창을 여는 열쇠가 이 숫자 몇 자리뿐이기 때문이다.
      */
     pinTitle: '수동 승인 PIN',
-    pinHint: '표를 손으로 들여보낼 때 쓸 숫자 {{digits}}자리를 정하세요. 이 단말기에만 저장되고 아무 데도 보내지 않아요.',
+    pinHint: '티켓을 손으로 들여보낼 때 쓸 숫자 {{digits}}자리를 정하세요. 이 단말기에만 저장되고 아무 데도 보내지 않아요.',
     pinLabel: '새 PIN',
     pinConfirmLabel: '한 번 더',
     pinSave: 'PIN 저장',
@@ -76,7 +76,6 @@ export const staffKo = {
   /** 콘솔 머리글. 게이트가 지금 무엇을 믿고 문을 여는지 한 줄로 말한다. */
   shell: {
     staffLabel: '담당',
-    blockLabel: '블록',
     /** 기록은 올라갔지만 아직 되돌려질 수 있는 상태(스펙 §7.2 8단계 앞쪽). */
     stageRecording: '기록 중',
     /** 되돌릴 수 없게 굳은 상태. */
@@ -85,6 +84,8 @@ export const staffKo = {
     snapshotLabel: '명단',
     snapshotFresh: '방금 받음',
     snapshotAge: '{{minutes}}분 전',
+    /** 명단을 아직 한 번도 받지 못했을 때. 나이가 없으니 숫자로 말하지 않는다. */
+    snapshotNone: '아직 못 받음',
     entriesLabel: '입장',
     entriesCount: '{{count}}명',
   },
@@ -93,6 +94,8 @@ export const staffKo = {
   ready: {
     tap: '여기에 대주세요',
     hint: '휴대폰 뒷면을 화면 가운데에 대주세요.',
+    /** 카드 흉내를 낼 수 없는 기기(브라우저·아이폰). 탭은 오지 않으니 할 일을 말한다. */
+    unavailable: '이 브라우저에서는 단말기 모드를 쓸 수 없어요. 수동 승인으로 입장을 처리해 주세요.',
   },
 
   /**
@@ -108,12 +111,12 @@ export const staffKo = {
     failed: 'QR을 읽지 못했어요. 다시 누르세요.',
   },
 
-  /** 표를 받았고, 아직 보내기 전. */
+  /** 티켓을 받았고, 아직 보내기 전. */
   received: {
-    title: '표를 받았어요',
-    ticketLabel: '표 번호',
+    title: '티켓을 받았어요',
+    ticketLabel: '티켓 번호',
     precheckOk: '명단에서 확인했어요',
-    precheckUnknown: '명단에 없는 표예요. 지금 확인할게요',
+    precheckUnknown: '명단에 없는 티켓이에요. 지금 확인할게요',
     precheckFail: '명단에서 문제를 찾았어요',
   },
 
@@ -134,7 +137,6 @@ export const staffKo = {
     title: '입장',
     entryLabel: '입장 순번',
     entryValue: '{{count}}번째',
-    blockLabel: '블록',
     settled: '확정됐어요',
     recording: '기록하고 있어요',
     deviceChanged: '24시간 안에 휴대폰을 바꿨어요',
@@ -154,13 +156,13 @@ export const staffKo = {
   /** 스펙 §13 거절 사유. 코드 하나에 문장 하나, 열세 개 전부. */
   deny: {
     ALREADY_USED: '이미 입장했어요',
-    WRONG_EVENT: '다른 행사 표예요',
-    REVOKED: '취소된 표예요',
+    WRONG_EVENT: '다른 행사 티켓이에요',
+    REVOKED: '취소된 티켓이에요',
     EXPIRED_CODE: '시간이 지난 표시예요. 다시 대주세요',
-    NO_TICKET: '표가 없어요',
+    NO_TICKET: '티켓이 없어요',
     GATE_CLOSED: '아직 이 문을 열지 않았어요',
     DEVICE_LOCKED: '휴대폰 잠금을 풀고 다시 대주세요',
-    DEVICE_MISMATCH: '표를 산 휴대폰이 아니에요',
+    DEVICE_MISMATCH: '티켓을 받은 휴대폰이 아니에요',
     GATE_MISMATCH: '다른 입구로 가주세요',
     EVENT_ENDED: '행사가 끝났어요',
     EVENT_CANCELLED: '취소된 행사예요',
@@ -235,8 +237,8 @@ export const staffKo = {
     request: '결재 요청 보내기',
     cancel: '취소',
     /** 탭이 없을 때 명단에서 사람을 찾는 칸(04 T32 룰링 1). */
-    searchLabel: '이름 또는 표 번호',
-    searchHint: '이름 일부나 표 번호 뒷자리를 넣으세요.',
+    searchLabel: '이름 또는 티켓 번호',
+    searchHint: '이름 일부나 티켓 번호 뒷자리를 넣으세요.',
     searchEmpty: '명단에서 찾지 못했어요. 다르게 넣어 보세요.',
     chosenLabel: '들여보낼 사람',
     searchAgain: '다시 찾기',
@@ -246,6 +248,12 @@ export const staffKo = {
     approved: '들여보냈어요.',
     failed: '보내지 못했어요. 다시 해 보세요.',
     approverLabel: '승인한 사람',
+    /** 승인한 사람은 언제나 이 단말기를 든 스태프 본인이다. 주소 대신 그렇게 말한다. */
+    approverMeApprover: '나 (주최자)',
+    approverMeManager: '나 (매니저)',
+    approverMe: '나',
+    /** 표시 이름을 비워 둔 관객. 관객 화면의 티켓과 같은 말을 쓴다. */
+    guest: '게스트',
     roleLabel: '권한',
     roleApprover: '주최자 · 승인 권한 있음',
     roleManager: '매니저 · 승인 권한 있음',
@@ -316,13 +324,13 @@ export const staffEn: typeof staffKo = {
 
   shell: {
     staffLabel: 'Staff',
-    blockLabel: 'Block',
     stageRecording: 'Recording',
     stageSettled: 'Settled',
     stageOffline: 'Offline',
     snapshotLabel: 'List',
     snapshotFresh: 'Just now',
     snapshotAge: '{{minutes}} min ago',
+    snapshotNone: 'Not yet',
     entriesLabel: 'Entries',
     entriesCount: '{{count}}',
   },
@@ -330,6 +338,7 @@ export const staffEn: typeof staffKo = {
   ready: {
     tap: 'TAP HERE',
     hint: 'Hold the back of the phone against the middle of this screen.',
+    unavailable: 'This browser cannot work as a tap terminal. Please admit people with manual approval.',
   },
 
   qr: {
@@ -357,7 +366,6 @@ export const staffEn: typeof staffKo = {
     title: 'ADMIT',
     entryLabel: 'Entry number',
     entryValue: 'No. {{count}}',
-    blockLabel: 'Block',
     settled: 'Settled',
     recording: 'Recording',
     deviceChanged: 'Phone changed in the last 24 hours',
@@ -450,6 +458,10 @@ export const staffEn: typeof staffKo = {
     approved: 'They are in.',
     failed: 'It did not go through. Try again.',
     approverLabel: 'Approved by',
+    approverMeApprover: 'Me (organizer)',
+    approverMeManager: 'Me (manager)',
+    approverMe: 'Me',
+    guest: 'Guest',
     roleLabel: 'Rights',
     roleApprover: 'Organizer - may approve',
     roleManager: 'Manager - may approve',

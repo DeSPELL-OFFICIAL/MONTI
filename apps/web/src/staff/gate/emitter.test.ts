@@ -44,7 +44,19 @@ vi.mock('./gateKey', () => ({
 
 const { fromBase64, toBase64 } = await import('@monti/hce-android');
 const { CODE_WINDOW_SECONDS, GATE_CODE_ROTATE_MS, MONTI_AID } = await import('../constants');
-const { GATE_TAP_ERROR, GateTapError, startGateEmitter } = await import('./emitter');
+const { GATE_TAP_ERROR, GateTapError, isCardEmulationUnavailable, startGateEmitter } = await import('./emitter');
+
+describe('isCardEmulationUnavailable', () => {
+  it('reads the plugin web class refusal as "this device cannot be a gate"', () => {
+    expect(isCardEmulationUnavailable(Object.assign(new Error('HCE is Android-only'), { code: 'UNAVAILABLE' }))).toBe(true);
+  });
+
+  it('leaves every other start failure to the old path', () => {
+    expect(isCardEmulationUnavailable(new Error('AID refused'))).toBe(false);
+    expect(isCardEmulationUnavailable({ code: 'UNIMPLEMENTED' })).toBe(false);
+    expect(isCardEmulationUnavailable(undefined)).toBe(false);
+  });
+});
 
 /**
  * `0x22…` repeated is a low-s value, which is the half of the curve order Solady's

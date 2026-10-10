@@ -163,10 +163,10 @@ describe('the 무료 | 유료 segment', () => {
     await ready();
     expect(screen.getByRole('button', { name: copy.tiers.create })).toBeEnabled();
 
-    // 유료 is the segment's paid half; choosing it defaults the currency to MON, which the
-    // deployed contract still refuses — so the card blocks on the spot, as it did before.
+    // 유료 is the segment's paid half; choosing it sets the one currency the backend takes, which
+    // the deployed contract's claim still refuses — so the card blocks on the spot, as before.
     await user.click(screen.getByRole('button', { name: copy.tiers.paid }));
-    expect(mirror().tiers[0]?.currency).toBe('MON');
+    expect(mirror().tiers[0]?.currency).toBe('USDC');
     expect(screen.getByText(copy.tiers.paidBlocked)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: copy.tiers.create })).toBeDisabled();
     expect(screen.getByText(copy.tierProblems.paidTier)).toBeInTheDocument();
@@ -177,7 +177,7 @@ describe('the 무료 | 유료 segment', () => {
     expect(screen.getByRole('button', { name: copy.tiers.create })).toBeEnabled();
   });
 
-  it('shows the price, the currencies, the limit and its tooltip only for 유료', async () => {
+  it('shows the price, the fixed currency line, the limit and its tooltip only for 유료', async () => {
     const user = userEvent.setup();
     open();
     await ready();
@@ -185,17 +185,18 @@ describe('the 무료 | 유료 segment', () => {
     expect(screen.queryByLabelText(copy.tiers.amount)).toBeNull();
     expect(screen.queryByLabelText(copy.tiers.maxPerWallet)).toBeNull();
     expect(screen.queryByText(copy.tiers.limitTip)).toBeNull();
-    for (const currency of ['MON', 'USDT', 'USDC']) {
-      expect(screen.queryByRole('button', { name: currency })).toBeNull();
-    }
+    expect(screen.queryByText(copy.tiers.currencyFixed)).toBeNull();
 
     await user.click(screen.getByRole('button', { name: copy.tiers.paid }));
     expect(screen.getByLabelText(copy.tiers.amount)).toBeInTheDocument();
     expect(screen.getByLabelText(copy.tiers.maxPerWallet)).toBeInTheDocument();
     // The (i) tooltip beside the limit, in the exact words the founder asked for.
     expect(screen.getByText(copy.tiers.limitTip)).toBeInTheDocument();
+    // One plain line instead of currency chips — and no currency code anywhere on the card.
+    expect(screen.getByText('결제 통화 · 달러($) · 테스트 결제')).toBeInTheDocument();
     for (const currency of ['MON', 'USDT', 'USDC']) {
-      expect(screen.getByRole('button', { name: currency })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: currency })).toBeNull();
+      expect(screen.queryByText(currency)).toBeNull();
     }
     // The receiving method belongs to a free event, so it is gone once the kind is paid.
     expect(screen.queryByText(copy.tiers.receiveMethod)).toBeNull();
@@ -206,7 +207,6 @@ describe('the 무료 | 유료 segment', () => {
     open();
     await ready();
     await user.click(screen.getByRole('button', { name: copy.tiers.paid }));
-    await user.click(screen.getByRole('button', { name: 'USDC' }));
     await user.clear(screen.getByLabelText(copy.tiers.amount));
     await user.type(screen.getByLabelText(copy.tiers.amount), '25');
     expect(mirror().tiers[0]).toMatchObject({ currency: 'USDC', amount: 25 });
@@ -415,7 +415,7 @@ describe('the quick-start presets', () => {
     open();
     await ready();
     await user.click(screen.getByRole('button', { name: copy.tiers.quickPaid }));
-    expect(mirror().tiers[0]).toMatchObject({ currency: 'MON', maxPerWallet: 1 });
+    expect(mirror().tiers[0]).toMatchObject({ currency: 'USDC', maxPerWallet: 1 });
     expect(screen.getByText(copy.tiers.paidBlocked)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: copy.tiers.create })).toBeDisabled();
   });

@@ -1,6 +1,7 @@
 import { expect, type Page } from '@playwright/test';
 import { OTP_CODE, type Persona } from '../fixtures/personas';
 import { timed } from '../fixtures/timings';
+import { shot } from './shots';
 
 /** Copy strings, verbatim from apps/web/src/shared/copy/ko.ts — the selectors are the words. */
 const C = {
@@ -15,7 +16,7 @@ const C = {
   doneTitle: '준비가 끝났어요',
   nameLabel: '어떻게 불러 드릴까요?',
   doneCta: '시작하기',
-  alreadyTitle: '다시 오셨네요', // /login lands here if the number is already registered
+  alreadyTitle: '로그인', // /login lands here if the number is already registered
   // Recover.tsx (recover.* / common.retry) — a returning number on a fresh device lands here.
   recoverTitle: '휴대폰으로 다시 설정하기',
   recoverCta: '새로 설정하기',
@@ -46,6 +47,7 @@ export async function signUp(page: Page, persona: Persona): Promise<SignupResult
   await timed(persona.id, 'signup.phone', async () => {
     await page.goto('/signup/phone');
     await page.getByLabel(C.phoneLabel, { exact: true }).fill(persona.phone);
+    await shot(page, `${persona.id}-signup-phone`);
     await page.getByRole('button', { name: C.sendCode }).click();
     // Firebase phone auth hands us the code screen. The `monti:e2e` flag every persona context
     // sets (see session.ts) swaps the live reCAPTCHA for Firebase's mock verifier on the
@@ -55,6 +57,7 @@ export async function signUp(page: Page, persona: Persona): Promise<SignupResult
 
   const landed = await timed(persona.id, 'signup.verify', async () => {
     await page.getByLabel(C.codeLabel, { exact: true }).fill(OTP_CODE);
+    await shot(page, `${persona.id}-signup-verify-code`);
     await page.getByRole('button', { name: C.verify, exact: true }).click();
     // Verify routes a first-time number to the combined register screen, and a number that is
     // already `active` on chain (re-registered: on-chain identity outlived its Firestore person) to
@@ -72,7 +75,7 @@ export async function signUp(page: Page, persona: Persona): Promise<SignupResult
   }
 
   await timed(persona.id, 'signup.register', async () => {
-    await runRegister(page);
+    await runRegister(page, persona.id);
   });
 
   await timed(persona.id, 'signup.done', async () => {
@@ -80,9 +83,12 @@ export async function signUp(page: Page, persona: Persona): Promise<SignupResult
     if (persona.displayName) {
       await page.getByLabel(C.nameLabel, { exact: true }).fill(persona.displayName);
     }
+    await shot(page, `${persona.id}-signup-done`);
     await page.getByRole('button', { name: C.doneCta, exact: true }).click();
     // Fresh signup lands on 탐색 ('/'); an invited one on the inbox.
     await expect(page).toHaveURL(/(\/|\/tickets\/inbox)$/, { timeout: 30_000 });
+    await page.waitForTimeout(1500);
+    await shot(page, `${persona.id}-after-signup-home`);
   });
 
   return { recovered: false };
@@ -93,13 +99,16 @@ export async function signUp(page: Page, persona: Persona): Promise<SignupResult
  * block, and the screen then turns the button into 다시 시도하기 — pressing it resumes rather
  * than restarts, so a retry is safe and never mints a second passkey.
  */
-async function runRegister(page: Page): Promise<void> {
+async function runRegister(page: Page, personaId: string): Promise<void> {
   await expect(page.getByRole('heading', { name: C.registerTitle })).toBeVisible({ timeout: 30_000 });
   const start = page.getByRole('button', { name: C.registerCta, exact: true });
   const retry = page.getByRole('button', { name: C.registerRetry, exact: true });
   const skip = page.getByRole('button', { name: C.deviceSkip, exact: true });
 
+  await shot(page, `${personaId}-signup-register`);
   await start.click();
+  await page.waitForTimeout(1200);
+  await shot(page, `${personaId}-signup-registering`);
   const deadline = Date.now() + REGISTER_TIMEOUT_MS;
   let attempts = 1;
   while (Date.now() < deadline) {

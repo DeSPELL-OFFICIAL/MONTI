@@ -109,7 +109,7 @@ describe('the done screen — before it is public', () => {
   /** The reassurance beside the button: publishing is free and MONTI does the hard part. */
   it('reassures that going public is free and handled for them', () => {
     open();
-    expect(screen.getByText(common.montiHandles)).toBeInTheDocument();
+    expect(screen.getByText('공개 비용은 없어요 · MONTI가 대신 처리해요')).toBeInTheDocument();
   });
 
   /** Plan §2b: the two-step header, at step 2 — going public is what is still to come. */

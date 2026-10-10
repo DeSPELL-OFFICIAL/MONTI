@@ -12,6 +12,7 @@ import { api, callableFailure } from '../../shared/api/functions';
 import { getFirebaseAuth } from '../../shared/api/firebase';
 import { getSession } from '../../shared/session';
 import { markDeviceHealthy } from '../../shared/deviceHealth';
+import { safeReturnTo } from '../../shared/returnTo';
 import { clearSignup, readSignup } from './useSignup';
 import { useRegisterChallenge } from './Register';
 
@@ -142,11 +143,13 @@ export function Recover() {
       // The session comes from the token's claims, read by shared/api/sessionHydrator -- the same
       // path signup and sign-in take, which is why nothing here sets the session by hand.
       await signInWithCustomToken(getFirebaseAuth(), result.token);
+      // A claim link that sent this person through sign-in → signup → here is where they go back.
+      const next = safeReturnTo(readSignup().next, '/tickets');
       clearSignup();
       // The key was just replaced and re-registered; clear the cached needs-recovery so the health
       // guard does not bounce this person straight back to /recover on /tickets.
       markDeviceHealthy();
-      navigate('/tickets');
+      navigate(next);
     } catch (failure) {
       setError(message(copy, locale, failure));
     } finally {

@@ -80,7 +80,6 @@ function renderShell(overrides: Partial<Parameters<typeof StaffShell>[0]> = {}) 
       gateName={GATE_NAME}
       eventTitle={EVENT_TITLE}
       staffName={STAFF_NAME}
-      blockNumber={1234n}
       finalized={false}
       online
       snapshotAgeMs={0}
@@ -124,12 +123,9 @@ describe('StaffShell', () => {
     expect(screen.queryByText(new RegExp(staffKo.shell.staffLabel))).not.toBeInTheDocument();
   });
 
-  it('shows the block number only when there is one', () => {
+  it('never shows a block number in the header', () => {
     renderShell();
-    expect(screen.getByText(`${staffKo.shell.blockLabel} 1234`)).toBeInTheDocument();
-    cleanup();
-    renderShell({ blockNumber: undefined });
-    expect(screen.queryByText(new RegExp(staffKo.shell.blockLabel))).not.toBeInTheDocument();
+    expect(screen.queryByText(/블록/)).not.toBeInTheDocument();
   });
 
   it('says offline ahead of anything the list claims', () => {
@@ -152,6 +148,12 @@ describe('StaffShell', () => {
     cleanup();
     renderShell({ snapshotAgeMs: 3 * 60_000 + 1000 });
     expect(screen.getByText(fmt(staffKo.shell.snapshotAge, { minutes: 3 }))).toBeInTheDocument();
+  });
+
+  it('says the list has not arrived yet instead of "Infinity분 전"', () => {
+    renderShell({ snapshotAgeMs: Number.POSITIVE_INFINITY });
+    expect(screen.getByText('아직 못 받음')).toBeInTheDocument();
+    expect(screen.queryByText(/Infinity/)).not.toBeInTheDocument();
   });
 
   it('counts the people already through this door', () => {
@@ -239,7 +241,6 @@ describe('AdmitCard', () => {
         tierLabel="VIP"
         seat="A12"
         entryNumber={41}
-        blockNumber={1234n}
         finalized={false}
       />,
     );
@@ -248,7 +249,7 @@ describe('AdmitCard', () => {
     expect(screen.getByText('VIP · A12')).toBeInTheDocument();
     expect(screen.getByText(staffKo.admit.entryLabel)).toBeInTheDocument();
     expect(screen.getByText(fmt(staffKo.admit.entryValue, { count: 41 }))).toBeInTheDocument();
-    expect(screen.getByText(`${staffKo.admit.blockLabel} 1234`)).toBeInTheDocument();
+    expect(screen.queryByText(/블록/)).not.toBeInTheDocument();
   });
 
   it('distinguishes a settled entry from one still being recorded', () => {
@@ -430,7 +431,9 @@ describe('LastTapChip', () => {
     expect(screen.getByText(staffKo.lastTap.override)).toBeInTheDocument();
     expect(screen.getByText(staffKo.override.reason2)).toBeInTheDocument();
     expect(screen.getByText(staffKo.override.roleManager)).toBeInTheDocument();
-    expect(screen.getByText('0xbbbb…bbbb')).toBeInTheDocument();
+    // The approver is this staff member: said as 나, never as a 0x address.
+    expect(screen.getByText('나 (매니저)')).toBeInTheDocument();
+    expect(screen.queryByText(/0x/)).not.toBeInTheDocument();
     // The name comes off the outcome when there is no tap to carry a ticket.
     expect(screen.getByText('박관객')).toBeInTheDocument();
   });
@@ -620,7 +623,8 @@ describe('OverrideDialog', () => {
     expect(status).toHaveTextContent(staffKo.override.requested);
     expect(status).toHaveTextContent(staffKo.override.roleNone);
     expect(status).toHaveTextContent(staffKo.override.reason2);
-    expect(status).toHaveTextContent('0xbbbb…bbbb');
+    expect(status).toHaveTextContent(staffKo.override.approverMe);
+    expect(status).not.toHaveTextContent(/0x/);
     expect(screen.queryByRole('button', { name: staffKo.override.request })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: staffKo.done })).toBeInTheDocument();
   });
@@ -642,6 +646,7 @@ describe('OverrideDialog', () => {
     );
     expect(screen.getByRole('status')).toHaveTextContent(staffKo.override.roleApprover);
     expect(screen.getByRole('status')).toHaveTextContent(staffKo.override.approved);
+    expect(screen.getByRole('status')).toHaveTextContent('나 (주최자)');
   });
 
   /**
@@ -669,6 +674,16 @@ describe('OverrideDialog', () => {
     await user.type(screen.getByLabelText(staffKo.override.pin), '4821');
     await user.click(screen.getByRole('button', { name: staffKo.override.approve }));
     expect(onSubmit).toHaveBeenCalledWith('4821', 1, '1042');
+  });
+
+  it('lists a match by name and the last four digits, and a nameless one as 게스트', async () => {
+    const named = ticket({ tokenId: '1234567890123456789012345678901', displayName: '박관객' });
+    const nameless = ticket({ tokenId: '1234567890123456789012345675555', displayName: '' });
+    const user = userEvent.setup();
+    render(<OverrideDialog canApprove onSearch={() => [named, nameless]} onSubmit={noop} onCancel={noop} />);
+    await user.type(screen.getByLabelText(staffKo.override.searchLabel), '12345');
+    expect(screen.getByRole('button', { name: '박관객 ••8901' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '게스트 ••5555' })).toBeInTheDocument();
   });
 
   it('says so when the guest list has nobody by that name', async () => {

@@ -38,9 +38,12 @@ vi.mock('../../shared/api/functions', async (orig) => ({
 // — real Firestore in jsdom. One shared mock (test/mocks/eventArt.ts) stands in for every
 // EventDetail test: it answers "no stored art" by default, so the hero falls back the way most
 // events do, and a test that wants a picture arms it with `mockResolvedValueOnce`.
+/** The settlement mirror a priced event's per-kind price comes from. `null` is a free event. */
+const getSettlement = vi.fn(async (_eventId: string): Promise<unknown> => null);
 vi.mock('../../shared/api/firestore', async (orig) => ({
   ...(await orig<typeof import('../../shared/api/firestore')>()),
   loadEventArt,
+  getSettlement,
 }));
 
 const { setSession } = await import('../../shared/session');
@@ -272,13 +275,13 @@ describe('Discover', () => {
     expect(screen.queryByText('재즈 나이트')).toBeNull();
   });
 
-  it('keeps an event whose metadata never arrives, under a neutral placeholder', async () => {
+  it('leaves off the home list an event whose title never arrives, and keeps the rest', async () => {
     fetchEventMetadata.mockImplementation((cid: string) =>
       cid === 'cid-a' ? Promise.resolve(META_A) : Promise.reject(new Error('IPFS_504')),
     );
     renderDiscover();
     expect(await screen.findByText('재즈 나이트')).toBeInTheDocument();
-    expect(screen.getByText('제목을 불러오지 못했어요')).toBeInTheDocument();
+    expect(screen.queryByText('제목을 불러오지 못했어요')).toBeNull();
   });
 
   /**
@@ -824,6 +827,21 @@ describe('EventDetail · the sticky primary (visual R1-5)', () => {
     expect(link.closest('.sticky-bar')).not.toBeNull();
     // A holder is not offered the claim at all.
     expect(screen.queryByRole('button', { name: '티켓 받기' })).toBeNull();
+  });
+
+  it('shows each kind with its price and puts the price on the button of a paid event', async () => {
+    vi.stubEnv('VITE_ADDR_SETTLEMENT_VAULT', `0x${'11'.repeat(20)}`);
+    vi.stubEnv('VITE_ADDR_USDC', `0x${'22'.repeat(20)}`);
+    getSettlement.mockResolvedValueOnce({ priceUsdCentsByTier: { '0': 3000 } });
+    try {
+      gql.mockResolvedValue({ Event: [EVENT_ONE], Tier: TIERS });
+      renderDetail();
+      expect(await screen.findByText('일반 · $30.00')).toBeInTheDocument();
+      expect(screen.getByText('60자리 남음')).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: '결제하고 받기 $30.00' })).toHaveAttribute('href', '/claim/1');
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it('offers 신청하기 in the sticky bar for a non-holder when the event needs approval', async () => {

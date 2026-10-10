@@ -59,6 +59,9 @@ export function Dashboard() {
   // The full metadata, kept for the publish summary sheet — venue, region and the two hide flags
   // that decide what a summary may show before the event goes public (plan §2b).
   const [meta, setMeta] = useState<EventMetadata | null>(null);
+  // The metadata read has answered (either way) — until then a missing title is "loading", not
+  // "unnamed".
+  const [metaSettled, setMetaSettled] = useState(false);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [pending, setPending] = useState<Pending>('');
@@ -97,6 +100,7 @@ export function Dashboard() {
   useEffect(() => {
     if (imageCid === '') return undefined;
     let cancelled = false;
+    setMetaSettled(false);
     void fetchEventMetadata(imageCid)
       .then((loaded) => {
         if (!cancelled) {
@@ -104,7 +108,10 @@ export function Dashboard() {
           setTitle(loaded.title);
         }
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setMetaSettled(true);
+      });
     return () => {
       cancelled = true;
     };
@@ -159,6 +166,9 @@ export function Dashboard() {
   // For an event the indexer has no row for yet, the readable title and start time are not on the
   // chain — they are in the organiser's own draft of the event they just made.
   const draftFallback = event === null ? createdDraftFor(eventId) : null;
+  // While the indexer or the title document is still on its way, say so rather than "unnamed".
+  const titleLoading = loading || (imageCid !== '' && !metaSettled);
+  const shownTitle = title || draftFallback?.title || (titleLoading ? dash.art.titleLoading : dash.art.untitled);
 
   // The publish summary, best-effort from what the indexer and the gateway gave. It is the
   // organiser's own view, so it shows the full start time; place follows the hide flag — the
@@ -200,11 +210,6 @@ export function Dashboard() {
             </p>
           ) : null}
           {status === 'Draft' ? <Button onClick={() => setPending('publish')}>{life.publish}</Button> : null}
-          {status === 'Draft' || status === 'Published' ? (
-            <Button variant="danger" onClick={() => setPending('cancel')}>
-              {life.cancel}
-            </Button>
-          ) : null}
         </>
       ) : pending === 'publish' ? (
         // 발행 요약 시트: 무엇을 공개하는지 먼저 보여주고, 그 뒤에 되돌릴 수 없다는 확인(계획 §2b).
@@ -213,7 +218,7 @@ export function Dashboard() {
           <dl className="publish-summary">
             <div>
               <dt>{life.summary.title}</dt>
-              <dd>{title || draftFallback?.title || dash.art.untitled}</dd>
+              <dd>{shownTitle}</dd>
             </div>
             <div>
               <dt>{life.summary.date}</dt>
@@ -236,17 +241,7 @@ export function Dashboard() {
           <Button disabled={busy} onClick={() => void run('publish')}>{life.confirm}</Button>
           <Button variant="ghost" disabled={busy} onClick={() => setPending('')}>{life.back}</Button>
         </Sheet>
-      ) : (
-        <Alert tone="warn">
-          {life.cancelConfirm}
-          <Button disabled={busy} onClick={() => void run('cancel')}>
-            {life.confirm}
-          </Button>
-          <Button variant="ghost" disabled={busy} onClick={() => setPending('')}>
-            {life.back}
-          </Button>
-        </Alert>
-      )}
+      ) : null}
 
       <table>
         <tbody>
@@ -284,7 +279,7 @@ export function Dashboard() {
       <EventArt
         eventId={eventId}
         tiers={tiers}
-        title={title || draftFallback?.title || dash.art.untitled}
+        title={shownTitle}
         startsAt={Number(event?.startsAt ?? draftFallback?.startsAt ?? 0)}
       />
 
@@ -306,6 +301,25 @@ export function Dashboard() {
             {pendingRequests.length > 0 ? ` (${pendingRequests.length})` : ''}
           </Link>
         </p>
+      ) : null}
+
+      {/* 행사 취소 is the one irreversible write here, so it sits at the very foot as a quiet
+          button, away from 공개하기, and asks before it sends anything. */}
+      {pending === '' && (status === 'Draft' || status === 'Published') ? (
+        <Button variant="ghost" onClick={() => setPending('cancel')}>
+          {life.cancel}
+        </Button>
+      ) : null}
+      {pending === 'cancel' ? (
+        <Alert tone="warn">
+          {life.cancelConfirm}
+          <Button variant="danger" disabled={busy} onClick={() => void run('cancel')}>
+            {life.confirm}
+          </Button>
+          <Button variant="ghost" disabled={busy} onClick={() => setPending('')}>
+            {life.back}
+          </Button>
+        </Alert>
       ) : null}
     </Screen>
   );

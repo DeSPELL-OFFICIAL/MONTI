@@ -76,7 +76,7 @@ import { relayCheckIn } from './checkInOp';
 import { matchIssuedCode } from './decodeResponse';
 import { resolveTicketOnChain } from './overrideLookup';
 import { DENY_LABELS, mapCallableDeny } from './denyMap';
-import { startGateEmitter, type GateEmitter, type GateTap } from './emitter';
+import { isCardEmulationUnavailable, startGateEmitter, type GateEmitter, type GateTap } from './emitter';
 import {
   createGateMachine,
   type GateMachine,
@@ -163,6 +163,11 @@ export type UseGateResult = GateContext & {
    */
   gateOpenStale: boolean;
   /**
+   * This device cannot emulate a card (a browser or an iPhone), so no tap will ever arrive. The
+   * screen says so and leaves manual approval as the way in.
+   */
+  emulationUnavailable: boolean;
+  /**
    * Whether the signed-in staff member may admit somebody outright, or only ask (Task 32).
    * Read from `Organizers` when the dialog opens and **never** cached across openings: rights
    * change inside a shift, and a stale `true` is a button that promises an operation the chain
@@ -242,6 +247,7 @@ export function useGate(params: UseGateParams): UseGateResult {
   // admits somebody offline, and the header has to show it after a drain too.
   const [queueDepth, setQueueDepth] = useState({ pending: 0, parked: 0 });
   const [listAgeMs, setListAgeMs] = useState(Number.POSITIVE_INFINITY);
+  const [emulationUnavailable, setEmulationUnavailable] = useState(false);
 
   /** The QR fallback's way in, and `retry`'s way to the watcher, across renders. */
   const handlerRef = useRef<(response: GateResponseWire) => Promise<void>>(async () => {});
@@ -505,6 +511,9 @@ export function useGate(params: UseGateParams): UseGateResult {
         // The AID was refused, so this phone is not emulating a card and no tap will ever
         // arrive. There is no degraded mode — the screen stays `idle` and says nothing green.
         warn('gate', 'the gate could not claim the tag', error);
+        // A browser (or an iPhone) cannot emulate a card at all: say so on the screen and leave
+        // manual approval as the way in, rather than an idle "tap here" nobody can answer.
+        if (alive && isCardEmulationUnavailable(error)) setEmulationUnavailable(true);
       });
 
     // Mount, while the connection is already up: the rows on disk have no edge coming.
@@ -823,6 +832,7 @@ export function useGate(params: UseGateParams): UseGateResult {
     queueError,
     gateOpen,
     gateOpenStale,
+    emulationUnavailable,
     canApprove,
     openOverride,
     searchGuests,

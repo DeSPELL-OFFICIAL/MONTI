@@ -78,8 +78,11 @@ describe('router', () => {
 
   it('redirects a protected route to /login when signed out', async () => {
     setSession({ status: 'anonymous' });
-    renderAt('/me');
-    expect(await screen.findByRole('heading', { name: '다시 오셨네요' })).toBeInTheDocument();
+    const router = routerAt('/me?tab=1');
+    expect(await screen.findByRole('heading', { name: '로그인' })).toBeInTheDocument();
+    // Where they were going rides along, so sign-in (or signup) can put them back there.
+    expect(router.state.location.pathname).toBe('/login');
+    expect(new URLSearchParams(router.state.location.search).get('returnTo')).toBe('/me?tab=1');
   });
 
   it('never leaves a guarded route stuck on loading after a cold boot', async () => {
@@ -87,7 +90,7 @@ describe('router', () => {
     bootSession();
     expect(getSession().status).toBe('anonymous');
     renderAt('/tickets');
-    expect(await screen.findByRole('heading', { name: '다시 오셨네요' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '로그인' })).toBeInTheDocument();
   });
 
   /**

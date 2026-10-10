@@ -506,6 +506,15 @@ describe('done screen', () => {
     expect(navigate).toHaveBeenCalledWith('/');
   });
 
+  it('returns to the claim link that sent this person into signup', async () => {
+    seedSignup({ personId: PERSON_ID, account: ACCOUNT, next: '/claim/12' });
+    renderScreen(<Done />);
+    await userEvent.click(screen.getByRole('button', { name: ko.signup.doneCta }));
+
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/claim/12'));
+    expect(sessionStorage.getItem('monti.signup')).toBeNull();
+  });
+
   /** The name a ticket is drawn with. Its own field — the chain nickname cannot hold `김태완`. */
   it('saves the name this person gave before going on', async () => {
     renderScreen(<Done />);
