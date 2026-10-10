@@ -49,7 +49,7 @@ vi.mock('../../shared/api/firestore', async (orig) => ({
 const { setSession } = await import('../../shared/session');
 const { Discover } = await import('./Discover');
 const { EventDetail } = await import('./EventDetail');
-const { DEFAULT_FILTERS, METADATA_CONCURRENCY, loadFilters, mapWithPool, saveFilters } =
+const { DEFAULT_FILTERS, METADATA_CONCURRENCY, listableItems, loadFilters, mapWithPool, saveFilters } =
   await import('./useEvents');
 const { THEME_CODES, themeLabels } = await import('../../shared/eventThemes');
 const { ko } = await import('../../shared/copy/index');
@@ -284,6 +284,16 @@ describe('Discover', () => {
     expect(screen.queryByText('제목을 불러오지 못했어요')).toBeNull();
   });
 
+  // A slow or down gateway fails every document at once. Hiding untitled cards then would empty
+  // the home page, so with no title anywhere the cards stay, under the placeholder.
+  it('keeps every card under the placeholder when no title arrives at all', async () => {
+    fetchEventMetadata.mockRejectedValue(new Error('IPFS_TIMEOUT'));
+    renderDiscover();
+    const links = await screen.findAllByRole('link', { name: '제목을 불러오지 못했어요' });
+    expect(links.length).toBeGreaterThan(0);
+    expect(screen.queryByText('조건에 맞는 행사가 없어요.')).toBeNull();
+  });
+
   /**
    * Two failures, two sentences. The request that never arrived is worth pressing 다시 시도 on;
    * the answer that came back broken is not, so it says "not right now" instead — which is the
@@ -502,6 +512,33 @@ describe('gateway fan-out', () => {
     expect(await screen.findAllByRole('link')).toHaveLength(12);
     expect(peak).toBeGreaterThan(1);
     expect(peak).toBeLessThanOrEqual(METADATA_CONCURRENCY);
+  });
+});
+
+describe('listableItems', () => {
+  const meta = { ...META_A, imageCid: '' };
+  const titled = { event: EVENT_ONE, metadata: meta };
+  const failed = { event: { ...EVENT_ONE, id: '9' }, metadata: null };
+  const blank = { event: { ...EVENT_ONE, id: '10' }, metadata: { ...meta, title: '' } };
+
+  it('drops untitled cards while at least one card has a title', () => {
+    expect(listableItems([titled, failed, blank])).toEqual([titled]);
+  });
+
+  it('keeps every card when none has a title, rather than an empty list', () => {
+    expect(listableItems([failed, blank])).toEqual([failed, blank]);
+  });
+
+  it('keeps an empty page empty', () => {
+    expect(listableItems([])).toEqual([]);
+  });
+});
+
+describe('metadata pool sizing', () => {
+  // Every read can wait out the 12 s gateway timeout (shared/envio/ipfs.ts) and the page renders
+  // once the whole pool drains, so ~20 events must finish in two rounds.
+  it('keeps the worst case for twenty events near thirty seconds', () => {
+    expect(Math.ceil(20 / METADATA_CONCURRENCY) * 12_000).toBeLessThanOrEqual(30_000);
   });
 });
 

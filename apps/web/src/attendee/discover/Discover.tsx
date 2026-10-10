@@ -13,6 +13,7 @@ import {
   DEFAULT_FILTERS,
   formatEventDate,
   formatEventDay,
+  listableItems,
   loadFilters,
   saveFilters,
   useEvents,
@@ -42,10 +43,10 @@ export function Discover() {
   // signed-in organiser to /signup/phone (S5). It clears the moment the session resolves.
   const sessionLoading = useSession().status === 'loading';
   const { data, isLoading, isError, error, refetch } = useEvents();
-  // A card whose title never arrived (its metadata document failed) is left off the home list —
-  // a row reading "제목을 불러오지 못했어요" gives a visitor nothing to tap for. The event itself is
-  // still reachable by its link.
-  const items = applyFilters(data ?? [], filters).filter(({ metadata }) => Boolean(metadata?.title));
+  // Untitled cards are left off while any card has a title, and all kept when none has one, so a
+  // slow gateway never empties the page (listableItems). Metadata is fetched inside the query, so
+  // "still loading" is `isLoading` (skeletons) and `metadata: null` always means it failed.
+  const items = listableItems(applyFilters(data ?? [], filters));
   const reduce = useReducedMotion();
   // Reduced motion drops the stagger so the cards are all there at once (see LIST_STAGGER).
   const list = reduce ? {} : { variants: LIST_STAGGER.container, initial: 'hidden' as const, animate: 'show' as const };

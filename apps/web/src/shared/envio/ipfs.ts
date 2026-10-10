@@ -38,8 +38,12 @@ export interface EventMetadata {
 }
 
 const IPFS_SCHEME = 'ipfs://';
-/** A gateway that has not answered by now is not going to help this render. */
-const FETCH_TIMEOUT_MS = 5_000;
+/**
+ * A gateway that has not answered by now is not going to help this render. The public gateway
+ * answers in 5–7 s (measured 2026-10-10), so the cut-off sits well past that; the discover pool
+ * (`METADATA_CONCURRENCY`) is sized against it.
+ */
+const FETCH_TIMEOUT_MS = 12_000;
 
 /** One document per CID per session: the list and the detail screen read the same rows. */
 const cache = new Map<string, EventMetadata>();
