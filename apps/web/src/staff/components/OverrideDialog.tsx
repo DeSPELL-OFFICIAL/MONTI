@@ -5,7 +5,7 @@ import { OVERRIDE_REASONS } from '@monti/shared';
 import { Button } from '../../shared/ui';
 import { useStaffCopy } from '../copy';
 import type { OverrideOutcome, OverrideReason, SnapshotTicket } from '../types';
-import { ROLE_KEY, STATUS_KEY, reasonKey, shortAccount } from './overrideText';
+import { ROLE_KEY, STATUS_KEY, approverLine, guestLine, reasonKey } from './overrideText';
 
 const NON_DIGITS = /\D/g;
 
@@ -16,8 +16,6 @@ function toReason(value: string): OverrideReason {
     : OVERRIDE_REASONS[0];
 }
 
-/** 표 번호 뒷자리만. 콘솔의 다른 화면과 같은 가림이다. */
-const maskTicketId = (tokenId: string): string => `••${tokenId.slice(-2)}`;
 
 export interface OverrideDialogProps {
   canApprove: boolean;
@@ -140,7 +138,7 @@ export function OverrideDialog({
               {shown.map((match) => (
                 <li key={match.tokenId}>
                   <Button variant="ghost" onClick={() => setPicked(match)}>
-                    {`${match.displayName} ${maskTicketId(match.tokenId)}`}
+                    {guestLine(copy, match)}
                   </Button>
                 </li>
               ))}
@@ -150,7 +148,7 @@ export function OverrideDialog({
       ) : (
         <p className="gate-dialog__chosen">
           <span>{copy.override.chosenLabel}</span>{' '}
-          <strong>{`${picked.displayName} ${maskTicketId(picked.tokenId)}`}</strong>{' '}
+          <strong>{guestLine(copy, picked)}</strong>{' '}
           {locked ? null : (
             <Button
               variant="ghost"
@@ -228,7 +226,7 @@ function Outcome({ outcome }: { outcome: OverrideOutcome }): ReactElement {
         {outcome.approver === undefined ? null : (
           <>
             <dt>{copy.override.approverLabel}</dt>
-            <dd className="mono">{shortAccount(outcome.approver)}</dd>
+            <dd>{approverLine(copy, outcome.role)}</dd>
           </>
         )}
       </dl>

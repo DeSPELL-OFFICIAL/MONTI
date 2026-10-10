@@ -2,7 +2,7 @@ import type { ReactElement } from 'react';
 
 import { useStaffCopy, type StaffCopy } from '../copy';
 import type { SettledTap } from '../gate/machine';
-import { ROLE_KEY, reasonKey, shortAccount } from './overrideText';
+import { ROLE_KEY, approverLine, reasonKey } from './overrideText';
 
 const STATE_WORD: Record<SettledTap['state'], keyof StaffCopy['lastTap']> = {
   admit: 'admit',
@@ -51,7 +51,7 @@ export function LastTapChip({ lastTap }: LastTapChipProps): ReactElement {
           <span>{copy.override[reasonKey(override.reason)]}</span>
           {override.role === undefined ? null : <span>{copy.override[ROLE_KEY[override.role]]}</span>}
           {override.approver === undefined ? null : (
-            <span className="mono">{shortAccount(override.approver)}</span>
+            <span>{approverLine(copy, override.role)}</span>
           )}
         </>
       )}

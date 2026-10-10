@@ -14,6 +14,8 @@ export const ko = {
     contactEmail: 'info@despell.io',
     // 티켓 받기 버튼 근처 안심 문구. 돈도 안 들고, 어려운 건 MONTI가 대신 한다는 약속.
     montiHandles: '무료예요 · MONTI가 대신 처리해요',
+    // 주최자 생성 완료 화면: 공개하는 데 드는 비용이 없다는 말. 티켓 값이 있는 행사에도 맞는 말이다.
+    publishFree: '공개 비용은 없어요 · MONTI가 대신 처리해요',
     // 상세 인라인 받기 시트의 버튼 아래 안심 문구(계획 C 여정 A).
     free: '무료예요',
   },

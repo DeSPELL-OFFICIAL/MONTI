@@ -99,6 +99,16 @@ export interface GateEmitter {
  * on chain cannot be undone, so it cannot change under a running gate; asking the Keystore for
  * it again on every rotation would be one more bridge call per 3 seconds that can only fail.
  */
+/**
+ * Whether a failed {@link startGateEmitter} means this device cannot emulate a card at all — a
+ * browser or an iPhone, where the plugin's web class rejects every call with Capacitor's
+ * `UNAVAILABLE` (`plugins/hce-android/src/web.ts`). No tap will ever arrive there, so the gate
+ * screen says so and points at manual approval rather than sitting on an idle "tap here".
+ */
+export function isCardEmulationUnavailable(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'UNAVAILABLE';
+}
+
 export async function startGateEmitter(params: StartGateEmitterParams): Promise<GateEmitter> {
   const key = await ensureGateKey();
   let ring: GateCodeWire[] = [];

@@ -183,7 +183,7 @@ export function Created() {
               <OpProgress phase="saving" />
             ) : (
               // 안심어: 공개도 무료고, 어려운 건 MONTI가 대신 처리한다(T-SIMP-6). 주행동은 하단 바로.
-              <p className="muted">{common.montiHandles}</p>
+              <p className="muted">{common.publishFree}</p>
             )}
             {problem !== '' ? <Alert tone="error">{life[problem]}</Alert> : null}
           </>

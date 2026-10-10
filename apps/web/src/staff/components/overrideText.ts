@@ -28,11 +28,25 @@ export const ROLE_KEY = {
 } as const satisfies Record<OverrideRole, keyof StaffCopy['override']>;
 
 /**
- * 승인자 주소를 줄여서 보여준다. 줄 서 있는 사람들이 같이 보는 화면이라 전체는 띄우지 않고,
- * 그래도 나중에 체인 기록과 맞춰 볼 수 있을 만큼은 남긴다.
+ * 승인한 사람을 글자로. 승인자는 언제나 이 단말기를 든 스태프 본인의 계정이라(`types.ts`
+ * `approver`), 0x 주소 대신 "나"와 그 권한으로 말한다 — 스태프가 읽을 수 있는 말은 그쪽이다.
  */
-export function shortAccount(account: string): string {
-  return `${account.slice(0, 6)}…${account.slice(-4)}`;
+export function approverLine(copy: StaffCopy, role: OverrideRole | undefined): string {
+  if (role === 'approver') return copy.override.approverMeApprover;
+  if (role === 'manager') return copy.override.approverMeManager;
+  return copy.override.approverMe;
+}
+
+/** 스태프가 티켓 번호 끝 네 자리로 사람을 맞춘다. 그 네 자리만 남기고 가린다. */
+const TICKET_TAIL = 4;
+
+/**
+ * 찾기 결과와 고른 사람 한 줄: 표시 이름(비워 뒀으면 "게스트")과 티켓 번호 끝 네 자리.
+ * 티켓 번호는 31자리 숫자라 문자열로만 자른다.
+ */
+export function guestLine(copy: StaffCopy, ticket: { displayName: string; tokenId: string }): string {
+  const name = ticket.displayName.trim() === '' ? copy.override.guest : ticket.displayName;
+  return `${name} ••${ticket.tokenId.slice(-TICKET_TAIL)}`;
 }
 
 /** 막힌 이유를 문장으로. 숫자를 끼워 넣는 두 가지만 여기 있고, 나머지는 키 하나로 끝난다. */

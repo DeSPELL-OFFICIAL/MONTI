@@ -13,6 +13,7 @@ import { relayProblem } from '../../shared/relay/relayError';
 import { gql } from '../../shared/envio/client';
 import { GATES_QUERY, type EnvioGate } from '../../shared/envio/queries';
 import { useOrganizerCopy, type OrganizerCopy } from '../copy';
+import { fmt } from '../../shared/i18n';
 import { readGateKey } from './gateKey';
 import { useEventGatesWithFallback } from '../useEventGatesWithFallback';
 
@@ -60,6 +61,8 @@ export function Gates() {
   const [problem, setProblem] = useState<GateProblem | ''>('');
   const [paste, setPaste] = useState(EMPTY_PASTE);
   const [reload, setReload] = useState(0);
+  // The gate whose 폐기 is waiting on its confirmation, or null.
+  const [revoking, setRevoking] = useState<string | null>(null);
 
   // 인덱서가 0행으로 정착하면 체인 로그(GateRegistered)에서 등록된 단말기를 직접 세운다 — 방금
   // 등록한 게이트의 열기 버튼이 인덱서(Envio)를 기다리지 않게. 인덱서에 행이 있으면 그대로 쓴다.
@@ -185,9 +188,12 @@ export function Gates() {
         <ul style={{ listStyle: 'none', padding: 0 }}>
           {registered.map((gate) => (
             <li key={gate.id} style={{ marginBottom: 12 }}>
-              <p style={{ wordBreak: 'break-all' }}>
-                {copy.gateId} {gate.id} · {gate.account}
-              </p>
+              {/* The number a person can say out loud; the raw address waits under 상세. */}
+              <p>{fmt(copy.gateLabel, { n: gate.id })}</p>
+              <details className="more">
+                <summary>{copy.gateDetails}</summary>
+                <p style={{ wordBreak: 'break-all' }}>{copy.account} {gate.account}</p>
+              </details>
               {/* The indexer's column is `isOpen`, after the contract view `isOpenGate`. */}
               <p>{gate.revoked ? copy.isRevoked : gate.isOpen ? copy.isOpen : copy.isClosed}</p>
               {mayManage && !gate.revoked ? (
@@ -201,9 +207,29 @@ export function Gates() {
                       {copy.open}
                     </Button>
                   )}
-                  <Button variant="danger" disabled={busy} onClick={() => void send('revokeGate', [BigInt(gate.id)])}>
-                    {copy.revoke}
-                  </Button>
+                  {/* 폐기 cannot be undone, so it asks first (the same in-place warning 행사 취소 uses). */}
+                  {revoking === gate.id ? (
+                    <Alert tone="warn">
+                      {copy.revokeConfirm}
+                      <Button
+                        variant="danger"
+                        disabled={busy}
+                        onClick={() => {
+                          setRevoking(null);
+                          void send('revokeGate', [BigInt(gate.id)]);
+                        }}
+                      >
+                        {copy.revoke}
+                      </Button>
+                      <Button variant="ghost" disabled={busy} onClick={() => setRevoking(null)}>
+                        {copy.revokeKeep}
+                      </Button>
+                    </Alert>
+                  ) : (
+                    <Button variant="danger" disabled={busy} onClick={() => setRevoking(gate.id)}>
+                      {copy.revoke}
+                    </Button>
+                  )}
                 </>
               ) : null}
             </li>

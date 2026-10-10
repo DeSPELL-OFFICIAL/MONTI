@@ -6,7 +6,7 @@ import type { EventDraftTier } from '../../shared/api/firestore';
 import { approvalModesEnabled } from '../../shared/config';
 import { useOrganizerCopy } from '../copy';
 import { ArtPicker } from '../ArtPicker';
-import { MAX_TIER_NAME_CHARS, UNLIMITED_SUPPLY, tierArt } from './draftRules';
+import { MAX_TIER_NAME_CHARS, PAID_CURRENCY, UNLIMITED_SUPPLY, tierArt } from './draftRules';
 
 /**
  * The preview's tap regions, as bands of the frame's own height. The picture, the kind and the
@@ -24,8 +24,6 @@ const TAP_REGION = {
   title: { top: '64%', height: '10%' },
 } as const;
 
-/** The currencies a paid kind can be priced in. `free` is the segment's other half, not a chip. */
-const PAID_CURRENCIES = ['MON', 'USDT', 'USDC'] as const;
 
 /** A whole number out of a box somebody may have emptied; a blank box is zero, not NaN. */
 function whole(value: string): number {
@@ -266,25 +264,16 @@ export function TierCard({
       </Field>
 
       {/* 무료 | 유료 — always visible, replacing the four currency chips and the old fold. 유료
-          defaults the currency to MON; the three paid currencies are the row that follows. */}
+          sets the one currency the backend takes; there is nothing to pick, so it is one line. */}
       <p className="muted">{copy.price}</p>
       <div className="chip-row" role="group" aria-label={copy.price} ref={priceRef}>
         <Chip label={copy.free} selected={!paid} onClick={() => onPatch({ currency: 'free' })} />
-        <Chip label={copy.paid} selected={paid} onClick={() => onPatch({ currency: 'MON' })} />
+        <Chip label={copy.paid} selected={paid} onClick={() => onPatch({ currency: PAID_CURRENCY })} />
       </div>
 
       {paid ? (
         <>
-          <div className="chip-row">
-            {PAID_CURRENCIES.map((currency) => (
-              <Chip
-                key={currency}
-                label={currency}
-                selected={tier.currency === currency}
-                onClick={() => onPatch({ currency })}
-              />
-            ))}
-          </div>
+          <p className="muted">{copy.currencyFixed}</p>
           <Field label={copy.amount}>
             <input {...amountField} />
           </Field>

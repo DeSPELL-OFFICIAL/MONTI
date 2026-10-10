@@ -411,7 +411,7 @@ test('55 · settlement chain — organiser + attendee + staff, one process', asy
     for (let attempt = 0; attempt < 4 && !approved; attempt++) {
       await expect(openOverrideBtn).toBeVisible({ timeout: 60_000 });
       await openOverrideBtn.click();
-      const searchBox = page.getByLabel('이름 또는 표 번호');
+      const searchBox = page.getByLabel('이름 또는 티켓 번호');
       await expect(searchBox).toBeVisible({ timeout: 10_000 });
       await searchBox.fill(tokenId);
       const match = page.locator('.gate-dialog__matches li button').first();

@@ -118,6 +118,14 @@ describe('the organiser dashboard', () => {
     expect(screen.getByText(/bob/)).toBeInTheDocument();
     expect(listAttendees).toHaveBeenCalledWith({ eventId: '5' });
   });
+
+  it('says the title is loading, not that the event is unnamed, while its document is on its way', async () => {
+    fetchEventMetadata.mockReturnValueOnce(new Promise(() => undefined));
+    open();
+    await screen.findByText(`${dash.sold} 40`);
+    await waitFor(() => expect(document.body.innerHTML).toContain(dash.art.titleLoading));
+    expect(document.body.innerHTML).not.toContain(dash.art.untitled);
+  });
 });
 
 describe('publishing and cancelling', () => {

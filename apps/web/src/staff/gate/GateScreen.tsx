@@ -151,6 +151,9 @@ function RunningGate({ gateId, eventId, orgId, gateAccount, open, revoked }: Run
       onOverrideCancel={gate.retry}
       actions={
         <>
+          {/* No card emulation here (a browser): taps will never come, so say what to do instead.
+              The 수동 승인하기 button just below stays the way in. */}
+          {gate.emulationUnavailable ? <Alert tone="warn">{copy.ready.unavailable}</Alert> : null}
           <Button variant="ghost" onClick={scan}>
             {copy.qr.scanButton}
           </Button>

@@ -93,6 +93,7 @@ function running(over: Partial<UseGateResult> = {}): UseGateResult {
     parkedCount: 0,
     gateOpen: true,
     gateOpenStale: false,
+    emulationUnavailable: false,
     canApprove: false,
     openOverride,
     searchGuests,
@@ -185,6 +186,20 @@ describe('the running console', () => {
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(String(7n));
     expect(screen.getByText('가을 밤 콘서트')).toBeInTheDocument();
     expect(screen.getByText(staffKo.ready.tap)).toBeInTheDocument();
+  });
+
+  it('says a browser cannot be a tap terminal, and keeps 수동 승인 in reach', () => {
+    gate.mockReturnValue(running({ emulationUnavailable: true }));
+    renderGate();
+    expect(
+      screen.getByText('이 브라우저에서는 단말기 모드를 쓸 수 없어요. 수동 승인으로 입장을 처리해 주세요.'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: staffKo.override.open })).toBeInTheDocument();
+  });
+
+  it('says nothing about it on a phone that emulates a card', () => {
+    renderGate();
+    expect(screen.queryByText(staffKo.ready.unavailable)).not.toBeInTheDocument();
   });
 
   it('names the event by number until the first guest list lands', () => {

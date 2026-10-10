@@ -166,6 +166,13 @@ const SECONDS_PER_HOUR = 3_600;
  */
 export const UNLIMITED_SUPPLY = UINT32_MAX;
 
+/**
+ * The one currency a paid kind is priced in. The backend deposits only this token
+ * (`settlement.ts` `usdcAddress`) and the vault allows only it (`tokenAllowed`), so the card offers
+ * no choice: it shows one plain line and stores this value.
+ */
+export const PAID_CURRENCY = 'USDC' as const;
+
 /** One named rule of SCENE 2; `organizer/copy.ts` owns a sentence for each. */
 export type TierProblem =
   | 'tiersTooMany' | 'tierName' | 'tierNameTooLong' | 'tierSupply' | 'tierMaxPerWallet'

@@ -204,8 +204,25 @@ describe('the registered list', () => {
       expect(sendAction).toHaveBeenCalledWith('openGate', 'organizers', data('openGate', [7n])),
     );
     await user.click(screen.getByRole('button', { name: copy.revoke }));
+    // 폐기 asks first; nothing is sent until the warning is confirmed.
+    expect(screen.getByText(copy.revokeConfirm)).toBeInTheDocument();
+    expect(sendAction).not.toHaveBeenCalledWith('revokeGate', 'organizers', data('revokeGate', [7n]));
+    await user.click(screen.getByRole('button', { name: copy.revoke }));
     await waitFor(() =>
       expect(sendAction).toHaveBeenCalledWith('revokeGate', 'organizers', data('revokeGate', [7n])),
     );
+  });
+
+  it('names a terminal by its number, not its address, and keeps it on 그대로 두기', async () => {
+    const user = userEvent.setup();
+    gql.mockResolvedValue({
+      Gate: [{ id: '7', eventId: '5', account: GATE, kx: KX, ky: KY, isOpen: false, revoked: false }],
+    });
+    open();
+    expect(await screen.findByText('단말기 7')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: copy.revoke }));
+    await user.click(screen.getByRole('button', { name: copy.revokeKeep }));
+    expect(screen.queryByText(copy.revokeConfirm)).toBeNull();
+    expect(sendAction).not.toHaveBeenCalled();
   });
 });

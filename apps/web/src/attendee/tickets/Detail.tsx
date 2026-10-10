@@ -107,7 +107,9 @@ export function TicketDetail() {
       <Receipt
         tokenId={tokenId}
         eventId={ticket.eventId}
-        canRefund={ticket.state === 'before' && !entered}
+        // A called-off event is refundable too: the vault lets anyone refund a cancelled event's
+        // deposit (SettlementVault.refund), which is what the organiser's cancel warning promises.
+        canRefund={(ticket.state === 'before' && !entered) || ticket.state === 'cancelled'}
         onStatus={setOrderStatus}
       />
       {/* The door guide is for a ticket that can still get in — not a used or refunded one. */}

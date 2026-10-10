@@ -143,7 +143,7 @@ test('53 · settlement step 3 — organiser admits attendee via staff manual ove
       // Wait for the console (snapshot issued on mount) and open the override dialog.
       await expect(openOverrideBtn).toBeVisible({ timeout: 60_000 });
       await openOverrideBtn.click();
-      const searchBox = page.getByLabel('이름 또는 표 번호');
+      const searchBox = page.getByLabel('이름 또는 티켓 번호');
       await expect(searchBox).toBeVisible({ timeout: 10_000 });
       await searchBox.fill(TOKEN_ID);
       await page.waitForTimeout(1500);

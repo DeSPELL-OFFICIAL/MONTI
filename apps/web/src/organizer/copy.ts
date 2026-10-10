@@ -70,7 +70,7 @@ const ko = {
     publishConfirm: '공개하면 누구나 이 행사를 보고 신청할 수 있어요. 공개한 뒤에는 내용을 고칠 수 없어요',
     cancel: '행사 취소하기',
     // 01b 재배포 뒤에는 취소된 행사의 티켓을 남에게 넘길 수 없다. 확인 창에서 미리 말해 둔다.
-    cancelConfirm: '취소하면 되돌릴 수 없어요. 신청이 닫히고, 이미 나간 티켓은 다음 업데이트부터 남에게 넘길 수 없게 돼요',
+    cancelConfirm: '취소하면 되돌릴 수 없어요. 신청이 닫히고, 결제한 분들은 환불받을 수 있어요.',
     confirm: '네, 진행할게요',
     back: '아니요',
     working: '보내고 있어요',
@@ -103,10 +103,14 @@ const ko = {
     open: '열기',
     close: '닫기',
     revoke: '폐기',
+    revokeConfirm: '폐기하면 이 단말기로 다시 입장을 받을 수 없어요. 폐기할까요?',
+    revokeKeep: '그대로 두기',
     isOpen: '열림',
     isClosed: '닫힘',
     isRevoked: '폐기됨',
     gateId: '단말기 번호',
+    gateLabel: '단말기 {{n}}',
+    gateDetails: '상세',
     submittedAt: '올라온 시각',
     manual: '직접 옮겨 적기',
     manualHelp: '스태프 앱이 올린 줄이 안 보이면 단말기 화면의 값을 그대로 옮겨 적으세요',
@@ -245,6 +249,8 @@ const ko = {
       notAllowed: '이 행사의 티켓 그림을 바꿀 권한이 없어요',
       failed: '티켓 그림을 저장하지 못했어요. 잠시 뒤 다시 시도해 주세요',
       untitled: '이름 없는 행사',
+      // 제목 문서를 아직 받는 중일 때. 끝내 못 받았을 때만 '이름 없는 행사'로 바뀐다.
+      titleLoading: '제목 불러오는 중…',
     },
   },
 
@@ -414,6 +420,8 @@ const ko = {
       paidBlocked: '유료 티켓은 곧 열려요. 지금은 무료로만 만들 수 있어요',
       // 무료 | 유료 세그먼트: 통화 칩 4개와 접힘을 대체하고 카드 상단에 항상 노출된다(계획 A-1).
       paid: '유료',
+      // 결제는 달러 테스트 결제 하나뿐이라 고를 통화가 없다. 저장 값은 서버가 받는 그 하나다.
+      currencyFixed: '결제 통화 · 달러($) · 테스트 결제',
       // (i) 툴팁 — 창업자가 요청한 정확한 문구(계획 A-3).
       limitTip: '예매하는 본인도 1명으로 포함돼요. 가족·동행 표를 함께 사게 하려면 2 이상, 1인 1매로 막으려면 1로 두세요.',
       // 무료일 때만 나오는 받는 방식 2분기(계획 A-2). approvalRequired 는 이벤트 단위라 첫 카드에만 그린다.
@@ -627,7 +635,7 @@ const en: typeof ko = {
     publishConfirm: 'Once it is public, anyone can see this event and sign up. You cannot change the details afterwards',
     cancel: 'Cancel this event',
     // After the 01b redeploy a cancelled event's tickets can no longer be handed over.
-    cancelConfirm: 'Cancelling cannot be undone. Sign-ups close, and from the next update on nobody can hand an issued ticket to somebody else',
+    cancelConfirm: 'Cancelling cannot be undone. Sign-ups close, and anyone who paid can get a refund.',
     confirm: 'Yes, go ahead',
     back: 'No',
     working: 'Sending',
@@ -660,10 +668,14 @@ const en: typeof ko = {
     open: 'Open',
     close: 'Close',
     revoke: 'Retire',
+    revokeConfirm: 'A retired terminal can never take entries again. Retire it?',
+    revokeKeep: 'Keep it',
     isOpen: 'Open',
     isClosed: 'Closed',
     isRevoked: 'Retired',
     gateId: 'Terminal number',
+    gateLabel: 'Terminal {{n}}',
+    gateDetails: 'Details',
     submittedAt: 'Sent at',
     manual: 'Type it in instead',
     manualHelp: 'If the staff app\'s entry is not listed, copy the values from the terminal screen exactly',
@@ -797,6 +809,7 @@ const en: typeof ko = {
       notAllowed: 'You may not change the pictures for this event',
       failed: 'Could not save the picture. Please try again in a moment',
       untitled: 'Unnamed event',
+      titleLoading: 'Loading the title…',
     },
   },
 
@@ -962,6 +975,7 @@ const en: typeof ko = {
       // The 무료 | 유료 segment, always at the top of the card, replacing the fold and the four
       // currency chips (plan section A-1).
       paid: 'Paid',
+      currencyFixed: 'Currency · US dollars ($) · test payment',
       // The (i) tooltip in the exact words the founder asked for (plan section A-3).
       limitTip: 'You are counted as one of the buyers. Set it to 2 or more to let one person buy for family or a guest, or leave it at 1 to hold everyone to a single ticket.',
       // The two receiving methods, shown only while the event is free (plan section A-2).

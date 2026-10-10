@@ -6,7 +6,7 @@ import { useCopy } from '../../shared/i18n';
 import { useOrganizerCopy } from '../copy';
 import { emptyEventDraftTier } from '../useEventDraft';
 import { TierCard } from './TierCard';
-import { MAX_TIERS, type TierProblem } from './draftRules';
+import { MAX_TIERS, PAID_CURRENCY, type TierProblem } from './draftRules';
 
 export interface TicketSectionProps {
   draft: EventDraft;
@@ -115,7 +115,7 @@ export function TicketSection({ draft, patch, problems, blocked, onEditTitle }: 
           label={copy.tiers.quickPaid}
           selected={quick === 'paid'}
           // The amount is left at its default; the honest paid block still lands in the card.
-          onClick={() => patchTier(0, { currency: 'MON', maxPerWallet: 1 })}
+          onClick={() => patchTier(0, { currency: PAID_CURRENCY, maxPerWallet: 1 })}
         />
       </div>
 
