@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { signInWithCustomToken } from 'firebase/auth';
 import { Alert, Button, Screen, Spinner } from '../shared/ui';
 import { useCopy } from '../shared/i18n';
@@ -7,6 +7,8 @@ import type { Copy } from '../shared/copy/index';
 import { api, callableFailure } from '../shared/api/functions';
 import { getFirebaseAuth } from '../shared/api/firebase';
 import { NoPasskeyOnDevice, passkeyProblem, signPasskeyAssertion } from '../shared/passkey';
+import { safeReturnTo } from '../shared/returnTo';
+import { readSignup, writeSignup } from './signup/useSignup';
 
 /** The person is gone as far as signing in goes — a retry cannot change any of these. */
 const UNAVAILABLE_REASONS = new Set(['BAD_SIGNUP_STATE', 'NO_ACCOUNT', 'USER_NOT_FOUND']);
@@ -75,7 +77,19 @@ export function Login() {
   // Signup sends an already-registered number here with the sentence to show, so the attendee
   // is not dropped on a bare sign-in screen wondering what happened.
   const notice = (useLocation().state as { notice?: string } | null)?.notice;
+  // Where a guarded route bounced this person from (`router.tsx` RequireSession), or — when
+  // signup sent an already-registered number back here — the target signup was carrying.
+  const [params] = useSearchParams();
+  const requested = params.get('returnTo') ?? readSignup().next ?? null;
+  const returnTo = safeReturnTo(requested, '/tickets');
   const [error, setError] = useState('');
+
+  /** Somebody new has no passkey to sign in with: signup starts at the phone number, and the
+   *  target rides along in the signup state so the done screen can put them back. */
+  function startSignup(): void {
+    writeSignup({ next: requested !== null ? safeReturnTo(requested, '/') : undefined });
+    navigate('/signup/phone');
+  }
   const [busy, setBusy] = useState(false);
 
   /**
@@ -94,7 +108,7 @@ export function Login() {
         const assertion = await signPasskeyAssertion(challenge);
         const { token } = await api.loginVerify({ assertion });
         await signInWithCustomToken(getFirebaseAuth(), token);
-        navigate('/tickets');
+        navigate(returnTo);
         return;
       } catch (failure) {
         if (attempt < MAX_LOGIN_ATTEMPTS && isTransient(failure)) {
@@ -128,6 +142,9 @@ export function Login() {
       ) : null}
       <Button onClick={run} disabled={busy}>
         {copy.login.cta}
+      </Button>
+      <Button variant="ghost" onClick={startSignup} disabled={busy}>
+        {copy.login.signupCta}
       </Button>
     </Screen>
   );

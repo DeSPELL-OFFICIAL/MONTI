@@ -250,6 +250,12 @@ describe('TicketDetail', () => {
     expect(screen.getByRole('button', { name: '친구에게 주기' })).toBeInTheDocument();
   });
 
+  it('shows the ticket number staff search by, with a copy action', async () => {
+    renderDetail('1');
+    expect(await screen.findByText(/티켓 번호/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '번호 복사' })).toBeInTheDocument();
+  });
+
   it('drops the entry and handover buttons once the ticket is used', async () => {
     renderDetail('2');
     expect(await screen.findByText('입장 완료')).toBeInTheDocument();

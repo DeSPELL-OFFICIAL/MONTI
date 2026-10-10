@@ -22,6 +22,13 @@ export interface SignupState {
   /** Empty string means the platform verified instantly; absent means nothing started. */
   verificationId?: string;
   phoneE164?: string;
+  /**
+   * Where a signed-out person was headed (a claim link) when the sign-in screen sent them into
+   * signup. Kept here rather than as `?returnTo=` because that query already means something else
+   * on these screens: on `/signup/verify` it is the staff exit that skips the passkey step, and on
+   * `/signup/register` it marks an account being finished. The done screen reads it last.
+   */
+  next?: string;
 }
 
 export function readSignup(): SignupState {

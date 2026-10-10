@@ -41,9 +41,9 @@ vi.mock('react-router-dom', async (orig) => ({
 const { Login } = await import('./Login');
 const { NoPasskeyOnDevice } = await import('../shared/passkey');
 
-function renderScreen() {
+function renderScreen(path = '/login') {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[path]}>
       <Login />
     </MemoryRouter>,
   );
@@ -60,6 +60,7 @@ beforeEach(() => {
   signPasskeyAssertion.mockReset();
   signInWithCustomToken.mockClear();
   navigate.mockClear();
+  sessionStorage.clear();
   loginChallenge.mockResolvedValue({ challenge: CHALLENGE, expiresAt: 0 });
   loginVerify.mockResolvedValue({ token: 'custom-token', personId: PERSON_ID, account: ACCOUNT });
   signPasskeyAssertion.mockResolvedValue(ASSERTION);
@@ -77,6 +78,26 @@ describe('passkey-only sign-in', () => {
     // The session itself comes from the token's claims, read by shared/api/sessionHydrator.
     expect(signInWithCustomToken).toHaveBeenCalledWith({ name: 'auth' }, 'custom-token');
     expect(navigate).toHaveBeenCalledWith('/tickets');
+  });
+
+  it('goes back to where a guarded route bounced the person from', async () => {
+    renderScreen('/login?returnTo=%2Fclaim%2F12');
+    await userEvent.click(screen.getByRole('button', { name: '로그인' }));
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/claim/12'));
+  });
+
+  it('ignores a return target that would leave the app', async () => {
+    renderScreen('/login?returnTo=%2F%2Fevil.example');
+    await userEvent.click(screen.getByRole('button', { name: '로그인' }));
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/tickets'));
+  });
+
+  it('offers somebody new the phone signup, carrying the return target into signup', async () => {
+    sessionStorage.clear();
+    renderScreen('/login?returnTo=%2Fclaim%2F12');
+    await userEvent.click(screen.getByRole('button', { name: '처음이에요 · 휴대폰 번호로 시작하기' }));
+    expect(navigate).toHaveBeenCalledWith('/signup/phone');
+    expect(JSON.parse(sessionStorage.getItem('monti.signup') ?? '{}')).toMatchObject({ next: '/claim/12' });
   });
 
   it('shows the failure sentence when the server rejects the assertion', async () => {

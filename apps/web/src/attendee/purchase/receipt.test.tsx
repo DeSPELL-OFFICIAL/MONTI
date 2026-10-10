@@ -83,12 +83,34 @@ describe('Receipt', () => {
     expect(screen.getByText('MONTI 플랫폼 · $3.00')).toBeTruthy();
   });
 
-  it('refunds a held order before the event', async () => {
+  it('asks first, then refunds a held order before the event and says so', async () => {
     const user = userEvent.setup();
     renderReceipt(true);
     const button = await screen.findByRole('button', { name: '환불받기' });
     await user.click(button);
+    // One tap only opens the question — nothing irreversible has happened yet.
+    const sheet = await screen.findByRole('dialog', { name: '환불할까요?' });
+    expect(sheet).toHaveTextContent('환불하면 이 티켓으로 입장할 수 없어요. 결제한 $30.00은 결제 수단으로 돌아가요.');
+    expect(mocks.refundOrder).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: '환불하기' }));
     await waitFor(() => expect(mocks.refundOrder).toHaveBeenCalledWith({ orderId: 'o1' }));
+    expect(await screen.findByText('환불했어요')).toBeTruthy();
+  });
+
+  it('does nothing when the refund question is answered 아니요', async () => {
+    const user = userEvent.setup();
+    renderReceipt(true);
+    await user.click(await screen.findByRole('button', { name: '환불받기' }));
+    await user.click(await screen.findByRole('button', { name: '아니요' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(mocks.refundOrder).not.toHaveBeenCalled();
+  });
+
+  it('tells the detail screen the order status', async () => {
+    currentOrder = { ...currentOrder!, status: 'refunded' };
+    const onStatus = vi.fn();
+    render(<Receipt tokenId="42" eventId="5" canRefund onStatus={onStatus} />);
+    await waitFor(() => expect(onStatus).toHaveBeenCalledWith('refunded'));
   });
 
   it('shows the settled status and offers no refund once released', async () => {

@@ -3,7 +3,6 @@ import { useParams } from 'react-router-dom';
 import { Card, EmptyState, Screen, Spinner } from '../../shared/ui';
 import { getConfig } from '../../shared/config';
 import { useLocale } from '../../shared/i18n';
-import type { SettlementView } from '../../shared/api/firestore';
 import { settlementCopy as t } from './copy';
 import {
   buildReasonLookup,
@@ -15,12 +14,8 @@ import {
   type ReadableRecipient,
 } from './format';
 import { useSettlementDoc, useSettlementEvent, useSettlementLive, type EscrowRow } from './useSettlement';
+import { buildSegments } from './segments';
 import './settlement.css';
-
-/** The segment colours of the share bar; the platform and the reserve get their own muted tones. */
-const SEGMENT_COLORS = ['#836EF9', '#5B3FD9', '#0F7A5A', '#A0055D', '#8A5200', '#4C4877'];
-const PLATFORM_COLOR = '#B9B3D6';
-const RESERVE_COLOR = '#E3DEF7';
 
 function localeTag(locale: string): string {
   return locale === 'en' ? 'en-US' : 'ko-KR';
@@ -69,50 +64,12 @@ function explorerLink(base: string, kind: 'address' | 'tx', value: string): Reac
   );
 }
 
-interface Segment {
-  label: string;
-  bps: number;
-  amountCents: number;
-  color: string;
-}
-
 /** The most expensive tier is the clearest example to divide — "a $30 ticket splits like this". */
 function representativeCents(byTier: Record<string, number> | undefined): number {
   const values = Object.values(byTier ?? {}).filter((n) => Number.isFinite(n) && n > 0);
   return values.length ? Math.max(...values) : 3000;
 }
 
-function buildSegments(
-  policy: SettlementView['policy'],
-  recipients: ReadableRecipient[],
-  ticketCents: number,
-): Segment[] {
-  const segments: Segment[] = recipients.map((recipient, index) => ({
-    label: recipient.reason || recipient.tag || t.reasonFallback(index + 1),
-    bps: recipient.bps,
-    amountCents: (ticketCents * recipient.bps) / 10000,
-    color: SEGMENT_COLORS[index % SEGMENT_COLORS.length] ?? PLATFORM_COLOR,
-  }));
-  if (policy.platformBps > 0) {
-    segments.push({
-      label: t.platformLabel,
-      bps: policy.platformBps,
-      amountCents: (ticketCents * policy.platformBps) / 10000,
-      color: PLATFORM_COLOR,
-    });
-  }
-  const used = recipients.reduce((sum, recipient) => sum + recipient.bps, 0) + policy.platformBps;
-  const reserve = 10000 - used;
-  if (reserve > 0) {
-    segments.push({
-      label: t.reserveLabel,
-      bps: reserve,
-      amountCents: (ticketCents * reserve) / 10000,
-      color: RESERVE_COLOR,
-    });
-  }
-  return segments;
-}
 
 interface StatCell {
   count: number;

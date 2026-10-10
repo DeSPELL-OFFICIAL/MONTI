@@ -81,7 +81,8 @@ export const ko = {
     failed: '다시 설정하지 못했어요. 잠시 뒤 다시 시도해 주세요.',
   },
   login: {
-    title: '다시 오셨네요', body: '얼굴이나 지문으로 바로 들어갈 수 있어요.', cta: '로그인',
+    title: '로그인', body: '얼굴이나 지문으로 바로 들어갈 수 있어요.', cta: '로그인',
+    signupCta: '처음이에요 · 휴대폰 번호로 시작하기',
     failed: '로그인하지 못했어요. 다시 시도해 주세요.', working: '확인하고 있어요',
     cancelled: '로그인을 취소했어요.',
     noPasskey: '이 휴대폰에는 설정된 잠금이 없어요. 먼저 가입해 주세요.',
@@ -153,6 +154,9 @@ export const ko = {
     artNoTitle: '행사 이름을 불러오지 못했어요', artNoTier: '티켓',
     // 표시 이름을 비워 둔 사람의 티켓에 찍히는 말. 빈 줄보다 낫고, '이름 없음'보다 낫다.
     artGuest: '게스트',
+    refundedState: '환불된 티켓이에요 · 입장할 수 없어요',
+    // 수동 승인에서 스태프가 찾는 번호. 끝 네 자리를 따로 보여 준다.
+    ticketNumber: '티켓 번호', copyNumber: '번호 복사', numberCopied: '복사했어요',
   },
   claim: {
     cta: '티켓 받기', checking: '확인 중…', working: '받는 중이에요', done: '티켓을 받았어요 · 내 티켓에 있어요', tierLabel: '티켓 종류',
@@ -346,6 +350,11 @@ export const ko = {
     refund: '환불받기',
     refunding: '환불하는 중이에요',
     refundFailed: '환불하지 못했어요. 잠시 뒤 다시 시도해 주세요',
+    refundConfirmTitle: '환불할까요?',
+    refundConfirmBody: '환불하면 이 티켓으로 입장할 수 없어요. 결제한 {{amount}}은 결제 수단으로 돌아가요.',
+    refundConfirm: '환불하기',
+    refundCancel: '아니요',
+    refundDone: '환불했어요',
     receiptDetails: '영수증 자세히',
     receiptLink: '결제 기록 원본',
   },

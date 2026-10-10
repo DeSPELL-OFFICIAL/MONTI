@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { BPS_TOTAL } from '@monti/shared';
-import { Alert, Button } from '../../shared/ui';
-import { useCopy, useLocale } from '../../shared/i18n';
+import { Alert, Button, Sheet } from '../../shared/ui';
+import { fmt, useCopy, useLocale } from '../../shared/i18n';
 import { getConfig } from '../../shared/config';
 import { api } from '../../shared/api/functions';
 import { getSettlement, watchOrder, type OrderView, type SettlementView } from '../../shared/api/firestore';
@@ -13,6 +13,9 @@ export interface ReceiptProps {
   eventId: string;
   /** The ticket may still be refunded while it has not been used (before the event / entry). */
   canRefund: boolean;
+  /** Told the order's status as it changes (`null` while there is no order), so the detail screen
+   *  can take 입장하기 and 친구에게 주기 away from a refunded ticket. */
+  onStatus?: (status: OrderView['status'] | null) => void;
 }
 
 /** Split an order's paid cents across the policy recipients by bps, last row taking the dust. */
@@ -32,13 +35,16 @@ function splitByRole(recipients: SettlementView['policy']['recipients'], cents: 
  * allowed. It renders nothing for a free ticket (no order recorded on this device), so the detail
  * screen is unchanged for events without settlement.
  */
-export function Receipt({ tokenId, eventId, canRefund }: ReceiptProps) {
+export function Receipt({ tokenId, eventId, canRefund, onStatus }: ReceiptProps) {
   const copy = useCopy();
   const locale = useLocale();
   const [order, setOrder] = useState<OrderView | null>(null);
   const [settlement, setSettlement] = useState<SettlementView | null>(null);
   const [refunding, setRefunding] = useState(false);
   const [refundError, setRefundError] = useState('');
+  // A refund cannot be taken back, so the button asks first (the same sheet 공개하기 uses).
+  const [confirming, setConfirming] = useState(false);
+  const [refundDone, setRefundDone] = useState(false);
 
   const orderId = orderIdForToken(tokenId) ?? orderIdForEvent(eventId);
 
@@ -48,13 +54,20 @@ export function Receipt({ tokenId, eventId, canRefund }: ReceiptProps) {
     return watchOrder(orderId, setOrder, () => setOrder(null));
   }, [orderId, eventId]);
 
+  const status = order?.status ?? null;
+  useEffect(() => {
+    onStatus?.(status);
+  }, [onStatus, status]);
+
   const refund = useCallback(async () => {
     if (orderId === null) return;
+    setConfirming(false);
     setRefunding(true);
     setRefundError('');
     try {
       await api.refundOrder({ orderId });
-      // watchOrder reflects the refunded status; no local mutation needed.
+      // watchOrder reflects the refunded status; this only says the tap worked.
+      setRefundDone(true);
     } catch {
       setRefundError(copy.purchase.refundFailed);
     } finally {
@@ -97,10 +110,19 @@ export function Receipt({ tokenId, eventId, canRefund }: ReceiptProps) {
       ) : null}
 
       {refundError ? <Alert tone="error">{refundError}</Alert> : null}
+      {refundDone ? <Alert tone="info">{copy.purchase.refundDone}</Alert> : null}
       {canRefund && order.status === 'deposited' ? (
-        <Button variant="ghost" disabled={refunding} onClick={() => void refund()}>
+        <Button variant="ghost" disabled={refunding} onClick={() => setConfirming(true)}>
           {refunding ? copy.purchase.refunding : copy.purchase.refund}
         </Button>
+      ) : null}
+      {confirming ? (
+        <Sheet label={copy.purchase.refundConfirmTitle} onDismiss={() => setConfirming(false)}>
+          <h2>{copy.purchase.refundConfirmTitle}</h2>
+          <p>{fmt(copy.purchase.refundConfirmBody, { amount: formatUsdCents(order.amountUsdCents) })}</p>
+          <Button variant="danger" onClick={() => void refund()}>{copy.purchase.refundConfirm}</Button>
+          <Button variant="ghost" onClick={() => setConfirming(false)}>{copy.purchase.refundCancel}</Button>
+        </Sheet>
       ) : null}
 
       {receiptTx ? (

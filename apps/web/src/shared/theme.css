@@ -646,6 +646,15 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
 /* The detail screen shows one ticket, so it is the picture rather than a thumbnail — capped
    short of the full width so the state, the door guide and 입장하기 stay on the same screen. */
 .ticket-detail-art { max-width: 260px; margin: 0 auto var(--s-4); }
+/* The number staff search by at the door: a 31-digit id, so it wraps anywhere, and the last
+   four digits (what staff read back) are set apart in bold. */
+.ticket-number { text-align: center; font-size: 0.875rem; }
+.ticket-number__digits { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
+.ticket-number__digits strong { font-size: 1.125rem; }
+.ticket-number__copy {
+  background: none; border: 0; padding: 0 var(--s-1); color: inherit;
+  text-decoration: underline; font: inherit; cursor: pointer;
+}
 
 /* ── the creation scenes ───────────────────────────────────────────────────────────────────
    One long scroll with a bar pinned to its foot, so the scroll pads itself by the bar's own

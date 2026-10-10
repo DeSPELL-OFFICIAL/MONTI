@@ -50,8 +50,17 @@ function TabShell() {
 
 export function RequireSession() {
   const session = useSession();
+  const location = useLocation();
   if (session.status === 'loading') return <Spinner />;
-  if (session.status === 'anonymous') return <Navigate to="/login" replace />;
+  if (session.status === 'anonymous') {
+    // The route transition keeps this (exiting) screen mounted for its slide-out, and it then reads
+    // the new location: without this it would bounce `/login` to itself and nest the target.
+    if (location.pathname === '/login') return null;
+    // Where they were going rides along, so a claim link opened signed out comes back to the
+    // claim after sign-in or signup rather than landing on 내 티켓.
+    const returnTo = encodeURIComponent(`${location.pathname}${location.search}`);
+    return <Navigate to={`/login?returnTo=${returnTo}`} replace />;
+  }
   return <FinishSignupFirst />;
 }
 

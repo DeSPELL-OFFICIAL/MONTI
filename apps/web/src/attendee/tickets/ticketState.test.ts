@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { deriveTicketState } from './ticketState';
+import { deriveDetailView, deriveTicketState, splitTicketNumber } from './ticketState';
 
 const base = { ownerIsMe: true, revoked: false, checkIn: null, offer: null, now: 1_790_000_000 };
 
@@ -22,5 +22,32 @@ describe('deriveTicketState', () => {
   it('marks a ticket on a cancelled event as cancelled', () => {
     expect(deriveTicketState({ ...base, eventCancelled: true })).toBe('cancelled');
     expect(deriveTicketState({ ...base, eventCancelled: true, checkIn: { ts: 1 } })).toBe('cancelled');
+  });
+});
+
+describe('deriveDetailView', () => {
+  it('offers the way in and the handover on a ticket waiting at the door', () => {
+    expect(deriveDetailView('before', null)).toEqual({ canEnter: true, canTransfer: true, refunded: false });
+    expect(deriveDetailView('before', 'deposited')).toEqual({ canEnter: true, canTransfer: true, refunded: false });
+  });
+
+  it('takes both actions away once the order is refunded', () => {
+    expect(deriveDetailView('before', 'refunded')).toEqual({ canEnter: false, canTransfer: false, refunded: true });
+  });
+
+  it('offers neither on a ticket that is no longer waiting', () => {
+    expect(deriveDetailView('entered', 'released')).toEqual({ canEnter: false, canTransfer: false, refunded: false });
+    expect(deriveDetailView('cancelled', null)).toEqual({ canEnter: false, canTransfer: false, refunded: false });
+  });
+});
+
+describe('splitTicketNumber', () => {
+  it('keeps the full number as text and sets the last four digits apart', () => {
+    const id = '1234567890123456789012345678901';
+    expect(splitTicketNumber(id)).toEqual({ head: '123456789012345678901234567', tail: '8901' });
+  });
+
+  it('leaves a short number whole in the tail', () => {
+    expect(splitTicketNumber('42')).toEqual({ head: '', tail: '42' });
   });
 });
