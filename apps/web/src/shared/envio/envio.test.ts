@@ -155,11 +155,16 @@ describe('fetchEventMetadata', () => {
     await expect(fetchEventMetadata('cid-missing')).rejects.toThrow('IPFS_504');
   });
 
-  it('stops waiting for the gateway after five seconds', async () => {
+  // The public gateway answers in 5–7 s (measured 2026-10-10), so a five-second cut-off turned
+  // every title into the placeholder. Twelve seconds lets a slow answer still land.
+  it('stops waiting for the gateway after twelve seconds', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
     fetchMock.mockResolvedValue(jsonResponse({ name: 'x' }));
     await fetchEventMetadata('cid-timeout');
     const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect(init.signal).toBeInstanceOf(AbortSignal);
+    expect(timeout).toHaveBeenCalledWith(12_000);
+    timeout.mockRestore();
   });
 
   it('leaves an http image alone and prefixes a bare CID', () => {

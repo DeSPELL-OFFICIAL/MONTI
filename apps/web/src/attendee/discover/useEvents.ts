@@ -24,8 +24,10 @@ export interface DiscoverItem {
 /** One page is fetched and then narrowed in the browser, so it has to be generous. */
 const PAGE_SIZE = 100;
 /** A public gateway rate-limits a burst of a hundred reads, so the page is read a few at a
- * time: one CID answering 429 or timing out then costs its own event a title, nothing more. */
-export const METADATA_CONCURRENCY = 4;
+ * time: one CID answering 429 or timing out then costs its own event a title, nothing more.
+ * The list renders once the whole pool drains and each read may wait out the 12 s gateway
+ * timeout, so ten at a time keeps ~20 events to two rounds (~24 s worst case). */
+export const METADATA_CONCURRENCY = 10;
 const STORAGE_KEY = 'monti.discover.filters';
 const DAY_MS = 86_400_000;
 
@@ -76,6 +78,16 @@ export function applyFilters(
     if (needle !== '' && !(metadata?.title ?? '').toLowerCase().includes(needle)) return false;
     return true;
   });
+}
+
+/**
+ * What the home list draws. A card with no title gives a visitor nothing to tap for, so it is
+ * left off while any card has one; when none has (the gateway is slow or down for everyone),
+ * every card stays under the placeholder rather than the page going empty.
+ */
+export function listableItems(items: DiscoverItem[]): DiscoverItem[] {
+  const titled = items.filter(({ metadata }) => Boolean(metadata?.title));
+  return titled.length > 0 ? titled : items;
 }
 
 /** Per-viewer convenience only, so private mode losing it is not an error. */
