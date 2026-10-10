@@ -2,6 +2,10 @@ import { expect, test, type Response } from '@playwright/test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { USERS } from '../fixtures/personas';
 import { closePersona, ensureAccount, openPersona } from '../utils/session';
+import { shot } from '../utils/shots';
+
+/** Ticket price in USD asserted on the CTA. Default unchanged ($30). */
+const PRICE = process.env.E2E_PRICE_USD ?? '30';
 
 /**
  * Batch H — Run 5, step 5. A SECOND fresh attendee buys the $30 ticket and then refunds it BEFORE
@@ -61,20 +65,25 @@ test('56 · settlement step 5 — attendee B buys then refunds before admission'
     const payCta = page.getByRole('button', { name: /결제하고 받기/ });
     await expect(payCta).toBeVisible({ timeout: 60_000 });
     await expect(payCta).toBeEnabled({ timeout: 30_000 });
-    expect((await payCta.innerText()).trim(), 'CTA shows $30').toContain('$30');
+    await shot(page, 'refund-attendee-claim-paid-cta');
+    expect((await payCta.innerText()).trim(), `CTA shows $${PRICE}`).toContain(`$${PRICE}`);
     await payCta.click();
     const sheet = page.getByRole('dialog', { name: '결제' });
     await expect(sheet).toBeVisible({ timeout: 10_000 });
     await page.getByPlaceholder('0000 0000 0000 0000 (테스트)').fill('4242424242424242');
     const payBtn = sheet.getByRole('button', { name: /결제하고 받기/ });
     await expect(payBtn).toBeEnabled({ timeout: 10_000 });
+    await shot(page, 'refund-attendee-payment-card-filled');
+    const payClickAt = Date.now();
     await payBtn.click();
     const doneAlert = sheet.getByText('결제 완료 · 티켓을 받았어요', { exact: true });
     const toTickets = sheet.getByRole('link', { name: '내 티켓 보기', exact: true });
     let purchased = false; const pd = Date.now() + 180_000;
     while (Date.now() < pd) { if (await doneAlert.isVisible().catch(() => false) || await toTickets.isVisible().catch(() => false)) { purchased = true; break; } await page.waitForTimeout(2000); }
     diag.purchased = purchased; diag.wire = { ...wire };
-    console.log(`[56] purchased=${purchased} wire=${JSON.stringify(wire)}`);
+    diag.purchaseLatencyMs = Date.now() - payClickAt;
+    await shot(page, 'refund-attendee-payment-done');
+    console.log(`[56] purchased=${purchased} latency=${diag.purchaseLatencyMs}ms wire=${JSON.stringify(wire)}`);
     expect(purchased, 'purchase reaches 결제 완료').toBe(true);
     expect(wire.tokenId, 'tokenId captured').toBeTruthy();
     const tokenId = wire.tokenId!;
@@ -87,6 +96,7 @@ test('56 · settlement step 5 — attendee B buys then refunds before admission'
     while (Date.now() < hd) { if (await heldLine.isVisible().catch(() => false)) { held = true; break; } await page.waitForTimeout(2000); }
     diag.receiptHeld = held;
     await page.screenshot({ path: `${ARTIFACTS}/56-refund-held.png`, fullPage: true }).catch(() => undefined);
+    await shot(page, 'refund-attendee-receipt-held-with-refund-button');
     expect(held, 'receipt reads 보관 중 before refund').toBe(true);
 
     const refundBtn = page.getByRole('button', { name: '환불받기', exact: true });
@@ -94,14 +104,24 @@ test('56 · settlement step 5 — attendee B buys then refunds before admission'
     const refundClickedAtMs = Date.now();
     diag.refundClickedAt = new Date().toISOString();
     await refundBtn.click();
+    // 환불받기 only opens the confirm sheet; the irreversible step is 환불하기 on it.
+    const confirmSheet = page.getByRole('dialog', { name: '환불할까요?' });
+    await expect(confirmSheet).toBeVisible({ timeout: 10_000 });
+    await shot(page, 'refund-attendee-confirm-sheet');
+    await confirmSheet.getByRole('button', { name: '환불하기', exact: true }).click();
+    await page.waitForTimeout(400);
+    await shot(page, 'refund-attendee-refunding');
     const refundedLine = page.getByText('환불됨', { exact: true });
     let refunded = false; const fd = Date.now() + 120_000;
     while (Date.now() < fd) { if (await refundedLine.isVisible().catch(() => false)) { refunded = true; break; } await page.waitForTimeout(2500); }
     diag.refunded = refunded; diag.refundObservedAt = new Date().toISOString();
+    // The success line is recorded, not asserted: it lives only until the screen is left.
+    diag.refundDoneShown = await page.getByText('환불했어요', { exact: true }).isVisible().catch(() => false);
     diag.refundUiLatencyMs = Date.now() - refundClickedAtMs;
     diag.wire = { ...wire };
     console.log(`[56] refunded=${refunded} refundTxHash=${wire.refundTxHash ?? '(none)'} uiLatencyMs=${diag.refundUiLatencyMs}`);
     await page.screenshot({ path: `${ARTIFACTS}/56-refund-done.png`, fullPage: true }).catch(() => undefined);
+    await shot(page, 'refund-attendee-refunded');
     expect(refunded, 'receipt flips to 환불됨').toBe(true);
 
     // Step 3 — negative check: reload the direct ticket URL (built from chain). The receipt must
@@ -114,6 +134,7 @@ test('56 · settlement step 5 — attendee B buys then refunds before admission'
     diag.reload = { refundedPersists, refundBtnGone };
     console.log(`[56] reload: refundedPersists=${refundedPersists} refundBtnGone=${refundBtnGone}`);
     await page.screenshot({ path: `${ARTIFACTS}/56-refund-reload.png`, fullPage: true }).catch(() => undefined);
+    await shot(page, 'refund-attendee-reload-still-refunded');
     expect(refundedPersists, 'receipt still reads 환불됨 after reload').toBe(true);
     expect(refundBtnGone, '환불받기 button is gone after refund').toBe(true);
   } finally {

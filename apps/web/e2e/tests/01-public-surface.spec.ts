@@ -45,7 +45,8 @@ test('public surface: discover, event detail, signup entry, login', async ({ bro
 
     // Login screen.
     await page.goto('/login');
-    await expect(page.getByRole('heading', { name: '다시 오셨네요' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '로그인' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '처음이에요 · 휴대폰 번호로 시작하기' })).toBeVisible();
     notes.loginText = (await page.locator('main.screen').innerText()).slice(0, 600);
     await page.screenshot({ path: `${SHOTS}/13-login.png`, fullPage: true });
 
