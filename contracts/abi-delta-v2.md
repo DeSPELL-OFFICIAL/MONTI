@@ -139,3 +139,39 @@ a nickname. `IIdentity` drops `nicknameOwner`/`nicknameOf`.
 
 v1 paid path = mint (~157k, relayer) + `deposit` (~254k, treasury) ≈ 411k in 2 tx → v2 `purchase` ≈ 301k in 1 tx
 (~27% less gas; all paid by the treasury now). Monad bills the gas **limit**, so the backend's estimate buffer drives cost.
+
+## C7 measured gas (2026-10-12, in-EVM; ForwardGas/SettlementGas/V2Flow suites)
+Execution gas (no 21k intrinsic, no calldata), local osaka; "monad-eq" subtracts 3,450 per P-256 verify (Monad RIP-7212).
+
+| Step (who sends) | Execution gas | Monad-eq |
+|---|---|---|
+| `publishEvent` free, via forwarder (relayer) | 351,806 | 348,356 |
+| `publishEvent` paid, 1 tier + 4-row split, via forwarder (relayer) | 708,804 | 705,354 |
+| `registerGate` (opens), via forwarder (relayer) | 213,391 | 209,941 |
+| `purchase`, steady state (treasury) | 216,289 | 212,839 |
+| `purchase`, first in event, full tx incl. intrinsic (`--isolate`) | 300,521 tx gas | — |
+| `checkInFor` (relayer), full tx (`--isolate`) | 110,521 tx gas | — |
+| `release` 4 rows, cold | 185,384 | same |
+| `refund` | 56,627 | same |
+| `settleNoShows` 1 / 10 | 193,757 / 606,337 | same |
+
+Organizer to first sale = `createOrganizer` + paid `publishEvent` + `registerGate` = 3 tx (v1: 6).
+
+## K3 deploy (testnet rc1) — operator runs this
+Dry-run verified 2026-10-12 against a 10143 fork (simulation only): 9 transactions, ≈16.1M gas, ≈3.3 MON at ~205 gwei.
+`--code-size-limit 131072` is required (Ticket runtime 30,831 B > EIP-170; without it forge stops at a confirmation prompt).
+
+```bash
+cd /Users/moomi/Downloads/z03.Vibe_Coding/MONTI/MONTI-prod/contracts
+export RPC=<monad testnet rpc>
+DEPLOYER_PK=$DEPLOYER_PK_V2 \
+ATTESTER_ADDRESS=0x6af898aA4d99375839d7069431A7019a6D84C4Ed \
+TREASURY_ADDRESS=0xAe6D18fA7dC1e2512a2dC7DaE1d4640D7D786Bb2 \
+USDC_ADDRESS=0x534b2f3A21130d7a60830c2Df862319e593943A3 \
+forge script script/Deploy.s.sol:Deploy --rpc-url $RPC --broadcast --slow --non-interactive --code-size-limit 131072
+# writes deployments/10143.json = {attester, block, chainId, forwarder, identity, organizers, settlementVault, ticket, usdc}
+
+TREASURY_ADDRESS=0xAe6D18fA7dC1e2512a2dC7DaE1d4640D7D786Bb2 DEPLOYER_ADDRESS=<new deployer address> \
+forge script script/Verify.s.sol:Verify --rpc-url $RPC
+# read-only; prints OK/FAIL for the 12 O3 wiring reads (+7 consistency reads), reverts if any fails
+```
