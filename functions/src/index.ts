@@ -14,6 +14,7 @@ export { listPinned, pinMessage } from './functions/pinMessage.js';
 export { lockDevice, startDeviceChange } from './functions/device.js';
 export { loginChallenge, loginVerify } from './functions/login.js';
 export { pinEventImage, pinEventMetadata } from './functions/organizer.js';
+export { listOverrideRequests, requestOverride } from './functions/overrideRequests.js';
 export { reconcilePending } from './functions/reconcilePending.js';
 export { relayClaim, relayCheckIn } from './functions/relay.js';
 export { relayAction } from './functions/relayAction.js';

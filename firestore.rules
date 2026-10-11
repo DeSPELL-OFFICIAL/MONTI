@@ -283,6 +283,15 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // 수동 입장 승인 요청(v2 설계 §6, P4). **요청한 본인만 읽는다** — 스태프 화면이 자기 요청의
+    // 승인 여부를 구독한다(토큰의 personId 클레임 == 문서의 requesterPersonId). 승인권자의 목록은
+    // 체인 권한을 묻는 콜러블(`listOverrideRequests`) 몫이다 — 규칙은 체인을 읽지 못한다.
+    // 쓰기는 서버(`requestOverride`·manualOverride 확정 훅) 전용이다.
+    match /overrideRequests/{requestId} {
+      allow read: if signedIn() && request.auth.token.personId == resource.data.requesterPersonId;
+      allow write: if false;
+    }
+
     // persons, passkeys, kycSessions, invites, phoneIndex, transferInvites, authChallenges 포함 전부 거부.
     match /{document=**} {
       allow read, write: if false;

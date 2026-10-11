@@ -20,6 +20,7 @@ import { RELAYS, USERS, db } from '../lib/db.js';
 import { getRelayerAccount, sendRelayed } from '../lib/relayer.js';
 import { actionFor, type ActionEntry, type ActionTarget } from '../lib/actionAllowlist.js';
 import { recordUsage } from '../lib/usage.js';
+import { approveOpenOverrideRequests } from '../lib/overrideRequests.js';
 
 /**
  * 설계 §4 C1 — **제네릭 릴레이 콜러블**. Phase 1 발급/입장을 뺀 나머지 스폰서드 동작(주최자
@@ -201,7 +202,6 @@ const SCOPE_SOURCE: Record<string, ScopeSource> = {
   rejectClaims: 'event',
   registerGate: 'event',
   revoke: 'token',
-  requestOverride: 'token',
   manualOverride: 'token',
   openGate: 'gate',
   closeGate: 'gate',
@@ -479,12 +479,14 @@ export const relayAction = onCall({ secrets: [RELAYER_PK] }, async (request): Pr
   // 게이트 경로(relay.ts §3)처럼 입장 확정 직후 그 토큰 에스크로를 분배한다 — tokenId 는 calldata 에서,
   // eventId 는 토큰 레이아웃(상위 160비트 = tokenId >> 96)에서. 느슨한 결합·실패 무시, sweep 이 백업한다.
   if (kind === 'manualOverride') {
+    const tokenId = ((decodeFunctionData({ abi: ticketAbi, data }).args ?? []) as readonly unknown[])[0] as bigint;
     await import('./settlement.js')
-      .then((m) => {
-        const tokenId = ((decodeFunctionData({ abi: ticketAbi, data }).args ?? []) as readonly unknown[])[0] as bigint;
-        return m.onCheckInConfirmed(tokenId >> 96n, tokenId);
-      })
+      .then((m) => m.onCheckInConfirmed(tokenId >> 96n, tokenId))
       .catch((cause) => info('relayAction.release.failed', { relayId, reason: (cause as Error).message }));
+    // 오프체인 승인 요청(P4)을 닫는다. 표시용 장부라 실패해도 입장 확정은 그대로다.
+    await approveOpenOverrideRequests(tokenId, account, sent.hash).catch((cause) =>
+      info('relayAction.overrideRequests.failed', { relayId, reason: (cause as Error).message }),
+    );
   }
 
   await ref.set(

@@ -56,6 +56,9 @@ beforeEach(async () => {
     await db.doc('admissions/7/tokens/42').set({ status: 'passing', gateId: 'g1', relayId: 'r1' });
     await db.doc('settlements/42').set({ policyHash: '0x00', policy: { recipients: [], platformBps: 2000 } });
     await db.doc('orders/o1').set({ personId: '0xaa', account: ACCOUNT, eventId: '42', tier: 0, status: 'deposited' });
+    await db.doc('overrideRequests/q1').set({
+      eventId: '1001', tokenId: '1', gateId: '3', reason: 2, requesterAccount: ACCOUNT, requesterPersonId: '0xaa', status: 'open',
+    });
   });
 });
 
@@ -687,5 +690,26 @@ describe('orders/{orderId}', () => {
   it('blocks client writes even by the owner (server-only)', async () => {
     await assertFails(buyer().doc('orders/o1').set({ status: 'refunded' }, { merge: true }));
     await assertFails(buyer().doc('orders/o2').set({ personId: '0xaa', status: 'pending' }));
+  });
+});
+
+describe('overrideRequests/{requestId}', () => {
+  function requester() {
+    return env.authenticatedContext('uid-1', { account: ACCOUNT, personId: '0xaa' }).firestore();
+  }
+
+  it('lets the requesting staff member read their own request', async () => {
+    await assertSucceeds(requester().doc('overrideRequests/q1').get());
+  });
+
+  it("blocks reading another person's request and anonymous reads", async () => {
+    const other = env.authenticatedContext('uid-2', { account: '0x02', personId: '0xbb' }).firestore();
+    await assertFails(other.doc('overrideRequests/q1').get());
+    await assertFails(env.unauthenticatedContext().firestore().doc('overrideRequests/q1').get());
+  });
+
+  it('blocks client writes even by the requester (server-only)', async () => {
+    await assertFails(requester().doc('overrideRequests/q1').set({ status: 'approved' }, { merge: true }));
+    await assertFails(requester().doc('overrideRequests/q2').set({ requesterPersonId: '0xaa', status: 'open' }));
   });
 });

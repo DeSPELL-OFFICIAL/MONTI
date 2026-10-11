@@ -29,6 +29,25 @@ export async function resolveCallerAccount(request: CallableRequest): Promise<He
   return getAddress(account);
 }
 
+const B32_RE = /^0x[0-9a-fA-F]{64}$/;
+
+/**
+ * 호출자의 personId. 1순위 `personId` 클레임(`mintSessionClaims`), 2순위 `users/{uid}.personId`.
+ * 계정은 회전하면 바뀌지만 personId 는 사람에 묶여 있어 오프체인 장부의 주인 키가 된다.
+ */
+export async function resolveCallerPersonId(request: CallableRequest): Promise<Hex> {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'AUTH_REQUIRED');
+  const claim = request.auth?.token?.personId;
+  if (typeof claim === 'string' && B32_RE.test(claim)) return claim as Hex;
+  const user = await db.collection(USERS).doc(uid).get();
+  const personId = user.get('personId') as string | undefined;
+  if (!personId || !B32_RE.test(personId)) {
+    throw new HttpsError('failed-precondition', 'NO_PERSON', { code: 'NO_PERSON' });
+  }
+  return personId as Hex;
+}
+
 /** `Organizers.sol` 의 권한 비트. 값은 컨트랙트가 진실이다(contracts/src/Organizers.sol). */
 export const PERM_CREATE_EVENT = 1;
 export const PERM_MANAGE_GATES = 2;

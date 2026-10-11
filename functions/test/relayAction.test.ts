@@ -52,6 +52,7 @@ vi.mock('../src/lib/db.js', () => ({
   USAGE: 'usage',
   USERS: 'users',
   PERSONS: 'persons',
+  OVERRIDE_REQUESTS: 'overrideRequests',
 }));
 
 vi.mock('../src/lib/chain.js', () => ({
@@ -314,6 +315,19 @@ describe('relayAction — settlement release on manualOverride confirm (design �
     expect(onCheckInConfirmed).toHaveBeenCalledWith(EVENT_ID, TOKEN_ID);
   });
 
+  it('closes the open off-chain override request for the same token (P4)', async () => {
+    fake.write('overrideRequests/q1', { tokenId: TOKEN_ID.toString(), status: 'open' });
+    fake.write('overrideRequests/q2', { tokenId: (TOKEN_ID + 1n).toString(), status: 'open' });
+    waitForTransactionReceipt.mockResolvedValueOnce({ status: 'success', logs: [], blockNumber: 100n });
+    await action(req('manualOverride', OVERRIDE) as never);
+    expect(fake.snapshot('overrideRequests/q1').data()).toMatchObject({
+      status: 'approved',
+      approvedBy: ACCOUNT,
+      approvedTxHash: TX_HASH,
+    });
+    expect(fake.snapshot('overrideRequests/q2').get('status')).toBe('open');
+  });
+
   it('does not release escrow for a non-admission kind (publishEvent)', async () => {
     waitForTransactionReceipt.mockResolvedValueOnce({ status: 'success', logs: [], blockNumber: 100n });
     await action(req('publishEvent', PUBLISH) as never);
@@ -327,7 +341,7 @@ describe('actionAllowlist', () => {
 
   it('maps every kind to exactly one 4-byte selector, all distinct', () => {
     const entries = Object.values(ACTION_ALLOWLIST);
-    expect(entries.length).toBe(24); // §2 표 23개 + createOrganizer
+    expect(entries.length).toBe(23); // §2 표 23개 + createOrganizer − requestOverride(v2 P4: 오프체인)
     const selectors = new Set<string>();
     for (const entry of entries) {
       expect(entry.selector).toMatch(/^0x[0-9a-f]{8}$/);

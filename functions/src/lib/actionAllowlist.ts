@@ -38,7 +38,6 @@ const SIGNATURES: Record<string, { target: ActionTarget; signature: string }> = 
   approveClaims: { target: 'ticket', signature: 'function approveClaims(uint256,uint256[])' },
   rejectClaims: { target: 'ticket', signature: 'function rejectClaims(uint256,uint256[])' },
   revoke: { target: 'ticket', signature: 'function revoke(uint256,uint8)' },
-  requestOverride: { target: 'ticket', signature: 'function requestOverride(uint256,uint256,uint8)' },
   manualOverride: { target: 'ticket', signature: 'function manualOverride(uint256,uint256,uint8)' },
   createOffer: { target: 'ticket', signature: 'function createOffer(uint256,bytes32,uint64)' },
   cancelOffer: { target: 'ticket', signature: 'function cancelOffer(uint256)' },

@@ -88,6 +88,15 @@ export const SETTLEMENTS = 'settlements';
 export const ORDERS = 'orders';
 
 /**
+ * 수동 입장 승인 **요청**(v2 설계 §6, P4). 문서 id 는 자동 id 이고 값은 `{ eventId, tokenId, gateId,
+ * reason, note?, requesterAccount, requesterPersonId, status:'open'|'approved', approvedBy?,
+ * approvedTxHash?, createdAt, approvedAt?, expireAt }`. 요청은 체인에 올리지 않는다 — 승인 자체는
+ * 기존 `manualOverride` 릴레이 1건이고, 그 확정이 같은 tokenId 의 open 요청을 `approved` 로 닫는다.
+ * `expireAt`(+24h) 에 TTL 정책이 걸린다. 쓰기는 서버 전용, 읽기는 요청자 본인만(firestore.rules).
+ */
+export const OVERRIDE_REQUESTS = 'overrideRequests';
+
+/**
  * 릴레이 상태·대기 테이블 컬렉션 이름. 정의는 `relayTypes.ts` 한 곳이고(웹과 공유), 여기서
  * 다시 내보내 정적 일관성 스캔(허용 목록)이 `db.ts` 상수로 해석할 수 있게 한다.
  */
@@ -120,6 +129,7 @@ export const ALLOWED_COLLECTIONS = [
   USAGE,
   SETTLEMENTS,
   ORDERS,
+  OVERRIDE_REQUESTS,
   RELAYS,
   ADMISSIONS,
   ADMISSION_TOKENS,
