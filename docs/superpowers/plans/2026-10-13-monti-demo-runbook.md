@@ -243,7 +243,7 @@ cd /Users/moomi/Downloads/z03.Vibe_Coding/MONTI/MONTI-prod
     # 8) 웹 응답
     curl -sI https://monti.despell.io | head -1
     # 9) 메타데이터 게이트웨이 — 200, <1 s 정상 (행사 제목·홈 목록용)
-    curl -s -o /dev/null -w '%{http_code} %{time_total}' https://monti.mypinata.cloud/ipfs/bafkreidwm5mmjfpzfsqqlhcde4iawvzihl6y6ui7z6ixsyvoi2kqpsgw3a
+    curl -s -o /dev/null -w '%{http_code} %{time_total}' https://olive-high-octopus-713.mypinata.cloud/ipfs/bafkreidwm5mmjfpzfsqqlhcde4iawvzihl6y6ui7z6ixsyvoi2kqpsgw3a
     ```
     합격: MON 기준 충족 · USDC 기준 충족 · nonce 두 값 같음 · lag<100 꾸준히 전진 · `eventStatus=1` ·
     정산 문서 존재 · 함수 ACTIVE · 스케줄러 ENABLED · 최근 30분 ERROR 없음(또는 설명 가능) · `HTTP/2 200`.
@@ -264,7 +264,7 @@ cd /Users/moomi/Downloads/z03.Vibe_Coding/MONTI/MONTI-prod
 | **결제 확정이 느림/멈춘 것 같음** | 약 **20초** 동안 변화가 없으면 새로고침 → `/tickets/<티켓번호>`를 직접 연다. **절대 다시 결제하지 않는다** | "확정되는 데 몇 초 걸립니다." |
 | **입장(NFC)** | 브라우저 게이트는 NFC·QR을 못 읽음(네이티브 스태프 앱 전용) → **처음부터 수동 승인(티켓 번호 검색)으로 진행** | — |
 | **분배가 공개 페이지에 안 뜸** | ① 인덱서 지연이면 탐색기 tx로 대체 ② 분배 자체가 누락이면 아래 **수동 release** 또는 **스케줄러 강제 실행** | "지금 분배를 확정합니다"(탐색기로 전환) |
-| **행사 제목이 '제목을 불러오지 못했어요'로 뜸 / 홈 목록 비어 보임** (원인: 메타데이터 게이트웨이 지연) | `curl -s -o /dev/null -w '%{http_code} %{time_total}' https://monti.mypinata.cloud/ipfs/bafkreidwm5mmjfpzfsqqlhcde4iawvzihl6y6ui7z6ixsyvoi2kqpsgw3a` 로 확인(200, <1 s 정상). 느리면 Pinata 대시보드 Gateways 상태 확인; 무대는 직접 URL(`/claim/<id>`, `/tickets/<id>`, `/settlement/<id>`)로 진행 — 결제·입장·정산은 게이트웨이와 무관 | 제목·목록만 늦을 뿐 돈의 흐름은 그대로. (제목은 전용 Pinata 게이트웨이 `https://monti.mypinata.cloud/ipfs/`로 읽음 — Vercel `VITE_IPFS_GATEWAY`(prod+preview), 백엔드 `functions/.env` `IPFS_GATEWAY`; 공용 `gateway.pinata.cloud`는 5–7초·타임아웃, 전용은 ~0.3초) |
+| **행사 제목이 '제목을 불러오지 못했어요'로 뜸 / 홈 목록 비어 보임** (원인: 메타데이터 게이트웨이 지연) | `curl -s -o /dev/null -w '%{http_code} %{time_total}' https://olive-high-octopus-713.mypinata.cloud/ipfs/bafkreidwm5mmjfpzfsqqlhcde4iawvzihl6y6ui7z6ixsyvoi2kqpsgw3a` 로 확인(200, <1 s 정상). 느리면 Pinata 대시보드 Gateways 상태 확인; 무대는 직접 URL(`/claim/<id>`, `/tickets/<id>`, `/settlement/<id>`)로 진행 — 결제·입장·정산은 게이트웨이와 무관 | 제목·목록만 늦을 뿐 돈의 흐름은 그대로. (제목은 전용 Pinata 게이트웨이 `https://olive-high-octopus-713.mypinata.cloud/ipfs/`로 읽음 — Vercel `VITE_IPFS_GATEWAY`(prod+preview), 백엔드 `functions/.env` `IPFS_GATEWAY` (Picnic 플랜은 게이트웨이 1개 포함 — 2개째는 월 $5 초과 과금이므로 추가 게이트웨이는 만들지 말 것); 공용 `gateway.pinata.cloud`는 5–7초·타임아웃, 전용은 ~0.3초) |
 | **화면 공유/미러링 실패** | 즉시 **백업 영상** 재생으로 전환 | "미리 녹화해 둔 실제 실행 영상입니다." |
 
 > **분배 누락 시 보조 조치(운영자 전용, 기술 용어 허용).** `settlementSweep` 콜러블은 **존재하지 않는다**
