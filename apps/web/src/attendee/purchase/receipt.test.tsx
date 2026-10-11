@@ -120,6 +120,20 @@ describe('Receipt', () => {
     expect(screen.queryByRole('button', { name: '환불받기' })).toBeNull();
   });
 
+  it('shows the refunded status', async () => {
+    currentOrder = { ...currentOrder!, status: 'refunded' };
+    renderReceipt(true);
+    expect(await screen.findByText('환불됨')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '환불받기' })).toBeNull();
+  });
+
+  it.each(['pending', 'sent', 'failed'] as const)('shows no receipt for a %s order — only a paid one has one', (status) => {
+    currentOrder = { ...currentOrder!, status };
+    const { container } = renderReceipt();
+    expect(container.firstChild).toBeNull();
+    expect(screen.queryByText('처리 중이에요')).toBeNull();
+  });
+
   it('renders nothing for a free ticket with no recorded order', () => {
     mocks.orderIdForToken.mockReturnValue(null);
     mocks.orderIdForEvent.mockReturnValue(null);

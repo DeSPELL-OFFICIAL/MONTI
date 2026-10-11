@@ -77,18 +77,21 @@ export function Receipt({ tokenId, eventId, canRefund, onStatus }: ReceiptProps)
 
   if (orderId === null || order === null) return null;
 
+  // Only a paid order has a receipt. `pending`/`sent` is still the purchase sheet's own wait, and
+  // `failed` charged nothing and issued no ticket — so neither shows a half-done receipt here.
   const statusLine =
-    order.status === 'released'
-      ? copy.purchase.statusReleased
-      : order.status === 'refunded'
-        ? copy.purchase.statusRefunded
-        : order.status === 'deposited'
-          ? copy.purchase.statusHeld
-          : copy.purchase.statusPending;
+    order.status === 'deposited'
+      ? copy.purchase.statusHeld
+      : order.status === 'released'
+        ? copy.purchase.statusReleased
+        : order.status === 'refunded'
+          ? copy.purchase.statusRefunded
+          : null;
+  if (statusLine === null) return null;
 
   const paidAt = order.createdAt !== undefined ? new Date(order.createdAt).toLocaleString(locale) : '';
   const split = settlement ? splitByRole(settlement.policy.recipients, order.amountUsdCents) : [];
-  const receiptTx = order.receiptTxHash ?? order.depositTxHash;
+  const receiptTx = order.depositTxHash;
   const explorer = getConfig().explorerUrl;
 
   return (

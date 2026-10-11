@@ -17,7 +17,8 @@ export interface PurchaseSheetProps {
  * The mock card sheet and the determinate purchase wait (Batch F). It opens on a card form that
  * says in plain words this is a test charge — no real money moves — then runs `purchaseTicket` and
  * shows the 결제 확인 → 티켓 발급 → 결제 금액 보관 steps over {@link OpProgress}. On success it points at
- * the new ticket's receipt; a determinate refusal shows its sentence and the retry.
+ * the new ticket's receipt; a refusal or a failed step (one atomic step — no ticket, no charge)
+ * shows its sentence and the retry.
  * The card number is never read — it is a demo field — so nothing here collects a real credential.
  *
  * Past {@link OP_TIMEOUT_SECONDS} the wait stops holding the person: 닫기 opens up and the way out is
@@ -30,7 +31,7 @@ export function PurchaseSheet({ eventId, tier, amountUsdCents, onClose }: Purcha
   const purchase = usePurchase({ eventId, tier, amountUsdCents });
   const [card, setCard] = useState('');
   const [slow, setSlow] = useState(false);
-  const busy = purchase.phase === 'paying' || purchase.phase === 'minting';
+  const busy = purchase.phase === 'paying' || purchase.phase === 'sent';
   const labels: [string, string, string] = [copy.purchase.steps.pay, copy.purchase.steps.mint, copy.purchase.steps.store];
   const amount = formatUsdCents(amountUsdCents);
 
@@ -86,7 +87,7 @@ export function PurchaseSheet({ eventId, tier, amountUsdCents, onClose }: Purcha
           {purchase.phase === 'error' && purchase.error ? <Alert tone="error">{purchase.error}</Alert> : null}
           {busy ? (
             <OpProgress
-              phase={purchase.phase === 'minting' ? 'confirming' : 'saving'}
+              phase={purchase.phase === 'sent' ? 'confirming' : 'saving'}
               labels={labels}
               timeoutMessage={copy.purchase.slow}
               onLater={checkTickets}
