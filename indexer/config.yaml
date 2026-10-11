@@ -65,17 +65,17 @@ contracts:
       - event: DepositorSet(address indexed account, bool allowed)
 networks:
   - id: 10143
-    start_block: 66724502
+    start_block: 70161104
     contracts:
       - name: Identity
         address:
-          - "0x10Fa9977363c40240381BEEfFc2D997BC9Edcd6b"
+          - "0x1EDFE1BC63e4239e8fB1c62249a33B78BAFC4B27"
       - name: Organizers
         address:
-          - "0xAF80CbfDD08284E3aae67FFaaf20A27E281C360A"
+          - "0x18134b640912A6f54e83B30DD079039627173dca"
       - name: Ticket
         address:
-          - "0x7E1fdfCB3688C5b0539101cEAE6a7Ee5bD9b51Cf"
+          - "0x8544c531A3EF7f702fe3A64Ff20D57bA774d9edC"
       - name: SettlementVault
         address:
-          - "0xA84FDb64C9DDc3B25eF8BDeA58561BDbE53ABD69"
+          - "0xDC3DDd274bb22a112ba8A120De471037aeE52925"
