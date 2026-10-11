@@ -3,6 +3,7 @@ import { organizersAbi, ticketAbi, type AttendeeRow, type Hex } from '@monti/sha
 import { PERM_CREATE_EVENT, resolveCallerAccount } from '../lib/auth.js';
 import { deployment, publicClient } from '../lib/chain.js';
 import { envioPage } from '../lib/envio.js';
+import { nicknamesByAccount } from '../lib/nicknames.js';
 
 const DIGITS_RE = /^[0-9]+$/;
 
@@ -12,8 +13,9 @@ export const ATTENDEE_PAGE_SIZE = 500;
 interface EnvioAttendeeRow {
   id: string;
   tier: number;
+  owner: string;
   checkIn: { id: string } | null;
-  identity: { nickname: string | null; kycLevel: number } | null;
+  identity: { kycLevel: number } | null;
 }
 
 /**
@@ -90,9 +92,8 @@ async function requireOrganizer(eventId: bigint, caller: Hex): Promise<void> {
  * 주최자용 참석자 목록.
  *
  * 인덱서는 목록용이다 — 체인 이벤트 말고는 아무것도 들고 있지 않아서
- * 여기서 새어 나갈 개인정보가 애초에 없다. 닉네임은 체인에서 읽을 수 없고
- * (`Identity.nicknameOf` 는 해시만 돌려준다) `NicknameSet` 이벤트를 받은
- * 인덱서에만 평문이 있다.
+ * 여기서 새어 나갈 개인정보가 애초에 없다. 닉네임은 v2 에서 체인에도 인덱서에도 없고
+ * Firestore `nicknames` 장부에만 있다(P5) — 소유 계정으로 한 번에 모아 읽는다.
  *
  * 쪽 수에 상한이 없으므로 기본 60 초·256 MiB 로는 큰 공연에서 불투명하게 죽는다.
  * `issueSnapshot` 과 같은 이유로 한도를 명시한다.
@@ -112,7 +113,7 @@ export const listAttendees = onCall(
     // `eventId`·`revoked` 는 서버 쪽 필터일 뿐이라 골라 받지 않는다.
     const rows = await envioPage<EnvioAttendeeRow>(
       'Ticket',
-      'id tier checkIn { id } identity { nickname kycLevel }',
+      'id tier owner checkIn { id } identity { kycLevel }',
       ATTENDEE_PAGE_SIZE,
       {
         vars: '$eventId: numeric!',
@@ -120,9 +121,10 @@ export const listAttendees = onCall(
         values: { eventId },
       },
     );
+    const names = await nicknamesByAccount(rows.map((row) => row.owner));
     return rows.map((row) => ({
       tokenId: row.id,
-      nickname: row.identity?.nickname ?? '',
+      nickname: names.get(row.owner.toLowerCase()) ?? '',
       checkedIn: row.checkIn !== null,
       tier: row.tier,
       kycLevel: narrowKycLevel(row.identity?.kycLevel),

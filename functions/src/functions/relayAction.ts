@@ -212,7 +212,6 @@ const SCOPE_SOURCE: Record<string, ScopeSource> = {
   safeTransferFrom: 'person',
   cancelRequest: 'person',
   migrate: 'person',
-  setNickname: 'person',
   cancelRotation: 'person',
   createOrganizer: 'person',
 };

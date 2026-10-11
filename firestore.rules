@@ -292,6 +292,13 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // 닉네임 장부(v2 설계 §7, P5). **서버 전용** — 유일성은 `setNickname` 트랜잭션이 지키고,
+    // 이름→사람 조회(`resolveRecipient`)와 계정→이름 조회(`resolveNicknames`)도 콜러블로만 한다.
+    // 클라이언트가 읽을 수 있으면 personId 가 새고, 쓸 수 있으면 남의 이름을 빼앗는다.
+    match /nicknames/{name} {
+      allow read, write: if false;
+    }
+
     // persons, passkeys, kycSessions, invites, phoneIndex, transferInvites, authChallenges 포함 전부 거부.
     match /{document=**} {
       allow read, write: if false;

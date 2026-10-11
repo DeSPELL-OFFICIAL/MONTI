@@ -56,9 +56,19 @@ const { PERM_CREATE_EVENT } = await import('../src/lib/auth.js');
 interface EnvioRow {
   id: string;
   tier: number;
+  owner: string;
   checkIn: { id: string } | null;
-  identity: { nickname: string | null; kycLevel: number } | null;
+  identity: { kycLevel: number } | null;
 }
+
+/** 닉네임 장부(Firestore, v2 P5). 소문자 계정 → 표시형. 인덱서에는 이제 닉네임이 없다. */
+const ALEX = getAddress('0x1111111111111111111111111111111111111aaa');
+const NOBODY = '0x2222222222222222222222222222222222222bbb';
+const nicknamesByAccount = vi.fn(async (accounts: readonly string[]) => {
+  const book = new Map([[ALEX.toLowerCase(), 'alex']]);
+  return new Map(accounts.flatMap((a) => (book.has(a.toLowerCase()) ? [[a.toLowerCase(), book.get(a.toLowerCase())!]] : [])) as [string, string][]);
+});
+vi.mock('../src/lib/nicknames.js', () => ({ nicknamesByAccount }));
 
 /** 인덱서가 내려줄 쪽들. 테스트마다 갈아끼운다. */
 let pages: EnvioRow[][] = [[]];
@@ -96,8 +106,9 @@ function rowsOf(count: number, from = 1): EnvioRow[] {
   return Array.from({ length: count }, (_, i) => ({
     id: String(from + i),
     tier: 0,
+    owner: ALEX,
     checkIn: null,
-    identity: { nickname: 'alex', kycLevel: 1 },
+    identity: { kycLevel: 1 },
   }));
 }
 
@@ -111,10 +122,12 @@ beforeEach(() => {
   envioQuery.mockClear();
   pages = [
     [
-      { id: '7', tier: 0, checkIn: { id: '7' }, identity: { nickname: 'alex', kycLevel: 1 } },
-      { id: '8', tier: 1, checkIn: null, identity: null },
+      // 인덱서는 owner 를 소문자로 준다 — 장부 조회는 대소문자와 무관해야 한다.
+      { id: '7', tier: 0, owner: ALEX.toLowerCase(), checkIn: { id: '7' }, identity: { kycLevel: 1 } },
+      { id: '8', tier: 1, owner: NOBODY, checkIn: null, identity: null },
     ],
   ];
+  nicknamesByAccount.mockClear();
 });
 
 describe('listAttendees', () => {
@@ -143,10 +156,19 @@ describe('listAttendees', () => {
   });
 
   it('falls back to an empty nickname and kycLevel 0 when the indexer has no identity', async () => {
-    pages = [[{ id: '9', tier: 2, checkIn: null, identity: { nickname: null, kycLevel: 0 } }]];
+    pages = [[{ id: '9', tier: 2, owner: NOBODY, checkIn: null, identity: { kycLevel: 0 } }]];
     await expect(call()).resolves.toEqual([
       { tokenId: '9', nickname: '', checkedIn: false, tier: 2, kycLevel: 0 },
     ]);
+  });
+
+  it('takes nicknames from the Firestore book by owner, never from the indexer (v2 P5)', async () => {
+    await call();
+    expect(nicknamesByAccount).toHaveBeenCalledTimes(1);
+    expect(nicknamesByAccount).toHaveBeenCalledWith([ALEX.toLowerCase(), NOBODY]);
+    const [query] = envioQuery.mock.calls[0]!;
+    expect(query).not.toContain('nickname');
+    expect(query).toContain('owner');
   });
 
   it('refuses a caller who is neither owner nor manager nor a PERM_CREATE_EVENT admin', async () => {
@@ -210,7 +232,7 @@ describe('listAttendees', () => {
   });
 
   it('stops the whole list when the indexer hands back a kycLevel outside 0 | 1', async () => {
-    pages = [[{ id: '9', tier: 0, checkIn: null, identity: { nickname: 'alex', kycLevel: 7 } }]];
+    pages = [[{ id: '9', tier: 0, owner: ALEX, checkIn: null, identity: { kycLevel: 7 } }]];
     // 그 줄만 빼면 주최자 화면에서 표를 가진 사람이 소리 없이 사라진다. 크게 터뜨린다.
     await expect(call()).rejects.toThrow('BAD_KYC_LEVEL');
   });

@@ -230,7 +230,7 @@ describe('relayAction', () => {
 describe('relayAction — usage ledger + org rate limit (design §4)', () => {
   const SET_ADMIN = encodeFunctionData({ abi: organizersAbi, functionName: 'setAdmin', args: [ORG_ID, OTHER, 1] });
   const APPROVE = encodeFunctionData({ abi: ticketAbi, functionName: 'approveClaims', args: [EVENT_ID, [1n, 2n]] });
-  const SET_NICK = ACTION_ALLOWLIST.setNickname!.selector;
+  const CANCEL_ROTATION = ACTION_ALLOWLIST.cancelRotation!.selector;
   const GAS = { status: 'success', logs: [] as unknown[], blockNumber: 100n, gasUsed: 210_000n, effectiveGasPrice: 50_000_000_000n };
 
   function req(kind: string, to: string, data: string, nonce = '0') {
@@ -259,10 +259,10 @@ describe('relayAction — usage ledger + org rate limit (design §4)', () => {
 
   it('records person-scoped usage for a personal kind and stamps no orgId', async () => {
     waitForTransactionReceipt.mockResolvedValueOnce(GAS);
-    await action(req('setNickname', IDENTITY, SET_NICK) as never);
+    await action(req('cancelRotation', IDENTITY, CANCEL_ROTATION) as never);
     const u = fake.snapshot(`usage/person:${PERSON_ID}`);
     expect(u.get('count')).toBe(1);
-    expect(u.get('lastKind')).toBe('setNickname');
+    expect(u.get('lastKind')).toBe('cancelRotation');
     expect(fake.snapshot(`relays/${ACCOUNT}:0`).get('orgId')).toBeUndefined();
   });
 
@@ -341,7 +341,7 @@ describe('actionAllowlist', () => {
 
   it('maps every kind to exactly one 4-byte selector, all distinct', () => {
     const entries = Object.values(ACTION_ALLOWLIST);
-    expect(entries.length).toBe(23); // §2 표 23개 + createOrganizer − requestOverride(v2 P4: 오프체인)
+    expect(entries.length).toBe(22); // §2 표 23개 + createOrganizer − requestOverride(P4)·setNickname(P5): 오프체인
     const selectors = new Set<string>();
     for (const entry of entries) {
       expect(entry.selector).toMatch(/^0x[0-9a-f]{8}$/);

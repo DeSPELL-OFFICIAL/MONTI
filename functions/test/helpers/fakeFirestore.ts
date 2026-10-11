@@ -136,14 +136,16 @@ export function createFakeFirestore() {
 
   async function runTransaction<T>(
     fn: (tx: {
-      get: (ref: { path: string }) => Promise<ReturnType<typeof snapshot>>;
+      get: (ref: { path: string } | { get: () => Promise<unknown> }) => Promise<ReturnType<typeof snapshot>>;
       set: (ref: { path: string }, data: Record<string, unknown>, options?: { merge?: boolean }) => void;
       update: (ref: { path: string }, data: Record<string, unknown>) => void;
       delete: (ref: { path: string }) => void;
     }) => Promise<T>,
   ): Promise<T> {
     const tx = {
-      get: async (ref: { path: string }) => snapshot(ref.path),
+      // 진짜 `Transaction.get` 처럼 문서 참조도 질의도 받는다.
+      get: async (ref: { path: string } | { get: () => Promise<unknown> }) =>
+        ('path' in ref ? snapshot(ref.path) : await ref.get()) as ReturnType<typeof snapshot>,
       set: (ref: { path: string }, data: Record<string, unknown>, options?: { merge?: boolean }) =>
         write(ref.path, data, options),
       update: (ref: { path: string }, data: Record<string, unknown>) => write(ref.path, data, { merge: true }),

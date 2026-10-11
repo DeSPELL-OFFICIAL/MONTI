@@ -55,7 +55,6 @@ const SIGNATURES: Record<string, { target: ActionTarget; signature: string }> = 
   setManager: { target: 'organizers', signature: 'function setManager(uint256,address,bool,bool)' },
   createOrganizer: { target: 'organizers', signature: 'function createOrganizer(address)' },
   // ── Identity ────────────────────────────────────────────────────────────
-  setNickname: { target: 'identity', signature: 'function setNickname(bytes32,string)' },
   cancelRotation: { target: 'identity', signature: 'function cancelRotation()' },
 };
 

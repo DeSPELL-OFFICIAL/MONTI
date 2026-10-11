@@ -693,6 +693,19 @@ describe('orders/{orderId}', () => {
   });
 });
 
+describe('nicknames/{name}', () => {
+  it('blocks client reads and writes (server-only book)', async () => {
+    await env.withSecurityRulesDisabled(async (context) => {
+      await context.firestore().doc('nicknames/alex').set({ personId: '0xaa', account: ACCOUNT, display: 'Alex' });
+    });
+    const client = env.authenticatedContext('uid-1', { account: ACCOUNT, personId: '0xaa' }).firestore();
+    await assertFails(client.doc('nicknames/alex').get());
+    await assertFails(client.doc('nicknames/alex').set({ personId: '0xaa' }, { merge: true }));
+    await assertFails(client.doc('nicknames/bob').set({ personId: '0xaa', account: ACCOUNT }));
+    await assertFails(env.unauthenticatedContext().firestore().doc('nicknames/alex').get());
+  });
+});
+
 describe('overrideRequests/{requestId}', () => {
   function requester() {
     return env.authenticatedContext('uid-1', { account: ACCOUNT, personId: '0xaa' }).firestore();

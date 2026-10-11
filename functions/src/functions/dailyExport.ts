@@ -34,7 +34,7 @@ export const EXPORT_ENTITIES = [
   { entity: 'Override', fields: 'id tokenId gateId approver role reason' },
   {
     entity: 'IdentityAccount',
-    fields: 'id personId nickname kycLevel deviceX deviceY locked deviceUpdatedAt',
+    fields: 'id personId kycLevel deviceX deviceY locked deviceUpdatedAt',
   },
   { entity: 'Offer', fields: 'id from commitment expiresAt status' },
 ] as const;

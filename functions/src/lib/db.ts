@@ -97,6 +97,14 @@ export const ORDERS = 'orders';
 export const OVERRIDE_REQUESTS = 'overrideRequests';
 
 /**
+ * 닉네임 장부(v2 설계 §7, P5). 문서 id 는 소문자 정규형(`^[a-z0-9_]{3,20}$`)이고 값은
+ * `{ personId, account(소문자), display, updatedAt }` 다. 유일성은 문서 id 와 트랜잭션이 지킨다 —
+ * 체인 `Identity` 의 닉네임은 v2 에서 사라진다. 주인 키는 회전해도 그대로인 `personId` 이고,
+ * `account` 는 표시용 역조회 칸이라 `recoverAccess` 가 회전 때 갱신한다. **서버 전용**이다.
+ */
+export const NICKNAMES = 'nicknames';
+
+/**
  * 릴레이 상태·대기 테이블 컬렉션 이름. 정의는 `relayTypes.ts` 한 곳이고(웹과 공유), 여기서
  * 다시 내보내 정적 일관성 스캔(허용 목록)이 `db.ts` 상수로 해석할 수 있게 한다.
  */
@@ -130,6 +138,7 @@ export const ALLOWED_COLLECTIONS = [
   SETTLEMENTS,
   ORDERS,
   OVERRIDE_REQUESTS,
+  NICKNAMES,
   RELAYS,
   ADMISSIONS,
   ADMISSION_TOKENS,

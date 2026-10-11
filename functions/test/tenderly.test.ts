@@ -409,14 +409,13 @@ describe('tenderlyWebhook', () => {
     expect(snapshot(`${PERSONS}/${stranger}`).exists).toBe(false);
   });
 
-  it('mirrors the chain nickname onto the matching users document', async () => {
+  it('has no NicknameSet case any more — nicknames live in Firestore (v2 P5)', async () => {
+    // v1 Identity 가 아직 이 이벤트를 내더라도 users.nickname 을 덮어쓰지 않는다 — 원본은 setNickname 이다.
     chain.personOf.set(OWNER.toLowerCase(), PERSON);
-    write(`${USERS}/uid-1`, { personId: PERSON });
-    write(`${USERS}/uid-2`, { personId: `0x${'bb'.repeat(32)}` });
+    write(`${USERS}/uid-1`, { personId: PERSON, nickname: 'monti' });
 
     await deliver([nicknameSet(OWNER, '몽티')]);
-    expect(snapshot(`${USERS}/uid-1`).get('nickname')).toBe('몽티');
-    expect(snapshot(`${USERS}/uid-2`).get('nickname')).toBeUndefined();
+    expect(snapshot(`${USERS}/uid-1`).get('nickname')).toBe('monti');
   });
 
   it('drops the sender from the event chat only when no ticket is left', async () => {
