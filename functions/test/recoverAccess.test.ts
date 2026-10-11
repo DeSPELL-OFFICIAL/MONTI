@@ -191,6 +191,7 @@ vi.mock('../src/lib/db.js', () => ({
   PERSONS: 'persons',
   USERS: 'users',
   PASSKEYS: 'passkeys',
+  NICKNAMES: 'nicknames',
   DEVICES: 'devices',
   AUTH_CHALLENGES: 'authChallenges',
   RECOVERY_QUOTA: 'recoveryQuota',
@@ -412,6 +413,20 @@ describe('recoverAccess — the happy path', () => {
     expect(result.txHash).toBe(ROTATE_TX);
     expect(result.alreadyRotated).toBeUndefined();
     expect(awaitFinalized).toHaveBeenCalledWith(1n);
+  });
+
+  it("moves the person's nickname book entry to the new account and leaves others alone (v2 P5)", async () => {
+    write('nicknames/alex', { personId: PERSON_ID, account: 'old', display: 'Alex' });
+    write('nicknames/someone', { personId: `0x${'bb'.repeat(32)}`, account: 'theirs', display: 'someone' });
+    seedChallenge('chal-nick-0123456789ab');
+    const { attestation } = makeAttestation({ challenge: 'chal-nick-0123456789ab', counter: 1 });
+
+    await call({ personId: PERSON_ID, attestation });
+
+    expect(snapshot('nicknames/alex').get('account')).toBe(NEW_ACCOUNT.toLowerCase());
+    expect(snapshot('nicknames/alex').get('personId')).toBe(PERSON_ID);
+    expect(snapshot('nicknames/alex').get('display')).toBe('Alex');
+    expect(snapshot('nicknames/someone').get('account')).toBe('theirs');
   });
 
   it('succeeds without a device write when deviceX/Y are omitted', async () => {

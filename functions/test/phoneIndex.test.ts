@@ -12,7 +12,6 @@ const CALLER = '0x9999999999999999999999999999999999999999';
 /** 받는 사람. 소문자로 저장·입력돼도 응답은 체크섬 형태라야 한다. */
 const RECIPIENT_LOWER = '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd';
 const RECIPIENT = getAddress(RECIPIENT_LOWER);
-const ZERO = '0x0000000000000000000000000000000000000000';
 const PERSON_ID = `0x${'aa'.repeat(32)}`;
 const PHONE = '+821012345678';
 const UNKNOWN_PHONE = '+821099998888';
@@ -41,6 +40,7 @@ vi.mock('../src/lib/db.js', () => ({
   PERSONS: 'persons',
   USERS: 'users',
   PHONE_INDEX: 'phoneIndex',
+  NICKNAMES: 'nicknames',
   db: {
     collection: (name: string) => ({
       doc: (id: string) => ({
@@ -53,10 +53,10 @@ vi.mock('../src/lib/db.js', () => ({
 }));
 
 /**
- * 체인 상태. `nicknameOf` 는 일부러 없다 — 그 함수는 `bytes32`(keccak 해시)를 돌려주므로
- * 평문 닉네임의 출처가 될 수 없다(contracts/src/Identity.sol). 구현이 부르면 테스트가 깨진다.
+ * 체인 상태. 닉네임 함수는 일부러 없다 — v2 에서 닉네임은 Firestore 장부에만 있다(P5).
+ * 구현이 체인에 닉네임을 물으면 테스트가 깨진다.
  */
-const chain = { nicknameOwner: ZERO as string, members: new Set<string>() };
+const chain = { members: new Set<string>() };
 const reads: Array<{ functionName: string; args: readonly unknown[] }> = [];
 
 vi.mock('../src/lib/chain.js', () => ({
@@ -73,7 +73,6 @@ vi.mock('../src/lib/chain.js', () => ({
     }) => {
       if (address !== IDENTITY) throw new Error(`UNEXPECTED_CONTRACT:${address}`);
       reads.push({ functionName, args });
-      if (functionName === 'nicknameOwner') return chain.nicknameOwner;
       if (functionName === 'isMember') {
         return chain.members.has((args[0] as string).toLowerCase());
       }
@@ -109,7 +108,6 @@ beforeEach(() => {
   process.env.PHONE_INDEX_KEY = KEY;
   docs.clear();
   reads.length = 0;
-  chain.nicknameOwner = ZERO;
   chain.members.clear();
   chain.members.add(RECIPIENT_LOWER);
   chain.members.add(CALLER.toLowerCase());
@@ -186,20 +184,24 @@ describe('resolveRecipient by phone', () => {
   });
 });
 
-describe('resolveRecipient by nickname', () => {
-  it('resolves through Identity.nicknameOwner and echoes the normalized nickname', async () => {
-    chain.nicknameOwner = RECIPIENT_LOWER;
+describe('resolveRecipient by nickname (v2 P5: Firestore, not the chain)', () => {
+  it('resolves nicknames/{key} → persons/{personId}.account and echoes the display form', async () => {
+    write('nicknames/alex', { personId: PERSON_ID, account: '0xstale', display: 'Alex' });
 
     const result = await call({ type: 'nickname', value: '  ALEX ' });
 
-    expect(result).toMatchObject({ member: true, account: RECIPIENT, nickname: 'alex' });
+    // 계정은 닉네임 문서가 아니라 사람 문서에서 온다(회전 자동 반영).
+    expect(result).toMatchObject({ member: true, account: RECIPIENT, nickname: 'Alex' });
     expect(result.commitment).toBeUndefined();
-    expect(reads.map((r) => r.functionName)).toEqual(['nicknameOwner']);
+    expect(reads).toEqual([]);
   });
 
   it('rejects a nickname nobody owns', async () => {
-    chain.nicknameOwner = ZERO;
     await expectRejection(call({ type: 'nickname', value: 'ghost' }), 'not-found', 'NICKNAME_UNKNOWN');
+  });
+
+  it('treats a malformed nickname as unknown without reading anything', async () => {
+    await expectRejection(call({ type: 'nickname', value: 'a b' }), 'not-found', 'NICKNAME_UNKNOWN');
   });
 
   it('rejects an empty nickname', async () => {
@@ -207,9 +209,10 @@ describe('resolveRecipient by nickname', () => {
   });
 
   it('refuses my own nickname', async () => {
-    chain.nicknameOwner = CALLER;
+    write(`${PERSONS}/0xme`, { status: 'active', account: CALLER });
+    write('nicknames/myself', { personId: '0xme', account: CALLER, display: 'myself' });
     await expectRejection(
-      call({ type: 'nickname', value: 'me' }),
+      call({ type: 'nickname', value: 'myself' }),
       'invalid-argument',
       'SELF_TRANSFER',
     );

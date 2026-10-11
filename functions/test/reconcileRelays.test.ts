@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { TransactionReceiptNotFoundError } from 'viem';
+import { TransactionReceiptNotFoundError, getAddress } from 'viem';
+import { eventCreatedLog, policySetLog, publishCalldata } from './helpers/publishCalldata.js';
 import type { Hex } from '@monti/shared';
 
 // 로거는 소음/부작용을 피하려 죽인다. chain 은 통째로 mock 해 config 의 부작용 로드를 끊는다 —
@@ -26,7 +27,12 @@ vi.mock('../src/lib/db.js', () => ({
   RELAYS: 'relays',
   ADMISSIONS: 'admissions',
   ADMISSION_TOKENS: 'tokens',
+  SETTLEMENTS: 'settlements',
+  PENDING_GATES: 'pendingGates',
+  OVERRIDE_REQUESTS: 'overrideRequests',
 }));
+
+const CONFIRM_EMPTY = { kind: 'confirm', receipt: { logs: [] } } as const;
 
 const { decideRelay, applyRelayDecision } = await import('../src/functions/reconcileRelays.js');
 
@@ -42,10 +48,12 @@ function pc(overrides: Record<string, unknown>): Pc {
 }
 
 describe('decideRelay — 상태 전이(스텁 클라이언트)', () => {
-  it('confirms on a successful receipt', async () => {
-    const client = pc({ getTransactionReceipt: vi.fn(async () => ({ status: 'success' })) });
+  it('confirms on a successful receipt and carries its logs for the confirm hook', async () => {
+    const logs = [{ topics: [] }];
+    const client = pc({ getTransactionReceipt: vi.fn(async () => ({ status: 'success', logs })) });
     expect(await decideRelay({ txHash: HASH, sentAtMs: NOW - 3 * MIN, nowMs: NOW }, client)).toEqual({
       kind: 'confirm',
+      receipt: { logs },
     });
   });
 
@@ -144,7 +152,7 @@ describe('applyRelayDecision — Firestore 효과 + 대기 테이블 연동', ()
 
   it('confirms a check-in and flips its admission to confirmed', async () => {
     const doc = fakeDoc({ kind: 'checkIn', eventId: '7', tokenId: '42' });
-    await applyRelayDecision(doc as unknown as Doc, { kind: 'confirm' });
+    await applyRelayDecision(doc as unknown as Doc, CONFIRM_EMPTY);
     expect(doc.refWrites[0]).toMatchObject({ merge: true });
     expect(doc.refWrites[0]?.data.status).toBe('confirmed');
     const adm = hoisted.writes.find((w) => w.path === 'admissions/7/tokens/42');
@@ -164,8 +172,42 @@ describe('applyRelayDecision — Firestore 효과 + 대기 테이블 연동', ()
 
   it('confirms a claim without touching any admission', async () => {
     const doc = fakeDoc({ kind: 'claim', eventId: '7' });
-    await applyRelayDecision(doc as unknown as Doc, { kind: 'confirm' });
+    await applyRelayDecision(doc as unknown as Doc, CONFIRM_EMPTY);
     expect(doc.refWrites[0]?.data.status).toBe('confirmed');
+    expect(hoisted.writes).toHaveLength(0);
+  });
+
+  it('re-runs the relayAction confirm hook on a late publish: records result.eventId and the paid mirror', async () => {
+    const TICKET = getAddress(`0x${'ce'.repeat(20)}`);
+    const VAULT = getAddress(`0x${'5a'.repeat(20)}`);
+    const ORGANIZER = getAddress(`0x${'11'.repeat(20)}`);
+    const PAYEE = getAddress(`0x${'33'.repeat(20)}`);
+    const data = publishCalldata({
+      orgId: 1001n,
+      prices: [1000n],
+      recipients: [{ account: PAYEE, bps: 10_000, reason: 'all', tag: 'artist' }],
+      platformBps: 0,
+    });
+    const doc = fakeDoc({ kind: 'publishEvent', account: ORGANIZER, data, reasons: ['all'], txHash: HASH });
+    const logs = [eventCreatedLog(TICKET, 1001n, 1001n, ORGANIZER), policySetLog(VAULT, 1001n, ORGANIZER, `0x${'77'.repeat(32)}`)];
+
+    await applyRelayDecision(doc as unknown as Doc, { kind: 'confirm', receipt: { logs } });
+
+    expect(doc.refWrites[0]?.data).toMatchObject({ status: 'confirmed', result: { eventId: '1001' } });
+    const mirror = hoisted.writes.find((w) => w.path === 'settlements/1001');
+    expect(mirror?.data).toMatchObject({
+      orgId: '1001',
+      priceUsdCentsByTier: { '0': 1000 },
+      policy: { recipients: [{ account: PAYEE, bps: 10_000, reason: 'all', tag: 'artist' }] },
+      setBy: ORGANIZER,
+      txHash: HASH,
+    });
+  });
+
+  it('does not run the confirm hook for a purchase relay (not an allowlisted action)', async () => {
+    const doc = fakeDoc({ kind: 'purchase', data: '0x1234', txHash: HASH });
+    await applyRelayDecision(doc as unknown as Doc, CONFIRM_EMPTY);
+    expect(doc.refWrites[0]?.data).toEqual({ status: 'confirmed', confirmedAt: expect.anything() });
     expect(hoisted.writes).toHaveLength(0);
   });
 

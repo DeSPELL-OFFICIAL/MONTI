@@ -16,7 +16,8 @@ import { getAttesterAccount } from '../lib/attester.js';
 import { requireStaffForGate, resolveCallerAccount } from '../lib/auth.js';
 import { deployment, publicClient } from '../lib/chain.js';
 import { PERSONS, db } from '../lib/db.js';
-import { envioPageOnce, envioQuery } from '../lib/envio.js';
+import { envioPageOnce } from '../lib/envio.js';
+import { nicknamesByAccount } from '../lib/nicknames.js';
 import { decryptField, piiAad } from '../lib/kms.js';
 import { PORTRAIT_MAX_BASE64_BYTES } from '../lib/portrait.js';
 
@@ -52,11 +53,6 @@ interface EnvioTicketRow {
   tier: number;
   owner: string;
   checkIn: { id: string } | null;
-}
-
-interface EnvioIdentityRow {
-  id: string;
-  nickname: string | null;
 }
 
 interface EventMeta {
@@ -123,32 +119,6 @@ export async function eventTitleOf(imageCid: string): Promise<string> {
   // 빈 제목은 캐시하지 않는다 — 게이트웨이가 잠깐 죽은 것을 영구 결론으로 굳히면 안 된다.
   if (title) eventTitleCache.set(imageCid, title);
   return title;
-}
-
-/**
- * 계정 → 닉네임.
- *
- * **체인에서 읽을 수 없다.** `Identity.nicknameOf(account)` 는 `keccak256(nickname)` 만 돌려준다
- * (contracts/src/Identity.sol). 평문은 `NicknameSet` 이벤트에만 실려 있고, 인덱서가
- * `IdentityAccount.nickname` 으로 들고 있다. 그래서 닉네임의 출처는 인덱서 하나다.
- *
- * **id 대소문자 규약:** 인덱서(Task 36 핸들러)는 `IdentityAccount.id` 를 **소문자 주소**로 저장한다.
- * 여기서 묻는 쪽과 받은 쪽을 **둘 다** 소문자로 맞추는 이유가 그것이다 — 체크섬 주소가 들어와도
- * 조회가 조용히 빗나가지 않는다.
- */
-async function nicknamesOf(accounts: string[]): Promise<Map<string, string>> {
-  const unique = [...new Set(accounts.map((account) => account.toLowerCase()))];
-  const names = new Map<string, string>();
-  if (unique.length === 0) return names;
-
-  const data = await envioQuery<{ rows: EnvioIdentityRow[] }>(
-    `query Nicknames($accounts: [String!]!, $limit: Int!) {
-      rows: IdentityAccount(where: {id: {_in: $accounts}}, limit: $limit) { id nickname }
-    }`,
-    { accounts: unique, limit: unique.length },
-  );
-  for (const row of data.rows) names.set(row.id.toLowerCase(), row.nickname ?? '');
-  return names;
 }
 
 /**
@@ -312,9 +282,9 @@ export const issueSnapshot = onCall(
           (account) => !nicknames.has(account),
         );
         if (unknown.length > 0) {
-          // 인덱서에 없는 계정도 '' 로 못박아 다음 쪽에서 다시 묻지 않는다.
+          // 닉네임이 없는 계정도 '' 로 못박아 다음 쪽에서 다시 묻지 않는다(장부: Firestore, v2 P5).
           for (const account of unknown) nicknames.set(account, '');
-          for (const [account, nickname] of await nicknamesOf(unknown)) {
+          for (const [account, nickname] of await nicknamesByAccount(unknown)) {
             nicknames.set(account, nickname);
           }
         }
@@ -438,7 +408,7 @@ export const getPhotoForGate = onCall(
       const account = getAddress(owner);
       // 한 장만 묻는 자리다. 사람 문서가 없으면 스태프에게 분명히 알려야 하므로 여기서는 그대로 터뜨린다.
       const [nicknames, photoJpegB64] = await Promise.all([
-        nicknamesOf([account]),
+        nicknamesByAccount([account]),
         meta.requireKyc ? photoOf(account) : Promise.resolve(''),
       ]);
       audit.photos = photoJpegB64 ? 1 : 0;

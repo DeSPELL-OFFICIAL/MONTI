@@ -150,18 +150,21 @@ const ticketRow: TicketRow = {
 };
 
 /**
- * 티켓 목록은 쪽 단위로, 닉네임은 물어본 계정 그대로 돌려준다.
- * 두 질의를 이름으로 갈라 답한다.
+ * 닉네임 장부(Firestore, v2 P5). 물어본 계정마다 같은 이름을 돌려준다 — `null` 이면 아무도 없다.
+ * 인덱서에는 이제 닉네임이 없다.
  */
+let nicknameBook: string | null = 'alex';
+const nicknamesByAccount = vi.fn(
+  async (accounts: readonly string[]) =>
+    new Map(nicknameBook === null ? [] : accounts.map((a) => [a.toLowerCase(), nicknameBook as string] as const)),
+);
+vi.mock('../src/lib/nicknames.js', () => ({ nicknamesByAccount }));
+
+/** 티켓 목록은 쪽 단위로 돌려주고, 닉네임 장부의 답을 함께 정한다. */
 function envioAnswers(pages: TicketRow[][] = [[ticketRow]], nickname: string | null = 'alex') {
   let page = 0;
-  return async (query: string, variables?: Record<string, unknown>) => {
-    if (query.includes('IdentityAccount')) {
-      const accounts = (variables?.accounts as string[] | undefined) ?? [];
-      return { rows: accounts.map((id) => ({ id, nickname })) };
-    }
-    return { rows: pages[page++] ?? [] };
-  };
+  nicknameBook = nickname;
+  return async () => ({ rows: pages[page++] ?? [] });
 }
 
 function rowsOf(count: number, owner = OWNER.toLowerCase()): TicketRow[] {
@@ -226,6 +229,7 @@ beforeEach(() => {
   logWarn.mockClear();
   fetchMock.mockClear();
   envioQuery.mockClear();
+  nicknamesByAccount.mockClear();
   envioQuery.mockImplementation(envioAnswers() as never);
   docs.set(`persons/${PERSON_ID}`, {
     status: 'active',
@@ -390,10 +394,11 @@ describe('issueSnapshot', () => {
   it('asks for each nickname once across the whole event, not once per page', async () => {
     envioQuery.mockImplementation(envioAnswers([rowsOf(SNAPSHOT_MAX_TICKETS), []]) as never);
     await callIssue();
-    const nicknameCalls = envioCalls('IdentityAccount');
-    expect(nicknameCalls).toHaveLength(1);
+    expect(nicknamesByAccount).toHaveBeenCalledTimes(1);
     // 같은 주인이 500장을 들고 있어도 계정은 한 번만 묻는다.
-    expect(nicknameCalls[0]![1]).toMatchObject({ accounts: [OWNER.toLowerCase()] });
+    expect(nicknamesByAccount).toHaveBeenCalledWith([OWNER.toLowerCase()]);
+    // 인덱서에는 닉네임을 묻지 않는다(v2 P5).
+    expect(envioCalls('IdentityAccount')).toHaveLength(0);
   });
 
   it('leaves the display name empty when the account has no nickname', async () => {
@@ -402,17 +407,14 @@ describe('issueSnapshot', () => {
     expect(snapshot.tickets[0]!.displayName).toBe('');
   });
 
-  it('matches a checksummed indexer id, because both sides are lowercased', async () => {
-    // 인덱서가 id 를 체크섬 형태로 써도 조회가 빗나가면 안 된다(Task 36 은 소문자로 쓴다).
-    envioQuery.mockImplementation((async (query: string) => {
-      if (query.includes('IdentityAccount')) return { rows: [{ id: MIXED, nickname: 'alex' }] };
-      return { rows: [{ ...ticketRow, owner: MIXED }] };
-    }) as never);
+  it('matches a checksummed owner, because both sides are lowercased', async () => {
+    // 인덱서가 owner 를 체크섬 형태로 줘도 장부 조회가 빗나가면 안 된다.
+    envioQuery.mockImplementation(envioAnswers([[{ ...ticketRow, owner: MIXED }]]) as never);
     const snapshot = await callIssue();
     expect(snapshot.tickets[0]!.account).toBe(MIXED);
     expect(snapshot.tickets[0]!.displayName).toBe('alex');
     // 물어볼 때도 소문자로 보낸다.
-    expect(envioCalls('IdentityAccount')[0]![1]).toMatchObject({ accounts: [MIXED.toLowerCase()] });
+    expect(nicknamesByAccount).toHaveBeenCalledWith([MIXED.toLowerCase()]);
   });
 
   describe('a person document that is missing', () => {

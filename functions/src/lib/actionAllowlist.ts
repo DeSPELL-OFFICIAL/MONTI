@@ -20,21 +20,18 @@ export interface ActionEntry {
  *
  * **여기 없는 것(의도적):** Phase 1 발급/입장(claimFor·requestClaimFor·checkInFor·checkInForLate)
  * 은 relayClaim/relayCheckIn 이 따로 대납하고, ERC-4337·페이마스터 경로는 폐기된다(설계 §3).
+ * v2(트랜잭션 다이어트)에서 `createEvent`·`publishEvent(uint256)`·`updateEventMeta` 는 공개 1건
+ * `publishEvent(meta,tiers,policy)` 로 합쳐졌고, `requestOverride`·`setNickname` 은 오프체인으로 갔다.
  */
 const SIGNATURES: Record<string, { target: ActionTarget; signature: string }> = {
   // ── Ticket ──────────────────────────────────────────────────────────────
-  createEvent: {
+  // v2: 생성 + 공개 (+ 유료면 정산 정책) 한 건(abi-delta-v2, selector 0x7254c158).
+  publishEvent: {
     target: 'ticket',
     signature:
-      'function createEvent((uint256,bytes32,bytes32,string,uint64,uint64,bytes32,uint64,uint64,bool,uint32,uint8,bool,uint8,bytes32,bool),(string,uint256,uint32,uint32,uint16,bool)[])',
+      'function publishEvent((uint256,bytes32,bytes32,string,uint64,uint64,bytes32,uint64,uint64,bool,uint32,uint8,bool,uint8,bytes32,bool),(string,uint256,uint32,uint32,uint16,bool)[],((address,uint16,bytes32,bytes32)[],uint16,uint16,bool,bool,uint32))',
   },
-  publishEvent: { target: 'ticket', signature: 'function publishEvent(uint256)' },
   cancelEvent: { target: 'ticket', signature: 'function cancelEvent(uint256)' },
-  updateEventMeta: {
-    target: 'ticket',
-    signature:
-      'function updateEventMeta(uint256,(uint256,bytes32,bytes32,string,uint64,uint64,bytes32,uint64,uint64,bool,uint32,uint8,bool,uint8,bytes32,bool),(string,uint256,uint32,uint32,uint16,bool)[])',
-  },
   approveClaims: { target: 'ticket', signature: 'function approveClaims(uint256,uint256[])' },
   rejectClaims: { target: 'ticket', signature: 'function rejectClaims(uint256,uint256[])' },
   revoke: { target: 'ticket', signature: 'function revoke(uint256,uint8)' },
@@ -55,7 +52,6 @@ const SIGNATURES: Record<string, { target: ActionTarget; signature: string }> = 
   setManager: { target: 'organizers', signature: 'function setManager(uint256,address,bool,bool)' },
   createOrganizer: { target: 'organizers', signature: 'function createOrganizer(address)' },
   // ── Identity ────────────────────────────────────────────────────────────
-  setNickname: { target: 'identity', signature: 'function setNickname(bytes32,string)' },
   cancelRotation: { target: 'identity', signature: 'function cancelRotation()' },
 };
 

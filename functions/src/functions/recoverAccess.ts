@@ -13,6 +13,7 @@ import { mintSessionClaims } from '../lib/claims.js';
 import {
   AUTH_CHALLENGES,
   DEVICES,
+  NICKNAMES,
   PASSKEYS,
   PERSONS,
   RECOVERY_QUOTA,
@@ -333,8 +334,18 @@ export const recoverAccess = onCall(
     //     옛 패스키 조회는 바깥에서 미리 한다.
     const oldPasskeys = await db.collection(PASSKEYS).where('personId', '==', personId).get();
     const oldIds = oldPasskeys.docs.map((doc) => doc.id);
+    // 닉네임 장부(v2 P5)의 역조회 칸도 새 계정으로 옮긴다 — 주인 키(personId)는 그대로다.
+    const nicknames = await db.collection(NICKNAMES).where('personId', '==', personId).get();
+    const nicknameIds = nicknames.docs.map((doc) => doc.id);
     await db.runTransaction(async (tx) => {
       for (const id of oldIds) tx.delete(db.collection(PASSKEYS).doc(id));
+      for (const id of nicknameIds) {
+        tx.set(
+          db.collection(NICKNAMES).doc(id),
+          { account: newAccount.toLowerCase(), updatedAt: FieldValue.serverTimestamp() },
+          { merge: true },
+        );
+      }
       tx.set(credentialRef, {
         personId,
         publicKeyCose: Buffer.from(credential.publicKey).toString('base64'),

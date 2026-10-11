@@ -20,6 +20,12 @@ describe('actionAllowlist — v2 off-chain moves', () => {
     const present = new Set(Object.values(ACTION_ALLOWLIST).map((e) => e.selector));
     expect(present.has(toFunctionSelector('function requestOverride(uint256,uint256,uint8)'))).toBe(false);
   });
+
+  it('no longer relays setNickname (v2 P5: nicknames live in Firestore)', () => {
+    expect(ACTION_ALLOWLIST.setNickname).toBeUndefined();
+    const present = new Set(Object.values(ACTION_ALLOWLIST).map((e) => e.selector));
+    expect(present.has(toFunctionSelector('function setNickname(bytes32,string)'))).toBe(false);
+  });
 });
 
 describe('actionAllowlist ↔ generated ABI (drift guard)', () => {
