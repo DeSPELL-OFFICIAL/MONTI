@@ -182,3 +182,38 @@ export async function sweepRelays(): Promise<void> {
     }
   }
 }
+
+/** 확정 훅이 결과를 남겨야 하는 kind. 이 둘은 결과가 없으면 화면(공개·게이트 등록)이 멈춘다. */
+export const HOOKED_KINDS = ['publishEvent', 'registerGate'] as const;
+/** 결과 없는 확정 문서를 되돌아보는 창. 짧게 둔다 — 창 안 문서를 매 틱 다시 읽는다. */
+const UNHOOKED_WINDOW_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * **남이 닫은** 확정 문서를 메운다. 전환 기간에는 v1 스윕(훅을 모른다)이 v2 의 `sent` 문서를
+ * `confirmed` 로 먼저 닫을 수 있다 — 그러면 위 스윕은 그 문서를 다시 보지 않고 `result.eventId`·
+ * 정산 거울·게이트 대기 줄이 영영 비어 남는다. 그래서 최근에 확정된 `publishEvent`/`registerGate`
+ * 중 `result` 가 없는 것을 영수증(txHash)으로 다시 훅에 태운다. 훅은 멱등이라 두 번 돌아도 같다.
+ */
+export async function sweepUnhookedRelays(pc: PublicClient = publicClient()): Promise<void> {
+  const cutoff = Timestamp.fromMillis(Date.now() - UNHOOKED_WINDOW_MS);
+  const snapshot = await db
+    .collection(RELAYS)
+    .where('status', '==', 'confirmed')
+    .where('kind', 'in', [...HOOKED_KINDS])
+    .where('confirmedAt', '>', cutoff)
+    .limit(SWEEP_LIMIT)
+    .get();
+  for (const doc of snapshot.docs) {
+    if (doc.get('result')) continue;
+    try {
+      const txHash = doc.get('txHash') as Hex | undefined;
+      if (!txHash) continue;
+      const receipt = await receiptOrDropped(pc, txHash);
+      if (!receipt || receipt.status !== 'success') continue;
+      const result = await rerunPostConfirm(doc, { logs: receipt.logs ?? [] });
+      if (result) await doc.ref.set({ result }, { merge: true });
+    } catch (cause) {
+      error('reconcile.unhooked', { relayId: doc.id, reason: (cause as Error).message });
+    }
+  }
+}
