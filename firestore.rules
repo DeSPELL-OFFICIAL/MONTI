@@ -202,6 +202,9 @@ service cloud.firestore {
         && capped('body', 5000)
         && capped('description', 5000)
         && capped('posterCid', 80)
+        // v2 정산 규칙 편집기(설계 §5): 수취인 표를 JSON 문자열 한 칸으로 둔다. 목록·맵으로 두면
+        // 위 표현식 예산을 칸마다 또 치르므로 문자열 상한 하나로 막는다(최대 10명 × 사유 80자 여유).
+        && capped('splitJson', 4000)
         && listCapped('tags', 5)
         && listCapped('tiers', 8)
         && stampOk()
