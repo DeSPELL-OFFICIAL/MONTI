@@ -23,7 +23,9 @@ mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd)"
 
 cd "$ROOT"
-forge build --silent
+# Sources only: the ABI depends on src/, so a test or script that does not compile mid-refactor must not
+# block an export (v2 K1 hit exactly that). `forge test` remains the gate for tests and scripts.
+forge build --silent --skip test --skip script
 
 # The first-party contracts. MontiForwarder is the ERC-2771 relay the web app and Functions sign
 # forward requests against; SettlementVault is the programmable-settlement layer (plan 2026-10-01) the

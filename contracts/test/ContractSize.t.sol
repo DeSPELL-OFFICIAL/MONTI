@@ -7,6 +7,7 @@ import {Identity} from "../src/Identity.sol";
 import {MontiForwarder} from "../src/MontiForwarder.sol";
 import {Organizers} from "../src/Organizers.sol";
 import {Ticket} from "../src/Ticket.sol";
+import {SettlementVault} from "../src/SettlementVault.sol";
 
 /// @notice 한도는 EIP-170 의 24,576 B 가 아니라 Monad 의 128 KB 다(Task 1 이 foundry.toml 에
 ///         code_size_limit 으로 못박았다). 이 테스트는 그 한도를 테스트로 들고 있어서, 어느
@@ -64,5 +65,14 @@ contract ContractSizeTest is Test {
         assertLt(type(Identity).creationCode.length, MONAD_CODE_SIZE_LIMIT);
         assertLt(type(Organizers).creationCode.length, MONAD_CODE_SIZE_LIMIT);
         assertLt(type(MontiForwarder).creationCode.length, MONAD_CODE_SIZE_LIMIT);
+    }
+
+    /// @dev v2: SettlementVault is part of the single deployment now (design 2026-10-12 §8).
+    function test_settlementVaultFitsUnderMonadsLimit() public {
+        SettlementVault vault = new SettlementVault(address(0x7111), address(0x0461), address(0), address(0));
+        emit log_named_uint("SettlementVault runtime size (B)", address(vault).code.length);
+        emit log_named_uint("SettlementVault initcode size (B)", type(SettlementVault).creationCode.length);
+        assertLt(address(vault).code.length, MONAD_CODE_SIZE_LIMIT);
+        assertLt(type(SettlementVault).creationCode.length, MONAD_CODE_SIZE_LIMIT);
     }
 }
