@@ -17,7 +17,6 @@ const PERSON = `0x${'aa'.repeat(32)}`;
 const ZERO32 = `0x${'00'.repeat(32)}`;
 const DEVICE_X = `0x${'11'.repeat(32)}`;
 const DEVICE_Y = `0x${'22'.repeat(32)}`;
-const NICK_HASH = `0x${'bb'.repeat(32)}`;
 
 const T0 = 1_760_000_000;
 const T1 = T0 + 86_400;
@@ -69,7 +68,6 @@ describe('Identity handlers', () => {
     expect(after.entities.IdentityAccount.get(alice)).toEqual({
       id: alice,
       personId: PERSON,
-      nickname: undefined,
       kycLevel: 0,
       deviceX: ZERO32,
       deviceY: ZERO32,
@@ -95,7 +93,7 @@ describe('Identity handlers', () => {
    * 등록을 못 본 계정(= 구독 시작 블록보다 앞선 것)에 대해서는 행을 **지어내지 않는다**.
    * 이 셋은 personId 를 싣지 않아, 행을 만들면 사람 없는 계정이 생긴다.
    */
-  it('ignores device and nickname events for an account it never saw registered', async () => {
+  it('ignores device events for an account it never saw registered', async () => {
     let mockDb = await Identity.DeviceChanged.processEvent({
       event: Identity.DeviceChanged.createMockEvent({
         account: BOB,
@@ -116,17 +114,6 @@ describe('Identity handlers', () => {
       mockDb,
     });
     expect(mockDb.entities.IdentityAccount.get(bob)).toBeUndefined();
-
-    const after = await Identity.NicknameSet.processEvent({
-      event: Identity.NicknameSet.createMockEvent({
-        account: BOB,
-        nicknameHash: NICK_HASH,
-        nickname: 'bob',
-        mockEventData: block(T0),
-      }),
-      mockDb,
-    });
-    expect(after.entities.IdentityAccount.get(bob)).toBeUndefined();
   });
 
   it('fills the device keys on DeviceChanged and records deviceUpdatedAt', async () => {
@@ -152,20 +139,6 @@ describe('Identity handlers', () => {
     expect(after.entities.IdentityAccount.get(alice)?.locked).toBe(false);
   });
 
-  it('stores the nickname on NicknameSet', async () => {
-    const mockDb = await signedUp();
-    const after = await Identity.NicknameSet.processEvent({
-      event: Identity.NicknameSet.createMockEvent({
-        account: ALICE,
-        nicknameHash: NICK_HASH,
-        nickname: 'alex',
-        mockEventData: block(T0),
-      }),
-      mockDb,
-    });
-    expect(after.entities.IdentityAccount.get(alice)?.nickname).toBe('alex');
-  });
-
   /**
    * `AccountRotated` 는 다른 핸들러들과 달리 옛 행이 없어도 새 행을 세운다 —
    * 이벤트가 `personId` 를 싣고 있어 지어낸 값이 필요 없고, 회전 뒤의 현재 계정이
@@ -186,7 +159,6 @@ describe('Identity handlers', () => {
     expect(after.entities.IdentityAccount.get(bob)).toEqual({
       id: bob,
       personId: PERSON,
-      nickname: undefined,
       kycLevel: 0,
       deviceX: ZERO32,
       deviceY: ZERO32,
@@ -195,15 +167,14 @@ describe('Identity handlers', () => {
     });
   });
 
-  it('moves the person and the handle on AccountRotated, leaving the new account without a device', async () => {
+  it('moves the person on AccountRotated, leaving the new account without a device', async () => {
     const after = await rotatedAway();
 
-    // 새 계정: 사람·닉네임·kyc 는 따라오지만 기기는 아니다. rotateAccount 는
+    // 새 계정: 사람·kyc 는 따라오지만 기기는 아니다. rotateAccount 는
     // _devices[newAccount] 를 건드리지 않으므로 체인 위에서도 0 이다.
     expect(after.entities.IdentityAccount.get(bob)).toEqual({
       id: bob,
       personId: PERSON,
-      nickname: 'alex',
       kycLevel: 1,
       deviceX: ZERO32,
       deviceY: ZERO32,
@@ -211,10 +182,9 @@ describe('Identity handlers', () => {
       deviceUpdatedAt: 0n,
     });
 
-    // 밀려난 계정: 행은 남되(Ticket.migrate 가 아직 찾는다) 핸들은 잃고,
+    // 밀려난 계정: 행은 남고(Ticket.migrate 가 아직 찾는다),
     // 01b 의 rotateAccount 가 함께 낸 DeviceLocked(old, true) 로 잠겨 있다.
     const previous = after.entities.IdentityAccount.get(alice);
-    expect(previous?.nickname).toBeUndefined();
     expect(previous?.deviceX).toBe(DEVICE_X);
     expect(previous?.locked).toBe(true);
   });
@@ -239,7 +209,6 @@ describe('Identity handlers', () => {
     expect(after.entities.IdentityAccount.get(alice)).toEqual({
       id: alice,
       personId: PERSON,
-      nickname: 'alex',
       kycLevel: 1,
       deviceX: DEVICE_X,
       deviceY: DEVICE_Y,
@@ -248,27 +217,17 @@ describe('Identity handlers', () => {
       locked: true,
       deviceUpdatedAt: BigInt(T0),
     });
-    expect(after.entities.IdentityAccount.get(bob)?.nickname).toBeUndefined();
   });
 });
 
 /**
- * register → setNickname → 01b rotateAccount.
+ * register → 01b rotateAccount.
  * `rotateAccount` 는 `AccountRotated` 뒤에 밀려난 계정에 대한 `DeviceLocked(old, true)`
  * 를 같은 트랜잭션에서 함께 낸다(01b 델타 §6). 2026-09-23 재배포로 실제로 도는
  * 경로이므로, 여기서도 두 이벤트를 그 순서대로 흘려 보낸다.
  */
 async function rotatedAway(): Promise<MockDbT> {
   let mockDb = await signedUp();
-  mockDb = await Identity.NicknameSet.processEvent({
-    event: Identity.NicknameSet.createMockEvent({
-      account: ALICE,
-      nicknameHash: NICK_HASH,
-      nickname: 'alex',
-      mockEventData: block(T0),
-    }),
-    mockDb,
-  });
   mockDb = await Identity.AccountRotated.processEvent({
     event: Identity.AccountRotated.createMockEvent({
       personId: PERSON,
@@ -375,6 +334,24 @@ describe('Organizers handlers', () => {
       mockDb,
     });
     expect(mockDb.entities.Gate.get('3')?.isOpen).toBe(false);
+  });
+
+  // v2: registerGate 는 같은 tx 에서 GateRegistered → GateOpened 를 낸다(등록 즉시 개장).
+  it('ends open when GateRegistered and GateOpened arrive in the same transaction (v2 register)', async () => {
+    const TX = `0x${'9a'.repeat(32)}`;
+    const sameTx = { mockEventData: { transaction: { hash: TX }, block: { number: 70_000_001, timestamp: T0 } } };
+    let mockDb = await Organizers.GateRegistered.processEvent({
+      event: Organizers.GateRegistered.createMockEvent({
+        gateId: 1n, eventId: 1001n, gateAccount: GATE, kx: DEVICE_X, ky: DEVICE_Y,
+        mockEventData: { ...sameTx.mockEventData, logIndex: 0 },
+      }),
+      mockDb: MockDb.createMockDb(),
+    });
+    mockDb = await Organizers.GateOpened.processEvent({
+      event: Organizers.GateOpened.createMockEvent({ gateId: 1n, mockEventData: { ...sameTx.mockEventData, logIndex: 1 } }),
+      mockDb,
+    });
+    expect(mockDb.entities.Gate.get('1')).toMatchObject({ eventId: 1001n, account: gateAddr, isOpen: true, revoked: false });
   });
 
   it('shuts the gate as well as revoking it on GateRevoked', async () => {

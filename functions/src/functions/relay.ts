@@ -2,17 +2,16 @@ import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { HttpsError, onCall, type CallableRequest } from 'firebase-functions/v2/https';
 import { info } from 'firebase-functions/logger';
 import {
-  BaseError,
-  ContractFunctionRevertedError,
   WaitForTransactionReceiptTimeoutError,
   encodeFunctionData,
   parseEventLogs,
   type TransactionReceipt,
 } from 'viem';
-import { identityAbi, ticketAbi, type Hex } from '@monti/shared';
+import { ticketAbi, type Hex } from '@monti/shared';
 import { RELAYER_PK } from '../config.js';
 import { resolveCallerAccount } from '../lib/auth.js';
 import { deployment, publicClient } from '../lib/chain.js';
+import { CLAIM_CODES, assertUnderPendingLimit, mapRevert, precheckClaim } from '../lib/claimPrecheck.js';
 import { ADMISSIONS, ADMISSION_TOKENS, RELAYS, USERS, db } from '../lib/db.js';
 import { getRelayerAccount, sendRelayed } from '../lib/relayer.js';
 import { checkInRelayId, claimRelayId, type RelayKind } from '../lib/relayTypes.js';
@@ -39,8 +38,6 @@ const RELAY_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const ADMISSION_TTL_MS = 3 * 24 * 60 * 60 * 1000;
 /** 확정을 기다리는 상한. 넘으면 `sent` 로 응답하고 대사(reconcileRelays)가 마무리한다. */
 const RECEIPT_WAIT_MS = 8_000;
-/** 사람당 미확정(pending|sent) 릴레이 상한. RPC/가스 남용 방어(설계 §5). */
-const MAX_PENDING = 5;
 
 // ─────────────────────────────────────── 요청/응답 타입 (웹과 동결)
 
@@ -73,31 +70,6 @@ export interface RelayCheckInResult {
 // ─────────────────────────────────────── revert 이름 → details.code
 
 /**
- * 발급 시뮬 revert → 코드. 값은 웹이 카피로 매핑하는 안정 코드다. SoldOut→SOLD_OUT,
- * 지갑 한도→LIMIT, 판매창→NOT_ON_SALE 등(설계 §5, 289줄의 사유 집합). 표에 없는 이름은
- * `REVERTED` 로 떨어진다.
- */
-const CLAIM_CODES: Record<string, string> = {
-  AuthExpired: 'AUTH_EXPIRED',
-  BadNonce: 'BAD_NONCE',
-  NotMember: 'NOT_MEMBER',
-  DeviceLocked: 'DEVICE_LOCKED',
-  BadDeviceSignature: 'BAD_DEVICE_SIG',
-  ApprovalRequired: 'APPROVAL_REQUIRED',
-  ApprovalNotRequired: 'APPROVAL_NOT_REQUIRED',
-  KycRequired: 'KYC_REQUIRED',
-  SaleClosed: 'NOT_ON_SALE',
-  SoldOut: 'SOLD_OUT',
-  MaxPerWalletExceeded: 'LIMIT',
-  PaidTiersNotEnabled: 'PAID_TIERS',
-  UnknownTier: 'UNKNOWN_TIER',
-  UnknownEvent: 'UNKNOWN_EVENT',
-  EventNotPublished: 'NOT_PUBLISHED',
-  EventEnded: 'EVENT_ENDED',
-  EventCancelled: 'EVENT_CANCELLED',
-};
-
-/**
  * 입장 시뮬 revert → 게이트 DENY 코드. 값은 웹 게이트의 정본
  * (`apps/web/src/staff/gate/denyMap.ts` 의 `DenyCode` = `CHECK_IN_DENY` 매핑)과 같다 —
  * 게이트가 이미 가진 화면을 그대로 쓴다. 관객 잘못이 아닌 설정 오류(NotMember/EventNotPublished/
@@ -120,24 +92,6 @@ const CHECKIN_CODES: Record<string, string> = {
   NotMember: 'TX_FAILED',
   Unauthorized: 'TX_FAILED',
 };
-
-/** 던진 오류에서 viem 이 디코딩한 커스텀 에러 이름을 꺼낸다. revert 가 아니면 null(→ RPC 오류). */
-function revertName(err: unknown): string | null {
-  if (!(err instanceof BaseError)) return null;
-  const revert = err.walk((e) => e instanceof ContractFunctionRevertedError);
-  if (revert instanceof ContractFunctionRevertedError) {
-    return revert.data?.errorName ?? revert.reason ?? null;
-  }
-  return null;
-}
-
-/** revert → HttpsError. 매핑되면 `failed-precondition`+코드, revert 가 아니면 `internal`. */
-function mapRevert(err: unknown, table: Record<string, string>, fallback: string): HttpsError {
-  const name = revertName(err);
-  if (name === null) return new HttpsError('internal', 'SIMULATE_FAILED', { code: 'SIMULATE_FAILED' });
-  const code = table[name] ?? fallback;
-  return new HttpsError('failed-precondition', code, { code });
-}
 
 // ─────────────────────────────────────── 공통 헬퍼
 
@@ -199,19 +153,6 @@ function admissionRef(eventId: string, tokenId: string) {
   return db.collection(ADMISSIONS).doc(eventId).collection(ADMISSION_TOKENS).doc(tokenId);
 }
 
-/** 사람당 미확정 릴레이가 상한을 넘으면 거절(claim 전용, 설계 §5). */
-async function assertUnderPendingLimit(personId: Hex): Promise<void> {
-  const snap = await db
-    .collection(RELAYS)
-    .where('personId', '==', personId)
-    .where('status', 'in', ['pending', 'sent'])
-    .limit(MAX_PENDING)
-    .get();
-  if (snap.size >= MAX_PENDING) {
-    throw new HttpsError('resource-exhausted', 'TOO_MANY_PENDING', { code: 'TOO_MANY_PENDING' });
-  }
-}
-
 // ─────────────────────────────────────── relayClaim
 
 /**
@@ -232,38 +173,16 @@ export interface RunRelayClaim {
 }
 
 /**
- * 발급 릴레이의 알맹이(설계 §5). `relayClaim` 콜러블과 `purchaseTicket`(settlement.ts) 이 함께
- * 쓰라고 뽑아 둔다 — 요청 파싱만 콜러블이 하고, 자기 계정 발급·시뮬·전송·확정은 전부 여기 한 곳이다.
+ * 무료 발급 릴레이의 알맹이(설계 §5). 요청 파싱만 콜러블이 하고, 자기 계정 발급·시뮬·전송·확정은
+ * 전부 여기 한 곳이다(유료 티어는 v2 에서 `purchaseTicket` 의 원자 결제만 탄다).
  * 멱등키는 `(account,eventId,nonce)` 로, 같은 승인서를 두 번 보내도 트랜잭션은 한 번이다.
  */
 export async function runRelayClaim(p: RunRelayClaim): Promise<RelayClaimResult> {
   const { account, personId, mode, eventId, tier, nonce, deadline, deviceSig } = p;
 
-  // deadline 미래.
-  const nowSec = BigInt(Math.floor(Date.now() / 1000));
-  if (deadline <= nowSec) throw new HttpsError('failed-precondition', 'AUTH_EXPIRED', { code: 'AUTH_EXPIRED' });
-
-  const pc = publicClient();
+  // 승인서·회원·잠금·nonce 사전확인(설계 §5) — purchaseTicket 과 공용(lib/claimPrecheck).
+  await precheckClaim({ account, eventId, nonce, deadline });
   const contracts = deployment();
-
-  // isMember · !isLocked 선확인(설계 §5).
-  const [member, locked] = await Promise.all([
-    pc.readContract({ address: contracts.identity, abi: identityAbi, functionName: 'isMember', args: [account] }) as Promise<boolean>,
-    pc.readContract({ address: contracts.identity, abi: identityAbi, functionName: 'isLocked', args: [account] }) as Promise<boolean>,
-  ]);
-  if (!member) throw new HttpsError('failed-precondition', 'NOT_MEMBER', { code: 'NOT_MEMBER' });
-  if (locked) throw new HttpsError('failed-precondition', 'DEVICE_LOCKED', { code: 'DEVICE_LOCKED' });
-
-  // nonce 재대조 — 진부/중복 승인서를 가스 쓰기 전에 막고, 현재 nonce 를 돌려줘 재서명하게 한다.
-  const chainNonce = (await pc.readContract({
-    address: contracts.ticket,
-    abi: ticketAbi,
-    functionName: 'claimNonce',
-    args: [eventId, account],
-  })) as bigint;
-  if (chainNonce !== nonce) {
-    throw new HttpsError('failed-precondition', 'BAD_NONCE', { code: 'BAD_NONCE', nonce: chainNonce.toString() });
-  }
 
   // 멱등: (account,eventId,nonce). 이미 진행 중/확정이면 재사용(두 번째 tx 없음).
   const relayId = claimRelayId(account, eventId, nonce);

@@ -1,5 +1,5 @@
-import { encodeAbiParameters, keccak256, stringToHex, toHex, type Hex } from 'viem';
-import { settlementVaultAbi } from '@monti/shared';
+import { encodeAbiParameters, keccak256, parseAbi, stringToHex, toHex, type Abi, type Hex } from 'viem';
+import { settlementVaultAbi, ticketAbi } from '@monti/shared';
 
 /**
  * SettlementVault 의 ABI — 01b 가 컴파일 산출물에서 뽑아 `packages/shared/src/abi/SettlementVault.json`
@@ -7,6 +7,28 @@ import { settlementVaultAbi } from '@monti/shared';
  * 시그니처는 `functions/test/settlementAbi.test.ts` 가 참조 목록과 selector 로 드리프트를 막는다.
  */
 export const settlementAbi = settlementVaultAbi;
+
+/** `SettlementVault.UNITS_PER_CENT` 미러 — 6자리 USD 스테이블(USDC)에서 1센트 = 1e4 단위(v2 §3). */
+export const UNITS_PER_CENT = 10_000n;
+
+/**
+ * `purchase` 시뮬/디코드용 ABI(abi-delta-v2 "Simulation ABI"): 금고 ABI + Ticket 오류(`mintPaid` 가
+ * 발급 검사 오류를 그대로 버블) + solady `TransferFromFailed()`(트레저리 allowance/잔고 부족).
+ */
+export const purchaseSimAbi = [
+  ...(settlementVaultAbi as readonly { type: string }[]),
+  ...(ticketAbi as readonly { type: string }[]).filter((i) => i.type === 'error'),
+  ...parseAbi(['error TransferFromFailed()']),
+] as Abi;
+
+/** `ITicket.ClaimAuth` — 관객 기기키가 서명한 발급 승인서(`claimFor`·`purchase` 공용 튜플). */
+export interface ClaimAuthArgs {
+  eventId: bigint;
+  tier: number;
+  account: Hex;
+  nonce: bigint;
+  deadline: bigint;
+}
 
 /** 금고가 쓰는 escrow status 코드(ISettlementVault.Escrow.status). */
 export const ESCROW_STATUS = { none: 0, held: 1, released: 2, refunded: 3 } as const;
