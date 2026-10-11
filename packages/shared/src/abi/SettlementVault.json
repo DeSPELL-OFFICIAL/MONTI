@@ -13,11 +13,6 @@
         "internalType": "address"
       },
       {
-        "name": "identity_",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
         "name": "initialDepositor",
         "type": "address",
         "internalType": "address"
@@ -84,19 +79,6 @@
   },
   {
     "type": "function",
-    "name": "SETTLE_POLICY_TAG",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "TAG_PLATFORM",
     "inputs": [],
     "outputs": [
@@ -110,31 +92,16 @@
   },
   {
     "type": "function",
-    "name": "deposit",
-    "inputs": [
+    "name": "UNITS_PER_CENT",
+    "inputs": [],
+    "outputs": [
       {
-        "name": "eventId",
+        "name": "",
         "type": "uint256",
         "internalType": "uint256"
-      },
-      {
-        "name": "tokenId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "token",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "amount",
-        "type": "uint128",
-        "internalType": "uint128"
       }
     ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -342,19 +309,6 @@
   },
   {
     "type": "function",
-    "name": "identity",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "contract IIdentity"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "organizers",
     "inputs": [],
     "outputs": [
@@ -418,22 +372,59 @@
   },
   {
     "type": "function",
-    "name": "policyNonce",
+    "name": "purchase",
     "inputs": [
       {
-        "name": "",
+        "name": "a",
+        "type": "tuple",
+        "internalType": "struct ITicket.ClaimAuth",
+        "components": [
+          {
+            "name": "eventId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "tier",
+            "type": "uint8",
+            "internalType": "uint8"
+          },
+          {
+            "name": "account",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "nonce",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "deadline",
+            "type": "uint64",
+            "internalType": "uint64"
+          }
+        ]
+      },
+      {
+        "name": "deviceSig",
+        "type": "bytes",
+        "internalType": "bytes"
+      },
+      {
+        "name": "token",
         "type": "address",
         "internalType": "address"
       }
     ],
     "outputs": [
       {
-        "name": "",
+        "name": "tokenId",
         "type": "uint256",
         "internalType": "uint256"
       }
     ],
-    "stateMutability": "view"
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -507,7 +498,7 @@
   },
   {
     "type": "function",
-    "name": "setPolicy",
+    "name": "setPolicyByTicket",
     "inputs": [
       {
         "name": "eventId",
@@ -574,69 +565,13 @@
         ]
       },
       {
-        "name": "auth",
-        "type": "tuple",
-        "internalType": "struct ISettlementVault.PolicyAuth",
-        "components": [
-          {
-            "name": "organizer",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "nonce",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "deadline",
-            "type": "uint64",
-            "internalType": "uint64"
-          }
-        ]
-      },
-      {
-        "name": "deviceSig",
-        "type": "bytes",
-        "internalType": "bytes"
+        "name": "organizer",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "setPolicyDigest",
-    "inputs": [
-      {
-        "name": "eventId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "policyHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "nonce",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "deadline",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -1043,27 +978,7 @@
   },
   {
     "type": "error",
-    "name": "AlreadyDeposited",
-    "inputs": []
-  },
-  {
-    "type": "error",
     "name": "AlreadySettled",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "AuthExpired",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "BadDeviceSignature",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "BadNonce",
     "inputs": []
   },
   {
@@ -1103,11 +1018,6 @@
   },
   {
     "type": "error",
-    "name": "NoPolicy",
-    "inputs": []
-  },
-  {
-    "type": "error",
     "name": "NotCheckedIn",
     "inputs": []
   },
@@ -1124,6 +1034,11 @@
   {
     "type": "error",
     "name": "NotPolicyAuthorizer",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NotTicket",
     "inputs": []
   },
   {
@@ -1168,12 +1083,7 @@
   },
   {
     "type": "error",
-    "name": "UnknownEvent",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "ZeroAmount",
+    "name": "UnsupportedDecimals",
     "inputs": []
   },
   {

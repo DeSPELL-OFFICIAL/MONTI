@@ -209,10 +209,6 @@ const checkedInLate = (tokenId: bigint) =>
   ]);
 const registered = (personId: Hex, account: Hex) =>
   montiLog(IDENTITY, identityAbi, 'Registered', { personId, account });
-const nicknameSet = (account: Hex, nickname: string) =>
-  montiLog(IDENTITY, identityAbi, 'NicknameSet', { account, nicknameHash: `0x${'cc'.repeat(32)}` }, 'string nickname', [
-    nickname,
-  ]);
 const transfer = (from: Hex, to: Hex, tokenId: bigint, address: string = TICKET) =>
   montiLog(address, ticketAbi, 'Transfer', { from, to, tokenId });
 const offerAccepted = (tokenId: bigint) =>
@@ -407,15 +403,6 @@ describe('tenderlyWebhook', () => {
     const stranger = `0x${'bb'.repeat(32)}` as Hex;
     await deliver([registered(stranger, OWNER)]);
     expect(snapshot(`${PERSONS}/${stranger}`).exists).toBe(false);
-  });
-
-  it('has no NicknameSet case any more — nicknames live in Firestore (v2 P5)', async () => {
-    // v1 Identity 가 아직 이 이벤트를 내더라도 users.nickname 을 덮어쓰지 않는다 — 원본은 setNickname 이다.
-    chain.personOf.set(OWNER.toLowerCase(), PERSON);
-    write(`${USERS}/uid-1`, { personId: PERSON, nickname: 'monti' });
-
-    await deliver([nicknameSet(OWNER, '몽티')]);
-    expect(snapshot(`${USERS}/uid-1`).get('nickname')).toBe('monti');
   });
 
   it('drops the sender from the event chat only when no ticket is left', async () => {
