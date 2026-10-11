@@ -16,6 +16,4 @@ interface IIdentity {
     function deviceUpdatedAt(address account) external view returns (uint64);
     function attester() external view returns (address);
     function kycLevelOf(address account) external view returns (uint8);
-    function nicknameOwner(bytes32 nicknameHash) external view returns (address);
-    function nicknameOf(address account) external view returns (bytes32);
 }

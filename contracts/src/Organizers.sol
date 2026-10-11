@@ -32,7 +32,9 @@ contract Organizers is IOrganizers, ERC2771Context {
     address public immutable deployer;
     address public ticket;
 
-    uint256 private _nextOrgId = 1;
+    /// @dev v2 ids start at 1001 (v2 design D7) so v2 Firestore keys (orgProfiles/{orgId},
+    ///      usage/org:{orgId}) never collide with v1 documents.
+    uint256 private _nextOrgId = 1001;
     uint256 private _nextGateId = 1;
 
     mapping(uint256 => address) private _owners;
@@ -115,7 +117,8 @@ contract Organizers is IOrganizers, ERC2771Context {
     }
 
     /// @notice Spec 7.1: the staff device creates a gate account from its hardware key, an admin puts
-    ///         that account on the event's gate allowlist. A gate starts closed.
+    ///         that account on the event's gate allowlist. Approval is opening (v2 D3): a gate starts
+    ///         open, emitting GateRegistered then GateOpened. closeGate/openGate remain for a pause.
     function registerGate(uint256 eventId, address gateAccount, bytes32 kx, bytes32 ky)
         external
         returns (uint256 gateId)
@@ -130,10 +133,11 @@ contract Organizers is IOrganizers, ERC2771Context {
         if (!hasPermission(orgId, _msgSender(), PERM_MANAGE_GATES)) revert Unauthorized();
 
         gateId = _nextGateId++;
-        _gates[gateId] = Gate({eventId: eventId, account: gateAccount, kx: kx, ky: ky, open: false, revoked: false});
+        _gates[gateId] = Gate({eventId: eventId, account: gateAccount, kx: kx, ky: ky, open: true, revoked: false});
         _gateOf[gateAccount] = gateId;
 
         emit GateRegistered(gateId, eventId, gateAccount, kx, ky);
+        emit GateOpened(gateId);
     }
 
     function gateOf(address gateAccount) external view override returns (uint256) {

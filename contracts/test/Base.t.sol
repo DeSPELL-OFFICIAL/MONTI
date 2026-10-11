@@ -6,7 +6,11 @@ import {Identity} from "../src/Identity.sol";
 import {Organizers} from "../src/Organizers.sol";
 import {Ticket} from "../src/Ticket.sol";
 import {MontiForwarder} from "../src/MontiForwarder.sol";
+import {SettlementVault} from "../src/SettlementVault.sol";
+import {MockUSD} from "../src/mocks/MockUSD.sol";
 import {IIdentity} from "../src/interfaces/IIdentity.sol";
+import {ITicket} from "../src/interfaces/ITicket.sol";
+import {ISettlementVault} from "../src/interfaces/ISettlementVault.sol";
 import {P256Vectors} from "./utils/P256Vectors.sol";
 
 abstract contract MontiTest is Test {
@@ -14,6 +18,15 @@ abstract contract MontiTest is Test {
     Organizers internal organizers;
     Ticket internal ticket;
     MontiForwarder internal fwd;
+    SettlementVault internal vault;
+    MockUSD internal usd;
+
+    /// @dev The allowlisted purchase adapter (treasury EOA in production).
+    address internal constant TREASURY = address(0x7EA50);
+    address internal constant R_ARTIST = address(0xA4715);
+    address internal constant R_VENUE = address(0xACE);
+    address internal constant R_ORG = address(0x0B6);
+    address internal constant R_PLATFORM = address(0x9147); // MONTI
 
     uint256 internal constant ATTESTER_PK = 0xA11CE;
     address internal attester;
@@ -42,14 +55,21 @@ abstract contract MontiTest is Test {
     function _deployMonti() internal {
         attester = vm.addr(ATTESTER_PK);
         identity = new Identity(attester);
-        // Deploy order (design §2): Identity -> Forwarder -> Organizers -> Ticket ->
-        // setForwarder -> setTargets -> setTicket. Deployer = this test contract.
+        // Deploy order (v2 design §8): Identity -> Forwarder -> Organizers -> Ticket -> SettlementVault ->
+        // setForwarder -> setTargets -> setTicket -> setVault. Deployer = this test contract.
         fwd = new MontiForwarder(IIdentity(address(identity)), address(this));
         organizers = new Organizers(address(fwd));
         ticket = new Ticket(address(identity), address(organizers), address(fwd));
+        usd = new MockUSD();
+        vault = new SettlementVault(address(ticket), address(organizers), TREASURY, address(usd));
         identity.setForwarder(address(fwd));
         fwd.setTargets(address(ticket), address(organizers));
         organizers.setTicket(address(ticket));
+        ticket.setVault(address(vault));
+
+        usd.mint(TREASURY, 1_000_000_000);
+        vm.prank(TREASURY);
+        usd.approve(address(vault), type(uint256).max);
         vm.warp(T0);
     }
 
@@ -124,12 +144,10 @@ abstract contract MontiTest is Test {
         return abi.encode(r, s);
     }
 
-    /// @dev 진짜 게이트 키로 게이트를 등록하고 연다. 릴레이 입장 테스트가 이 gateId 로 서명한다.
+    /// @dev 진짜 게이트 키로 게이트를 등록한다(v2: 등록이 곧 개장). 릴레이 입장 테스트가 이 gateId 로 서명한다.
     function _openRealGate(uint256 eventId, address gateAccount) internal returns (uint256 gateId) {
-        vm.startPrank(ORG_OWNER);
+        vm.prank(ORG_OWNER);
         gateId = organizers.registerGate(eventId, gateAccount, GATE_KX, GATE_KY);
-        organizers.openGate(gateId);
-        vm.stopPrank();
     }
 
     // --- relayed claim (claimFor) ----------------------------------------------------------------
@@ -138,7 +156,7 @@ abstract contract MontiTest is Test {
     ///      nonce 는 체인의 현재 (eventId, account) nonce 를 읽어 채운다. account 는 진짜 DEVICE
     ///      키로 등록돼 있어야 한다(_member/_memberWithDeviceKey).
     function _claimForFixture(address account, uint256 eventId, uint8 tier) internal returns (uint256 tokenId) {
-        Ticket.ClaimAuth memory a = Ticket.ClaimAuth({
+        ITicket.ClaimAuth memory a = ITicket.ClaimAuth({
             eventId: eventId,
             tier: tier,
             account: account,
@@ -160,9 +178,9 @@ abstract contract MontiTest is Test {
     function _signClaimAuth(address account, uint256 eventId, uint8 tier)
         internal
         view
-        returns (Ticket.ClaimAuth memory a, bytes memory sig)
+        returns (ITicket.ClaimAuth memory a, bytes memory sig)
     {
-        a = Ticket.ClaimAuth({
+        a = ITicket.ClaimAuth({
             eventId: eventId,
             tier: tier,
             account: account,
@@ -187,7 +205,7 @@ abstract contract MontiTest is Test {
         internal
         returns (uint256 requestId)
     {
-        (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(account, eventId, tier);
+        (ITicket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(account, eventId, tier);
         requestId = ticket.requestClaimFor(a, sig);
     }
 
@@ -232,7 +250,69 @@ abstract contract MontiTest is Test {
         internal
         returns (uint256 eventId)
     {
-        Ticket.EventMeta memory m = Ticket.EventMeta({
+        Ticket.EventMeta memory m = _meta(orgId, maxTransfers, transferable, requireKyc);
+        Ticket.Tier[] memory t = new Ticket.Tier[](1);
+        t[0] = Ticket.Tier({
+            name: "General", priceUsdCents: 0, supply: 100, minted: 0, maxPerWallet: maxPerWallet, seated: false
+        });
+        vm.prank(ORG_OWNER);
+        eventId = ticket.publishEvent(m, t, _emptyPolicy());
+    }
+
+    /// @dev One published paid event (v2): tier 0 priced `priceCents`, the split recorded and frozen by the
+    ///      vault in the same transaction. maxPerWallet 10, transferable, maxTransfers 2.
+    function _paidEvent(uint256 orgId, uint256 priceCents, ISettlementVault.SplitPolicy memory policy)
+        internal
+        returns (uint256 eventId)
+    {
+        Ticket.EventMeta memory m = _meta(orgId, 2, true, false);
+        Ticket.Tier[] memory t = new Ticket.Tier[](1);
+        t[0] = Ticket.Tier({
+            name: "General", priceUsdCents: priceCents, supply: 100, minted: 0, maxPerWallet: 10, seated: false
+        });
+        vm.prank(ORG_OWNER);
+        eventId = ticket.publishEvent(m, t, policy);
+    }
+
+    function _emptyPolicy() internal pure returns (ISettlementVault.SplitPolicy memory p) {}
+
+    /// @dev The demo split: MONTI platform 5% first, then artist 60 / venue 20 / organizer 15.
+    function _recipients() internal pure returns (ISettlementVault.Recipient[] memory r) {
+        r = new ISettlementVault.Recipient[](4);
+        r[0] = ISettlementVault.Recipient(R_PLATFORM, 500, keccak256("platform fee"), "platform");
+        r[1] = ISettlementVault.Recipient(R_ARTIST, 6000, keccak256("appearance fee"), "artist");
+        r[2] = ISettlementVault.Recipient(R_VENUE, 2000, keccak256("venue rental"), "venue");
+        r[3] = ISettlementVault.Recipient(R_ORG, 1500, keccak256("organizing fee"), "organizer");
+    }
+
+    function _policy(ISettlementVault.Recipient[] memory r, bool noShowRefund)
+        internal
+        pure
+        returns (ISettlementVault.SplitPolicy memory p)
+    {
+        p.recipients = r;
+        p.platformBps = 500;
+        p.reserveBps = 0;
+        p.noShowRefund = noShowRefund;
+    }
+
+    function _goodPolicy() internal pure returns (ISettlementVault.SplitPolicy memory) {
+        return _policy(_recipients(), false);
+    }
+
+    /// @dev Atomic paid purchase (v2 D1): TREASURY submits the attendee's device-signed ClaimAuth.
+    function _purchase(address account, uint256 eventId, uint8 tier) internal returns (uint256 tokenId) {
+        (ITicket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(account, eventId, tier);
+        vm.prank(TREASURY);
+        tokenId = vault.purchase(a, sig, address(usd));
+    }
+
+    function _meta(uint256 orgId, uint8 maxTransfers, bool transferable, bool requireKyc)
+        internal
+        pure
+        returns (Ticket.EventMeta memory m)
+    {
+        m = Ticket.EventMeta({
             orgId: orgId,
             titleHash: keccak256("MONTI Night"),
             descHash: keccak256("a test event"),
@@ -250,14 +330,6 @@ abstract contract MontiTest is Test {
             regionCode: keccak256("KR-11"),
             requireKyc: requireKyc
         });
-        Ticket.Tier[] memory t = new Ticket.Tier[](1);
-        t[0] = Ticket.Tier({
-            name: "General", priceUsdCents: 0, supply: 100, minted: 0, maxPerWallet: maxPerWallet, seated: false
-        });
-        vm.prank(ORG_OWNER);
-        eventId = ticket.createEvent(m, t);
-        vm.prank(ORG_OWNER);
-        ticket.publishEvent(eventId);
     }
 
     // --- relayed forward (MontiForwarder.execute) ------------------------------------------------

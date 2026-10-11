@@ -13,6 +13,7 @@ import {P256} from "solady/utils/P256.sol";
 import {IIdentity} from "./interfaces/IIdentity.sol";
 import {IOrganizers} from "./interfaces/IOrganizers.sol";
 import {ITicket} from "./interfaces/ITicket.sol";
+import {ISettlementVault} from "./interfaces/ISettlementVault.sol";
 
 /// @title Ticket
 /// @notice ERC-721 where every transfer rule lives in one _update override and every admission is a
@@ -64,18 +65,6 @@ contract Ticket is ERC721, EIP712, ERC2771Context, ITicket {
         uint256 eventId;
         uint64 issuedAt;
         bytes32 nonce;
-    }
-
-    /// @notice 릴레이된 발급의 승인서. 관객 기기 키(P-256)가 `claimAuthDigest` 에 서명한다.
-    ///         `account` 는 티켓을 받을 스마트 계정(수신자)이고, `nonce` 는 (eventId, account) 별
-    ///         claim nonce(== claimNonce(eventId, account))다. `deadline` 은 미제출 승인서의 수명을
-    ///         제한한다(block.timestamp <= deadline).
-    struct ClaimAuth {
-        uint256 eventId;
-        uint8 tier;
-        address account;
-        uint256 nonce;
-        uint64 deadline;
     }
 
     /// @notice `checkInOf` 의 반환 튜플. 슬림 저장(설계 §12-2)으로 실제 온체인에 남는 것은 `ts`
@@ -172,8 +161,15 @@ contract Ticket is ERC721, EIP712, ERC2771Context, ITicket {
 
     IIdentity public immutable identity;
     IOrganizers public immutable organizers;
+    /// @notice The deploying account — the only one allowed to wire `vault`, once (Organizers.setTicket
+    ///         precedent).
+    address public immutable deployer;
+    /// @notice SettlementVault: the only `mintPaid` caller, and where publishEvent records a paid split.
+    address public vault;
 
-    uint256 private _nextEventId = 1;
+    /// @dev v2 ids start at 1001 (v2 design D7): Firestore document keys are chain ids, so restarting at 1
+    ///      would collide with v1 documents and let v1 idempotency records swallow v2 actions.
+    uint256 private _nextEventId = 1001;
     /// @notice 다음 티켓의 전역 순번(serial). tokenId 에 인코딩되고 usedAt 패킹의 키가 된다.
     uint256 private _nextSerial = 1;
     bool private _internalMove;
@@ -203,7 +199,6 @@ contract Ticket is ERC721, EIP712, ERC2771Context, ITicket {
 
     event EventCreated(uint256 indexed eventId, uint256 indexed orgId, address indexed creator);
     event EventStatusChanged(uint256 indexed eventId, uint8 status);
-    event EventMetaUpdated(uint256 indexed eventId);
     event Claimed(uint256 indexed tokenId, uint256 indexed eventId, address indexed to, uint8 tier);
     /// @notice 승인제(01c). 신청이 접수됐다. 아직 민팅은 없다. eventId·requestId·requester 셋을
     ///         인덱싱해 인덱서가 이벤트·요청·신청자별로 거를 수 있게 한다.
@@ -220,7 +215,6 @@ contract Ticket is ERC721, EIP712, ERC2771Context, ITicket {
     /// @notice 큐에서 흘러들어온 입장. 같은 트랜잭션에서 CheckedIn 도 함께 나가므로, 입장 수를
     ///         세는 쪽은 CheckedIn 하나만 보면 되고 오프라인 비율을 세는 쪽만 이걸 본다(스펙 12).
     event CheckedInLate(uint256 indexed tokenId, uint256 indexed gateId, uint64 issuedAt, uint64 ts);
-    event OverrideRequested(uint256 indexed tokenId, uint256 indexed gateId, address indexed requester, uint8 reason);
     event ManualOverride(
         uint256 indexed tokenId, uint256 indexed gateId, address indexed approver, uint8 role, uint8 reason
     );
@@ -236,7 +230,6 @@ contract Ticket is ERC721, EIP712, ERC2771Context, ITicket {
     error UnknownEvent();
     error UnknownTier();
     error NoSuchTicket();
-    error NotDraft();
     error EventNotPublished();
     error EventEnded();
     error EventCancelled();
@@ -272,6 +265,14 @@ contract Ticket is ERC721, EIP712, ERC2771Context, ITicket {
     error NotRotatedAccount();
     error NothingToMigrate();
     error RotationPending();
+    error NotDeployer();
+    error VaultAlreadySet();
+    error ZeroAddress();
+    error NotVault();
+    error NotPaidTier();
+    error PolicyRequired();
+    error UnexpectedPolicy();
+    error PaidApprovalUnsupported();
 
     constructor(address identity_, address organizers_, address forwarder_)
         ERC721("MONTI Ticket", "MONTI")
@@ -280,25 +281,60 @@ contract Ticket is ERC721, EIP712, ERC2771Context, ITicket {
     {
         identity = IIdentity(identity_);
         organizers = IOrganizers(organizers_);
+        deployer = msg.sender;
     }
 
-    function createEvent(EventMeta calldata meta, Tier[] calldata tiers_) external returns (uint256 eventId) {
-        if (!organizers.hasPermission(meta.orgId, _msgSender(), PERM_CREATE_EVENT)) revert Unauthorized();
+    /// @notice Wire the SettlementVault once. Deployer only, never zero, never twice.
+    function setVault(address vault_) external {
+        if (msg.sender != deployer) revert NotDeployer();
+        if (vault != address(0)) revert VaultAlreadySet();
+        if (vault_ == address(0)) revert ZeroAddress();
+        vault = vault_;
+    }
+
+    /// @notice Create and publish an event in one call (v2 D2). There is no on-chain draft: the draft
+    ///         lives off-chain and arrives here as calldata. A paid event (any tier priced above 0) must
+    ///         carry its split policy, which SettlementVault records — frozen — in this same transaction
+    ///         after re-checking the organizer's PERM_MANAGE_SETTLEMENT. A free event must carry an empty
+    ///         policy. Paid + approvalRequired is refused: the approval path only mints free tiers, so
+    ///         nobody could ever get such a ticket.
+    /// @dev    eventId is decided inside this call, which is why this is a dedicated create-and-initialize
+    ///         function rather than a forwarder batch (Uniswap V3 createAndInitializePoolIfNecessary).
+    ///         Emits EventCreated → EventStatusChanged(1) → (paid) PolicySet.
+    function publishEvent(EventMeta calldata meta, Tier[] calldata tiers_, ISettlementVault.SplitPolicy calldata policy)
+        external
+        returns (uint256 eventId)
+    {
+        address organizer = _msgSender();
+        if (!organizers.hasPermission(meta.orgId, organizer, PERM_CREATE_EVENT)) revert Unauthorized();
         if (tiers_.length == 0 || tiers_.length > 8) revert InvalidTiers();
         if (meta.startsAt >= meta.endsAt || meta.saleStart >= meta.saleEnd) revert InvalidSchedule();
+
+        bool paid;
+        for (uint256 i; i < tiers_.length; ++i) {
+            if (tiers_[i].priceUsdCents != 0) paid = true;
+        }
+        if (paid) {
+            if (meta.approvalRequired) revert PaidApprovalUnsupported();
+            if (policy.recipients.length == 0) revert PolicyRequired();
+        } else if (policy.recipients.length != 0) {
+            revert UnexpectedPolicy();
+        }
 
         eventId = _nextEventId++;
         if (eventId > _MAX_EVENT_ID) revert EventIdOverflow();
         _events[eventId] = meta;
-        _status[eventId] = EventStatus.Draft;
+        _status[eventId] = EventStatus.Published;
         for (uint256 i; i < tiers_.length; ++i) {
             Tier memory t = tiers_[i];
             t.minted = 0;
             _tiers[eventId].push(t);
         }
 
-        emit EventCreated(eventId, meta.orgId, _msgSender());
-        emit EventStatusChanged(eventId, uint8(EventStatus.Draft));
+        emit EventCreated(eventId, meta.orgId, organizer);
+        emit EventStatusChanged(eventId, uint8(EventStatus.Published));
+
+        if (paid) ISettlementVault(vault).setPolicyByTicket(eventId, policy, organizer);
     }
 
     function eventMeta(uint256 eventId) external view returns (EventMeta memory) {
@@ -309,39 +345,12 @@ contract Ticket is ERC721, EIP712, ERC2771Context, ITicket {
         return _tiers[eventId];
     }
 
-    function publishEvent(uint256 eventId) external {
-        _requireEventPermission(eventId, PERM_CREATE_EVENT);
-        if (_status[eventId] != EventStatus.Draft) revert NotDraft();
-        _status[eventId] = EventStatus.Published;
-        emit EventStatusChanged(eventId, uint8(EventStatus.Published));
-    }
-
     function cancelEvent(uint256 eventId) external {
         _requireEventPermission(eventId, PERM_CREATE_EVENT);
         EventStatus s = eventStatus(eventId);
         if (s == EventStatus.Cancelled || s == EventStatus.Ended) revert EventAlreadyClosed();
         _status[eventId] = EventStatus.Cancelled;
         emit EventStatusChanged(eventId, uint8(EventStatus.Cancelled));
-    }
-
-    function updateEventMeta(uint256 eventId, EventMeta calldata meta, Tier[] calldata tiers_) external {
-        _requireEventPermission(eventId, PERM_CREATE_EVENT);
-        if (_status[eventId] != EventStatus.Draft) revert NotDraft();
-        if (tiers_.length == 0 || tiers_.length > 8) revert InvalidTiers();
-        if (meta.startsAt >= meta.endsAt || meta.saleStart >= meta.saleEnd) revert InvalidSchedule();
-
-        uint256 keptOrg = _events[eventId].orgId;
-        _events[eventId] = meta;
-        _events[eventId].orgId = keptOrg;
-
-        delete _tiers[eventId];
-        for (uint256 i; i < tiers_.length; ++i) {
-            Tier memory t = tiers_[i];
-            t.minted = 0;
-            _tiers[eventId].push(t);
-        }
-
-        emit EventMetaUpdated(eventId);
     }
 
     /// @notice Ended is derived from endsAt so no transaction is needed to close an event.
@@ -372,10 +381,23 @@ contract Ticket is ERC721, EIP712, ERC2771Context, ITicket {
 
     /// @notice 릴레이된 발급. 누구나 제출할 수 있다(permissionless) — msg.sender 는 인가에 쓰이지
     ///         않고, 권한은 관객 기기 서명이 증명한다(설계 §3). 승인제 이벤트는 여기서 막히고
-    ///         requestClaimFor 경로만 발급한다.
+    ///         requestClaimFor 경로만 발급한다. 무료 티어 전용 — 유료 티어는 PaidTiersNotEnabled 로
+    ///         막히고 SettlementVault.purchase → mintPaid 로만 민팅된다(v2 D1).
     function claimFor(ClaimAuth calldata a, bytes calldata deviceSig) external returns (uint256 tokenId) {
         _verifyClaimAuth(a, deviceSig);
-        return _claimTo(a.eventId, a.tier, a.account);
+        (tokenId,) = _claimTo(a.eventId, a.tier, a.account, false);
+    }
+
+    /// @notice 유료 민팅(v2 D1). SettlementVault 만 부를 수 있다 — 돈을 받는 계약만 유료 티켓을
+    ///         민팅한다. 승인서 검증·자격 검사는 claimFor 와 같고, 티어 가격이 0 이면 NotPaidTier.
+    ///         금고가 같은 호출 안에서 priceUsdCents × UNITS_PER_CENT 를 에스크로한다.
+    function mintPaid(ClaimAuth calldata a, bytes calldata deviceSig)
+        external
+        returns (uint256 tokenId, uint256 priceUsdCents)
+    {
+        if (msg.sender != vault) revert NotVault();
+        _verifyClaimAuth(a, deviceSig);
+        return _claimTo(a.eventId, a.tier, a.account, true);
     }
 
     /// @notice 릴레이된 승인제 신청. claimFor 와 같은 검증 후 requestClaim 본문을 실행한다.
@@ -401,9 +423,13 @@ contract Ticket is ERC721, EIP712, ERC2771Context, ITicket {
     }
 
     /// @dev 직접 발급 본문(기존 claim 을 msg.sender→to 로 추출). 자격 검사는 발행·판매창·KYC·티어·
-    ///      무료 전용·품절·지갑 한도. 멤버 여부는 호출 전 _verifyClaimAuth 가 이미 확인했다. 티켓
-    ///      순번은 전역 serial 이며 tokenId 에 인코딩된다.
-    function _claimTo(uint256 eventId, uint8 tier, address to) private returns (uint256 tokenId) {
+    ///      가격 규칙·품절·지갑 한도. 가격 규칙: paid 면 가격 0 → NotPaidTier, 아니면 가격 ≠ 0 →
+    ///      PaidTiersNotEnabled. 멤버 여부는 호출 전 _verifyClaimAuth 가 이미 확인했다. 티켓 순번은
+    ///      전역 serial 이며 tokenId 에 인코딩된다.
+    function _claimTo(uint256 eventId, uint8 tier, address to, bool paid)
+        private
+        returns (uint256 tokenId, uint256 price)
+    {
         EventStatus s = eventStatus(eventId);
         if (s == EventStatus.Ended) revert EventEnded();
         if (s != EventStatus.Published) revert EventNotPublished();
@@ -415,7 +441,12 @@ contract Ticket is ERC721, EIP712, ERC2771Context, ITicket {
         if (tier >= _tiers[eventId].length) revert UnknownTier();
 
         Tier storage t = _tiers[eventId][tier];
-        if (t.priceUsdCents != 0) revert PaidTiersNotEnabled();
+        price = t.priceUsdCents;
+        if (paid) {
+            if (price == 0) revert NotPaidTier();
+        } else if (price != 0) {
+            revert PaidTiersNotEnabled();
+        }
         if (t.minted >= t.supply) revert SoldOut();
         if (_wallet[eventId][to].held >= t.maxPerWallet) revert MaxPerWalletExceeded();
 
@@ -732,30 +763,6 @@ contract Ticket is ERC721, EIP712, ERC2771Context, ITicket {
     ///      코드젠이 다시 stack too deep 으로 죽는다.
     function _deviceDigest(uint256 tokenId, GateCode calldata g) private view returns (bytes32) {
         return deviceDigest(tokenId, g.gateId, g.eventId, g.nonce, g.issuedAt);
-    }
-
-    /// @notice Spec 13: a manager without approval rights files a request; someone with rights admits.
-    ///         Checks run authority first, so nothing about the ticket or the door is told to a stranger:
-    ///         the ticket must exist (its event is what authority is measured against), the caller must
-    ///         belong to that organizer, and only then must the gate be one of this event's gates — open
-    ///         or closed, since a request is not a tap. An unregistered gateId (0 included) reports
-    ///         eventId 0 and is rejected.
-    function requestOverride(uint256 tokenId, uint256 gateId, uint8 reason) external {
-        if (_ownerOf(tokenId) == address(0)) revert NoSuchTicket();
-        uint256 eventId = _decodeEvent(tokenId);
-        uint256 orgId = _events[eventId].orgId;
-
-        (bool exists,) = organizers.managerOf(orgId, _msgSender());
-        if (!exists && !organizers.hasPermission(orgId, _msgSender(), PERM_APPROVE_OVERRIDE)) revert Unauthorized();
-
-        if (_revoked[tokenId]) revert TicketRevoked();
-        // manualOverride 와 같은 기준이다: 승인할 수 없는 요청은 올라가지 않는다(Minor 5).
-        EventStatus status = eventStatus(eventId);
-        if (status == EventStatus.Ended) revert EventEnded();
-        if (status == EventStatus.Cancelled) revert EventCancelled();
-        (uint256 gateEventId,,,,,) = organizers.gateInfo(gateId);
-        if (gateEventId != eventId) revert GateMismatch();
-        emit OverrideRequested(tokenId, gateId, _msgSender(), reason);
     }
 
     /// @notice ROLE_APPROVER = admin (or owner) holding PERM_APPROVE_OVERRIDE, ROLE_MANAGER = manager
