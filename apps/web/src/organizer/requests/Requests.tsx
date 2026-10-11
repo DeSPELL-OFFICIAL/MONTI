@@ -5,13 +5,8 @@ import { useQuery } from '@tanstack/react-query';
 import { Alert, Button, Card, EmptyState, OpProgress, Screen, Spinner } from '../../shared/ui';
 import { fmt } from '../../shared/i18n';
 import { gql } from '../../shared/envio/client';
-import {
-  EVENT_QUERY,
-  IDENTITY_NAMES_QUERY,
-  type EnvioEvent,
-  type EnvioIdentityAccount,
-  type EnvioTier,
-} from '../../shared/envio/queries';
+import { EVENT_QUERY, type EnvioEvent, type EnvioTier } from '../../shared/envio/queries';
+import { resolveNicknames } from '../../shared/api/nicknames';
 import { useEventRequests } from '../../shared/envio/claimRequests';
 import { ticketAbi } from '../../shared/chain/abis';
 import { sendAction } from '../../shared/relay/sendAction';
@@ -71,25 +66,15 @@ export function Requests() {
 
   const { requests, isLoading, isError, refetch } = useEventRequests(eventId, 'Pending');
 
-  // One round trip resolves every waiting requester to a nickname; anyone the index has no name for
-  // falls back to the masked account below.
+  // One `resolveNicknames` call (P5: nicknames live on the server) names every waiting requester;
+  // anyone without one falls back to the masked account below.
   const accounts = useMemo(() => [...new Set(requests.map((request) => request.requester))], [requests]);
-  const { data: nameRows } = useQuery({
-    queryKey: ['identityNames', accounts.join(',')],
-    queryFn: async () => {
-      const { IdentityAccount } = await gql<{ IdentityAccount: EnvioIdentityAccount[] }>(
-        IDENTITY_NAMES_QUERY,
-        { accounts },
-      );
-      return IdentityAccount;
-    },
+  const { data: nameMap } = useQuery({
+    queryKey: ['nicknames', accounts.join(',')],
+    queryFn: () => resolveNicknames(accounts),
     enabled: accounts.length > 0,
   });
-  const names = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const row of nameRows ?? []) if (row.nickname) map.set(row.id.toLowerCase(), row.nickname);
-    return map;
-  }, [nameRows]);
+  const names = useMemo(() => new Map(Object.entries(nameMap ?? {})), [nameMap]);
 
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [done, setDone] = useState<ReadonlySet<string>>(new Set());
@@ -231,7 +216,7 @@ export function Requests() {
                       checked={selected.has(request.requestId)}
                       onChange={() => toggle(request.requestId)}
                     />
-                    {names.get(request.requester) ?? maskAccount(request.requester)}
+                    {names.get(request.requester.toLowerCase()) ?? maskAccount(request.requester)}
                     <span className="muted"> · {fmt(copy.tier, { tier: request.tier + 1 })}</span>
                   </label>
                 </li>

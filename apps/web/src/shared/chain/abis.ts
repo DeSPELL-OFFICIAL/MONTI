@@ -26,7 +26,6 @@ export type UsedContract = 'Identity' | 'Organizers' | 'Ticket';
 export const USED_ABI = {
   Identity: {
     isMember: 1, isLocked: 1, kycLevelOf: 1, activeDevice: 1, deviceUpdatedAt: 1,
-    nicknameOwner: 1, setNickname: 2,
     // 01b's recovery undo. `rotatedAt`/`rotatedFrom` take a **personId** (`bytes32`), not an
     // account; `register` stamps `rotatedAt` too, so `rotatedFrom` is the flag that says there
     // is anything to undo (abi-delta-01b.md §1). `cancelRotation` takes no argument — the
@@ -48,10 +47,10 @@ export const USED_ABI = {
     // 딥링크된 표 상세를 체인에서 세울 때, 그 표가 정말 이 세션 계정의 것인지 확인하는 ERC-721
     // 소유자 읽기. 없는 번호면 `ownerOf` 가 revert 하므로, 잘못 친 번호는 '없음'으로 남는다.
     ownerOf: 1,
-    // Manual approval (04 T32). Both are sent from the staff member's OWN passkey account and
-    // never from the gate account: the chain records `msg.sender` as the approver, and a gate
-    // terminal is a device rather than a person who can stand behind letting somebody in.
-    requestOverride: 3, manualOverride: 3,
+    // Manual approval (04 T32), sent from the staff member's OWN passkey account and never from
+    // the gate account: the chain records `msg.sender` as the approver. v2: a manager who may not
+    // approve files the request off chain (`api.requestOverride`), so it is not a write here.
+    manualOverride: 3,
     safeTransferFrom: 3,
     // 01c approval mode. The attendee's claim and the gate's check-in are relayed now: the
     // 2026-09-29 redeploy dropped the direct `claim`/`requestClaim`/`checkIn`/`checkInLate`

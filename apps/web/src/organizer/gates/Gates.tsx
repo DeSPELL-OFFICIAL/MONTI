@@ -39,9 +39,10 @@ const EMPTY_PASTE = { gateAccount: '', kx: '', ky: '' };
 /**
  * The organiser's half of spec §5.7 step 1. The staff terminal makes its own key in its secure
  * chip and submits the public half through the backend (`submitPendingGate`); this screen
- * lists that queue and puts a chosen entry on the event's allowlist with `registerGate`, then
- * opens and closes it. Nothing is granted before that write lands — a queued row has no
- * permission of any kind.
+ * lists that queue and puts a chosen entry on the event's allowlist with `registerGate`, which
+ * opens it in the same write (v2, design D3) — there is no separate 열기 step. 닫기 pauses a door
+ * and 다시 열기 undoes only that; 폐기 is final. Nothing is granted before the register write
+ * lands — a queued row has no permission of any kind.
  *
  * The typed-in form beside the queue is the fallback for the evening when the staff app cannot
  * reach the backend: the same three values, read off the terminal's own screen, through the
@@ -163,6 +164,7 @@ export function Gates() {
       {mayManage ? (
         <section>
           <h2>{copy.pending}</h2>
+          <p className="muted">{copy.registerHelp}</p>
           {pending.length === 0 ? <p>{copy.none}</p> : null}
           <ul style={{ listStyle: 'none', padding: 0 }}>
             {pending.map((gate) => (
@@ -204,7 +206,7 @@ export function Gates() {
                     </Button>
                   ) : (
                     <Button disabled={busy} onClick={() => void send('openGate', [BigInt(gate.id)])}>
-                      {copy.open}
+                      {copy.reopen}
                     </Button>
                   )}
                   {/* 폐기 cannot be undone, so it asks first (the same in-place warning 행사 취소 uses). */}

@@ -113,14 +113,13 @@ describe('reads', () => {
   it('exposes only reads the usage manifest declares', () => {
     // The manifest types the writes too (`ops.ts` reads it), and a write never shows up here.
     const writes = [
-      'setNickname',
       // 01b: the recovery undo and the ticket hand-over. Both go out through ops.ts
       // (`identityOp` / `ticketOp`), so neither belongs on a read helper.
       'cancelRotation', 'migrate',
       // Manual approval (04) goes out from the staff member's own passkey account through
       // `ticketOp`. The gate's check-in is relayed since the 2026-09-29 redeploy — `checkIn`/
       // `checkInLate` are no longer in the ABI or the manifest, so neither is listed here.
-      'requestOverride', 'manualOverride',
+      'manualOverride',
       'safeTransferFrom', 'createOffer', 'cancelOffer', 'acceptOffer',
       // 01c approval mode. The attendee's claim and request are relayed now; what stays a
       // sponsored op through `ticketOp` is the request cancel and the organiser's approve/reject,

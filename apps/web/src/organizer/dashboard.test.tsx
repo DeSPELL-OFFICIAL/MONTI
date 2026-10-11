@@ -53,7 +53,6 @@ const watchRelayStatus = vi.fn(() => () => undefined);
 vi.mock('../shared/api/firestore', () => ({ loadEventArt, loadMyProfile, getSettlement, watchSettlement, watchRelayStatus }));
 vi.mock('../shared/chain/settlementReads', () => ({
   readChainPolicy: vi.fn(async () => ({ recipients: [], platformBps: 0, reserveBps: 0, noShowRefund: false, frozen: false, version: 0 })),
-  readPolicyNonce: vi.fn(async () => 0n),
 }));
 
 const fetchEventMetadata = vi.fn(async (): Promise<Record<string, unknown>> => ({ title: '재즈 나이트', tags: [] }));

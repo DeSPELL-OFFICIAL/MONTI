@@ -181,6 +181,18 @@ describe('the registered list', () => {
     expect(gql).toHaveBeenCalledWith(expect.stringContaining('isOpen'), { eventId: '5' });
   });
 
+  /** v2 (design D3): registerGate opens the gate in the same write, so an open one offers no 열기. */
+  it('shows an approved terminal as open, with 닫기 and 폐기 but no open step', async () => {
+    gql.mockResolvedValue({
+      Gate: [{ id: '7', eventId: '5', account: GATE, kx: KX, ky: KY, isOpen: true, revoked: false }],
+    });
+    open();
+    expect(await screen.findByText(copy.isOpen)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: copy.close })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: copy.revoke })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: copy.reopen })).toBeNull();
+  });
+
   it('closes an open terminal by its gate number', async () => {
     const user = userEvent.setup();
     gql.mockResolvedValue({
@@ -193,13 +205,13 @@ describe('the registered list', () => {
     );
   });
 
-  it('opens a closed terminal and retires it on request', async () => {
+  it('reopens a terminal that was closed, and retires it on request', async () => {
     const user = userEvent.setup();
     gql.mockResolvedValue({
       Gate: [{ id: '7', eventId: '5', account: GATE, kx: KX, ky: KY, isOpen: false, revoked: false }],
     });
     open();
-    await user.click(await screen.findByRole('button', { name: copy.open }));
+    await user.click(await screen.findByRole('button', { name: copy.reopen }));
     await waitFor(() =>
       expect(sendAction).toHaveBeenCalledWith('openGate', 'organizers', data('openGate', [7n])),
     );

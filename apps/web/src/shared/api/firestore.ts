@@ -475,7 +475,7 @@ export async function deleteEventDraft(draftId: string): Promise<void> {
 /**
  * One event's settlement, as the server writes it to `settlements/{eventId}` — the split policy,
  * its on-chain hash, and the per-tier USD price the chain has no room for. The rules open it to any
- * signed-in reader and the server alone writes it (`relaySetPolicy`), the same shape
+ * signed-in reader and the server alone writes it (the `relayAction` publish confirm hook), the same shape
  * `orgProfiles`/`eventArt` have.
  *
  * The field names are stable on purpose: `priceUsdCentsByTier`, `policyHash` and the recipient

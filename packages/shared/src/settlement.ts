@@ -1,14 +1,5 @@
-import { encodeAbiParameters, keccak256, parseAbiParameters, sha256, stringToHex, toHex, type Address } from 'viem';
+import { encodeAbiParameters, keccak256, parseAbiParameters, stringToHex, toHex, type Address } from 'viem';
 import type { Hex } from './types.js';
-
-/**
- * 정산 정책 서명 원문 앞에 붙는 목적 태그. `SettlementVault.SETTLE_POLICY_TAG` 와 같은
- * 값이어야 한다 — 컨트랙트는 `keccak256("MONTI:SETTLE_POLICY:v1")` 로 두고, 여기서는
- * `keccak256(toHex('MONTI:SETTLE_POLICY:v1'))` 로 둔다. 둘 다 같은 utf8 바이트열을 해싱하므로
- * 한 값이다. 이 태그가 있어야 정산 서명이 다른 MONTI 다이제스트(체크인·오퍼 등) 경로로
- * 재생되지 않는다(디자인 §2/§3).
- */
-export const SETTLE_POLICY_TAG: Hex = keccak256(toHex('MONTI:SETTLE_POLICY:v1'));
 
 /**
  * 오거나이저 화면이 입력하는 수취인 한 줄. `reason`/`tag` 는 사람이 읽는 문자열이고,
@@ -96,56 +87,4 @@ export function encodePolicyStruct(policy: PolicyInput): Hex {
 /** `SettlementVault.hashPolicy(policy)` 와 같은 값. keccak256 of {@link encodePolicyStruct}. */
 export function hashPolicy(policy: PolicyInput): Hex {
   return keccak256(encodePolicyStruct(policy));
-}
-
-/**
- * 오거나이저 기기 키가 서명하는 **원문 바이트열**. WebCrypto 는 다이제스트가 아니라 원문을
- * 받아 자기가 sha256 하므로 로컬 검증은 이걸 쓴다(encoding.ts 의 `gateCodePreimage` 와 같은
- * 이유). ABI 타입과 순서는 `SettlementVault.setPolicyDigest` 의 abi.encode 와 같다:
- * `(bytes32 tag, uint256 chainId, address vault, uint256 eventId, bytes32 policyHash,
- * uint256 nonce, uint64 deadline)`.
- *
- * `chainId` 와 `vault` 가 앞에 있어야 한 체인·한 배포본에서 거둔 서명이 다른 곳에서 재생되지
- * 않는다 — 컨트랙트는 이 둘을 `block.chainid`/`address(this)` 로 스스로 채운다.
- */
-export function setPolicyPreimage(params: {
-  chainId: bigint;
-  vault: Address;
-  eventId: bigint;
-  policyHash: Hex;
-  nonce: bigint;
-  deadline: bigint;
-}): Hex {
-  return encodeAbiParameters(
-    parseAbiParameters(
-      'bytes32 tag, uint256 chainId, address vault, uint256 eventId, bytes32 policyHash, uint256 nonce, uint64 deadline',
-    ),
-    [SETTLE_POLICY_TAG, params.chainId, params.vault, params.eventId, params.policyHash, params.nonce, params.deadline],
-  );
-}
-
-/** 오거나이저 기기 키가 서명하는 32바이트. `SettlementVault.setPolicyDigest(...)` 와 같은 값. */
-export function setPolicyDigest(params: {
-  chainId: bigint;
-  vault: Address;
-  eventId: bigint;
-  policyHash: Hex;
-  nonce: bigint;
-  deadline: bigint;
-}): Hex {
-  return sha256(setPolicyPreimage(params));
-}
-
-/**
- * 정책 하나를 서명 가능한 형태로 한 번에 빚는 편의 함수. 정책 해시·원문·다이제스트를 한
- * 입력에서 함께 내므로, 호출부가 `hashPolicy` 를 따로 부른 뒤 그 결과를 `setPolicyDigest` 에
- * 다시 넘기며 어긋날 일이 없다.
- */
-export function buildPolicyDigest(
-  policy: PolicyInput,
-  ctx: { chainId: bigint; vault: Address; eventId: bigint; nonce: bigint; deadline: bigint },
-): { policyHash: Hex; preimage: Hex; digest: Hex } {
-  const policyHash = hashPolicy(policy);
-  const preimage = setPolicyPreimage({ ...ctx, policyHash });
-  return { policyHash, preimage, digest: sha256(preimage) };
 }

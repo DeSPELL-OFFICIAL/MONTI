@@ -32,17 +32,20 @@ describe('Identity ABI', () => {
   it('carries every call and event the backend and indexer use', () => {
     expect(names(identityAbi, 'function')).toEqual(
       expect.arrayContaining([
-        'register', 'rotateAccount', 'setActiveDevice', 'lockDevice', 'setKycLevel', 'setNickname',
+        'register', 'rotateAccount', 'setActiveDevice', 'lockDevice', 'setKycLevel',
         'accountOf', 'personOf', 'isMember', 'activeDevice', 'isLocked', 'deviceUpdatedAt',
-        'kycLevelOf', 'nicknameOwner', 'nicknameOf', 'attester',
+        'kycLevelOf', 'attester',
         // 01b: 회전 되돌리기(C3)
         'cancelRotation', 'rotatedAt', 'rotatedFrom', 'ROTATION_UNDO_WINDOW',
       ]),
     );
     expect(names(identityAbi, 'event')).toEqual(
-      expect.arrayContaining(['Registered', 'AccountRotated', 'DeviceChanged', 'DeviceLocked', 'NicknameSet', 'KycLevelSet',
+      expect.arrayContaining(['Registered', 'AccountRotated', 'DeviceChanged', 'DeviceLocked', 'KycLevelSet',
         'RotationCancelled']),
     );
+    // v2: nicknames live off chain (design D6).
+    expect(names(identityAbi, 'function')).not.toContain('setNickname');
+    expect(names(identityAbi, 'event')).not.toContain('NicknameSet');
   });
 
   it('declares register with the kycLevel argument', () => {
@@ -73,11 +76,18 @@ describe('Ticket ABI', () => {
         // checkInFor/checkInForLate 와 (event, account) claim nonce 뷰. EIP-712 오퍼 다이제스트,
         // 7워드 기기 다이제스트, 늦은 체크인 창 상수, 계정 회전 이관은 그대로.
         'claimFor', 'requestClaimFor', 'checkInFor', 'checkInForLate', 'claimNonce',
-        'offerDigest', 'eip712Domain', 'deviceDigest', 'LATE_WINDOW', 'MIGRATE_DELAY', 'migrate']),
+        'offerDigest', 'eip712Domain', 'deviceDigest', 'LATE_WINDOW', 'MIGRATE_DELAY', 'migrate',
+        // v2: publish in one write, paid purchase minted by the vault.
+        'publishEvent', 'mintPaid', 'vault']),
     );
+    expect(names(ticketAbi, 'function')).not.toEqual(
+      expect.arrayContaining(['createEvent']),
+    );
+    expect(names(ticketAbi, 'function')).not.toContain('updateEventMeta');
+    expect(names(ticketAbi, 'function')).not.toContain('requestOverride');
     expect(names(ticketAbi, 'event')).toEqual(
       expect.arrayContaining(['EventCreated', 'EventStatusChanged', 'Claimed', 'Transfer', 'CheckedIn',
-        'OverrideRequested', 'ManualOverride', 'Revoked', 'Migrated',
+        'ManualOverride', 'Revoked', 'Migrated',
         'OfferCreated', 'OfferCancelled', 'OfferAccepted',
         // 01b: 늦은 체크인은 CheckedIn 에 더해서 나온다 — 입장 수를 셀 때 두 번 세면 안 된다.
         'CheckedInLate']),

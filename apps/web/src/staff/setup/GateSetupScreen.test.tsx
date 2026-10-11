@@ -22,7 +22,7 @@ vi.mock('./useGateRegistration', async (importOriginal) => ({
 
 const { GateSetupScreen, PHONE_SIGN_IN_PATH, STAFF_SETUP_PATH } = await import('./GateSetupScreen');
 const { staffSetupKo } = await import('../copy');
-const { SEEDED_EVENT_ID } = await import('../constants');
+const EVENT_ID = '1001';
 
 function registration(overrides: Partial<GateRegistration> = {}): GateRegistration {
   return {
@@ -82,27 +82,26 @@ describe('gate setup screen', () => {
     // wrong number cannot be moved: `registerGate` refuses the account a second time and
     // `revokeGate` does not free it.
     expect(useGateRegistration).toHaveBeenCalledWith({ eventId: undefined });
-    expect(useGateRegistration).not.toHaveBeenCalledWith({ eventId: SEEDED_EVENT_ID });
-    // The seeded event is prefilled so the demo is one press away, not zero.
-    expect(screen.getByDisplayValue(SEEDED_EVENT_ID)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: staffSetupKo.eventApply })).toBeEnabled();
+    // Nothing is pre-seeded (v2 events start at 1001), so the field starts empty and apply waits.
+    expect(screen.getByLabelText(staffSetupKo.eventLabel)).toHaveValue('');
+    expect(screen.getByRole('button', { name: staffSetupKo.eventApply })).toBeDisabled();
     expect(screen.getByText(staffSetupKo.notRequested)).toBeInTheDocument();
   });
 
-  it('applies for the prefilled event on one press', async () => {
+  it('applies for the typed event on one press', async () => {
     const user = userEvent.setup();
     await renderSetup();
 
+    await user.type(screen.getByLabelText(staffSetupKo.eventLabel), EVENT_ID);
     await user.click(screen.getByRole('button', { name: staffSetupKo.eventApply }));
-    expect(useGateRegistration).toHaveBeenCalledWith({ eventId: SEEDED_EVENT_ID });
+    expect(useGateRegistration).toHaveBeenCalledWith({ eventId: EVENT_ID });
   });
 
   it('applies for a different event only once the staff member confirms it', async () => {
     const user = userEvent.setup();
     await renderSetup();
-    const field = screen.getByDisplayValue(SEEDED_EVENT_ID);
+    const field = screen.getByLabelText(staffSetupKo.eventLabel);
 
-    await user.clear(field);
     await user.type(field, '42');
     // Typing alone must not submit: every keystroke would otherwise be its own application.
     expect(useGateRegistration).not.toHaveBeenCalledWith({ eventId: '4' });
@@ -124,6 +123,7 @@ describe('gate setup screen', () => {
   it('says the request is in, and how long it has been in, while it waits', async () => {
     const user = userEvent.setup();
     await renderSetup();
+    await user.type(screen.getByLabelText(staffSetupKo.eventLabel), EVENT_ID);
     await user.click(screen.getByRole('button', { name: staffSetupKo.eventApply }));
 
     expect(screen.getByText(staffSetupKo.submitted)).toBeInTheDocument();

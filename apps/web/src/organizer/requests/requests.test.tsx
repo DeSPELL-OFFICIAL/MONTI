@@ -25,8 +25,14 @@ vi.mock('../useMyOrgs', () => ({
 const eventRow: { row: Record<string, unknown> } = { row: { id: '5', orgId: '9', approvalRequired: true } };
 const requests: { rows: Array<Record<string, unknown>> } = { rows: [] };
 const names: { rows: Array<Record<string, unknown>> } = { rows: [] };
+/** v2 (P5): nicknames come from the `resolveNicknames` callable, not the indexer. */
+const resolveNicknames = vi.fn(async (accounts: readonly string[]) => Object.fromEntries(
+  names.rows
+    .filter((row) => accounts.map((a) => a.toLowerCase()).includes(String(row.id).toLowerCase()))
+    .map((row) => [String(row.id).toLowerCase(), String(row.nickname)]),
+));
+vi.mock('../../shared/api/nicknames', () => ({ resolveNicknames }));
 async function answerIndexer(query: string) {
-  if (query.includes('IdentityNames')) return { IdentityAccount: names.rows };
   if (query.includes('EventRequests')) return { ClaimRequest: requests.rows };
   return { Event: [eventRow.row], Tier: [] };
 }
@@ -101,7 +107,7 @@ describe('Requests · gating', () => {
 });
 
 describe('Requests · names', () => {
-  it('shows a nickname when the index has one, else a masked account', async () => {
+  it('shows a nickname when the server has one, else a masked account', async () => {
     const named = `0x${'aa'.repeat(20)}`;
     const anon = `0x${'bb'.repeat(20)}`;
     requests.rows = [req('1', named), req('2', anon)];
@@ -111,6 +117,8 @@ describe('Requests · names', () => {
     // The account with no nickname is shown masked, never in full.
     expect(screen.getByText(new RegExp(`${anon.slice(0, 6)}`))).toBeInTheDocument();
     expect(screen.queryByText(new RegExp(anon))).not.toBeInTheDocument();
+    expect(resolveNicknames).toHaveBeenCalledWith([named, anon]);
+    expect(gql.mock.calls.some(([query]) => String(query).includes('IdentityNames'))).toBe(false);
   });
 });
 

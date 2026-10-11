@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 
 import { fmt } from '../../shared/i18n';
 import { Alert, Button, Field, Screen, Spinner } from '../../shared/ui';
-import { SEEDED_EVENT_ID } from '../constants';
 import { useStaffSetupCopy, type StaffSetupCopy } from '../copy';
 import { PinStep } from '../override/PinSetup';
 import { gatePayloadText, useGateRegistration, type GateSetupError } from './useGateRegistration';
@@ -92,7 +91,8 @@ export function GateSetupScreen() {
   // separate from the field's text: a hook keyed on every keystroke would send an application
   // per character typed.
   const [chosenEventId, setChosenEventId] = useState<string | undefined>(undefined);
-  const [draft, setDraft] = useState<string>(SEEDED_EVENT_ID);
+  // Empty to begin with: nothing is pre-seeded, and the staff member types the event's number.
+  const [draft, setDraft] = useState<string>('');
   // Whether this terminal can approve anything by hand yet (04 T32). The door is not offered
   // until it can: the only calm moment to agree on four digits is this panel, and the moment
   // they are needed is an attendee whose phone will not open with a queue behind them.

@@ -96,13 +96,6 @@ export const GATE_STATUS_POLL_MS = 10_000;
 export const GATE_REGISTRATION_POLL_MS = 3000;
 
 /**
- * The event the demo deployment seeded (`contracts/deployments/seed-10143.json`). It is the
- * setup screen's **prefilled value and nothing more** — the field stays editable, because a
- * gate device registered against the wrong event opens a door for the wrong ticket.
- */
-export const SEEDED_EVENT_ID = '1' as const;
-
-/**
  * The local PIN that unlocks manual approval (`staff/override/pin.ts`), and the lockout that is
  * the real defence around four digits.
  *

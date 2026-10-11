@@ -97,8 +97,6 @@ export function readIdentity() {
     isMember: (account: Hex) => call<boolean>('isMember', [account]),
     isLocked: (account: Hex) => call<boolean>('isLocked', [account]),
     kycLevelOf: (account: Hex) => call<number>('kycLevelOf', [account]),
-    /** Zero means nobody holds this name yet — how the profile blocks `NicknameTaken` early. */
-    nicknameOwner: (nicknameHash: Hex) => call<Hex>('nicknameOwner', [nicknameHash]),
     /** `uint64` seconds. The device cooldown is counted from here, never from Firestore. */
     deviceUpdatedAt: (account: Hex) => call<bigint>('deviceUpdatedAt', [account]),
     /** The P-256 point `Ticket.checkIn` verifies the device signature against. */
