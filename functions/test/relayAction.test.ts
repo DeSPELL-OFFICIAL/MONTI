@@ -9,9 +9,10 @@ import {
   toFunctionSelector,
   type Abi,
 } from 'viem';
-import { forwarderAbi, identityAbi, organizersAbi, ticketAbi, type Hex } from '@monti/shared';
+import { forwarderAbi, identityAbi, organizersAbi, settlementVaultAbi, ticketAbi, type Hex } from '@monti/shared';
 import { Timestamp } from 'firebase-admin/firestore';
 import { createFakeFirestore } from './helpers/fakeFirestore.js';
+import { eventCreatedLog, gateRegisteredLog, policySetLog, publishCalldata } from './helpers/publishCalldata.js';
 import { ACTION_ALLOWLIST } from '../src/lib/actionAllowlist.js';
 
 process.env.GCP_PROJECT_ID = 'monti-dev';
@@ -53,6 +54,8 @@ vi.mock('../src/lib/db.js', () => ({
   USERS: 'users',
   PERSONS: 'persons',
   OVERRIDE_REQUESTS: 'overrideRequests',
+  SETTLEMENTS: 'settlements',
+  PENDING_GATES: 'pendingGates',
 }));
 
 vi.mock('../src/lib/chain.js', () => ({
@@ -79,29 +82,18 @@ function reverted(abi: Abi, errorName: string) {
   return new ContractFunctionRevertedError({ abi, data, functionName: 'execute' });
 }
 
-function eventCreatedLog() {
-  return {
-    address: TICKET,
-    topics: encodeEventTopics({ abi: ticketAbi, eventName: 'EventCreated', args: { eventId: EVENT_ID, orgId: ORG_ID, creator: ACCOUNT } }),
-    data: '0x' as Hex,
-    blockNumber: 100n,
-    blockHash: `0x${'bb'.repeat(32)}`,
-    transactionHash: TX_HASH,
-    transactionIndex: 0,
-    logIndex: 0,
-    removed: false,
-  };
-}
+const eventCreated = () => eventCreatedLog(TICKET, EVENT_ID, ORG_ID, ACCOUNT);
 
-const CREATE_EVENT = ACTION_ALLOWLIST.createEvent!.selector;
+/** v2 공개 1건(무료). 회계 scope 는 meta.orgId(=ORG_ID) 에서 나온다. */
+const PUBLISH_FREE = publishCalldata({ orgId: ORG_ID });
 
 function futureDeadline(): string {
   return String(Math.floor(Date.now() / 1000) + 600);
 }
 function actionReq(over: Record<string, unknown> = {}) {
   return {
-    kind: 'createEvent',
-    req: { from: ACCOUNT, to: TICKET, nonce: '0', deadline: futureDeadline(), data: CREATE_EVENT },
+    kind: 'publishEvent',
+    req: { from: ACCOUNT, to: TICKET, nonce: '0', deadline: futureDeadline(), data: PUBLISH_FREE },
     deviceSig: DEVICE_SIG,
     ...over,
   };
@@ -124,7 +116,7 @@ beforeEach(() => {
 
 describe('relayAction', () => {
   it('confirms and decodes the target event result when the receipt lands', async () => {
-    waitForTransactionReceipt.mockResolvedValueOnce({ status: 'success', logs: [eventCreatedLog()], blockNumber: 100n });
+    waitForTransactionReceipt.mockResolvedValueOnce({ status: 'success', logs: [eventCreated()], blockNumber: 100n });
     const res = (await action({ data: actionReq(), auth } as never)) as {
       relayId: string;
       status: string;
@@ -137,13 +129,13 @@ describe('relayAction', () => {
     expect(sendRelayed).toHaveBeenCalledWith(expect.objectContaining({ to: FORWARDER }));
     const doc = fake.snapshot(`relays/${RELAY_ID}`);
     expect(doc.get('status')).toBe('confirmed');
-    expect(doc.get('kind')).toBe('createEvent');
+    expect(doc.get('kind')).toBe('publishEvent');
     expect(doc.get('account')).toBe(ACCOUNT);
     expect(doc.get('gasLimit')).toBe(231_000);
   });
 
   it('ignores a client-supplied from and keys the relay on the session account', async () => {
-    const res = (await action({ data: actionReq({ req: { from: OTHER, to: TICKET, nonce: '0', deadline: futureDeadline(), data: CREATE_EVENT } }), auth } as never)) as { relayId: string };
+    const res = (await action({ data: actionReq({ req: { from: OTHER, to: TICKET, nonce: '0', deadline: futureDeadline(), data: PUBLISH_FREE } }), auth } as never)) as { relayId: string };
     expect(res.relayId).toBe(RELAY_ID); // 세션 계정(ACCOUNT) 기준, OTHER 아님
     expect(fake.snapshot(`relays/${RELAY_ID}`).get('account')).toBe(ACCOUNT);
   });
@@ -157,7 +149,7 @@ describe('relayAction', () => {
   });
 
   it('rejects calldata whose selector is not the one allowed for the kind', async () => {
-    const wrong = ACTION_ALLOWLIST.publishEvent!.selector; // createEvent 가 아닌 selector
+    const wrong = ACTION_ALLOWLIST.cancelEvent!.selector; // publishEvent 가 아닌 selector
     await expect(action({ data: actionReq({ req: { from: ACCOUNT, to: TICKET, nonce: '0', deadline: futureDeadline(), data: wrong } }), auth } as never)).rejects.toMatchObject({
       code: 'failed-precondition',
       details: { code: 'SELECTOR_NOT_ALLOWED' },
@@ -167,7 +159,7 @@ describe('relayAction', () => {
   });
 
   it('rejects a to that is not the kind target contract', async () => {
-    await expect(action({ data: actionReq({ req: { from: ACCOUNT, to: OTHER, nonce: '0', deadline: futureDeadline(), data: CREATE_EVENT } }), auth } as never)).rejects.toMatchObject({
+    await expect(action({ data: actionReq({ req: { from: ACCOUNT, to: OTHER, nonce: '0', deadline: futureDeadline(), data: PUBLISH_FREE } }), auth } as never)).rejects.toMatchObject({
       code: 'failed-precondition',
       details: { code: 'WRONG_TARGET' },
     });
@@ -302,7 +294,7 @@ describe('relayAction — usage ledger + org rate limit (design §4)', () => {
 describe('relayAction — settlement release on manualOverride confirm (design §3)', () => {
   const TOKEN_ID = (EVENT_ID << 96n) | 123n; // eventId 는 상위 160비트 = tokenId >> 96
   const OVERRIDE = encodeFunctionData({ abi: ticketAbi, functionName: 'manualOverride', args: [TOKEN_ID, GATE_ID, 3] });
-  const PUBLISH = encodeFunctionData({ abi: ticketAbi, functionName: 'publishEvent', args: [EVENT_ID] });
+  const PUBLISH = PUBLISH_FREE;
 
   function req(kind: string, data: string) {
     return { data: { kind, req: { from: ACCOUNT, to: TICKET, nonce: '0', deadline: futureDeadline(), data }, deviceSig: DEVICE_SIG }, auth };
@@ -335,13 +327,124 @@ describe('relayAction — settlement release on manualOverride confirm (design �
   });
 });
 
+describe('relayAction — v2 publishEvent (P2) + re-runnable confirm hook', () => {
+  const VAULT = getAddress(`0x${'5a'.repeat(20)}`);
+  const PAYEE = getAddress(`0x${'33'.repeat(20)}`);
+  const PLATFORM = getAddress(`0x${'44'.repeat(20)}`);
+  const POLICY_HASH = `0x${'77'.repeat(32)}` as Hex;
+  const PAID = publishCalldata({
+    orgId: ORG_ID,
+    prices: [0n, 2500n],
+    recipients: [
+      { account: PAYEE, bps: 9500, reason: '공연자 몫', tag: 'artist' },
+      { account: PLATFORM, bps: 500, reason: 'MONTI', tag: 'platform' },
+    ],
+    platformBps: 500,
+  });
+
+  function publish(data: Hex, reasons?: unknown) {
+    return {
+      data: {
+        kind: 'publishEvent',
+        req: { from: ACCOUNT, to: TICKET, nonce: '0', deadline: futureDeadline(), data },
+        deviceSig: DEVICE_SIG,
+        ...(reasons === undefined ? {} : { reasons }),
+      },
+      auth,
+    };
+  }
+
+  it('relays the v2 publish, scopes usage to meta.orgId and stores data + reasons on the relay doc', async () => {
+    waitForTransactionReceipt.mockResolvedValueOnce({ status: 'success', logs: [eventCreated()], blockNumber: 100n });
+    const res = (await action(publish(PAID, ['공연자 몫', 'MONTI']) as never)) as { result?: { eventId?: string } };
+    expect(res.result).toEqual({ eventId: EVENT_ID.toString() });
+    const doc = fake.snapshot(`relays/${RELAY_ID}`);
+    expect(doc.get('orgId')).toBe(ORG_ID.toString());
+    expect(doc.get('data')).toBe(PAID);
+    expect(doc.get('reasons')).toEqual(['공연자 몫', 'MONTI']);
+    expect(doc.get('result')).toEqual({ eventId: EVENT_ID.toString() });
+  });
+
+  it('writes the public settlement mirror for a paid publish (prices, policy, hash from PolicySet, orgId)', async () => {
+    waitForTransactionReceipt.mockResolvedValueOnce({
+      status: 'success',
+      logs: [eventCreated(), policySetLog(VAULT, EVENT_ID, ACCOUNT, POLICY_HASH)],
+      blockNumber: 100n,
+    });
+    // 두 번째 사유는 원문이 아니다(해시 불일치) → 거울에는 '' 로 남는다.
+    await action(publish(PAID, ['공연자 몫', 'tampered']) as never);
+    const mirror = fake.snapshot(`settlements/${EVENT_ID}`);
+    expect(mirror.data()).toMatchObject({
+      orgId: ORG_ID.toString(),
+      priceUsdCentsByTier: { '0': 0, '1': 2500 },
+      policy: {
+        platformBps: 500,
+        recipients: [
+          { account: PAYEE, bps: 9500, reason: '공연자 몫', tag: 'artist' },
+          { account: PLATFORM, bps: 500, reason: '', tag: 'platform' },
+        ],
+      },
+      policyHash: POLICY_HASH,
+      setBy: ACCOUNT,
+      txHash: TX_HASH,
+    });
+  });
+
+  it('writes no settlement mirror for a free publish', async () => {
+    waitForTransactionReceipt.mockResolvedValueOnce({ status: 'success', logs: [eventCreated()], blockNumber: 100n });
+    await action(publish(PUBLISH_FREE) as never);
+    expect(fake.docs.has(`settlements/${EVENT_ID}`)).toBe(false);
+  });
+
+  it.each([
+    ['a count that does not match the recipients', ['only one']],
+    ['a reason over 80 characters', ['x'.repeat(81), 'MONTI']],
+    ['a non-array', 'nope'],
+  ])('rejects reasons with %s before simulating', async (_label, reasons) => {
+    await expect(action(publish(PAID, reasons) as never)).rejects.toMatchObject({ code: 'invalid-argument' });
+    expect(estimateContractGas).not.toHaveBeenCalled();
+  });
+
+  it('rejects reasons on any kind other than publishEvent', async () => {
+    const cancel = encodeFunctionData({ abi: ticketAbi, functionName: 'cancelEvent', args: [EVENT_ID] });
+    const data = { kind: 'cancelEvent', req: { from: ACCOUNT, to: TICKET, nonce: '0', deadline: futureDeadline(), data: cancel }, deviceSig: DEVICE_SIG, reasons: [] };
+    await expect(action({ data, auth } as never)).rejects.toMatchObject({ details: { code: 'BAD_REASONS' } });
+  });
+
+  it('decodes a settlement-vault revert bubbled through publishEvent by name (BadSplitSum)', async () => {
+    estimateContractGas.mockRejectedValueOnce(reverted(settlementVaultAbi as Abi, 'BadSplitSum'));
+    await expect(action(publish(PAID) as never)).rejects.toMatchObject({ details: { code: 'BadSplitSum' } });
+  });
+
+  it('closes the pending gate (registered, gateId, open) when registerGate confirms', async () => {
+    const GATE_ACCOUNT = getAddress(`0x${'6b'.repeat(20)}`);
+    fake.write(`pendingGates/${GATE_ACCOUNT.toLowerCase()}`, { status: 'pending', eventId: EVENT_ID.toString() });
+    const data = encodeFunctionData({
+      abi: organizersAbi,
+      functionName: 'registerGate',
+      args: [EVENT_ID, GATE_ACCOUNT, `0x${'11'.repeat(32)}`, `0x${'22'.repeat(32)}`],
+    });
+    const gateLog = gateRegisteredLog(ORGANIZERS, GATE_ID, EVENT_ID, GATE_ACCOUNT);
+    waitForTransactionReceipt.mockResolvedValueOnce({ status: 'success', logs: [gateLog], blockNumber: 100n });
+    const res = (await action({ data: { kind: 'registerGate', req: { from: ACCOUNT, to: ORGANIZERS, nonce: '0', deadline: futureDeadline(), data }, deviceSig: DEVICE_SIG }, auth } as never)) as { result?: unknown };
+    expect(res.result).toEqual({ gateId: GATE_ID.toString() });
+    expect(fake.snapshot(`pendingGates/${GATE_ACCOUNT.toLowerCase()}`).data()).toMatchObject({
+      status: 'registered',
+      gateId: GATE_ID.toString(),
+      open: true,
+    });
+  });
+});
+
 describe('actionAllowlist', () => {
   const abiFor = (target: string): Abi =>
     target === 'organizers' ? organizersAbi : target === 'identity' ? identityAbi : ticketAbi;
 
   it('maps every kind to exactly one 4-byte selector, all distinct', () => {
     const entries = Object.values(ACTION_ALLOWLIST);
-    expect(entries.length).toBe(22); // §2 표 23개 + createOrganizer − requestOverride(P4)·setNickname(P5): 오프체인
+    // v1 24개 − createEvent·publishEvent(uint256)·updateEventMeta(→ publishEvent v2 하나) − requestOverride·setNickname(오프체인)
+    expect(entries.length).toBe(20);
+    expect(ACTION_ALLOWLIST.publishEvent!.selector).toBe('0x7254c158');
     const selectors = new Set<string>();
     for (const entry of entries) {
       expect(entry.selector).toMatch(/^0x[0-9a-f]{8}$/);

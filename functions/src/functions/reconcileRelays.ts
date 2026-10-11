@@ -5,6 +5,8 @@ import type { Hex } from '@monti/shared';
 import { publicClient } from '../lib/chain.js';
 import { ADMISSIONS, ADMISSION_TOKENS, RELAYS, db } from '../lib/db.js';
 import { isCheckInKind, type RelayError, type RelayKind } from '../lib/relayTypes.js';
+import { actionFor } from '../lib/actionAllowlist.js';
+import { postConfirm } from '../lib/postConfirm.js';
 
 /**
  * 릴레이 타임아웃 대사(설계 §5). `sent` 로 멈춘 릴레이를 영수증과 대조해 `confirmed`/`failed`
@@ -25,7 +27,7 @@ type Doc = FirebaseFirestore.QueryDocumentSnapshot;
 /** 이 릴레이를 어떻게 닫을지. `wait` 는 아직 결론이 없어 다음 틱으로 미루는 것. */
 export type RelayDecision =
   | { kind: 'wait' }
-  | { kind: 'confirm' }
+  | { kind: 'confirm'; receipt: { logs: readonly unknown[] } }
   | { kind: 'fail'; error: RelayError };
 
 /**
@@ -85,7 +87,7 @@ export async function decideRelay(
   }
   const receipt = await receiptOrDropped(pc, view.txHash);
   if (receipt) {
-    if (receipt.status === 'success') return { kind: 'confirm' };
+    if (receipt.status === 'success') return { kind: 'confirm', receipt: { logs: receipt.logs ?? [] } };
     return { kind: 'fail', error: { code: 'REVERTED', message: await revertReason(pc, view.txHash) } };
   }
   if (dropped) {
@@ -97,6 +99,25 @@ export async function decideRelay(
 /** `admissions/{eventId}/tokens/{tokenId}` 참조. */
 function admissionRef(eventId: string, tokenId: string) {
   return db.collection(ADMISSIONS).doc(eventId).collection(ADMISSION_TOKENS).doc(tokenId);
+}
+
+/** relays 문서에 남은 입력(kind·account·data·reasons·txHash)으로 확정 훅을 다시 돌린다. */
+async function rerunPostConfirm(doc: Doc, receipt: { logs: readonly unknown[] }) {
+  const data = doc.get('data') as Hex | undefined;
+  const txHash = doc.get('txHash') as Hex | undefined;
+  if (!data || !txHash) return undefined;
+  const reasons = doc.get('reasons') as string[] | undefined;
+  return postConfirm(
+    {
+      relayId: doc.id,
+      kind: doc.get('kind') as string,
+      account: doc.get('account') as Hex,
+      data,
+      ...(reasons ? { reasons } : {}),
+      txHash,
+    },
+    receipt,
+  );
 }
 
 /**
@@ -115,7 +136,10 @@ export async function applyRelayDecision(doc: Doc, decision: RelayDecision): Pro
 
   if (decision.kind === 'confirm') {
     const confirmedAt = FieldValue.serverTimestamp();
-    await doc.ref.set({ status: 'confirmed', confirmedAt }, { merge: true });
+    // relayAction 문서(allowlist kind)는 콜러블과 **같은 확정 훅**을 돌리고 결과를 남긴다 — 8초를 넘겨
+    // 확정된 공개의 eventId 가 사라지던 v1 결함의 수리다. purchase·claim·checkIn 은 allowlist 밖이라 건너뛴다.
+    const result = actionFor(kind) ? await rerunPostConfirm(doc, decision.receipt) : undefined;
+    await doc.ref.set({ status: 'confirmed', confirmedAt, ...(result ? { result } : {}) }, { merge: true });
     if (admission) await admission.set({ status: 'confirmed', confirmedAt }, { merge: true });
     return;
   }
