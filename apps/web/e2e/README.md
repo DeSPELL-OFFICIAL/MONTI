@@ -24,7 +24,33 @@ fnm exec --using=22 pnpm -F web e2e e2e/tests/01-public-surface.spec.ts   # 로�
 | `E2E_APPROVAL=1` | 승인제 시나리오(d) 및 승인 행사 생성 활성화 | off |
 | `E2E_ADMIN` | 관리자/주최자로 쓸 테스트 번호 인덱스(`01`…`10`, `persona-05`·`5` 도 허용) | `01` |
 | `E2E_USER_FROM` | 이용자 풀 시작 인덱스(…10 다음은 …01 로 순환, 관리자 번호는 건너뜀) | 관리자 다음 번호 |
+| `E2E_PRICE_USD` | 유료 행사 티켓 값(달러 정수). 55 가 티어 카드에 넣고 52/55/56 이 CTA 로 검증 | `30` |
+| `E2E_OVERRIDE_PERSONA` | 53 에서 수동 승인을 누를 페르소나(승인 권한 없는 매니저여야 함) → `requestOverride` 요청 경로 | 없음(관리자 = 승인 경로) |
+| `E2E_RPC_URL` · `E2E_TICKET_ADDR` · `E2E_ORGANIZERS_ADDR` · `E2E_RELAYER` · `E2E_TREASURY` | 체인 진실 읽기(`utils/chain.ts`) 주소 재정의. 기본은 `deployments/10143.json`(v2 rc1) | rc1 |
 | `E2E_PERSONA_OFFSET` | 다이얼 번호 오프셋(인덱스+오프셋 → 뒷자리). 기본 10 이면 인덱스 1…10 = `+821000000011`…`+821000000020`(원래 `…0001`–`…0010` 블록은 전부 소진). id 는 `persona-01…10` 그대로, `.state` 파일은 오프셋별로 분리됨(`persona-09@10.*`). `0` 이면 원래 블록 | `10` |
+
+## v2 트랜잭션 다이어트 (2026-10-12 rc1)
+
+스테이징 `E2E_BASE_URL=https://v2.monti.despell.io` 로 돌린다(운영 도메인은 O8 전환 전까지 v1).
+
+| 흐름 | 화면 | 체인 기록 |
+|---|---|---|
+| 주최자 → 공개 | `/org/new` 만들기 → **다음**(초안 저장만) → `/org/new/<draftId>/publish`(유료면 정산 규칙 카드: 수령인 행 + 고정 MONTI 5%, 합 100%) → **공개하기** → 확인 시트 **네, 공개할게요** → `/org/new/done/<eventId>` | `publishEvent` **1건**(행사 Published + 정책 동결). 행사 id 는 1001 부터 |
+| 단말기 승인 | 스태프 `/staff/setup` 요청 → 주최자 `/org/events/<id>/gates` **등록** | `registerGate` **1건**, 등록 즉시 열림(따로 여는 단계 없음. 닫았던 단말기만 **다시 열기**) |
+| 유료 결제 | `/claim/<id>` 결제하고 받기 → 카드 시트 | 트레저리의 `purchase` **1건**(민팅 + 에스크로 원자). 실패면 "결제가 완료되지 않았어요 · 청구된 금액은 없어요" |
+| 수동 승인 | 콘솔 수동 승인하기 | 승인권자: `manualOverride` **1건** / 권한 없는 매니저: `requestOverride` 콜러블(체인 기록 0) → "요청됨 — 승인 대기" |
+
+- `utils/organizer.ts` `createDraftAndPublish(page, spec)` 가 위 주최자 흐름 전체(유료면 `spec.split`)를 하고
+  체인에서 `eventStatus == 1` 을 확인한 뒤 `{ eventId, publishMs }` 를 준다. 옛 `createOrganizerAndEvent`·`publishEvent`
+  (Draft → 공개 2단계)와 50/50b/31 스펙은 삭제됐다.
+- `utils/gates.ts`: `fileGateRequest` → `approveGate`(등록 직후 체인 `gateInfo.open` 확인, 열기 버튼이 남은 빌드면 한 번
+  눌러 `openedSeparately` 로 기록) → `startConsole` → `admitByOverride`(승인/요청 두 결과).
+- `utils/chain.ts`: rc1 주소로 읽는 viem 클라이언트, 릴레이어·트레저리 MON 잔고.
+- **55** 가 한 프로세스로 공개 1 · 결제 1 · 등록 1 · 수동 승인 1 을 돌리고 `e2e/.artifacts/55-chain-diag.json` 에
+  단계별 지연(ms), 릴레이어 MON(단계별), **트레저리 MON 델타(결제)**, **주최자 온체인 기록 수**(`organizerWrites`,
+  `relayAction` kind + `createOrganizerForMe`)를 남긴다. 스크린샷은 `E2E_SHOTS_DIR` 그대로.
+- 이어 달리기: 52(결제만, `EVENT_ID`), 53/57(입장, `EVENT_ID`+`TOKEN_ID`), 56(결제 후 환불, `EVENT_ID`).
+- 컴파일 확인: `fnm exec --using=22 pnpm -F web exec playwright test --list` (라이브 실행은 O7).
 
 ## 릴레이 경로 (2026-09-30 재배포)
 
@@ -62,12 +88,8 @@ fnm exec --using=22 pnpm -F web e2e e2e/tests/01-public-surface.spec.ts   # 로�
 
 - **승인제(d)**: 신청 관리(승인) 화면과 `VITE_APPROVAL_MODES=on` 이 프로덕션 빌드에 반영됐다
   (`E2E_APPROVAL=1` 로 켠다). 승인 신청은 `relayClaim(mode:'request')`, 주최자 승인은 스폰서 op.
-- **유료 티켓**: 컨트랙트가 계속 거절 — 시나리오 a 는 "발행 버튼 비활성 + 안내 문구"만 검증한다.
-- **프로덕션 주소 전환 대기**: 라이브 런은 프로덕션 번들이 2026-09-30 재배포(티켓
-  `0x7E1f…51Cf`, 포워더 `0xb19c…B4B5F`)를 가리킬 때만 유효하다. 소스는 이미 이 주소로 고정돼
-  있으나(`apps/web/.env.example`·`packages/shared/src/deployments/10143.json` 의 current), 활성
-  프로덕션 config 가 아직 이전 배포를 가리키는 동안에는 릴레이/자금이 신규 배포에 있어 서명
-  도메인이 어긋나므로 실행하지 말 것.
+- **주소 전환 대기**: 소스는 v2 rc1(티켓 `0x8544…9edC`, 포워더 `0xcE6D…ddbb`)을 가리킨다. 대상
+  번들(`E2E_BASE_URL`)이 rc1 빌드가 아니면 서명 도메인이 어긋나므로 실행하지 말 것(v1 운영 도메인 금지).
 
 ## 관리자 선택과 재등록 번호(/recover)
 

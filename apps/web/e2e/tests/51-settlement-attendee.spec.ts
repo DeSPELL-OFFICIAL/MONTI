@@ -6,7 +6,7 @@ import { closePersona, ensureAccount, openPersona } from '../utils/session';
 /**
  * Batch H — programmable-settlement demo, step 3 (attendee side) live against production.
  *
- * Precondition: step 1 (50-settlement) has confirmed the $30 split policy and published the event.
+ * Precondition: a priced event published with its split in one write (55, or `createDraftAndPublish`).
  * Pass the event id via EVENT_ID. This spec proves two things without spending any USDC:
  *   3a. the PUBLIC settlement page `/settlement/<eventId>` renders the confirmed rules (no login);
  *   3b. an attendee (USERS[0], e.g. persona-06 with E2E_USER_FROM=06) sees the priced CTA

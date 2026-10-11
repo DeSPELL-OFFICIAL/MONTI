@@ -2,15 +2,17 @@ import { expect, test, type Response } from '@playwright/test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { USERS } from '../fixtures/personas';
 import { closePersona, ensureAccount, openPersona } from '../utils/session';
+import { fmtMon, monBalance, TREASURY } from '../utils/chain';
 
 /**
- * Batch H — programmable-settlement demo, step 2 (attendee SUBMITS the purchase) live against
- * production. Sibling of 51, which opens the sheet but deliberately does not submit; this one
- * actually pays with the mock card so the USDC deposit lands in escrow.
+ * v2 step 2 (attendee SUBMITS the purchase). Sibling of 51, which opens the sheet but deliberately
+ * does not submit; this one pays with the mock card. In v2 that is ONE `SettlementVault.purchase`
+ * sent by the treasury — mint + escrow in the same transaction, so the ticket and the held payment
+ * appear together or not at all (a failure reads "결제가 완료되지 않았어요 · 청구된 금액은 없어요").
  *
- * Precondition: step 1 (50-settlement) created + published a $30 priced event and the treasury
- * has USDC to front the deposit. Pass the event id via EVENT_ID and the attendee via
- * E2E_USER_FROM (persona-08 for Run 4). This spec:
+ * Precondition: a priced event published with its split (55, or `createDraftAndPublish`) and a
+ * treasury with USDC + MON. Pass the event id via EVENT_ID, the price via E2E_PRICE_USD (default
+ * 30) and the attendee via E2E_USER_FROM. This spec:
  *   2a. signs persona-08 in and opens /claim/<eventId>;
  *   2b. taps 결제하고 받기 $30.00 → the mock card sheet opens;
  *   2c. fills the demo card field and taps the sheet's pay button → waits for 결제 완료;
@@ -24,6 +26,7 @@ import { closePersona, ensureAccount, openPersona } from '../utils/session';
 const ARTIFACTS = 'e2e/.artifacts';
 const DIAG_PATH = `${ARTIFACTS}/52-purchase-diag.json`;
 const EVENT_ID = process.env.EVENT_ID ?? '';
+const PRICE = process.env.E2E_PRICE_USD ?? '30';
 
 /** Card placeholder copy on the mock sheet — a demo field that is never read or sent. */
 const CARD_PLACEHOLDER = '0000 0000 0000 0000 (테스트)';
@@ -47,7 +50,7 @@ interface PurchaseWire {
   error?: unknown;
 }
 
-test('52 · settlement step 2 — attendee pays $30 and the receipt reads 보관 중', async ({ browser }) => {
+test('52 · v2 settlement step 2 — attendee pays in one purchase and the receipt reads 보관 중', async ({ browser }) => {
   test.setTimeout(4 * 60 * 1000);
   expect(EVENT_ID, 'EVENT_ID env must be the step-1 event id').not.toBe('');
   mkdirSync(ARTIFACTS, { recursive: true });
@@ -101,7 +104,7 @@ test('52 · settlement step 2 — attendee pays $30 and the receipt reads 보관
     await expect(payCta).toBeEnabled({ timeout: 30_000 });
     const ctaText = (await payCta.innerText()).trim();
     diag.ctaText = ctaText;
-    expect(ctaText, 'CTA must show the $30 price').toContain('$30');
+    expect(ctaText, `CTA must show the $${PRICE} price`).toContain(`$${PRICE}`);
     await payCta.click();
 
     const sheet = page.getByRole('dialog', { name: SHEET_NAME });
@@ -115,10 +118,12 @@ test('52 · settlement step 2 — attendee pays $30 and the receipt reads 보관
     const payBtn = sheet.getByRole('button', { name: SHEET_PAY_RE });
     await expect(payBtn).toBeEnabled({ timeout: 10_000 });
     console.log(`[52] submitting mock purchase for ${attendee.id} on event ${EVENT_ID}`);
+    const treasuryBefore = await monBalance(TREASURY);
+    const payAt = Date.now();
     await payBtn.click();
 
-    // Wait for 결제 완료 (the done state) or a determinate error. The mint + deposit runs through
-    // the relayer, so give it room; a failure Alert surfaces inside the sheet.
+    // Wait for 결제 완료 (the done state) or a determinate error. The one purchase is sent by the
+    // treasury, so give it room; a failure Alert surfaces inside the sheet.
     const doneAlert = sheet.getByText(DONE_TEXT, { exact: true });
     const toTickets = sheet.getByRole('link', { name: TO_TICKETS });
     const errorAlert = sheet.locator('.alert, [role="alert"]');
@@ -132,6 +137,8 @@ test('52 · settlement step 2 — attendee pays $30 and the receipt reads 보관
       await page.waitForTimeout(2000);
     }
     diag.purchased = purchased;
+    diag.purchaseLatencyMs = Date.now() - payAt;
+    diag.treasuryMonPurchase = fmtMon(treasuryBefore - (await monBalance(TREASURY)));
     diag.wire = wire;
     console.log(`[52] purchase done=${purchased} wire=${JSON.stringify(wire)} payError=${JSON.stringify(diag.payError ?? null)}`);
     await page.screenshot({ path: `${ARTIFACTS}/52-purchase-done.png`, fullPage: true }).catch(() => undefined);

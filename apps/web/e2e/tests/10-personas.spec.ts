@@ -1,7 +1,7 @@
 import { test, expect, type Browser, type Page } from '@playwright/test';
 import { ADMIN, USERS, type Persona } from '../fixtures/personas';
 import { closePersona, ensureAccount, openPersona, pool, type PersonaSession } from '../utils/session';
-import { createOrganizerAndEvent, publishEvent } from '../utils/organizer';
+import { createDraftAndPublish } from '../utils/organizer';
 import { approveAll, approveSelected, claimFree, hasTicketFor, myTickets, requestApproval, seesApproved } from '../utils/claim';
 import { getClaim, getEvent, markPublished, recordClaim, recordEvent, recordPersona } from '../utils/scenario-state';
 
@@ -10,8 +10,8 @@ import { getClaim, getEvent, markPublished, recordClaim, recordEvent, recordPers
  * relayer pays for. The nine-user fan-out throttles to three at a time.
  *
  * Approval scenarios (d and the approval-required event in a) run only with E2E_APPROVAL=1 AND a
- * build where VITE_APPROVAL_MODES=on — both arrive with the 01c deploy. Paid tickets stay
- * blocked by the contract, so scenario a asserts the honest block rather than a sale.
+ * build where VITE_APPROVAL_MODES=on — both arrive with the 01c deploy. Paid events (split rules
+ * in the draft, one publish, one purchase) are covered end to end by 55.
  *
  * Independence (task-claim-failure-report §6): scenarios do NOT share describe-scope `let`s. When
  * one fails, Playwright restarts the worker and re-imports this module, which would reset any such
@@ -102,10 +102,11 @@ test.describe('MONTI persona harness (admin + 9 users)', () => {
     sessions.clear();
   });
 
-  test('a: admin signs up and creates events (free 선착순, paid → blocked, approval flagged)', async ({ browser }) => {
+  test('a: admin signs up and publishes events (free 선착순, approval flagged) — one write each', async ({ browser }) => {
     const admin = await ensureSession(browser, ADMIN);
 
-    const free = await createOrganizerAndEvent(admin.page, {
+    // v2: draft → 공개 is ONE publishEvent, and the event is Published on chain when it returns.
+    const free = await createDraftAndPublish(admin.page, {
       personaId: ADMIN.id,
       orgName: '몬티 크루',
       title: FREE_TITLE,
@@ -113,16 +114,13 @@ test.describe('MONTI persona harness (admin + 9 users)', () => {
       venue: '서울 성수동 테스트홀',
       tiers: [{ kind: '무료', mode: '선착순', name: '일반', supply: 100 }],
     });
-    expect(free.blocked).toBe(false);
     expect(free.eventId).toBeTruthy();
-    const freeId = free.eventId!;
-    recordEvent('free', { id: freeId, published: false, title: FREE_TITLE });
-    const freeStatus = await publishEvent(admin.page, ADMIN.id, freeId);
-    markPublished('free', freeStatus === 'published');
+    recordEvent('free', { id: free.eventId, published: true, title: FREE_TITLE });
+    markPublished('free', true);
 
     // Approval-required event — only when the flag AND the build allow it.
     if (APPROVAL) {
-      const appr = await createOrganizerAndEvent(admin.page, {
+      const appr = await createDraftAndPublish(admin.page, {
         personaId: ADMIN.id,
         orgName: '몬티 크루',
         title: APPROVAL_TITLE,
@@ -131,23 +129,10 @@ test.describe('MONTI persona harness (admin + 9 users)', () => {
         tiers: [{ kind: '무료', mode: '관리자 승인', name: '일반', supply: 100 }],
       });
       expect(appr.eventId).toBeTruthy();
-      const apprId = appr.eventId!;
-      recordEvent('approval', { id: apprId, published: false, title: APPROVAL_TITLE });
-      const apprStatus = await publishEvent(admin.page, ADMIN.id, apprId);
-      markPublished('approval', apprStatus === 'published');
+      recordEvent('approval', { id: appr.eventId, published: true, title: APPROVAL_TITLE });
+      markPublished('approval', true);
     }
-
-    // Paid tier — expected to hold the create button disabled with the honest block copy.
-    const paid = await createOrganizerAndEvent(admin.page, {
-      personaId: ADMIN.id,
-      orgName: '몬티 크루',
-      title: '유료 티켓 테스트 행사',
-      intro: 'E2E 자동화가 만든 유료 행사입니다. 유료는 아직 막혀 있어야 합니다.',
-      venue: '서울 성수동 테스트홀',
-      tiers: [{ kind: '유료', name: 'VIP', price: 10000, limit: 2 }],
-    });
-    expect(paid.blocked).toBe(true);
-    expect(paid.eventId).toBeNull();
+    // Paid events (split rules + one publish) are covered end to end by 55.
   });
 
   test('b + c: users sign up (throttled to 3) and claim the free event', async ({ browser }) => {
@@ -238,7 +223,7 @@ test.describe('MONTI persona harness (admin + 9 users)', () => {
     // earlier scenario and a re-run after a worker restart never reuses a partly-claimed event. Seat
     // count and claimer count are tunable (SOLDOUT_SUPPLY / USER_COUNT) for a budget-limited run.
     const admin = await ensureSession(browser, ADMIN);
-    const soldOut = await createOrganizerAndEvent(admin.page, {
+    const soldOut = await createDraftAndPublish(admin.page, {
       personaId: ADMIN.id,
       orgName: '몬티 크루',
       title: SOLDOUT_TITLE,
@@ -247,10 +232,9 @@ test.describe('MONTI persona harness (admin + 9 users)', () => {
       tiers: [{ kind: '무료', mode: '선착순', name: '일반', supply: SOLDOUT_SUPPLY }],
     });
     expect(soldOut.eventId).toBeTruthy();
-    const soldOutId = soldOut.eventId!;
-    recordEvent('soldOut', { id: soldOutId, published: false, title: SOLDOUT_TITLE });
-    const soldOutStatus = await publishEvent(admin.page, ADMIN.id, soldOutId);
-    markPublished('soldOut', soldOutStatus === 'published');
+    const soldOutId = soldOut.eventId;
+    recordEvent('soldOut', { id: soldOutId, published: true, title: SOLDOUT_TITLE });
+    markPublished('soldOut', true);
 
     const users = await ensureUsers(browser, USER_COUNT);
     // Sequential, with a beat between each, so the indexer's minted count can catch up and the
