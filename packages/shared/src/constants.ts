@@ -145,7 +145,11 @@ export type OverrideRoleCode = (typeof OVERRIDE_ROLE)[keyof typeof OVERRIDE_ROLE
  */
 export const PERM_APPROVE_OVERRIDE = 4;
 
-export const FIREBASE_REGION = 'us-east1';
+/**
+ * v2 함수 리전. v1(`us-east1`, codebase `default`)과 같은 이름의 함수가 codebase `v2` 로
+ * 나란히 산다(블루/그린, 설계 §12). 전환 뒤에도 v2 는 여기 남는다.
+ */
+export const FIREBASE_REGION = 'us-east4';
 
 /**
  * 관객 화면 카피에 등장하면 안 되는 금지어 목록(스펙 §3.2).
