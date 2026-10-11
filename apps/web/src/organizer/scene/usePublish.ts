@@ -1,6 +1,4 @@
 import { useCallback, useState } from 'react';
-import { encodeFunctionData } from 'viem';
-import { ticketAbi } from '../../shared/chain/abis';
 import { api, callableFailure, CallableError } from '../../shared/api/functions';
 import { followRelay, sendAction } from '../../shared/relay/sendAction';
 import { relayProblem } from '../../shared/relay/relayError';
@@ -8,8 +6,9 @@ import type { EventDraft } from '../../shared/api/firestore';
 import type { MyOrg } from '../useMyOrgs';
 import { buildEventMeta, buildTiers, type ChainDraft } from './buildEventMeta';
 import type { OrganizerCopy } from '../copy';
-import { saveDraft, type LifecycleProblem } from '../lifecycle';
-import { endsAtOf, eventProblems, normalizeTags, saleWindow, tierProblems } from './draftRules';
+import { endsAtOf, normalizeTags, priceUsdCentsOf, saleWindow } from './draftRules';
+import { currentPublishEnv, publishSplit, publishView } from './draftPublishModel';
+import { encodePublishCall } from './publishCall';
 import { renderAutoPoster } from './autoPoster';
 import {
   followUpPlan, followUpsDone, runFollowUps, type FollowUpPlan, type FollowUpResult,
@@ -19,9 +18,9 @@ import {
 export type PublishProblem = keyof OrganizerCopy['scene']['publishProblems'];
 
 /**
- * What `Ticket.createEvent` can revert with, against the sentence that names the same rule.
- * The scene blocks all three before the operation is sent, so reaching one of these means the
- * draft changed underneath the check — worth saying precisely rather than under one sentence.
+ * What the publish write can revert with, against the sentence that names the same rule. The
+ * screen blocks all of them before anything is sent, so reaching one means the draft changed
+ * underneath the check — worth saying precisely rather than under one sentence.
  */
 const REVERT_PROBLEMS: ReadonlyArray<readonly [string, PublishProblem]> = [
   ['Unauthorized', 'notYourOrg'],
@@ -41,23 +40,6 @@ const PIN_PROBLEMS: Readonly<Record<string, PublishProblem>> = {
   // (functions/src/functions/organizer.ts). It is not a draft the organiser can fix — the
   // cap lifts tomorrow — so it earns its own sentence rather than the generic failure.
   PIN_QUOTA: 'imageQuota',
-};
-
-/**
- * What `updateEventMeta` can be refused for, in the words `organizer/lifecycle.ts` already
- * gives those reverts. `NotDraft` is the one that matters: the chain closes editing the moment
- * an event is published (`Ticket.sol:235`), so an organiser who published in another tab is
- * told exactly that rather than "that did not work".
- */
-const UPDATE_PROBLEMS: Readonly<Record<LifecycleProblem, PublishProblem>> = {
-  notDraft: 'notDraft',
-  closed: 'notDraft',
-  notAllowed: 'notYourOrg',
-  // Reachable without the organiser changing anything: the sign-up window is derived as
-  // now -> `endsAt`, so a Draft left past its own end date derives one that runs backwards.
-  schedule: 'eventPast',
-  tiers: 'tiersInvalid',
-  failed: 'failed',
 };
 
 /**
@@ -113,8 +95,8 @@ export interface PublishState {
 
 /**
  * The draft as `Ticket.EventMeta` wants it. The hashing lives in `buildEventMeta` and not in
- * this file, so the create path and the update path can never disagree by a byte:
- * `titleHash`, `descHash` and `venueHash` are written once and can never be repaired.
+ * this file, so it is tested on its own: `titleHash`, `descHash` and `venueHash` are written
+ * once and can never be repaired.
  *
  * Two values are constants here rather than switches on the scene: `seated` has no screen
  * behind it, and `maxTransfers` has no question worth asking yet. `approvalRequired` is no
@@ -147,6 +129,7 @@ function toChainDraft(draft: EventDraft, now: number): ChainDraft {
     requireKyc: draft.requireKyc,
     tiers: draft.tiers.map((tier) => ({
       name: tier.name.trim(),
+      priceUsdCents: priceUsdCentsOf(tier),
       supply: tier.supply,
       maxPerWallet: tier.maxPerWallet,
       seated: SEATED,
@@ -195,19 +178,22 @@ export interface PublishOptions {
 }
 
 /**
- * `행사 만들기`: the whole of it, in the order plan section E lays out.
+ * `공개하기`: the one on-chain step of draft → 정산 규칙 → 공개 (design §5, D4).
  *
- *   1. `pinEventMetadata` — the readable half, with the tags and the two visibility flags.
- *   2. `createEvent` as one relayed `MontiForwarder.execute` (via `sendAction`), and the new id
- *      out of the settled relay document's `result.eventId`.
- *   3. `saveEventArt` — the ticket pictures, which the chain has no room for.
- *   4. `setEventPrivate` — the real venue, when it is hidden.
- *   5. the draft goes.
+ *   1. the organisation, made only if this person has none (`resolveOrg`).
+ *   2. `pinEventMetadata` — the readable half, with the tags and the two visibility flags.
+ *   3. the publish write ({@link encodePublishCall}: the event, its priced kinds and — for a
+ *      paid event — the split from the draft's `splitJson`) as one relayed
+ *      `MontiForwarder.execute` (via `sendAction`), and the new id out of the settled relay
+ *      document's `result.eventId`. The event is public the moment it lands.
+ *   4. `saveEventArt` — the ticket pictures, which the chain has no room for.
+ *   5. `setEventPrivate` — the real venue, when it is hidden.
+ *   6. the draft goes.
  *
- * Steps 3 and 4 come **after** the id is known, because neither can be addressed without it.
+ * Steps 4 and 5 come **after** the id is known, because neither can be addressed without it.
  * If either fails the event still exists, so the organiser is carried on to the done screen
  * with one line saying what did not save — not left on a screen that would send a second
- * `createEvent` if they pressed the button again.
+ * publish if they pressed the button again.
  */
 export function usePublish(
   { draft, draftId, myOrgs, orgName, patch, save, discard, onCreated }: PublishOptions,
@@ -280,8 +266,8 @@ export function usePublish(
       const done = await runFollowUps(plan);
       const complete = followUpsDone(plan, done);
       // The one condition the draft may be deleted on. A venue that was never written is a
-      // venue nowhere else: the public document has no `venue` key, and `updateEventMeta`
-      // refuses anything past Draft, so losing the draft loses it for good.
+      // venue nowhere else: the public document has no `venue` key and a published event is
+      // never edited, so losing the draft loses it for good.
       if (complete) await discard();
       onCreated({
         eventId,
@@ -296,99 +282,9 @@ export function usePublish(
     [discard, draft, draftId, onCreated],
   );
 
-  /**
-   * The same two writes as {@link finish}, for an event that already existed. The difference
-   * is what happens when one of them does not land: there is no done screen to carry a retry
-   * to, and pressing 저장 again is safe for every step of an update — the pin, the chain write
-   * and both callables all replace rather than add — so the draft is kept and the button is
-   * the retry.
-   */
-  const finishUpdate = useCallback(
-    async (eventId: string): Promise<void> => {
-      setPhase('finishing');
-      const plan = followUpPlan(draft, eventId);
-      const done = await runFollowUps(plan);
-      if (!followUpsDone(plan, done)) {
-        setPhase('idle');
-        setProblem('followUpFailed');
-        return;
-      }
-      await discard();
-      onCreated({
-        eventId,
-        posterCid: draft.posterCid,
-        title: draft.title.trim(),
-        followUpFailed: false,
-        draftId,
-        plan,
-        done,
-      });
-    },
-    [discard, draft, draftId, onCreated],
-  );
-
-  /**
-   * `저장` on an event that already exists — the same scene, the same rules, and
-   * `updateEventMeta` in place of `createEvent` (T-EV-W12). The chain refuses it once the
-   * event is published, which is why the entry point is only offered while it is a Draft.
-   *
-   * Nothing here needs the duplicate-send guards the create path is built around: sending the
-   * same update twice writes the same `EventMeta` twice, where sending `createEvent` twice
-   * makes two events.
-   */
-  const update = useCallback(
-    async (eventId: string): Promise<void> => {
-      if (eventProblems(draft).length > 0 || tierProblems(draft).length > 0) {
-        setPhase('idle');
-        return;
-      }
-      setProblem('');
-      setPhase('pinning');
-      try {
-        const orgId = draft.orgId.trim();
-        // A fresh document every time: the chain's `imageCid` is the CID of *this* JSON, and
-        // the hashes beside it are of the strings in it, so the two are written together.
-        const { metadataCid } = await api.pinEventMetadata({ orgId, meta: toPinnedMeta(draft) });
-        setPhase('sending');
-        const chainDraft = toChainDraft(draft, Math.floor(Date.now() / 1_000));
-        // A relayed `updateEventMeta` (via `sendAction` inside `saveDraft`) that follows the relay
-        // document to a settled answer, so a success is always `done` — no timed-out receipt to
-        // resend around, and sending the same update twice only writes the same `EventMeta` twice.
-        const result = await saveDraft(
-          BigInt(eventId),
-          BigInt(orgId),
-          buildEventMeta(chainDraft, metadataCid),
-          buildTiers(chainDraft),
-        );
-        if (result.state === 'refused') {
-          setPhase('idle');
-          setProblem(UPDATE_PROBLEMS[result.problem]);
-          return;
-        }
-        await finishUpdate(eventId);
-      } catch (cause) {
-        setPhase('idle');
-        const { code, reason } = callableFailure(cause);
-        if (PIN_PROBLEMS[reason]) setProblem(PIN_PROBLEMS[reason]);
-        else if (code === 'resource-exhausted') setProblem('imageQuota');
-        else if (code === 'permission-denied') setProblem('notYourOrg');
-        else if (code !== '') setProblem('pinFailed');
-        else setProblem('failed');
-      }
-    },
-    [draft, finishUpdate],
-  );
-
   const publish = useCallback(async (): Promise<void> => {
-    // A draft opened from an event that already exists goes the other way entirely: no id to
-    // read out of a log, no duplicate to guard against, and `updateEventMeta` at the end.
-    if (draft.editingEventId !== '') {
-      await update(draft.editingEventId);
-      return;
-    }
-
-    // The event this draft already made. Recorded before anything that can fail, so from here
-    // on there is no path that sends a second `createEvent` — pressing the button again only
+    // The event this draft already published. Recorded before anything that can fail, so from
+    // here on there is no path that sends a second publish — pressing the button again only
     // tries the two writes that are still missing.
     if (draft.createdEventId !== '') {
       setProblem('');
@@ -396,10 +292,10 @@ export function usePublish(
       return;
     }
 
-    // A `createEvent` this draft already broadcast but has not seen settle: the relayer answered
-    // `sent`, the relay id was written to the draft, and then the page closed (or the wait dropped).
-    // The first question is always what became of that submission — never "send it again", because
-    // a second `createEvent` is a second event. Following the relay document is the whole of it.
+    // A publish this draft already broadcast but has not seen settle: the relayer answered `sent`,
+    // the relay id was written to the draft, and then the page closed (or the wait dropped). The
+    // first question is always what became of that submission — never "send it again", because a
+    // second publish is a second event. Following the relay document is the whole of it.
     if (draft.submittedRelayId !== '') {
       setProblem('');
       setPhase('confirming');
@@ -417,7 +313,7 @@ export function usePublish(
       } catch (cause) {
         // The relayer settled it as `failed` — `followRelay` rejects with a `CallableError`
         // carrying the forwarder code or the bubbled `Ticket` error name. The submission is spent,
-        // so drop the record and surface the rule, letting a fresh 만들기 send again.
+        // so drop the record and surface the rule, letting a fresh 공개하기 send again.
         if (cause instanceof CallableError) {
           setPhase('idle');
           setProblem(relayProblem(cause, REVERT_PROBLEMS) ?? 'failed');
@@ -432,8 +328,9 @@ export function usePublish(
       return;
     }
 
-    // The scene says which field; this is the guard that stops a draft that changed underneath.
-    if (eventProblems(draft).length > 0 || tierProblems(draft).length > 0) {
+    // The screen says what is held; this is the guard that stops a draft that changed underneath.
+    const env = currentPublishEnv();
+    if (publishView(draft, env).blocker !== '') {
       setPhase('idle');
       return;
     }
@@ -467,30 +364,32 @@ export function usePublish(
       }
       const { metadataCid } = await api.pinEventMetadata({ orgId, meta: toPinnedMeta({ ...draft, posterCid }) });
       setPhase('sending');
-      const chainDraft = toChainDraft({ ...draft, orgId }, Math.floor(Date.now() / 1_000));
-      // `createEvent` as one relayed `MontiForwarder.execute`. `sendAction` follows the relay
+      const chainDraft = toChainDraft({ ...draft, orgId }, env.now);
+      const call = encodePublishCall({
+        meta: buildEventMeta(chainDraft, metadataCid),
+        tiers: buildTiers(chainDraft),
+        ...publishSplit(draft, env.platformAccount ?? ''),
+      });
+      // The publish as one relayed `MontiForwarder.execute`. `sendAction` follows the relay
       // document to a settled answer and hands back `result.eventId`. `onSent` fires the moment the
       // relayer broadcasts (`sent`) but has not yet mined: the relay id is written to the draft
       // **before** the wait, so a page that closes here reopens onto `followRelay` rather than a
-      // second `createEvent`, and the confirming wait is shown meanwhile.
+      // second publish, and the confirming wait is shown meanwhile.
       const result = await sendAction(
-        'createEvent',
+        call.kind,
         'ticket',
-        encodeFunctionData({
-          abi: ticketAbi,
-          functionName: 'createEvent',
-          args: [buildEventMeta(chainDraft, metadataCid), buildTiers(chainDraft)],
-        }),
+        call.data,
         (relayId) => {
           patch({ submittedRelayId: relayId });
           void save().catch(() => undefined);
           setPhase('confirming');
         },
+        { reasons: call.reasons },
       );
       const eventId = result?.eventId ?? '';
       // The id is recorded before anything that could still fail, and the in-flight relay id is
       // cleared with it: from here every route back into `publish()` goes to the follow-ups
-      // (`createdEventId`) and never to a second `createEvent`.
+      // (`createdEventId`) and never to a second publish.
       patch({ createdEventId: eventId, submittedRelayId: '' });
       await save().catch(() => undefined);
       if (eventId === '') {
@@ -509,7 +408,7 @@ export function usePublish(
         return;
       }
       setPhase('idle');
-      // A relayed `createEvent` refusal — the forwarder code or the bubbled `Ticket` error name,
+      // A relayed publish refusal — the forwarder code or the bubbled `Ticket` error name,
       // read off `details.code` and matched against the same rules the sponsored path decoded from
       // a four-byte selector.
       const named = relayProblem(cause, REVERT_PROBLEMS);
@@ -527,7 +426,7 @@ export function usePublish(
       else if (code !== '') setProblem('pinFailed');
       else setProblem('failed');
     }
-  }, [draft, finish, patch, resolveOrg, save, update]);
+  }, [draft, finish, patch, resolveOrg, save]);
 
   // Sentences are the scene's business: this hook hands back the *name* of the rule, so the
   // same failure reads the same whichever screen ends up showing it.

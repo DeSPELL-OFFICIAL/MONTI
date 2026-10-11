@@ -197,40 +197,17 @@ describe('opening the scene', () => {
     expect(view.result.current.resumedAt).toBe(1_700_000_000_000);
   });
 
-  /**
-   * T-EV-W12. `/org/new` starts a creation; an abandoned edit draft belongs to the event it
-   * was opened from, and resuming it there would put 만들기 in front of somebody else's event
-   * and then send `updateEventMeta` to it.
-   */
-  it('never carries on with an abandoned edit draft at the create entry point', async () => {
-    store = [
-      { id: 'edit-7', updatedAt: 2_000, data: { title: '고치던 행사', editingEventId: '7' } },
-      { id: 'mine', updatedAt: 1_000, data: { title: '내 초안' } },
-    ];
-    const view = await openDraft();
-
-    expect(view.result.current.draftId).toBe('mine');
-    expect(view.result.current.draft.title).toBe('내 초안');
-
-    // Nor from the device copy, which is the other way the newest draft comes back.
-    localStorage.setItem(EVENT_DRAFT_KEY, JSON.stringify({
-      id: 'edit-7', draft: { title: '고치던 행사', editingEventId: '7' },
-    }));
-    store = [];
-    listEventDrafts.mockRejectedValue(new Error('offline'));
-    const fresh = await openDraft();
-    expect(fresh.result.current.draft.editingEventId).toBe('');
-    expect(fresh.result.current.draftId).not.toBe('edit-7');
-  });
-
-  it('opens an edit draft by name, because the address asked for that one', async () => {
-    store = [{ id: 'edit-7', updatedAt: 2_000, data: { title: '고치던 행사', editingEventId: '7' } }];
-    const view = renderHook(() => useEventDraft('', 'edit-7'));
+  /** v2: the split rules live in the draft until publish, and come back on the publish screen. */
+  it('stores the split rules on the draft and reads them back by name', async () => {
+    const view = renderHook(() => useEventDraft('', 'd-1'));
     await advance(0);
-    await advance(0);
+    const splitJson = JSON.stringify([{ name: '밴드', account: `0x${'1'.repeat(40)}`, bps: 9500, tag: 'band', platform: false }]);
+    act(() => view.result.current.patch({ splitJson }));
+    await advance(DRAFT_DEBOUNCE_MS);
 
-    expect(view.result.current.draftId).toBe('edit-7');
-    expect(view.result.current.draft.editingEventId).toBe('7');
+    expect(saveEventDraft).toHaveBeenLastCalledWith('d-1', expect.objectContaining({ splitJson }));
+    const reopened = renderHook(() => useEventDraft('', 'd-1'));
+    expect(reopened.result.current.draft.splitJson).toBe(splitJson);
   });
 
   it('starts empty when this account has no draft', async () => {
@@ -275,6 +252,19 @@ describe('opening the scene', () => {
       name: '일반', supply: 0, maxPerWallet: 0,
       currency: 'free', amount: 0, design: 'a', imageCid: '',
     });
+  });
+
+  it('keeps a dollar price and folds a retired currency back to free', () => {
+    const { tiers } = normalizeEventDraft({
+      tiers: [{ name: 'VIP', currency: 'USDC', amount: 30 }, { name: '옛', currency: 'MON', amount: 5 }],
+    });
+    expect(tiers.map((tier) => [tier.currency, tier.amount])).toEqual([['USDC', 30], ['free', 5]]);
+  });
+
+  it('drops a split past the rule cap rather than failing every autosave', () => {
+    expect(normalizeEventDraft({ splitJson: 'x'.repeat(4_001) }).splitJson).toBe('');
+    expect(normalizeEventDraft({ splitJson: '[]' }).splitJson).toBe('[]');
+    expect(normalizeEventDraft({ splitJson: 7 }).splitJson).toBe('');
   });
 });
 

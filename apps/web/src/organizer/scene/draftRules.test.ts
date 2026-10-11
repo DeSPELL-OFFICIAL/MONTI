@@ -4,7 +4,7 @@ import type { EventDraft } from '../../shared/api/firestore';
 import { TICKET_BACKDROPS } from '../../shared/ui/ticketArt/presets';
 import {
   DEFAULT_EVENT_SECONDS, MAX_TAGS, MAX_TIER_NAME_CHARS, TICKET_ART_PRESETS, endsAtOf,
-  eventProblems, normalizeTags, paidTiers, saleWindow, tierArt, tierProblems,
+  eventProblems, isPaidDraft, normalizeTags, priceUsdCentsOf, saleWindow, tierArt, tierProblems,
 } from './draftRules';
 
 /** A draft with nothing left to fix, so each case below can break exactly one rule. */
@@ -189,19 +189,32 @@ describe('tierProblems', () => {
   });
 });
 
-describe('paidTiers', () => {
+describe('paid kinds (v2: the price goes on chain at publish)', () => {
   const tier = { ...READY.tiers[0], name: '일반', supply: 10, maxPerWallet: 1 } as EventDraft['tiers'][number];
+  const paid = { ...tier, currency: 'USDC' as const, amount: 30 };
+
+  it('lets a priced kind through, and prices it in cents', () => {
+    const draft = { ...READY, tiers: [tier, paid] };
+    expect(tierProblems(draft)).toEqual([]);
+    expect(isPaidDraft(draft)).toBe(true);
+    expect(isPaidDraft({ ...READY, tiers: [tier] })).toBe(false);
+    expect(priceUsdCentsOf(paid)).toBe(3_000);
+    // A free kind is free whatever amount was typed while it was paid.
+    expect(priceUsdCentsOf({ ...tier, amount: 30 })).toBe(0);
+  });
+
+  it('refuses a paid kind with no whole-dollar price', () => {
+    expect(tierProblems({ ...READY, tiers: [{ ...paid, amount: 0 }] })).toEqual(['tierPrice']);
+    expect(tierProblems({ ...READY, tiers: [{ ...paid, amount: 2.5 }] })).toEqual(['tierPrice']);
+  });
 
   /**
-   * `Ticket.claim` reverts `PaidTiersNotEnabled` on any tier whose `priceUsdCents` is not
-   * zero, and `updateEventMeta` closes at publish — so a paid kind is an event nobody can
-   * ever get a ticket for and nobody can repair. The card is blocked where it was chosen.
+   * The approval path only ever issues price-0 tickets, so a paid event that also asks for
+   * approval is one nobody could get into — `publishEvent` reverts `PaidApprovalUnsupported`.
    */
-  it('names every card that cannot be created, by index', () => {
-    const draft = { ...READY, tiers: [tier, { ...tier, currency: 'USDC' as const }, tier] };
-    expect(paidTiers(draft)).toEqual([1]);
-    expect(tierProblems(draft)).toContain('paidTier');
-    expect(paidTiers({ ...READY, tiers: [tier] })).toEqual([]);
+  it('refuses a paid event that also asks for approval', () => {
+    expect(tierProblems({ ...READY, approvalRequired: true, tiers: [paid] })).toEqual(['paidApproval']);
+    expect(tierProblems({ ...READY, approvalRequired: true, tiers: [tier] })).toEqual([]);
   });
 });
 

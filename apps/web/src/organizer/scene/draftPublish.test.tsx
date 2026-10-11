@@ -59,15 +59,23 @@ type RelayResult = { eventId?: string } | undefined;
 const sendAction = vi.fn(
   async (
     _kind: string, _to: string, _data: Hex, _onSent?: (relayId: string) => void,
+    _extra?: { reasons?: string[] },
   ): Promise<RelayResult> => ({ eventId: '12' }),
 );
 const followRelay = vi.fn(async (_relayId: string): Promise<RelayResult> => ({ eventId: '12' }));
 vi.mock('../../shared/relay/sendAction', () => ({ sendAction, followRelay }));
 
 const TICKET = `0x${'33'.repeat(20)}` as const;
+const PLATFORM = `0x${'cc'.repeat(20)}` as const;
+/** Whether this build has the settlement wiring (vault + token + platform row account). */
+let settlementOn = false;
 vi.mock('../../shared/config', async (orig) => ({
   ...(await orig<typeof import('../../shared/config')>()),
-  getConfig: () => ({ addresses: { ticket: TICKET }, ipfsGateway: 'https://gw.test/' }),
+  getConfig: () => ({
+    addresses: { ticket: TICKET, ...(settlementOn ? { platform: PLATFORM } : {}) },
+    ipfsGateway: 'https://gw.test/',
+  }),
+  settlementEnabled: () => settlementOn,
 }));
 
 // The default-poster rasteriser needs a canvas jsdom does not have, so it is stubbed to raw
@@ -78,6 +86,7 @@ vi.mock('./autoPoster', () => ({
 }));
 
 const { CreateEvent } = await import('./CreateEvent');
+const { DraftPublish } = await import('./DraftPublish');
 const { emptyEventDraft, emptyEventDraftTier } = await import('../useEventDraft');
 const { organizerCopy } = await import('../copy');
 const copy = organizerCopy.ko.scene;
@@ -132,18 +141,22 @@ const READY: EventDraft = {
 function open(draft: EventDraft = READY, id = 'd-42'): void {
   store = [{ id, updatedAt: 1_000, data: draft }];
   render(
-    <MemoryRouter initialEntries={[`/org/new/${id}`]}>
+    <MemoryRouter initialEntries={[`/org/new/${id}/publish`]}>
       <Routes>
-        <Route path="/org/new/:draftId" element={<CreateEvent />} />
+        <Route path="/org/new/:draftId/publish" element={<DraftPublish />} />
         <Route path="*" element={<Probe />} />
       </Routes>
     </MemoryRouter>,
   );
 }
 
+/** 공개하기 on the publish screen, and — when the confirm sheet opens — 네, 공개할게요. */
 async function create(): Promise<void> {
-  await waitFor(() => expect(screen.getAllByLabelText(copy.tiers.name)[0]).toHaveValue('일반'));
-  await userEvent.setup().click(screen.getByRole('button', { name: copy.tiers.create }));
+  const user = userEvent.setup();
+  await screen.findByRole('heading', { name: READY.title.trim() });
+  await user.click(screen.getByRole('button', { name: copy.publishScreen.publish }));
+  const confirm = screen.queryByRole('button', { name: copy.publishScreen.confirm });
+  if (confirm !== null) await user.click(confirm);
 }
 
 beforeAll(() => {
@@ -155,6 +168,7 @@ beforeEach(() => {
   localStorage.clear();
   store = [];
   handed = null;
+  settlementOn = false;
   sendAction.mockResolvedValue({ eventId: '12' });
   followRelay.mockResolvedValue({ eventId: '12' });
   pinEventMetadata.mockResolvedValue({ metadataCid: 'bafyMeta' });
@@ -187,7 +201,7 @@ describe('the publish path', () => {
     // 2. one relayed `createEvent`, built by the one helper that owns the hashing and handed to
     //    `sendAction('createEvent', 'ticket', <calldata>, onSent)`.
     expect(sendAction).toHaveBeenCalledWith(
-      'createEvent', 'ticket', expect.any(String), expect.any(Function),
+      'createEvent', 'ticket', expect.any(String), expect.any(Function), { reasons: undefined },
     );
     const { meta, tiers } = createArgs();
     // The org id no longer rides beside the call — it is a field of the encoded `EventMeta`.
@@ -348,8 +362,8 @@ describe('when it does not land', () => {
       expect(written?.submittedRelayId).toBe('relay-1');
     });
 
-    // Pressing again follows the same relay document rather than sending a second createEvent.
-    await user.click(screen.getByRole('button', { name: copy.tiers.create }));
+    // Pressing again follows the same relay document rather than sending a second publish.
+    await user.click(screen.getByRole('button', { name: copy.publishScreen.publish }));
     await waitFor(() => expect(followRelay).toHaveBeenCalledWith('relay-1'));
     expect(sendAction).toHaveBeenCalledTimes(1);
   });
@@ -399,8 +413,9 @@ describe('when it does not land', () => {
     expect(await screen.findByText(copy.publishProblems.failed)).toBeInTheDocument();
     expect(sendAction).not.toHaveBeenCalled();
 
-    // The relay id is gone, so pressing again sends a fresh createEvent and finishes.
-    await user.click(screen.getByRole('button', { name: copy.tiers.create }));
+    // The relay id is gone, so pressing again (and confirming) sends a fresh publish and finishes.
+    await user.click(screen.getByRole('button', { name: copy.publishScreen.publish }));
+    await user.click(screen.getByRole('button', { name: copy.publishScreen.confirm }));
     await waitFor(() => expect(screen.getByText('landed:/org/new/done/12')).toBeInTheDocument());
     expect(sendAction).toHaveBeenCalledTimes(1);
     expect(followRelay).toHaveBeenCalledTimes(1);
@@ -500,30 +515,40 @@ function openFresh(): void {
       <Routes>
         <Route path="/org/new" element={<CreateEvent />} />
         <Route path="/org/new/:draftId" element={<CreateEvent />} />
+        <Route path="/org/new/:draftId/publish" element={<DraftPublish />} />
         <Route path="*" element={<Probe />} />
       </Routes>
     </MemoryRouter>,
   );
 }
 
+/** Title, 다음, 공개하기, and the confirm — nothing on chain until the last one. */
+async function minimumPublish(user: ReturnType<typeof userEvent.setup>): Promise<number> {
+  let actions = 0;
+  await user.type(screen.getByLabelText(copy.titleLabel), '동아리 공연'); actions += 1;
+  await user.click(screen.getByRole('button', { name: copy.tiers.next })); actions += 1;
+  expect(sendAction).not.toHaveBeenCalled();
+  await user.click(await screen.findByRole('button', { name: copy.publishScreen.publish })); actions += 1;
+  await user.click(screen.getByRole('button', { name: copy.publishScreen.confirm })); actions += 1;
+  return actions;
+}
+
 describe('the minimum event', () => {
-  it('reaches a published event in two actions (title + 행사 만들기)', async () => {
+  it('reaches a published event in four taps (title, 다음, 공개하기, confirm)', async () => {
     // One team already exists, so no organiser-name tap is needed either.
     orgsListed.mockReturnValue([{ orgId: '9', canCreateEvent: true }]);
     const user = userEvent.setup();
     openFresh();
     await waitFor(() => expect(screen.getByLabelText(copy.titleLabel)).toBeInTheDocument());
 
-    // Count each field entry and the button press as one user action.
-    let actions = 0;
-    await user.type(screen.getByLabelText(copy.titleLabel), '동아리 공연'); actions += 1;
-    await user.click(screen.getByRole('button', { name: copy.tiers.create })); actions += 1;
+    const actions = await minimumPublish(user);
 
     await waitFor(() => expect(screen.getByText('landed:/org/new/done/12')).toBeInTheDocument());
     // The default poster was synthesised and pinned — no poster upload tap was ever needed.
     expect(pinEventImage).toHaveBeenCalledWith({ bytesBase64: 'AUTO64', kind: 'poster' });
-    // Measured minimum for the P1 form: 2 actions (title, 행사 만들기). 장소는 이제 선택이다.
-    expect(actions).toBe(2);
+    // v2 minimum: the publish screen and its irreversible-confirm sheet are part of the flow.
+    expect(actions).toBe(4);
+    expect(sendAction).toHaveBeenCalledTimes(1);
   });
 
   /**
@@ -536,11 +561,98 @@ describe('the minimum event', () => {
     openFresh();
     await waitFor(() => expect(screen.getByLabelText(copy.titleLabel)).toBeInTheDocument());
 
-    await user.type(screen.getByLabelText(copy.titleLabel), '동아리 공연');
-    await user.click(screen.getByRole('button', { name: copy.tiers.create }));
+    await minimumPublish(user);
 
     await waitFor(() => expect(screen.getByText('landed:/org/new/done/12')).toBeInTheDocument());
     const pinned = pinEventMetadata.mock.calls.at(-1)?.[0];
     expect(pinned?.meta).toMatchObject({ venue: '', venueHidden: false });
+  });
+});
+
+/** v2: draft → 정산 규칙 → 공개. The split lives in the draft until the one publish write. */
+describe('the publish screen', () => {
+  const BAND = `0x${'a1'.repeat(20)}`;
+  const PAID: EventDraft = {
+    ...READY,
+    tiers: [{ ...emptyEventDraftTier, name: 'VIP', supply: 10, maxPerWallet: 1, currency: 'USDC', amount: 30 }],
+  };
+  const split = (bandBps: number, platformBps = 500): string => JSON.stringify([
+    { name: '밴드', account: BAND, bps: bandBps, tag: 'band', platform: false },
+    { name: 'MONTI 플랫폼', account: PLATFORM, bps: platformBps, tag: 'platform', platform: true },
+  ]);
+  const publishButton = () => screen.getByRole('button', { name: copy.publishScreen.publish });
+
+  it('shows no split rules card for a free event', async () => {
+    open();
+    await screen.findByRole('heading', { name: '재즈 나이트' });
+    expect(screen.queryByText(copy.publishScreen.splitIntro)).toBeNull();
+    expect(publishButton()).toBeEnabled();
+  });
+
+  it('holds 공개하기 on a paid event until the split adds up to 100%', async () => {
+    settlementOn = true;
+    open({ ...PAID, splitJson: split(9_000) });
+    await screen.findByText(copy.publishScreen.splitIntro);
+    expect(await screen.findByText(organizerCopy.ko.settlement.errors.badSum)).toBeInTheDocument();
+    expect(publishButton()).toBeDisabled();
+  });
+
+  it('saves the edited split into the draft, and lets the event publish once it is valid', async () => {
+    settlementOn = true;
+    const user = userEvent.setup();
+    open({ ...PAID, splitJson: split(9_000) });
+    await screen.findByText(copy.publishScreen.splitIntro);
+    const [bandPercent] = await screen.findAllByLabelText(organizerCopy.ko.settlement.percentLabel);
+    await user.clear(bandPercent as HTMLElement);
+    await user.type(bandPercent as HTMLElement, '95');
+    expect(publishButton()).toBeEnabled();
+    // The draft's device mirror is written on every change (Firestore follows on the debounce).
+    const mirror = JSON.parse(localStorage.getItem('monti.eventDraft') ?? '{}') as { draft?: EventDraft };
+    expect(JSON.parse(mirror.draft?.splitJson ?? '[]')).toEqual(JSON.parse(split(9_500)));
+  });
+
+  it('confirms what goes public — title, priced tickets, split rules — before sending anything', async () => {
+    settlementOn = true;
+    const user = userEvent.setup();
+    open({ ...PAID, splitJson: split(9_500) });
+    await screen.findByText(copy.publishScreen.splitIntro);
+    await user.click(publishButton());
+
+    const sheet = screen.getByRole('dialog', { name: copy.publishScreen.confirmHeading });
+    expect(sheet).toHaveTextContent('VIP · $30.00');
+    expect(sheet).toHaveTextContent('밴드 · 95%');
+    expect(sheet).toHaveTextContent('MONTI 플랫폼 · 5%');
+    expect(sheet).toHaveTextContent(copy.publishScreen.confirmBody);
+    expect(sendAction).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: copy.publishScreen.cancel }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(sendAction).not.toHaveBeenCalled();
+  });
+
+  it('publishes a paid event in one write carrying the prices and one reason per recipient', async () => {
+    settlementOn = true;
+    open({ ...PAID, splitJson: split(9_500) });
+    await create();
+    await waitFor(() => expect(screen.getByText('landed:/org/new/done/12')).toBeInTheDocument());
+    expect(sendAction).toHaveBeenCalledTimes(1);
+    expect(sendAction.mock.calls[0]?.[4]).toEqual({ reasons: ['밴드', 'MONTI 플랫폼'] });
+    expect(createArgs().tiers).toEqual([
+      { name: 'VIP', priceUsdCents: 3_000n, supply: 10, minted: 0, maxPerWallet: 1, seated: false },
+    ]);
+  });
+
+  it('says a paid event cannot publish where settlement is not set up', async () => {
+    open({ ...PAID, splitJson: split(9_500) });
+    await screen.findByRole('heading', { name: '재즈 나이트' });
+    expect(screen.getByText(copy.publishScreen.blockers.settlementOff)).toBeInTheDocument();
+    expect(publishButton()).toBeDisabled();
+  });
+
+  it('sends a draft with a broken creation rule back to 내용 고치기', async () => {
+    open({ ...READY, tiers: [{ ...emptyEventDraftTier, name: '' }] });
+    await screen.findByText(copy.publishScreen.blockers.draft);
+    expect(publishButton()).toBeDisabled();
+    expect(screen.getByRole('link', { name: copy.publishScreen.back })).toHaveAttribute('href', '/org/new/d-42');
   });
 });

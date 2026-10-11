@@ -1,36 +1,20 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import type { AttendeeRow } from '@monti/shared';
-import { Alert, Button, Screen, Sheet, Spinner } from '../shared/ui';
-import { fmt, useLocale } from '../shared/i18n';
+import { Alert, Button, Screen, Spinner } from '../shared/ui';
 import { api } from '../shared/api/functions';
-import { readTicket } from '../shared/chain/reads';
 import { gql } from '../shared/envio/client';
 import { EVENT_QUERY, type EnvioEvent, type EnvioTier } from '../shared/envio/queries';
-import { fetchEventMetadata, type EventMetadata } from '../shared/envio/ipfs';
+import { fetchEventMetadata } from '../shared/envio/ipfs';
 import { useEventRequests } from '../shared/envio/claimRequests';
 import { Announce } from './Announce';
 import { SettlementSection } from './settlement/SettlementSection';
 import { useOrganizerCopy } from './copy';
 import { EventArt } from './EventArt';
-import { cancelEvent, publishEvent, type LifecycleResult } from './lifecycle';
+import { cancelEvent, type LifecycleResult } from './lifecycle';
 import { createdDraftFor } from './useEventDraft';
 import { useEventStatusWithFallback } from './useEventStatusWithFallback';
 import { useEventTiersWithFallback } from './useEventTiersWithFallback';
-import { KR_REGIONS } from './scene/regions';
-
-/** Which confirmation is open, if any. Neither write happens without one. */
-type Pending = '' | 'publish' | 'cancel';
-
-/**
- * The result of a lifecycle write, with the write that produced it.
- *
- * `which` is what the confirmation sentence is chosen from, never the event's `status`: the
- * refetch that follows a write races the indexer's own `EventStatusChanged`, so for the
- * seconds it is behind, `status` still says what the event *was* — and an organiser who just
- * cancelled would read 발행했어요. The action that ran is not in doubt.
- */
-type Outcome = LifecycleResult & { which: Exclude<Pending, ''> };
 
 /**
  * One event, from the indexer. Every number on this screen is a chain fact the indexer already
@@ -44,28 +28,25 @@ export function Dashboard() {
   const copy = useOrganizerCopy();
   const dash = copy.dashboard;
   const life = copy.lifecycle;
-  const locale = useLocale();
   // The pending count beside the 신청 관리 link. Only an approvalRequired event has any, so an
   // ordinary event's empty answer (or an indexer that has not caught up) simply hides the count.
   const { requests: pendingRequests } = useEventRequests(eventId, 'Pending');
-  // The status the 발행/취소 actions gate on, from the indexer when it has the row and from the
-  // chain while it lags — so a just-created event offers 발행 before the indexer has caught up.
+  // The status 취소 gates on, from the indexer when it has the row and from the chain while it
+  // lags — so a just-published event can be cancelled before the indexer has caught up.
   const chainStatus = useEventStatusWithFallback(eventId);
 
   const [event, setEvent] = useState<EnvioEvent | null>(null);
   const [indexerTiers, setIndexerTiers] = useState<EnvioTier[]>([]);
   const [attendees, setAttendees] = useState<AttendeeRow[]>([]);
   const [title, setTitle] = useState('');
-  // The full metadata, kept for the publish summary sheet — venue, region and the two hide flags
-  // that decide what a summary may show before the event goes public (plan §2b).
-  const [meta, setMeta] = useState<EventMetadata | null>(null);
   // The metadata read has answered (either way) — until then a missing title is "loading", not
   // "unnamed".
   const [metaSettled, setMetaSettled] = useState(false);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
-  const [pending, setPending] = useState<Pending>('');
-  const [outcome, setOutcome] = useState<Outcome | null>(null);
+  // The cancel confirmation; nothing is sent without it.
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
+  const [outcome, setOutcome] = useState<LifecycleResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [reload, setReload] = useState(0);
 
@@ -103,10 +84,7 @@ export function Dashboard() {
     setMetaSettled(false);
     void fetchEventMetadata(imageCid)
       .then((loaded) => {
-        if (!cancelled) {
-          setMeta(loaded);
-          setTitle(loaded.title);
-        }
+        if (!cancelled) setTitle(loaded.title);
       })
       .catch(() => undefined)
       .finally(() => {
@@ -123,29 +101,16 @@ export function Dashboard() {
   // can be confirmed; the indexer's (richer) rows take over the moment they arrive.
   const { tiers } = useEventTiersWithFallback(eventId, loading ? undefined : indexerTiers);
 
-  async function run(which: Exclude<Pending, ''>): Promise<void> {
+  async function cancel(): Promise<void> {
     setBusy(true);
     setOutcome(null);
-    // The organisation is read off the chain, not the indexer, so a lagging indexer cannot feed
-    // a stale org into the write.
-    const orgId = await readTicket()
-      .eventOrg(BigInt(eventId))
-      .catch(() => null);
-    if (orgId === null || orgId === 0n) {
-      setOutcome({ state: 'refused', problem: 'failed', which });
-      setBusy(false);
-      setPending('');
-      return;
-    }
-    const result =
-      which === 'publish' ? await publishEvent(BigInt(eventId), orgId) : await cancelEvent(BigInt(eventId), orgId);
-    setOutcome({ ...result, which });
+    const result = await cancelEvent(BigInt(eventId));
+    setOutcome(result);
     setBusy(false);
-    setPending('');
+    setConfirmingCancel(false);
     if (result.state === 'done') {
       setReload((count) => count + 1);
-      // The chain has moved; re-read it so the actions reflect the new status even while the
-      // indexer is still behind (otherwise a just-published event still offers 발행).
+      // The chain has moved; re-read it so 취소 disappears even while the indexer is behind.
       chainStatus.refetch();
     }
   }
@@ -170,19 +135,6 @@ export function Dashboard() {
   const titleLoading = loading || (imageCid !== '' && !metaSettled);
   const shownTitle = title || draftFallback?.title || (titleLoading ? dash.art.titleLoading : dash.art.untitled);
 
-  // The publish summary, best-effort from what the indexer and the gateway gave. It is the
-  // organiser's own view, so it shows the full start time; place follows the hide flag — the
-  // region alone when the venue is for ticket holders (plan §2b).
-  const startsAtMs = Number(event?.startsAt ?? draftFallback?.startsAt ?? 0) * 1000;
-  const publishDate = Number.isFinite(startsAtMs) && startsAtMs > 0
-    ? new Date(startsAtMs).toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' })
-    : '';
-  const region = KR_REGIONS.find((entry) => entry.code === meta?.region);
-  const regionLabel = region ? (locale === 'en' ? region.labelEn : region.labelKo) : (meta?.region ?? '');
-  const publishPlace = meta?.venueHidden
-    ? fmt(life.summary.placeRegionOnly, { region: regionLabel })
-    : (meta?.venue || regionLabel);
-
   return (
     <Screen title={dash.title}>
       {failed ? <Alert tone="error">{dash.failed}</Alert> : null}
@@ -195,53 +147,8 @@ export function Dashboard() {
 
       {outcome?.state === 'refused' ? <Alert tone="error">{life[outcome.problem]}</Alert> : null}
       {/* The sentence comes from the write that ran, not from an indexer that may be behind. */}
-      {outcome?.state === 'done' ? (
-        <Alert tone="info">{outcome.which === 'cancel' ? life.cancelled : life.published}</Alert>
-      ) : null}
+      {outcome?.state === 'done' ? <Alert tone="info">{life.cancelled}</Alert> : null}
       {busy ? <Alert tone="info">{life.working}</Alert> : null}
-
-      {pending === '' ? (
-        <>
-          {/* Editing closes the moment the event is published — `updateEventMeta` reverts
-              `NotDraft` (`Ticket.sol:235`) — so the way in is offered only while it is open. */}
-          {status === 'Draft' ? (
-            <p>
-              <Link to={`/org/events/${eventId}/edit`}>{dash.edit}</Link>
-            </p>
-          ) : null}
-          {status === 'Draft' ? <Button onClick={() => setPending('publish')}>{life.publish}</Button> : null}
-        </>
-      ) : pending === 'publish' ? (
-        // 발행 요약 시트: 무엇을 공개하는지 먼저 보여주고, 그 뒤에 되돌릴 수 없다는 확인(계획 §2b).
-        <Sheet label={life.summary.heading}>
-          <h2>{life.summary.heading}</h2>
-          <dl className="publish-summary">
-            <div>
-              <dt>{life.summary.title}</dt>
-              <dd>{shownTitle}</dd>
-            </div>
-            <div>
-              <dt>{life.summary.date}</dt>
-              <dd>{publishDate}</dd>
-            </div>
-            <div>
-              <dt>{life.summary.place}</dt>
-              <dd>{publishPlace}</dd>
-            </div>
-            <div>
-              <dt>{life.summary.tiers}</dt>
-              <dd>{fmt(life.summary.tiersValue, { count: tiers.length })}</dd>
-            </div>
-            <div>
-              <dt>{life.summary.kyc}</dt>
-              <dd>{event?.requireKyc ? life.summary.kycOn : life.summary.kycOff}</dd>
-            </div>
-          </dl>
-          <p>{life.publishConfirm}</p>
-          <Button disabled={busy} onClick={() => void run('publish')}>{life.confirm}</Button>
-          <Button variant="ghost" disabled={busy} onClick={() => setPending('')}>{life.back}</Button>
-        </Sheet>
-      ) : null}
 
       <table>
         <tbody>
@@ -304,19 +211,19 @@ export function Dashboard() {
       ) : null}
 
       {/* 행사 취소 is the one irreversible write here, so it sits at the very foot as a quiet
-          button, away from 공개하기, and asks before it sends anything. */}
-      {pending === '' && (status === 'Draft' || status === 'Published') ? (
-        <Button variant="ghost" onClick={() => setPending('cancel')}>
+          button, and asks before it sends anything. */}
+      {!confirmingCancel && status === 'Published' ? (
+        <Button variant="ghost" onClick={() => setConfirmingCancel(true)}>
           {life.cancel}
         </Button>
       ) : null}
-      {pending === 'cancel' ? (
+      {confirmingCancel ? (
         <Alert tone="warn">
           {life.cancelConfirm}
-          <Button variant="danger" disabled={busy} onClick={() => void run('cancel')}>
+          <Button variant="danger" disabled={busy} onClick={() => void cancel()}>
             {life.confirm}
           </Button>
-          <Button variant="ghost" disabled={busy} onClick={() => setPending('')}>
+          <Button variant="ghost" disabled={busy} onClick={() => setConfirmingCancel(false)}>
             {life.back}
           </Button>
         </Alert>

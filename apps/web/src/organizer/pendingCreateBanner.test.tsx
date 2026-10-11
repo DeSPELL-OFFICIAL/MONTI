@@ -73,10 +73,9 @@ describe('the home pending-create banner', () => {
     expect(watchRelay).not.toHaveBeenCalled();
   });
 
-  it('ignores a draft that already has an event id, or is an edit', async () => {
+  it('ignores a draft that already has an event id', async () => {
     store = [
       { id: 'd-done', updatedAt: 2, data: { ...WAITING, createdEventId: '5' } },
-      { id: 'd-edit', updatedAt: 1, data: { ...WAITING, editingEventId: '7' } },
     ];
     open();
     await waitFor(() => expect(listEventDrafts).toHaveBeenCalled());
@@ -89,7 +88,7 @@ describe('the home pending-create banner', () => {
     open();
     expect(await screen.findByText(copy.pendingCreate)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: copy.pendingCreateOpen }))
-      .toHaveAttribute('href', '/org/new/d-1');
+      .toHaveAttribute('href', '/org/new/d-1/publish');
     await waitFor(() => expect(watchRelay)
       .toHaveBeenCalledWith(RELAY_ID, expect.any(Function), expect.any(Function)));
     expect(navigate).not.toHaveBeenCalled();
@@ -118,7 +117,7 @@ describe('the home pending-create banner', () => {
     open();
     expect(await screen.findByText(copy.pendingCreateFailed)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: copy.pendingCreateOpen }))
-      .toHaveAttribute('href', '/org/new/d-1');
+      .toHaveAttribute('href', '/org/new/d-1/publish');
     expect(navigate).not.toHaveBeenCalled();
   });
 
@@ -126,7 +125,7 @@ describe('the home pending-create banner', () => {
     store = [{ id: 'd-1', updatedAt: 1, data: WAITING }];
     relayView = { status: 'confirmed', result: {} };
     open();
-    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/org/new/d-1'));
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/org/new/d-1/publish'));
     expect(saveEventArt).not.toHaveBeenCalled();
   });
 });

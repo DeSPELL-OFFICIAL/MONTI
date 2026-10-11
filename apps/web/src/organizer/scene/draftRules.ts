@@ -38,7 +38,7 @@ export const PROBLEM_SECTION: Readonly<Record<EventProblem, string>> = {
 /**
  * The tag rule, run here before the tags are sent because the server runs exactly this one and
  * then **refuses the whole request** rather than quietly dropping a bad tag (`BAD_TAGS`): IPFS
- * cannot be re-pinned and `updateEventMeta` closes at publish, so an organiser's tags and an
+ * cannot be re-pinned and a published event is never edited, so an organiser's tags and an
  * attendee's tags must never be allowed to set differently.
  *
  * trim → drop a leading `#` → drop the empties and the duplicates → keep the first five.
@@ -123,7 +123,7 @@ export function eventProblems(
   else if (isTimestamp(draft.startsAt) && draft.startsAt >= endsAt) problems.push('schedule');
   // A draft written days ago and published today. Nothing on the screen is wrong and nothing
   // the organiser typed has changed, but `saleWindow` derives 지금 -> `endsAt`, so the window
-  // runs backwards and `Ticket.createEvent` reverts `InvalidSchedule()` — during the *estimate*,
+  // runs backwards and `Ticket.publishEvent` reverts `InvalidSchedule()` — during the *estimate*,
   // where there is no receipt and no `OpReverted` to name it. That is exactly the failure the
   // founder hit (task-create-failure-2 report §0): a correct-looking screen and the most
   // generic sentence the app has. It is a rule now, said before anything is sent.
@@ -134,7 +134,7 @@ export function eventProblems(
 
 /**
  * The sign-up window, derived rather than asked for (plan section B-1): it opens the moment the
- * event is made and closes when the event ends. `Ticket.createEvent` only asks that
+ * event is published and closes when the event ends. `Ticket.publishEvent` only asks that
  * `saleStart < saleEnd`, and `endsAt` is already past `startsAt` by the rule above, so a window
  * derived this way is always one the contract accepts — which is why the two date fields the
  * deleted wizard asked for are gone.
@@ -143,7 +143,7 @@ export function saleWindow(draft: EventDraft, now: number): { saleStart: number;
   return { saleStart: now, saleEnd: endsAtOf(draft) };
 }
 
-/** `Ticket.createEvent` refuses more than eight kinds with `InvalidTiers` (`Ticket.sol:193`). */
+/** `Ticket.publishEvent` refuses more than eight kinds with `InvalidTiers` (`Ticket.sol:193`). */
 export const MAX_TIERS = 8;
 
 /**
@@ -176,17 +176,28 @@ export const PAID_CURRENCY = 'USDC' as const;
 /** One named rule of SCENE 2; `organizer/copy.ts` owns a sentence for each. */
 export type TierProblem =
   | 'tiersTooMany' | 'tierName' | 'tierNameTooLong' | 'tierSupply' | 'tierMaxPerWallet'
-  | 'cutoff' | 'paidTier';
+  | 'tierPrice' | 'cutoff' | 'paidApproval';
+
+const CENTS_PER_DOLLAR = 100;
+/** Keeps `amount × 100` an exact integer; `priceUsdCents` itself is a `uint256`. */
+const MAX_PRICE_DOLLARS = Math.floor(Number.MAX_SAFE_INTEGER / CENTS_PER_DOLLAR);
+
+function isPaid(tier: EventDraftTier): boolean {
+  return tier.currency !== 'free';
+}
 
 /**
- * Which ticket kinds cannot be created, by index. Today that is every kind whose currency is
- * not `무료`: `Ticket.claim` is not `payable` and reverts `PaidTiersNotEnabled` on any tier
- * whose `priceUsdCents` is not zero (`Ticket.sol:274`), so a paid kind is a kind nobody could
- * ever get a ticket for — and after `publishEvent` there is no `updateEventMeta` to fix it
- * with. The card says so where the choice was made rather than at the end (plan section B-3).
+ * The on-chain `Tier.priceUsdCents` of a kind: whole dollars × 100, and 0 for a free kind
+ * whatever amount was typed while it was paid. v2 makes this the price of record — the vault's
+ * `purchase` charges exactly it, so there is no second copy of the price to disagree with.
  */
-export function paidTiers(draft: EventDraft): number[] {
-  return draft.tiers.flatMap((tier, index) => (tier.currency === 'free' ? [] : [index]));
+export function priceUsdCentsOf(tier: EventDraftTier): number {
+  return isPaid(tier) ? tier.amount * CENTS_PER_DOLLAR : 0;
+}
+
+/** A draft with any paid kind — the one kind of event that needs split rules to publish. */
+export function isPaidDraft(draft: EventDraft): boolean {
+  return draft.tiers.some(isPaid);
 }
 
 function isWholeNumber(value: number, low: number, high: number): boolean {
@@ -205,10 +216,16 @@ export function tierProblems(draft: EventDraft): TierProblem[] {
   if (draft.tiers.some((tier) => !isWholeNumber(tier.maxPerWallet, 1, UINT16_MAX))) {
     problems.push('tierMaxPerWallet');
   }
+  // A paid kind needs a whole-dollar price of at least $1; 0 would publish a "paid" kind free.
+  if (draft.tiers.some((tier) => isPaid(tier) && !isWholeNumber(tier.amount, 1, MAX_PRICE_DOLLARS))) {
+    problems.push('tierPrice');
+  }
   if (!isWholeNumber(draft.transferCutoffHours * SECONDS_PER_HOUR, 0, UINT32_MAX)) {
     problems.push('cutoff');
   }
-  if (paidTiers(draft).length > 0) problems.push('paidTier');
+  // The approval path only issues price-0 tickets, so `publishEvent` reverts
+  // `PaidApprovalUnsupported` on a paid event that also asks for approval.
+  if (draft.approvalRequired && isPaidDraft(draft)) problems.push('paidApproval');
   return problems;
 }
 

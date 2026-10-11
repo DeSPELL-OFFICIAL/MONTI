@@ -2,12 +2,13 @@ import { keccak256, toBytes } from 'viem';
 import type { EventMetaStruct, TierStruct } from '../../shared/chain/reads';
 
 /**
- * One ticket kind as the chain takes it. There is no price: `Ticket.claim` reverts
- * `PaidTiersNotEnabled` on any tier whose `priceUsdCents` is not zero, so an event with a paid
- * tier is one nobody could ever get a ticket for. `buildTiers` writes the zero.
+ * One ticket kind as the chain takes it. `priceUsdCents` is the price of record in v2: free
+ * kinds are claimed (`claimFor`, price 0), paid ones are bought through the vault's `purchase`,
+ * which charges exactly this amount.
  */
 export interface ChainTier {
   name: string;
+  priceUsdCents: number;
   supply: number;
   maxPerWallet: number;
   seated: boolean;
@@ -64,11 +65,11 @@ export function buildEventMeta(draft: ChainDraft, metaCid: string): EventMetaStr
   };
 }
 
-/** `minted` is zero on the way in; `createEvent` zeroes it again on the way into storage. */
+/** `minted` is zero on the way in; the contract zeroes it again on the way into storage. */
 export function buildTiers(draft: ChainDraft): TierStruct[] {
   return draft.tiers.map((tier) => ({
     name: tier.name,
-    priceUsdCents: 0n,
+    priceUsdCents: BigInt(tier.priceUsdCents),
     supply: tier.supply,
     minted: 0,
     maxPerWallet: tier.maxPerWallet,

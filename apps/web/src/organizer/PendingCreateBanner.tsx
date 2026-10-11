@@ -7,7 +7,7 @@ import { followUpPlan, followUpsDone, runFollowUps } from './scene/followUps';
 import { useOrganizerCopy } from './copy';
 
 /**
- * The background "확인 중" banner on the organiser home (계획 §2a). When a `createEvent` was
+ * The background "확인 중" banner on the organiser home (계획 §2a). When a publish was
  * broadcast by the relayer (`sent`) and the organiser chose 나중에 확인, the draft is left with the
  * relay id written and no event id read back. This is where the scene's promise — "잠시 뒤 주최자
  * 화면에서 확인" — is actually kept: the home finds that one draft, follows its `relays/{relayId}`
@@ -33,7 +33,7 @@ export function PendingCreateBanner() {
   const [pending, setPending] = useState<Pending | null>(null);
   const [failed, setFailed] = useState(false);
 
-  // The one draft that left a relay behind: an id written, no event id read back, and not an edit.
+  // The one draft that left a relay behind: an id written, no event id read back.
   useEffect(() => {
     let live = true;
     void (async () => {
@@ -46,9 +46,7 @@ export function PendingCreateBanner() {
       if (!live) return;
       const row = stored.find((entry) => {
         const draft = normalizeEventDraft(entry.data);
-        return draft.submittedRelayId !== ''
-          && draft.createdEventId === ''
-          && draft.editingEventId === '';
+        return draft.submittedRelayId !== '' && draft.createdEventId === '';
       });
       if (row === undefined) return;
       const draft = normalizeEventDraft(row.data);
@@ -81,9 +79,9 @@ export function PendingCreateBanner() {
         void (async () => {
           const eventId = relay.result?.eventId ?? '';
           if (eventId === '') {
-            // Confirmed but named no event id (a backend fault): send them into the draft, whose
-            // 만들기 button follows the same relay again and never creates a second event.
-            navigate(`/org/new/${pending.draftId}`);
+            // Confirmed but named no event id (a backend fault): send them to the draft's publish
+            // screen, whose 공개하기 follows the same relay again and never creates a second event.
+            navigate(`/org/new/${pending.draftId}/publish`);
             return;
           }
           const plan = followUpPlan(pending.draft, eventId);
@@ -115,7 +113,7 @@ export function PendingCreateBanner() {
   return (
     <Alert tone={failed ? 'error' : 'info'}>
       {failed ? copy.pendingCreateFailed : copy.pendingCreate}{' '}
-      <Link to={`/org/new/${pending.draftId}`}>{copy.pendingCreateOpen}</Link>
+      <Link to={`/org/new/${pending.draftId}/publish`}>{copy.pendingCreateOpen}</Link>
     </Alert>
   );
 }

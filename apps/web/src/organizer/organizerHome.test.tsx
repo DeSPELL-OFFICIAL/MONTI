@@ -272,21 +272,22 @@ describe('organiser home', () => {
       .toBeInTheDocument();
     // The kinds are a section of that one scroll now, so there is no second screen to land on.
     expect(screen.getByLabelText(organizerCopy.ko.scene.tiers.supply)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: organizerCopy.ko.scene.tiers.create })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: organizerCopy.ko.scene.tiers.next })).toBeInTheDocument();
   });
 
-  /**
-   * `EditEvent` writes a draft from an event and hands over to `/org/new/<draftId>`
-   * (`EditEvent.tsx`). The plan's "건드리지 않는 것" says that path keeps working after the
-   * merge — this is the test that says it does, against the real route table rather than a
-   * table a test built for itself.
-   */
-  it('opens a named draft at `/org/new/<id>`, which is where an edit hands over', () => {
+  /** v2: the draft's publish screen is a route of its own, against the real route table. */
+  it('opens a draft\'s publish screen at `/org/new/<id>/publish`', () => {
     withOrgs([ORG_A]);
-    const seen = open('/org/new/d-42');
-    expect(seen.at(-1)).toBe('/org/new/d-42');
-    expect(screen.getByRole('heading', { name: organizerCopy.ko.scene.title, level: 1 }))
+    const seen = open('/org/new/d-42/publish');
+    expect(seen.at(-1)).toBe('/org/new/d-42/publish');
+    expect(screen.getByRole('heading', { name: organizerCopy.ko.scene.publishScreen.title, level: 1 }))
       .toBeInTheDocument();
+  });
+
+  it('has no edit route for a published event any more', () => {
+    withOrgs([ORG_A]);
+    open('/org/events/7/edit');
+    expect(screen.queryByRole('heading', { name: organizerCopy.ko.scene.title, level: 1 })).toBeNull();
   });
 
   it('refuses the floating action to somebody who may not create events, and says why', () => {

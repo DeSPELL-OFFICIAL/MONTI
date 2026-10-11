@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
-import { Alert, Button, Chip, Field, TicketArt, formatTicketDate } from '../../shared/ui';
+import { Button, Chip, Field, TicketArt, formatTicketDate } from '../../shared/ui';
 import { fmt, useLocale } from '../../shared/i18n';
 import { useReducedMotion } from '../../shared/motion';
 import type { EventDraftTier } from '../../shared/api/firestore';
@@ -288,7 +288,6 @@ export function TierCard({
             </button>
             <span className="field-tip__bubble" role="tooltip">{copy.limitTip}</span>
           </span>
-          <Alert tone="warn">{copy.paidBlocked}</Alert>
         </>
       ) : null}
 

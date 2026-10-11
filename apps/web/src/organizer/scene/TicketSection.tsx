@@ -1,4 +1,4 @@
-import { Alert, Button, Card, Chip, Field, Toggle } from '../../shared/ui';
+import { Button, Card, Chip, Field, Toggle } from '../../shared/ui';
 import type { EventDraft, EventDraftTier } from '../../shared/api/firestore';
 import { approvalModesEnabled } from '../../shared/config';
 import { useDisplayName } from '../../shared/displayName';
@@ -11,10 +11,8 @@ import { MAX_TIERS, PAID_CURRENCY, type TierProblem } from './draftRules';
 export interface TicketSectionProps {
   draft: EventDraft;
   patch: (next: Partial<EventDraft>) => void;
-  /** The rules to say out loud — empty until 만들기 has been pressed once. */
+  /** The rules to say out loud — empty until 다음 has been pressed once. */
   problems: readonly TierProblem[];
-  /** A kind that is not free. It is a choice to undo, so it is an alert and not a line. */
-  blocked: boolean;
   /** Tapping the title on a preview asks the scene to edit the event title; see {@link TierCard}. */
   onEditTitle?: () => void;
 }
@@ -63,7 +61,7 @@ function KycIcon() {
  * because `transferable`, `transferCutoffSeconds` and `requireKyc` are fields of `EventMeta`
  * and `Tier` has no room for any of them — a per-kind switch would be a screen that lies.
  */
-export function TicketSection({ draft, patch, problems, blocked, onEditTitle }: TicketSectionProps) {
+export function TicketSection({ draft, patch, problems, onEditTitle }: TicketSectionProps) {
   const copy = useOrganizerCopy().scene;
   // Read once here rather than in each card: a draft may hold eight kinds, and the name is one
   // document. The fallback is the attendee's own word, so the organiser's preview and the
@@ -114,8 +112,11 @@ export function TicketSection({ draft, patch, problems, blocked, onEditTitle }: 
         <Chip
           label={copy.tiers.quickPaid}
           selected={quick === 'paid'}
-          // The amount is left at its default; the honest paid block still lands in the card.
-          onClick={() => patchTier(0, { currency: PAID_CURRENCY, maxPerWallet: 1 })}
+          // A paid event is never an approval one (`paidApproval`), so the preset clears it too.
+          onClick={() => {
+            patchTier(0, { currency: PAID_CURRENCY, maxPerWallet: 1 });
+            patch({ approvalRequired: false });
+          }}
         />
       </div>
 
@@ -144,14 +145,11 @@ export function TicketSection({ draft, patch, problems, blocked, onEditTitle }: 
         ))}
       </ul>
 
-      {problems
-        .filter((problem) => problem !== 'paidTier')
-        .map((problem) => (
-          <p className="problem" key={problem}>
-            {copy.tierProblems[problem]}
-          </p>
-        ))}
-      {blocked ? <Alert tone="warn">{copy.tierProblems.paidTier}</Alert> : null}
+      {problems.map((problem) => (
+        <p className="problem" key={problem}>
+          {copy.tierProblems[problem]}
+        </p>
+      ))}
     </Card>
   );
 }

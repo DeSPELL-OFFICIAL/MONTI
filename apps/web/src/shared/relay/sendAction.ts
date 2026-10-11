@@ -62,19 +62,28 @@ export function followRelay(relayId: string): Promise<RelayActionResult | undefi
  * settles with none.
  *
  * `onSent` fires once, with the `relayId`, the moment the relayer answers `sent` rather than
- * `confirmed` — before the wait begins. It is the durable-resume hook the createEvent path needs:
+ * `confirmed` — before the wait begins. It is the durable-resume hook the publish path needs:
  * the id is persisted on the draft so a page that closes here reopens onto {@link followRelay}
  * rather than a second send.
+ *
+ * `extra.reasons` rides in the `relayAction` body as is — `publishEvent` only: one readable reason
+ * per split recipient, which the confirm hook stores beside the on-chain `reasonHash`.
  */
 export async function sendAction(
   kind: string,
   to: RelayTarget,
   data: Hex,
   onSent?: (relayId: string) => void,
+  extra?: { reasons?: string[] },
 ): Promise<RelayActionResult | undefined> {
   const send = async (nonce?: bigint): Promise<RelayActionResponse> => {
     const built = await buildForwardRequest({ to, data, kind, nonce });
-    return api.relayAction({ req: built.req, deviceSig: built.deviceSig, kind: built.kind });
+    return api.relayAction({
+      req: built.req,
+      deviceSig: built.deviceSig,
+      kind: built.kind,
+      ...(extra?.reasons === undefined ? {} : { reasons: extra.reasons }),
+    });
   };
   let response: RelayActionResponse;
   try {

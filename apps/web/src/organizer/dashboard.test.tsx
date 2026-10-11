@@ -11,9 +11,8 @@ vi.mock('../shared/chain/accounts', () => ({ getStaffAccount: async () => ({ add
 
 // The relayed lifecycle writes are mocked at the module seam; lifecycle.test.ts covers the
 // transport (sendAction), so here the dashboard is judged on how it consumes the result.
-const publishEvent = vi.fn<(eventId: bigint, orgId: bigint) => Promise<LifecycleResult>>(async () => ({ state: 'done' }));
-const cancelEvent = vi.fn<(eventId: bigint, orgId: bigint) => Promise<LifecycleResult>>(async () => ({ state: 'done' }));
-vi.mock('./lifecycle', () => ({ publishEvent, cancelEvent }));
+const cancelEvent = vi.fn<(eventId: bigint) => Promise<LifecycleResult>>(async () => ({ state: 'done' }));
+vi.mock('./lifecycle', () => ({ cancelEvent }));
 
 const eventOrg = vi.fn(async () => 9n);
 // The chain fallback the status hook reads when the indexer has no row: `eventOrg` (0 means no such
@@ -63,10 +62,10 @@ vi.mock('../shared/envio/ipfs', async (orig) => ({
   fetchEventMetadata,
 }));
 
-const DRAFT_EVENT = {
+const PUBLIC_EVENT = {
   id: '5', orgId: '9', imageCid: 'bafy', startsAt: '1', endsAt: '2', saleStart: '1', saleEnd: '2',
   transferable: true, transferCutoffSeconds: '0', maxTransfers: 3, category: 0, regionCode: '0x00',
-  status: 'Draft', requireKyc: false,
+  status: 'Published', requireKyc: false,
 };
 const TIERS = [
   { id: '5-0', eventId: '5', idx: 0, name: '일반', priceUsdCents: '0', supply: '100', minted: '40', maxPerWallet: '2', seated: false },
@@ -74,7 +73,7 @@ const TIERS = [
 
 // The resolved shape is widened so a test can also stand in a `ClaimRequest` array — the same mock
 // answers both the event read and the pending-count read the 신청 관리 link makes.
-const gql = vi.fn(async (): Promise<Record<string, unknown>> => ({ Event: [DRAFT_EVENT], Tier: TIERS }));
+const gql = vi.fn(async (): Promise<Record<string, unknown>> => ({ Event: [PUBLIC_EVENT], Tier: TIERS }));
 vi.mock('../shared/envio/client', () => ({ gql }));
 
 const { organizerCopy } = await import('./copy');
@@ -95,10 +94,9 @@ function open() {
 }
 
 beforeEach(() => {
-  gql.mockResolvedValue({ Event: [DRAFT_EVENT], Tier: TIERS });
+  gql.mockResolvedValue({ Event: [PUBLIC_EVENT], Tier: TIERS });
   eventOrg.mockResolvedValue(9n);
   eventStatus.mockResolvedValue(0);
-  publishEvent.mockReset().mockResolvedValue({ state: 'done' });
   cancelEvent.mockReset().mockResolvedValue({ state: 'done' });
 });
 
@@ -128,39 +126,12 @@ describe('the organiser dashboard', () => {
   });
 });
 
-describe('publishing and cancelling', () => {
-  it('asks before publishing and says what publishing costs the organiser', async () => {
-    const user = userEvent.setup();
+describe('cancelling (publishing happens on the draft, never here)', () => {
+  it('offers no publish or edit on the dashboard', async () => {
     open();
-    await user.click(await screen.findByRole('button', { name: life.publish }));
-
-    expect(screen.getByText(life.publishConfirm)).toBeInTheDocument();
-    expect(publishEvent).not.toHaveBeenCalled();
-
-    await user.click(screen.getByRole('button', { name: life.confirm }));
-    await waitFor(() => expect(publishEvent).toHaveBeenCalledWith(5n, 9n));
-  });
-
-  /** Plan §2b: the summary sheet shows what goes public, and confirming publishes exactly once. */
-  it('summarises the event in a sheet and publishes exactly once', async () => {
-    const user = userEvent.setup();
-    fetchEventMetadata.mockResolvedValue({
-      title: '재즈 나이트', venue: '한남동 클럽', region: 'KR-11', venueHidden: false, timeHidden: false, tags: [],
-    });
-    gql.mockResolvedValue({ Event: [{ ...DRAFT_EVENT, requireKyc: true }], Tier: TIERS });
-    open();
-    await user.click(await screen.findByRole('button', { name: life.publish }));
-
-    // The summary: place, the ticket-kind count and the identity check, then the confirmation.
-    expect(await screen.findByText('한남동 클럽')).toBeInTheDocument();
-    expect(screen.getByText(life.summary.kycOn)).toBeInTheDocument();
-    expect(screen.getByText('1종')).toBeInTheDocument();
-    expect(screen.getByText(life.publishConfirm)).toBeInTheDocument();
-    expect(publishEvent).not.toHaveBeenCalled();
-
-    await user.click(screen.getByRole('button', { name: life.confirm }));
-    await waitFor(() => expect(publishEvent).toHaveBeenCalledWith(5n, 9n));
-    expect(publishEvent).toHaveBeenCalledTimes(1);
+    await screen.findByText(dash.attendees);
+    expect(screen.queryByRole('link', { name: /고치기/ })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button').map((button) => button.textContent)).not.toContain('공개하기');
   });
 
   /** Ruling 3: after sub-plan 01b a cancelled event blocks hand-overs — say so beforehand. */
@@ -173,7 +144,8 @@ describe('publishing and cancelling', () => {
     expect(cancelEvent).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole('button', { name: life.confirm }));
-    await waitFor(() => expect(cancelEvent).toHaveBeenCalledWith(5n, 9n));
+    await waitFor(() => expect(cancelEvent).toHaveBeenCalledWith(5n));
+    expect(await screen.findByText(life.cancelled)).toBeInTheDocument();
   });
 
   it('lets the organiser back out of the confirmation', async () => {
@@ -185,90 +157,42 @@ describe('publishing and cancelling', () => {
     expect(cancelEvent).not.toHaveBeenCalled();
   });
 
-  it('offers neither write on an event that is already cancelled', async () => {
-    gql.mockResolvedValue({ Event: [{ ...DRAFT_EVENT, status: 'Cancelled' }], Tier: TIERS });
+  it('offers no cancel on an event that is already cancelled', async () => {
+    gql.mockResolvedValue({ Event: [{ ...PUBLIC_EVENT, status: 'Cancelled' }], Tier: TIERS });
     open();
     await screen.findByText(dash.attendees);
-    expect(screen.queryByRole('button', { name: life.publish })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: life.cancel })).not.toBeInTheDocument();
-  });
-
-  /**
-   * The refetch that follows a write races the indexer's own `EventStatusChanged`. Choosing the
-   * sentence off `status` meant an organiser who had just cancelled read 발행했어요 for as long
-   * as the indexer was behind — wrong in exactly the moment they most need to be sure.
-   */
-  it('says what was just done, not what the indexer still thinks the event is', async () => {
-    const user = userEvent.setup();
-    open();
-    await user.click(await screen.findByRole('button', { name: life.cancel }));
-    await user.click(screen.getByRole('button', { name: life.confirm }));
-
-    expect(await screen.findByText(life.cancelled)).toBeInTheDocument();
-    expect(screen.queryByText(life.published)).not.toBeInTheDocument();
-  });
-
-  it('says 발행했어요 after a publish, for the same reason', async () => {
-    const user = userEvent.setup();
-    open();
-    await user.click(await screen.findByRole('button', { name: life.publish }));
-    await user.click(screen.getByRole('button', { name: life.confirm }));
-
-    expect(await screen.findByText(life.published)).toBeInTheDocument();
-    expect(screen.queryByText(life.cancelled)).not.toBeInTheDocument();
   });
 
   it('names the rule when the chain refuses the write', async () => {
     const user = userEvent.setup();
-    publishEvent.mockResolvedValueOnce({ state: 'refused', problem: 'notDraft' });
+    cancelEvent.mockResolvedValueOnce({ state: 'refused', problem: 'closed' });
     open();
-    await user.click(await screen.findByRole('button', { name: life.publish }));
+    await user.click(await screen.findByRole('button', { name: life.cancel }));
     await user.click(screen.getByRole('button', { name: life.confirm }));
-    expect(await screen.findByText(life.notDraft)).toBeInTheDocument();
+    expect(await screen.findByText(life.closed)).toBeInTheDocument();
   });
-
 });
 
 describe('an event the indexer has no row for', () => {
-  /**
-   * A mistyped number on the home screen: neither the indexer nor the chain has the event
-   * (`eventOrg` is 0), so this says so rather than rendering a blank screen with no reason.
-   */
   it('says the number is unknown when the chain has no such event either', async () => {
     gql.mockResolvedValue({ Event: [], Tier: [] });
     listAttendees.mockResolvedValue([]);
     eventOrg.mockResolvedValue(0n);
     open();
     expect(await screen.findByText(dash.notIndexed)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: life.publish })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: life.cancel })).not.toBeInTheDocument();
   });
 
-  /**
-   * The resilience this task adds: a real event the organiser just made, which the chain has as a
-   * Draft while the hosted indexer is still catching up. The row is rendered from the chain status,
-   * so 발행하기 is offered rather than a blank "아직 색인 전" screen with nothing to do.
-   */
-  it('offers 발행하기 from the chain status while the indexer has no row yet', async () => {
+  /** A just-published event the hosted indexer has not caught up with: the chain status drives it. */
+  it('offers 취소 from the chain status while the indexer has no row yet', async () => {
     gql.mockResolvedValue({ Event: [], Tier: [] });
     listAttendees.mockResolvedValue([]);
     eventOrg.mockResolvedValue(9n);
-    eventStatus.mockResolvedValue(0); // Draft on chain
-    open();
-    expect(await screen.findByRole('button', { name: life.publish })).toBeInTheDocument();
-    expect(screen.queryByText(dash.notIndexed)).not.toBeInTheDocument();
-  });
-
-  /**
-   * Precedence: the chain says Published (a publish that landed) while the indexer still has the
-   * event as Draft. The chain wins — 발행하기 is gone and only 취소하기 is left.
-   */
-  it('prefers the chain when it is ahead of a stale indexer row', async () => {
-    gql.mockResolvedValue({ Event: [{ ...DRAFT_EVENT, status: 'Draft' }], Tier: TIERS });
     eventStatus.mockResolvedValue(1); // Published on chain
     open();
-    await screen.findByText(dash.attendees);
-    expect(screen.queryByRole('button', { name: life.publish })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: life.cancel })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: life.cancel })).toBeInTheDocument();
+    expect(screen.queryByText(dash.notIndexed)).not.toBeInTheDocument();
   });
 
   it('shows the load failure instead when both reads threw', async () => {
@@ -298,7 +222,7 @@ describe('the 신청 관리 link', () => {
   it('appears with the pending count on an approvalRequired event', async () => {
     // One resolved value serves both reads: the event (approvalRequired) and the pending list.
     gql.mockResolvedValue({
-      Event: [{ ...DRAFT_EVENT, approvalRequired: true }],
+      Event: [{ ...PUBLIC_EVENT, approvalRequired: true }],
       Tier: TIERS,
       ClaimRequest: [{ requestId: '1' }, { requestId: '2' }],
     });

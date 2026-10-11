@@ -1,15 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
-  Alert, Button, Card, Field, OpProgress, Screen, Spinner, Steps, StickyBar, Toast, Toggle, type OpPhase,
+  Button, Card, Field, Screen, Spinner, Steps, StickyBar, Toast, Toggle,
 } from '../../shared/ui';
 import { fmt, useCopy, useLocale } from '../../shared/i18n';
 import { AnimatePresence } from '../../shared/motion';
 import { THEME_CODES, themeLabels } from '../../shared/eventThemes';
-import { useDisplayName } from '../../shared/displayName';
 import { useOrganizerCopy } from '../copy';
-import { useMyOrgs } from '../useMyOrgs';
-import { isGoodOrgName, ORG_NAME_MAX } from '../orgName';
 import { useEventDraft } from '../useEventDraft';
 import { KR_REGIONS } from './regions';
 import { fromLocalInput, toLocalInput } from './datetime';
@@ -18,10 +15,9 @@ import { usePosterUpload } from './usePosterUpload';
 import { ResumeSheet } from './ResumeSheet';
 import { SaveStatus } from './SaveStatus';
 import { TicketExtras, TicketSection } from './TicketSection';
-import { usePublish } from './usePublish';
 import {
   MAX_BODY_CHARS, MAX_TAGS, MAX_TAG_CHARS, MAX_TITLE_CHARS, MAX_VENUE_CHARS,
-  PROBLEM_SECTION, charCount, endsAtOf, eventProblems, normalizeTags, paidTiers, tierProblems,
+  PROBLEM_SECTION, charCount, endsAtOf, eventProblems, normalizeTags, tierProblems,
   type EventProblem,
 } from './draftRules';
 
@@ -36,20 +32,15 @@ const FOLDED_PROBLEMS: ReadonlySet<EventProblem> = new Set<EventProblem>([
 /**
  * The creation scene — the event **and** its tickets, as one scroll and one button.
  *
- * It was two screens until the founder's phone test (plan section B-1): `/org/new/:draftId` for
- * the event and `/org/new/:draftId/tickets` for the kinds, with 다음 between them. Pressing
- * 다음 and then 행사 만들기 is two taps for one intention, so the second screen is a section of
- * this one now and `만들기` is the only button. None of the rules moved: `eventProblems`,
- * `tierProblems` and `usePublish` are the same three they were.
+ * v2 (design §5): this screen never touches the chain. `다음` saves the draft and moves on to
+ * `/org/new/:draftId/publish`, where the split rules (for a paid event) and 공개하기 — the one
+ * on-chain write — live. A paid kind is allowed here: its price goes on chain at publish.
  *
- * `만들기` is never disabled for an empty field. An organiser who has not filled one in yet is
+ * `다음` is never disabled for an empty field. An organiser who has not filled one in yet is
  * scrolled to it and shown one line under it; they are not stopped, because a half-written
- * draft that cannot move is a draft that gets abandoned on the field it was stuck on — which is
- * the whole complaint the six-step wizard was replaced over. There are two exceptions, and both
- * are a value that is set and wrong rather than a box that is empty: a paid kind, and an event
- * whose end time has already passed. Both would be refused by the chain every single time, so
- * the button says so instead of spending twenty seconds finding out — and because neither is
- * reached by pressing it, both sentences are on screen from the start rather than after a press.
+ * draft that cannot move is a draft that gets abandoned on the field it was stuck on. The one
+ * exception is an event whose end time has already passed — a value that is set and wrong —
+ * and that sentence is on screen from the start rather than after a press.
  */
 
 export function CreateEvent() {
@@ -63,8 +54,8 @@ export function CreateEvent() {
   // `/org/new?org=<id>` is how the organiser home and the explore FAB name the organisation.
   const asked = useSearchParams()[0].get('org') ?? '';
   const {
-    draft, draftId, loading, resumed, resumedAt, status, savedAt,
-    patch, save, saveNow, startNew, discard,
+    draft, draftId, resumed, resumedAt, status, savedAt,
+    patch, saveNow, startNew,
   } = useEventDraft(asked, wanted);
   const [tag, setTag] = useState('');
   /** The one sentence 임시 저장 leaves behind, and `''` when there is none on screen. */
@@ -75,16 +66,6 @@ export function CreateEvent() {
    * there would be nothing else for the sheet to close on.
    */
   const [decided, setDecided] = useState(false);
-  const myOrgs = useMyOrgs();
-  const displayName = useDisplayName();
-  /**
-   * The organiser name, when this person has none yet. It is one line above the button rather
-   * than a screen of its own: making an organisation is not a thing anybody sets out to do, it
-   * is a field on the way to an event (plan section B-4). It is prefilled with the name they
-   * already gave, so the whole of it is usually just pressing 만들기.
-   */
-  const [orgName, setOrgName] = useState('');
-  const orgTyped = useRef(false);
   // Tapping the title on a ticket preview takes the organiser here, to the one box that owns it.
   const titleRef = useRef<HTMLInputElement>(null);
   // `더 설정하기`. Closed to begin with — the five fields above it are the whole of an event
@@ -94,24 +75,15 @@ export function CreateEvent() {
   // the moment it is opened is a scene that starts by telling the organiser off.
   const [checked, setChecked] = useState(false);
 
-  // A draft opened from an event that already exists (T-EV-W12). The way out then leads back
-  // to that event, and `처음부터` is hidden: on an edit it would throw the event's own fields
-  // away and leave an empty draft that makes a *second* event.
-  const editing = draft.editingEventId !== '';
   /**
    * Only a genuine resume is worth a question (plan section F-3). `/org/new/<id>` named the
-   * draft, so the address has already answered this one; an edit draft is never resumed at this
-   * entry point at all, and the hook is what makes sure of that.
+   * draft, so the address has already answered this one.
    */
   // Not gated on `!loading` any more: a resumed draft is known from the device mirror on the first
   // paint, so the question is asked before the scene can be typed into rather than after (계획 §2d).
-  const asking = !decided && resumed && wanted === undefined && !editing;
-  // Only when there is nothing to pick from: one organisation is used without asking, and two
-  // or more are chosen in `더 설정하기` — neither is a question worth a box on this screen.
-  const needsOrg = !editing && !myOrgs.isLoading && myOrgs.orgs.length === 0 && draft.orgId === '';
-  const orgNameWrong = needsOrg && !isGoodOrgName(orgName);
+  const asking = !decided && resumed && wanted === undefined;
   /**
-   * The poster's own life, owned here rather than by the card, because `만들기` has to be able
+   * The poster's own life, owned here rather than by the card, because `다음` has to be able
    * to wait for it. `patch` is the whole of what it reports: the draft carries the CID and
    * never the bytes — a Firestore document stops at 1 MiB and a 600 KB JPEG is 800 KB as
    * base64 — and the bytes themselves stay in memory behind an object URL.
@@ -124,13 +96,11 @@ export function CreateEvent() {
   const tiersWrong = tierProblems(draft);
   /**
    * The draft written days ago and opened again today. `saleWindow` derives 지금 -> `endsAt`,
-   * so a passed end time is a sign-up window that runs backwards and a `createEvent` that
-   * reverts `InvalidSchedule()` while it is still being estimated — which is the founder's
-   * "행사를 만들지 못했어요" (task-create-failure-2 report §0). Nothing on the screen looks
-   * wrong, so the sentence is shown without waiting for a press.
+   * so a passed end time is a sign-up window that runs backwards and a publish that reverts
+   * `InvalidSchedule()` (task-create-failure-2 report §0). Nothing on the screen looks wrong,
+   * so the sentence is shown without waiting for a press.
    */
   const past = problems.includes('eventPast');
-  const blocked = paidTiers(draft).length > 0;
   const wrong = (key: EventProblem) =>
     (checked && problems.includes(key) ? <p className="problem">{copy.problems[key]}</p> : null);
   // `min` on the start box, so a time already gone is refused by the picker inline rather than
@@ -138,79 +108,24 @@ export function CreateEvent() {
   // and derives from the start, so a floor on it would fight `endsAtOf`.
   const nowLocal = toLocalInput(Math.floor(Date.now() / 1000));
 
-  useEffect(() => {
-    if (orgTyped.current) return;
-    // A name a previous attempt wrote down outranks the profile's: it may already be the name
-    // of an organisation that exists.
-    const prefill = draft.orgPendingName || displayName;
-    if (prefill !== '') setOrgName(prefill);
-  }, [displayName, draft.orgPendingName]);
-
-  // `만들기` pressed while the poster was still going up. The publish is not started from the
-  // click but from here, once the upload is over, and deliberately so: `publish` is closed
-  // over `draft`, and the thing being waited for *is* a change to `draft`. Awaiting inside the
-  // handler and then calling the `publish` that handler captured would send the draft as it
-  // was before the CID landed — which `usePublish` would silently drop on its own
-  // `eventProblems` guard.
+  // `다음` pressed while the poster was still going up: the move waits here for the upload, so the
+  // CID is on the draft before the publish screen reads it.
   const [waiting, setWaiting] = useState(false);
 
-  const { phase, problem, publish } = usePublish({
-    draft,
-    draftId,
-    myOrgs,
-    orgName,
-    patch,
-    save,
-    discard,
-    // The title and the poster travel in the navigation because there is nowhere left to read
-    // them from: the indexer has not seen the event and, when everything landed, the draft is
-    // gone. `plan`/`done`/`draftId` go too — they are what makes the retry on that screen real.
-    // `onCreated` is never called without an id; that branch stays here and says so.
-    onCreated: (created) => {
-      // An event that already existed has a screen of its own to go back to, and the done
-      // screen's words ("행사를 만들었어요") would be the wrong ones for an edit.
-      if (editing) {
-        navigate(`/org/events/${created.eventId}`);
-        return;
-      }
-      navigate(`/org/new/done/${created.eventId}`, {
-        state: {
-          posterCid: created.posterCid,
-          title: created.title,
-          followUpFailed: created.followUpFailed,
-          draftId: created.draftId,
-          plan: created.plan,
-          done: created.done,
-        },
-      });
-    },
-  });
+  /** Writes the draft out (the device mirror already has it) and moves to the publish screen. */
+  const goPublish = useCallback(async (): Promise<void> => {
+    await saveNow();
+    navigate(`/org/new/${draftId}/publish`);
+  }, [draftId, navigate, saveNow]);
 
   useEffect(() => {
     if (!waiting || poster.busy) return;
     setWaiting(false);
     // The upload came back refused. The sentence and the `다시 올리기` chip are under the
-    // picture already; starting a publish with no poster on it would only add a second one.
+    // picture already.
     if (poster.problem !== '') return;
-    void publish();
-  }, [waiting, poster.busy, poster.problem, publish]);
-
-  // `confirming` deliberately leaves the button pressable: that press is what follows the relay
-  // document to find what became of a `createEvent` the relayer broadcast, and it never sends a
-  // second one.
-  const working = waiting
-    || phase === 'org' || phase === 'pinning' || phase === 'sending' || phase === 'finishing';
-
-  // The determinate wait shown in place of a bare spinner (plan §2c). It stays mounted from the
-  // first write through `confirming`, so its own timer can reach the 30s timeout and offer 다시
-  // 시도 — safe here because `create` re-checks `submittedRelayId` and follows the same relay rather
-  // than sending a second event.
-  const opPhase: OpPhase | null =
-    phase === 'org' || phase === 'pinning' || phase === 'sending'
-      ? 'saving'
-      : phase === 'finishing' || (phase === 'confirming' && problem === '')
-        ? 'confirming'
-        : null;
+    void goPublish();
+  }, [waiting, poster.busy, poster.problem, goPublish]);
 
   function scrollTo(section: string): void {
     // jsdom has no `scrollIntoView`, and neither does an older browser; the line under the
@@ -239,16 +154,12 @@ export function CreateEvent() {
       scrollTo('tickets');
       return;
     }
-    if (orgNameWrong) {
-      scrollTo('org');
-      return;
-    }
     // Everything else is filled in and the only thing left is the upload. Wait for it.
     if (poster.busy) {
       setWaiting(true);
       return;
     }
-    void publish();
+    void goPublish();
   }
 
   /**
@@ -288,10 +199,10 @@ export function CreateEvent() {
       </AnimatePresence>
       <div className="scene" inert={asking}>
         <p>
-          <Link to={editing ? `/org/events/${draft.editingEventId}` : '/org'}>{copy.leave}</Link>
+          <Link to="/org">{copy.leave}</Link>
         </p>
-        {/* 만들기 ≠ 발행: 생성 씬은 1단계, done 화면이 2단계다(계획 §2b). 편집 모드에는 해당 없음. */}
-        {editing ? null : <Steps labels={[copy.stepCreate, copy.stepPublish]} at={0} />}
+        {/* 만들기 ≠ 공개: 생성 씬은 1단계(초안), 공개 화면이 2단계다(설계 §5). */}
+        <Steps labels={[copy.stepCreate, copy.stepPublish]} at={0} />
 
         <Card title={copy.poster} id="scene-poster">
           <PosterCard posterCid={draft.posterCid} upload={poster} />
@@ -372,7 +283,6 @@ export function CreateEvent() {
           draft={draft}
           patch={patch}
           problems={checked ? tiersWrong : []}
-          blocked={blocked}
           onEditTitle={editTitle}
         />
 
@@ -473,48 +383,14 @@ export function CreateEvent() {
           <TicketExtras draft={draft} patch={patch} />
         </details>
 
-        {needsOrg ? (
-          <Card id="scene-org">
-            <Field label={copy.org.label}>
-              <input
-                value={orgName}
-                maxLength={ORG_NAME_MAX}
-                placeholder={copy.org.placeholder}
-                onChange={(event) => {
-                  orgTyped.current = true;
-                  setOrgName(event.target.value);
-                }}
-              />
-            </Field>
-            <p className="muted">{copy.org.help}</p>
-            {checked && orgNameWrong ? <p className="problem">{copy.publishProblems.orgName}</p> : null}
-          </Card>
-        ) : null}
-
-        {problem !== '' ? <Alert tone="error">{copy.publishProblems[problem]}</Alert> : null}
         {waiting ? <p className="working"><Spinner />{copy.posterWaiting}</p> : null}
-        {/* One determinate wait, never an info-alert stacked on top of it (계획 §2a). At the 45s cap
-            it turns into the decision block: 다시 시도 (follows the same relay — never a second event)
-            and, for a create, 나중에 확인 (leaves to /org, where the home banner resolves it). Both are
-            offered only once `confirming` has recorded the relay id, so neither can fire while the
-            first send is still in flight. */}
-        {opPhase ? (
-          <OpProgress
-            phase={opPhase}
-            onRetry={phase === 'confirming' ? create : undefined}
-            onLater={phase === 'confirming' && !editing ? () => navigate('/org') : undefined}
-            laterLabel={copy.publish.checkLater}
-            timeoutMessage={phase === 'confirming' && !editing ? copy.publish.stuck : undefined}
-          />
-        ) : null}
-        <p className="muted">{copy.tiers.feeNote}</p>
       </div>
 
       <StickyBar status={<SaveStatus status={status} savedAt={savedAt} />}>
         <div className="sticky-bar__buttons">
           <Button variant="ghost" disabled={asking} onClick={() => void saveDraft()}>{copy.saveDraft}</Button>
-          <Button disabled={blocked || past || working || asking} onClick={create}>
-            {editing ? copy.tiers.save : copy.tiers.create}
+          <Button disabled={past || waiting || asking} onClick={create}>
+            {copy.tiers.next}
           </Button>
         </div>
       </StickyBar>

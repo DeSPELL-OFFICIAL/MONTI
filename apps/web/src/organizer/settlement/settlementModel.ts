@@ -1,5 +1,4 @@
-import { BPS_TOTAL, DEFAULT_PLATFORM_BPS, type Hex } from '@monti/shared';
-import type { PolicyRecipientForm } from './buildPolicyAuth';
+import { BPS_TOTAL, DEFAULT_PLATFORM_BPS, type Hex, type PolicyRecipientInput } from '@monti/shared';
 
 /**
  * One row of the revenue-split editor. `name` is the organiser's human label (역할/이름) and
@@ -38,20 +37,39 @@ export function blankRow(): RecipientRow {
   return { id: newRowId(), name: '', account: '', bps: 0, tag: '' };
 }
 
+/** The vault's recipient limit (`_validatePolicy`: 1–10). */
+export const MAX_RECIPIENTS = 10;
+/** The relayer's cap on each reason (`relayAction` `reasons[]`, ≤80 chars each). */
+export const MAX_ROLE_NAME_CHARS = 80;
+/** A tag goes on chain as `bytes32` (`tagToBytes32`), so its UTF-8 must fit in 32 bytes. */
+const MAX_TAG_BYTES = 32;
+
+export type SplitError =
+  | '' | 'EMPTY' | 'TOO_MANY' | 'BAD_ACCOUNT' | 'BAD_BPS' | 'NAME_TOO_LONG' | 'BAD_TAG'
+  | 'PLATFORM_LOW' | 'BAD_SUM';
+
 export interface Validation {
   ok: boolean;
   sumBps: number;
   /** The first problem as a code, so the view owns the sentence. `''` when the split is valid. */
-  error: '' | 'EMPTY' | 'BAD_ACCOUNT' | 'BAD_BPS' | 'PLATFORM_LOW' | 'BAD_SUM';
+  error: SplitError;
 }
 
-/** The split is sendable only when every account is valid, every share positive, and the sum is 100%. */
+/**
+ * The split is publishable only when every account is valid, every share positive, the names
+ * and tags fit what the relayer and the vault take, and the sum is 100%. Within these limits
+ * the serialised split always fits the draft rule's 4,000-character cap, so that needs no rule
+ * of its own.
+ */
 export function validateRows(rows: RecipientRow[]): Validation {
   const sumBps = rows.reduce((acc, r) => acc + (Number.isFinite(r.bps) ? r.bps : 0), 0);
   if (rows.length === 0) return { ok: false, sumBps, error: 'EMPTY' };
+  if (rows.length > MAX_RECIPIENTS) return { ok: false, sumBps, error: 'TOO_MANY' };
   for (const r of rows) {
     if (!ADDRESS_RE.test(r.account)) return { ok: false, sumBps, error: 'BAD_ACCOUNT' };
     if (!Number.isInteger(r.bps) || r.bps <= 0 || r.bps > BPS_TOTAL) return { ok: false, sumBps, error: 'BAD_BPS' };
+    if ([...r.name].length > MAX_ROLE_NAME_CHARS) return { ok: false, sumBps, error: 'NAME_TOO_LONG' };
+    if (new TextEncoder().encode(r.tag).length > MAX_TAG_BYTES) return { ok: false, sumBps, error: 'BAD_TAG' };
   }
   const platform = rows.find((r) => r.platform);
   if (platform !== undefined && platform.bps < DEFAULT_PLATFORM_BPS) {
@@ -66,9 +84,59 @@ export function platformBpsOf(rows: RecipientRow[]): number {
   return rows.filter((r) => r.tag === PLATFORM_TAG).reduce((acc, r) => acc + r.bps, 0);
 }
 
-/** The editor rows as the `relaySetPolicy` recipient payload (role label → `reason`). */
-export function toRecipients(rows: RecipientRow[]): PolicyRecipientForm[] {
+/** The editor rows as policy recipients (role label → `reason`), in row order. */
+export function toRecipients(rows: RecipientRow[]): PolicyRecipientInput[] {
   return rows.map((r) => ({ account: r.account as Hex, bps: r.bps, reason: r.name, tag: r.tag }));
+}
+
+/** One row as `eventDrafts/{uid}/drafts/{id}.splitJson` stores it — the row minus its React id. */
+interface StoredRow {
+  name: string;
+  account: string;
+  bps: number;
+  tag: string;
+  platform: boolean;
+}
+
+/** The rows as the draft's `splitJson` string. */
+export function serializeSplit(rows: RecipientRow[]): string {
+  const stored: StoredRow[] = rows.map((r) => ({
+    name: r.name, account: r.account, bps: r.bps, tag: r.tag, platform: r.platform === true,
+  }));
+  return JSON.stringify(stored);
+}
+
+function toStoredRow(raw: unknown): StoredRow | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const { name, account, bps, tag, platform } = raw as Record<string, unknown>;
+  return {
+    name: typeof name === 'string' ? name : '',
+    account: typeof account === 'string' ? account : '',
+    bps: typeof bps === 'number' && Number.isFinite(bps) ? bps : 0,
+    tag: typeof tag === 'string' ? tag : '',
+    platform: platform === true,
+  };
+}
+
+/**
+ * The draft's `splitJson` back as editor rows. Anything unreadable starts over from the one
+ * locked platform row. The platform row always points at the configured MONTI account (only its
+ * share is the organiser's), and one is added in front when the stored split has none.
+ */
+export function parseSplit(json: string, platformAccount: string): RecipientRow[] {
+  let parsed: unknown = null;
+  try {
+    parsed = json === '' ? null : JSON.parse(json);
+  } catch {
+    parsed = null;
+  }
+  const stored = Array.isArray(parsed)
+    ? parsed.map(toStoredRow).filter((row): row is StoredRow => row !== null)
+    : [];
+  const rows: RecipientRow[] = stored.map((row) => (row.platform
+    ? { ...platformRow(platformAccount), bps: row.bps }
+    : { id: newRowId(), name: row.name, account: row.account, bps: row.bps, tag: row.tag, platform: false }));
+  return rows.some((row) => row.platform) ? rows : [platformRow(platformAccount), ...rows];
 }
 
 /**

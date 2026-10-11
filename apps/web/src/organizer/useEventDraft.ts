@@ -44,7 +44,10 @@ const DEFAULT_REGION = 'KR-11';
  */
 const DEFAULT_DESIGN = 'a';
 
-const CURRENCIES: readonly EventDraftCurrency[] = ['free', 'MON', 'USDT', 'USDC'];
+const CURRENCIES: readonly EventDraftCurrency[] = ['free', 'USDC'];
+
+/** What the draft rule caps `splitJson` at (`capped('splitJson', 4000)`). */
+export const MAX_SPLIT_JSON_CHARS = 4_000;
 
 /**
  * The name a first ticket kind starts with. It is filled in rather than blank because the one
@@ -68,7 +71,8 @@ export const emptyEventDraft: EventDraft = {
   transferable: true, transferCutoffHours: 2, requireKyc: false,
   approvalRequired: false,
   tiers: [emptyEventDraftTier],
-  submittedRelayId: '', createdEventId: '', editingEventId: '', orgPendingName: '',
+  splitJson: '',
+  submittedRelayId: '', createdEventId: '', orgPendingName: '',
 };
 
 /**
@@ -107,6 +111,15 @@ function count(value: unknown, fallback: number): number {
 
 function flag(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback;
+}
+
+/**
+ * Past the rule's cap the whole document would be refused, so an oversized split is dropped
+ * rather than carried into every autosave from here on.
+ */
+function splitText(value: unknown): string {
+  const split = text(value, '');
+  return split.length > MAX_SPLIT_JSON_CHARS ? '' : split;
 }
 
 function currency(value: unknown): EventDraftCurrency {
@@ -164,9 +177,9 @@ export function normalizeEventDraft(raw: unknown): EventDraft {
     requireKyc: flag(saved.requireKyc, emptyEventDraft.requireKyc),
     approvalRequired: flag(saved.approvalRequired, emptyEventDraft.approvalRequired),
     tiers: tiers.length > 0 ? tiers : emptyEventDraft.tiers,
+    splitJson: splitText(saved.splitJson),
     submittedRelayId: text(saved.submittedRelayId, emptyEventDraft.submittedRelayId),
     createdEventId: text(saved.createdEventId, emptyEventDraft.createdEventId),
-    editingEventId: text(saved.editingEventId, emptyEventDraft.editingEventId),
     orgPendingName: text(saved.orgPendingName, emptyEventDraft.orgPendingName),
   };
 }
@@ -246,17 +259,6 @@ export async function forgetEventDraft(draftId: string): Promise<void> {
   await deleteEventDraft(draftId);
 }
 
-/**
- * A draft that was opened from an event that already exists (T-EV-W12). It is never what
- * `/org/new` carries on with: that entry point starts a **creation**, and resuming an
- * abandoned edit there would put the organiser in front of somebody else's event with a button
- * that says 만들기 — and then send `updateEventMeta` to an event they were not editing.
- * Named drafts (`/org/new/<id>`) are unaffected: the address asked for that one by name.
- */
-function isEditDraft(draft: EventDraft): boolean {
-  return draft.editingEventId !== '';
-}
-
 /** The organisation comes from the route, so it outranks whatever the stored draft remembers. */
 function withOrg(draft: EventDraft, orgId: string): EventDraft {
   return orgId === '' || draft.orgId === orgId ? draft : { ...draft, orgId };
@@ -318,7 +320,7 @@ export function useEventDraft(orgId: string, wantedId?: string): EventDraftState
   // document; for any other id the fields start empty and the read below fills them.
   const [opened] = useState(() => {
     if (wantedId !== undefined) return mirrored?.id === wantedId ? mirrored : null;
-    return mirrored !== null && !isEditDraft(mirrored.draft) ? mirrored : null;
+    return mirrored;
   });
   const [draft, setDraft] = useState<EventDraft>(() =>
     withOrg(opened?.draft ?? freshEventDraft(), orgId));
@@ -486,9 +488,7 @@ export function useEventDraft(orgId: string, wantedId?: string): EventDraftState
       }
       if (!liveRef.current) return;
       // The named document when the route named one; otherwise whichever was written last.
-      const newest = wantedId === undefined
-        ? stored.find((entry) => !isEditDraft(normalizeEventDraft(entry.data)))
-        : stored.find((entry) => entry.id === wantedId);
+      const newest = wantedId === undefined ? stored[0] : stored.find((entry) => entry.id === wantedId);
       if (newest !== undefined && !touchedRef.current && newest.id !== openedIdRef.current) {
         // Another device got further than this one. Typing that has already happened here
         // outranks it, which is why `touchedRef` is asked first.
