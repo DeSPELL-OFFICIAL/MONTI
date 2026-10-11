@@ -26,6 +26,19 @@ const REVERT_PROBLEMS: ReadonlyArray<readonly [string, PublishProblem]> = [
   ['Unauthorized', 'notYourOrg'],
   ['InvalidSchedule', 'schedule'],
   ['InvalidTiers', 'tiersEmpty'],
+  ['PaidApprovalUnsupported', 'paidApproval'],
+  // The vault's check on a paid publish: the account needs PERM_MANAGE_SETTLEMENT on the org.
+  ['NotPolicyAuthorizer', 'notSettlementManager'],
+  ['Paused', 'settlementPaused'],
+  // Everything `_validatePolicy` (and the free/paid policy rule) can refuse is one fix: the split.
+  ['PolicyRequired', 'splitInvalid'],
+  ['UnexpectedPolicy', 'splitInvalid'],
+  ['BadSplitSum', 'splitInvalid'],
+  ['PlatformShareTooLow', 'splitInvalid'],
+  ['PlatformMirrorMismatch', 'splitInvalid'],
+  ['InvalidRecipients', 'splitInvalid'],
+  ['ZeroRecipient', 'splitInvalid'],
+  ['ZeroBps', 'splitInvalid'],
 ];
 
 /** The server's reason codes against the sentence each deserves (task-ev-b report §3.2). */

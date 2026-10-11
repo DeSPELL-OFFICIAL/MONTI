@@ -126,7 +126,7 @@ describe('reads', () => {
       // sponsored op through `ticketOp` is the request cancel and the organiser's approve/reject,
       // never a read helper.
       'cancelRequest', 'approveClaims', 'rejectClaims',
-      'createEvent', 'publishEvent', 'cancelEvent', 'updateEventMeta',
+      'publishEvent', 'cancelEvent',
       'setAdmin', 'setManager', 'registerGate', 'openGate', 'closeGate', 'revokeGate',
     ];
     // Two reads are exposed under a camelCase helper name because the ABI spells them as

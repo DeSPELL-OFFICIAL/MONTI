@@ -1,7 +1,7 @@
 import { encodeFunctionData } from 'viem';
-import type { Hex, PolicyRecipientInput } from '@monti/shared';
+import { toOnChainRecipients, type Hex, type PolicyRecipientInput } from '@monti/shared';
 import { ticketAbi } from '../../shared/chain/abis';
-import type { EventMetaStruct, TierStruct } from '../../shared/chain/reads';
+import type { EventMetaStruct, SplitPolicyStruct, TierStruct } from '../../shared/chain/reads';
 
 /**
  * Everything the single publish write carries: the event, its kinds with their prices, and —
@@ -17,27 +17,38 @@ export interface PublishCallInput {
 
 /** One relayed `Ticket` write, as `sendAction(kind, 'ticket', data, onSent, { reasons })` takes it. */
 export interface PublishCall {
-  kind: string;
+  kind: 'publishEvent';
   data: Hex;
   /** One readable reason per recipient, in recipient order; absent for a free event. */
   reasons?: string[];
 }
 
 /**
- * The publish write's calldata — the one on-chain step of the draft → 정산 규칙 → 공개 flow.
+ * The calldata of `Ticket.publishEvent(meta, tiers, policy)` (`0x7254c158`) — the one on-chain
+ * step of draft → 정산 규칙 → 공개 (design D2). The event is created Published in that one
+ * transaction; for a paid event the Ticket hands `policy` to `SettlementVault.setPolicyByTicket`,
+ * which freezes it. A free event must send an empty policy (`UnexpectedPolicy` otherwise).
  *
- * This is the seam the v2 ABI fills: the frozen `Ticket.publishEvent(meta, tiers, policy)` with
- * `toOnChainRecipients(recipients)`, `platformBps`, `reserveBps 0`, `noShowRefund false`. The ABI
- * in this build predates it, so the body encodes the build's `createEvent(meta, tiers)` and the
- * policy travels only as `reasons`.
+ * The chain keeps only `keccak256(reason)`; the readable reasons ride beside the request
+ * (`relayAction.reasons`) so the confirm hook can store them in `settlements/{eventId}`.
+ * `reserveBps` and `noShowRefund` have no screen and one right answer each; `frozen`/`version`
+ * are ignored by the contract (stored as `true`/`1`).
  */
 export function encodePublishCall(input: PublishCallInput): PublishCall {
+  const policy: SplitPolicyStruct = {
+    recipients: toOnChainRecipients(input.recipients),
+    platformBps: input.platformBps,
+    reserveBps: 0,
+    noShowRefund: false,
+    frozen: false,
+    version: 0,
+  };
   const data = encodeFunctionData({
     abi: ticketAbi,
-    functionName: 'createEvent',
-    args: [input.meta, input.tiers],
+    functionName: 'publishEvent',
+    args: [input.meta, input.tiers, policy],
   });
   return input.recipients.length === 0
-    ? { kind: 'createEvent', data }
-    : { kind: 'createEvent', data, reasons: input.recipients.map((recipient) => recipient.reason) };
+    ? { kind: 'publishEvent', data }
+    : { kind: 'publishEvent', data, reasons: input.recipients.map((recipient) => recipient.reason) };
 }

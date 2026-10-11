@@ -61,12 +61,10 @@ export const USED_ABI = {
     // the first word, which is what the paymaster reads to pick the sponsor slot.
     cancelRequest: 2, approveClaims: 2, rejectClaims: 2,
     createOffer: 3, cancelOffer: 1, acceptOffer: 2,
-    createEvent: 2,
-    // The event lifecycle. `updateEventMeta` reverts `NotDraft` once the event is published,
-    // which is why the organiser screen only offers it before publishing. `eventOrg` is
-    // declared once, above — the merge that brought the organiser block in unioned it a second
-    // time here, which is TS1117 and silently drops one of the two entries.
-    publishEvent: 1, cancelEvent: 1, updateEventMeta: 3,
+    // The event lifecycle (v2): `publishEvent(meta, tiers, policy)` creates the event Published
+    // in one write — there is no on-chain Draft to create, edit or publish later — and
+    // `cancelEvent` is the only write after it.
+    publishEvent: 3, cancelEvent: 1,
     // 01b. `deviceDigest(tokenId, gateId, eventId, nonce, issuedAt)` is the parity target: the
     // contract fills in `block.chainid` and `address(this)` itself, which is exactly why a
     // hand-rolled sha256 passes every local test and fails at the door

@@ -68,7 +68,7 @@ function Probe() {
   return <p>{`landed:${useLocation().pathname}`}</p>;
 }
 
-/** The org id the event was created under, decoded from the one relayed `createEvent` calldata. */
+/** The org id the event was created under, decoded from the one relayed `publishEvent` calldata. */
 function sentOrgId(call = 0): bigint {
   const data = sendAction.mock.calls[call]?.[2] as Hex;
   const { args = [] } = decodeFunctionData({ abi: ticketAbi, data });

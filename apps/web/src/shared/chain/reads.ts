@@ -63,6 +63,16 @@ export interface TierStruct {
   seated: boolean;
 }
 
+/** `ISettlementVault.SplitPolicy` as `Ticket.publishEvent` takes it (abi-delta-v2.md). */
+export interface SplitPolicyStruct {
+  recipients: Array<{ account: Hex; bps: number; reasonHash: Hex; tag: Hex }>;
+  platformBps: number;
+  reserveBps: number;
+  noShowRefund: boolean;
+  frozen: boolean;
+  version: number;
+}
+
 /**
  * One `readContract` bound to a contract, so every call below is a single named line. The
  * function name is typed against `USED_ABI`, so a read this app has not declared does not
@@ -235,6 +245,12 @@ const TIER_FIELDS = [
   'name', 'priceUsdCents', 'supply', 'minted', 'maxPerWallet', 'seated',
 ] as const satisfies readonly (keyof TierStruct)[];
 
+// `platformBps` and `reserveBps` are both `uint16`: swapped, a 5% platform share would encode
+// as a 5% reserve and the vault would refuse the split as `PlatformMirrorMismatch`.
+const SPLIT_POLICY_FIELDS = [
+  'recipients', 'platformBps', 'reserveBps', 'noShowRefund', 'frozen', 'version',
+] as const satisfies readonly (keyof SplitPolicyStruct)[];
+
 // The 01b order (`contracts/docs/abi-delta-01b.md` §5): `nonceHash` in front of `ts`, and
 // `late` at the end. `checkInOf`'s selector `0xdb7b7d7e` did **not** change, so nothing about
 // this reorder can surface as a compile error, a revert, or a decode failure — a wrong list
@@ -262,25 +278,18 @@ const ACTIVE_DEVICE_FIELDS = ['x', 'y'] as const satisfies readonly (keyof Devic
 const MANAGER_FIELDS = ['exists', 'canApprove'] as const satisfies readonly (keyof ManagerStruct)[];
 
 /**
- * The same pin, for the structs this app **sends**. `Ticket.createEvent` takes an `EventMeta`
- * and a `Tier[]` as calldata, and viem encodes an object positionally out of the ABI's
- * components exactly as it decodes one: a field sub-plan 01 reordered would be encoded into
- * the neighbouring slot at the same width, with no error on the way — an event published with
- * its sale window where its schedule should be. `abis.test.ts` pins both lists, reading the
- * function's *inputs* rather than its outputs.
+ * The same pin, for the structs this app **sends**. `Ticket.publishEvent` takes an
+ * `EventMeta`, a `Tier[]` and a `SplitPolicy` as calldata, and viem encodes an object
+ * positionally out of the ABI's components exactly as it decodes one: a reordered field would
+ * be encoded into the neighbouring slot at the same width, with no error on the way.
+ * `abis.test.ts` pins every list, reading the function's *inputs* rather than its outputs.
  *
- * The two lists are the same ones the reads use, so a struct can never drift between the
- * screen that writes it and the screen that reads it back.
+ * The meta and tier lists are the same ones the reads use, so a struct can never drift between
+ * the screen that writes it and the screen that reads it back.
  */
 export const STRUCT_INPUT_SHAPES = {
   Ticket: {
-    createEvent: { meta: EVENT_META_FIELDS, tiers_: TIER_FIELDS },
-    // The edit path sends the same two structs as the create path and has to be pinned too —
-    // otherwise a reordered `EventMeta` is caught when an event is made and missed when it is
-    // edited. Both rows reference the same two lists, and so do the reads above, so a struct
-    // cannot drift between the screen that creates one, the screen that edits it, and the
-    // screen that reads it back.
-    updateEventMeta: { meta: EVENT_META_FIELDS, tiers_: TIER_FIELDS },
+    publishEvent: { meta: EVENT_META_FIELDS, tiers_: TIER_FIELDS, policy: SPLIT_POLICY_FIELDS },
   },
 } as const;
 

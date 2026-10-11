@@ -478,6 +478,10 @@ const ko = {
       badPoster: '포스터를 다시 올려 주세요',
       schedule: '종료 시각이 시작 시각보다 뒤여야 해요',
       tiersEmpty: '티켓 종류를 하나 이상 만들어 주세요',
+      paidApproval: '유료 티켓은 관리자 승인으로 받을 수 없어요. 내용 고치기에서 선착순으로 바꿔 주세요',
+      notSettlementManager: '이 팀에서 정산을 정할 권한이 없어요. 팀 오너에게 권한을 요청해 주세요',
+      settlementPaused: '지금은 유료 행사를 공개할 수 없어요. 잠시 뒤 다시 시도해 주세요',
+      splitInvalid: '정산 규칙을 다시 확인해 주세요',
       failed: '행사를 공개하지 못했어요. 잠시 뒤 다시 시도해 주세요',
     },
 
@@ -1026,6 +1030,10 @@ const en: typeof ko = {
       badPoster: 'Please upload the poster again',
       schedule: 'The end has to come after the start',
       tiersEmpty: 'Add at least one ticket kind',
+      paidApproval: 'Paid tickets cannot be issued by approval. Switch to first come, first served under Edit details',
+      notSettlementManager: 'You may not set the split for this team. Ask the team owner for the permission',
+      settlementPaused: 'Paid events cannot be published right now. Please try again in a moment',
+      splitInvalid: 'Please check the split rules again',
       failed: 'Could not publish the event. Please try again in a moment',
     },
 
