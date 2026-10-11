@@ -97,7 +97,14 @@ const issueSnapshot = vi.fn(async () => {
   throw new Error('offline');
 });
 const getPhotoForGate = vi.fn(async () => ({ photoJpegB64: 'FETCHED', displayName: '김입장' }));
-vi.mock('../../shared/api/functions', () => ({ issueSnapshot, getPhotoForGate }));
+// P4: a request is a backend record, and an approver reads the open ones back.
+const requestOverride = vi.fn(async (_req: unknown) => ({ requestId: 'req-1' }));
+const listOverrideRequests = vi.fn(async (_req: unknown) => ({ requests: [] as unknown[] }));
+vi.mock('../../shared/api/functions', () => ({
+  issueSnapshot,
+  getPhotoForGate,
+  api: { requestOverride, listOverrideRequests },
+}));
 
 // --- the relayed check-in (design §4-5) and the reads around it ---------------------------------
 // One mock covers both the online tap (useGate → `./checkInOp`) and the offline drain (opQueue →
@@ -903,10 +910,11 @@ describe('manual approval', () => {
   });
 
   /**
-   * The half that admits nobody. `requestOverride` emits `OverrideRequested` and no check-in, so
-   * this sentence is the only thing that tells a staff member the request left the phone.
+   * The half that admits nobody. A request is a backend record (P4, `requestOverride` callable) —
+   * no chain write, no passkey prompt — and this sentence is the only thing that tells a staff
+   * member the request left the phone.
    */
-  it('files a request for a manager who may not approve, and says 요청됨 — 승인 대기', async () => {
+  it('files a request for a manager who may not approve through the callable, and says 요청됨 — 승인 대기', async () => {
     managerOf = [true, false];
     const { result } = await ready();
 
@@ -916,15 +924,73 @@ describe('manual approval', () => {
     await waitFor(() => expect(result.current.canApprove).toBe(false));
 
     await act(async () => {
-      await result.current.submitOverride('4821', 3, TOKEN_ID);
+      await result.current.submitOverride('4821', 3, TOKEN_ID, { note: '화면이 깨졌어요' });
     });
 
-    const sent = await sentOverride();
-    expect(sent.functionName).toBe('requestOverride');
-    expect(sent.args).toEqual([BigInt(TOKEN_ID), GATE_ID, 3]);
-    expect(result.current.override).toMatchObject({ status: 'requested', role: 'none' });
+    expect(requestOverride).toHaveBeenCalledWith({
+      eventId: EVENT_ID.toString(),
+      tokenId: TOKEN_ID,
+      gateId: GATE_ID.toString(),
+      reason: 3,
+      note: '화면이 깨졌어요',
+    });
+    expect(sendAction).not.toHaveBeenCalled();
+    expect(result.current.override).toMatchObject({ status: 'requested', role: 'none', route: 'requestOverride' });
     // Nobody went in on a request.
     expect(result.current.entriesCount).toBe(0);
+  });
+
+  it('says this account may not ask when the request callable answers NOT_ALLOWED', async () => {
+    managerOf = [true, false];
+    requestOverride.mockRejectedValueOnce(
+      Object.assign(new Error('NOT_ALLOWED'), { code: 'permission-denied', details: { code: 'NOT_ALLOWED' } }),
+    );
+    const { result } = await ready();
+    await act(async () => {
+      result.current.openOverride();
+    });
+    await waitFor(() => expect(result.current.canApprove).toBe(false));
+    await act(async () => {
+      await result.current.submitOverride('4821', 1, TOKEN_ID);
+    });
+    expect(result.current.override).toMatchObject({ status: 'failed', detail: staffKo.override.denied });
+  });
+
+  it('shows an approver the open requests, and approves one at the gate it was filed from', async () => {
+    listOverrideRequests.mockResolvedValue({
+      requests: [
+        { id: 'req-1', tokenId: TOKEN_ID, gateId: '9', reason: 2, requesterAccount: `0x${'dd'.repeat(20)}`, createdAt: 1 },
+      ],
+    });
+    const { result } = await ready();
+    await act(async () => {
+      result.current.openOverride();
+    });
+    await waitFor(() => expect(result.current.canApprove).toBe(true));
+    await waitFor(() => expect(result.current.overrideRequests).toHaveLength(1));
+    expect(listOverrideRequests).toHaveBeenCalledWith({ eventId: EVENT_ID.toString() });
+    // Named from the held guest list.
+    expect(result.current.overrideRequests[0]).toMatchObject({ tokenId: TOKEN_ID, gateId: '9', displayName: '김입장' });
+
+    await act(async () => {
+      await result.current.submitOverride('4821', 2, TOKEN_ID, { gateId: '9' });
+    });
+    const sent = await sentOverride();
+    expect(sent.functionName).toBe('manualOverride');
+    expect(sent.args).toEqual([BigInt(TOKEN_ID), 9n, 2]);
+    listOverrideRequests.mockResolvedValue({ requests: [] });
+  });
+
+  it('asks for no open requests from somebody who may only ask', async () => {
+    managerOf = [true, false];
+    listOverrideRequests.mockClear();
+    const { result } = await ready();
+    await act(async () => {
+      result.current.openOverride();
+    });
+    await waitFor(() => expect(result.current.canApprove).toBe(false));
+    expect(listOverrideRequests).not.toHaveBeenCalled();
+    expect(result.current.overrideRequests).toEqual([]);
   });
 
   it('spends nothing on a wrong PIN, and says how many tries are left', async () => {

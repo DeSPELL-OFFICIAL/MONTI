@@ -95,6 +95,7 @@ function running(over: Partial<UseGateResult> = {}): UseGateResult {
     gateOpenStale: false,
     emulationUnavailable: false,
     canApprove: false,
+    overrideRequests: [],
     openOverride,
     searchGuests,
     searchGuestsOnChain,
@@ -320,7 +321,7 @@ describe('manual approval', () => {
     expect(screen.getByRole('button', { name: staffKo.override.approve })).toBeInTheDocument();
     await userEvent.type(screen.getByLabelText(staffKo.override.pin), '4821');
     await userEvent.click(screen.getByRole('button', { name: staffKo.override.approve }));
-    expect(submitOverride).toHaveBeenCalledWith('4821', 1, TICKET.tokenId);
+    expect(submitOverride).toHaveBeenCalledWith('4821', 1, TICKET.tokenId, {});
   });
 
   it('offers only a request when the chain says this account may not approve', () => {

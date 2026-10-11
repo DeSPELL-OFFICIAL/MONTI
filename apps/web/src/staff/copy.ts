@@ -242,6 +242,11 @@ export const staffKo = {
     searchEmpty: '명단에서 찾지 못했어요. 다르게 넣어 보세요.',
     chosenLabel: '들여보낼 사람',
     searchAgain: '다시 찾기',
+    /** 승인 권한이 없는 스태프가 요청에 붙이는 한 줄(선택). */
+    noteLabel: '요청 메모 (선택)',
+    /** 승인 권한이 있는 스태프에게만 보이는, 다른 입구에서 들어온 요청 목록. */
+    requestsTitle: '들어온 승인 요청',
+    requestsHint: '누르면 사람과 사유가 채워져요. PIN을 넣고 승인하세요.',
     /** 보낸 뒤. 체인 사건이 남길 것과 같은 세 가지를 화면에도 그대로 적는다. */
     sending: '보내고 있어요. 잠시만요.',
     requested: '요청됨 — 승인 대기',
@@ -453,6 +458,9 @@ export const staffEn: typeof staffKo = {
     searchEmpty: 'Nobody in the list matches. Try something else.',
     chosenLabel: 'Letting in',
     searchAgain: 'Search again',
+    noteLabel: 'Note for the approver (optional)',
+    requestsTitle: 'Approval requests',
+    requestsHint: 'Tap one to fill in the person and the reason, then enter the PIN and approve.',
     sending: 'Sending. One moment.',
     requested: 'Requested - waiting for approval',
     approved: 'They are in.',
