@@ -15,7 +15,7 @@ import { optionalEnv, requiredEnv } from '../config';
  * the region has moved once already, so it is environment-driven with the current value as
  * the default rather than a constant compiled into every call site.
  */
-export const DEFAULT_FUNCTIONS_REGION = 'us-east1';
+export const DEFAULT_FUNCTIONS_REGION = 'us-east4';
 
 export function getFunctionsRegion(): string {
   return optionalEnv('VITE_FUNCTIONS_REGION') ?? DEFAULT_FUNCTIONS_REGION;
