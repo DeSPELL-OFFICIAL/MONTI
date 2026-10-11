@@ -28,9 +28,9 @@ const ISSUED_AT = 1_789_862_400n; // 2026-09-20T00:00:00Z
 /** abi-delta-01b §7 의 가상 배포. 컨트랙트 쪽 고정 벡터와 같은 fixture 를 쓴다. */
 const FIXTURE_CHAIN_ID = 31337;
 const FIXTURE_TICKET = '0x7111111111111111111111111111111111111111' as Hex;
-/** 2026-09-23 Monad 테스트넷(10143)에 실제로 올라간 Ticket. */
+/** Monad 테스트넷(10143)에 지금 올라가 있는 Ticket(v2 rc1, 2026-10-12). */
 const LIVE_CHAIN_ID = 10143;
-const LIVE_TICKET = '0x4B8353C9F3503Cdbd011E8f35da0a955D95b1367' as Hex;
+const LIVE_TICKET = '0x8544c531A3EF7f702fe3A64Ff20D57bA774d9edC' as Hex;
 const RECIPIENT = '0x0000000000000000000000000000000000000001' as Hex;
 
 describe('gateCodeHash', () => {
@@ -153,7 +153,9 @@ describe('deviceDigestV2', () => {
 describe('deviceDigestV2 against the deployed Ticket', () => {
   const LIVE_INPUT = {
     chainId: 10143n,
-    ticket: '0x4B8353C9F3503Cdbd011E8f35da0a955D95b1367' as Hex,
+    // v2 rc1 Ticket(2026-10-12, block 70161104). 기대값은 그 컨트랙트의 deviceDigest(7,3,11,0x11*32,1789862400)
+    // eth_call 이 돌려준 값이다 — 재배포하면 주소와 벡터를 함께 다시 떠야 한다.
+    ticket: '0x8544c531A3EF7f702fe3A64Ff20D57bA774d9edC' as Hex,
     tokenId: 7n,
     gateId: 3n,
     eventId: 11n,
@@ -163,7 +165,7 @@ describe('deviceDigestV2 against the deployed Ticket', () => {
 
   it('reproduces what the live deviceDigest(...) view returned on 10143', () => {
     expect(deviceDigestV2(LIVE_INPUT)).toBe(
-      '0xec0c84e899cdacfab3dc560fc6ad89a3db7800cd07154b5ad3f24d0d4f46f8e9',
+      '0xcaba7b087bd89614721b46d73391176cf543c4ec91548b62e388c968a537b505',
     );
   });
 
