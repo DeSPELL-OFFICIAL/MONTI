@@ -109,7 +109,6 @@ export const NON_GATE_ERRORS = [
   'KycRequired',
   'MaxPerWalletExceeded',
   'NoOffer',
-  'NotDraft',
   'NotRotatedAccount',
   'NothingToMigrate',
   'OfferExpired',
@@ -127,6 +126,17 @@ export const NON_GATE_ERRORS = [
   'TransfersDisabled',
   'UnknownEvent',
   'UnknownTier',
+  // v2 (abi-delta-v2.md): the one-write publish and the vault-minted paid purchase. Publishing is
+  // the organiser's write and `purchase` the treasury's; `setVault` is a deploy-time call. None
+  // is reachable from a door tap.
+  'NotDeployer',
+  'NotPaidTier',
+  'NotVault',
+  'PaidApprovalUnsupported',
+  'PolicyRequired',
+  'UnexpectedPolicy',
+  'VaultAlreadySet',
+  'ZeroAddress',
 ] as const;
 
 /**
