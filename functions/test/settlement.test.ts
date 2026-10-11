@@ -443,6 +443,39 @@ describe('settlementSweep', () => {
     expect(sendFromTreasury).not.toHaveBeenCalled();
   });
 
+  // 스테이징 창: v1 의 범용 sweepRelays 가 같은 relays/{id} 를 tokenId 없이 먼저 confirmed 로 닫는다.
+  it('re-reads the receipt when v1 closed the purchase relay as confirmed without tokenId', async () => {
+    seedSent(ago(3));
+    fake.write(`relays/${ORDER_ID}`, { status: 'confirmed', confirmedAt: ago(1) }, { merge: true });
+    await settlement.settlementSweep();
+    const relay = fake.snapshot(`relays/${ORDER_ID}`);
+    expect(relay.get('status')).toBe('confirmed');
+    expect(relay.get('tokenId')).toBe(TOKEN_ID.toString());
+    expect(relay.get('txHash')).toBe(BUY_TX);
+    const order = fake.snapshot(`orders/${ORDER_ID}`);
+    expect(order.get('status')).toBe('deposited');
+    expect(order.get('tokenId')).toBe(TOKEN_ID.toString());
+    expect(order.get('depositTxHash')).toBe(BUY_TX);
+  });
+
+  it('overrides a v1 TX_DROPPED on the relay with REVERTED when the receipt shows a revert', async () => {
+    seedSent(ago(3));
+    fake.write(`relays/${ORDER_ID}`, { status: 'failed', error: { code: 'TX_DROPPED', message: 'x' } }, { merge: true });
+    getTransactionReceipt.mockResolvedValueOnce({ status: 'reverted', logs: [] });
+    await settlement.settlementSweep();
+    expect(fake.snapshot(`orders/${ORDER_ID}`).get('status')).toBe('failed');
+    expect((fake.snapshot(`relays/${ORDER_ID}`).get('error') as { code: string }).code).toBe('REVERTED');
+  });
+
+  it('recovers a missing tokenId on a deposited order from its receipt (idempotent)', async () => {
+    fake.write(`orders/${ORDER_ID}`, { status: 'deposited', eventId: EVENT_ID.toString(), txHash: BUY_TX, depositTxHash: BUY_TX, updatedAt: ago(10) });
+    fake.write(`relays/${ORDER_ID}`, { kind: 'purchase', status: 'confirmed', personId: PERSON_ID, txHash: BUY_TX });
+    await settlement.settlementSweep();
+    expect(fake.snapshot(`orders/${ORDER_ID}`).get('tokenId')).toBe(TOKEN_ID.toString());
+    expect(fake.snapshot(`orders/${ORDER_ID}`).get('status')).toBe('deposited');
+    expect(fake.snapshot(`relays/${ORDER_ID}`).get('tokenId')).toBe(TOKEN_ID.toString());
+  });
+
   it('marks a reverted purchase failed (order and relay)', async () => {
     seedSent(ago(3));
     getTransactionReceipt.mockResolvedValueOnce({ status: 'reverted', logs: [] });

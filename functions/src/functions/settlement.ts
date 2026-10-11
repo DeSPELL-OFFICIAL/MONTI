@@ -535,6 +535,21 @@ export async function settlementSweep(): Promise<void> {
   await sweepDeposited();
 }
 
+/** 영수증 1회 조회. 아직 없으면 null, 그 밖의 RPC 오류는 올린다(문서별 catch 가 로그). */
+async function receiptOrNull(hash: Hex): Promise<TransactionReceipt | null> {
+  try {
+    return await publicClient().getTransactionReceipt({ hash });
+  } catch (cause) {
+    if (cause instanceof TransactionReceiptNotFoundError) return null;
+    throw cause;
+  }
+}
+
+/**
+ * `sent` 주문을 영수증으로 닫는다. 릴레이 문서 상태는 보지 않는다 — v1 의 범용 `sweepRelays` 가
+ * 스테이징 창 동안 같은 `relays/{id}` 를 tokenId 없이 `confirmed`(또는 `failed`)로 먼저 닫을 수 있어서,
+ * 주문 상태와 영수증만 믿고 finalizePurchase 가 릴레이를 tokenId 와 함께 다시 덮는다(멱등).
+ */
 async function sweepSentOrders(): Promise<void> {
   const now = Date.now();
   const snapshot = await db
@@ -550,14 +565,7 @@ async function sweepSentOrders(): Promise<void> {
       const hash = doc.get('txHash') as Hex | undefined;
       const eventId = BigInt(doc.get('eventId') as string);
       const rref = relayRef(doc.id);
-      let receipt: TransactionReceipt | null = null;
-      if (hash) {
-        try {
-          receipt = await publicClient().getTransactionReceipt({ hash });
-        } catch (cause) {
-          if (!(cause instanceof TransactionReceiptNotFoundError)) throw cause;
-        }
-      }
+      const receipt = hash ? await receiptOrNull(hash) : null;
       if (receipt && hash) {
         await finalizePurchase(doc.ref, rref, eventId, hash, receipt);
         continue;
@@ -596,10 +604,18 @@ async function sweepDeposited(): Promise<void> {
 
   for (const doc of snapshot.docs) {
     try {
-      const tokenIdStr = doc.get('tokenId') as string | undefined;
-      if (!tokenIdStr) continue;
-      const tokenId = BigInt(tokenIdStr);
       const eventId = BigInt(doc.get('eventId') as string);
+      const tokenIdStr = doc.get('tokenId') as string | undefined;
+      if (!tokenIdStr) {
+        // tokenId 없는 deposited(로그 누락 등) — 영수증으로 다시 닫는다(멱등). 다음 틱에 분배를 본다.
+        const hash = (doc.get('depositTxHash') ?? doc.get('txHash')) as Hex | undefined;
+        if (hash) {
+          const receipt = await receiptOrNull(hash);
+          if (receipt) await finalizePurchase(doc.ref, relayRef(doc.id), eventId, hash, receipt);
+        }
+        continue;
+      }
+      const tokenId = BigInt(tokenIdStr);
 
       const used = Number(
         await pc.readContract({ address: contracts.ticket, abi: ticketAbi, functionName: 'usedAt', args: [tokenId] }),
