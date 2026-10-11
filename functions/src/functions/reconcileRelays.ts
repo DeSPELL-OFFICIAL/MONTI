@@ -169,6 +169,9 @@ export async function sweepRelays(): Promise<void> {
   const pc = publicClient();
   const nowMs = Date.now();
   for (const doc of snapshot.docs) {
+    // 결제 릴레이는 settlement 의 `sweepSentOrders` 가 주인이다 — 주문과 릴레이를 tokenId 와 함께
+    // 한 번에 닫는다. 여기서 먼저 `confirmed` 로 닫으면 tokenId 없는 확정 창이 생긴다.
+    if (doc.get('kind') === 'purchase') continue;
     // 문서 하나가 터져도 나머지는 계속 간다 — 깨진 문서 하나가 밀린 전부를 막지 않는다.
     try {
       const sentAt = doc.get('sentAt') as Timestamp | undefined;

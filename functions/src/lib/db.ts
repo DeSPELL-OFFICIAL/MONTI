@@ -74,9 +74,10 @@ export const USAGE = 'usage';
 
 /**
  * 공연별 **정산 장부 미러**(설계 2026-10-01 §5). 문서 id 는 `eventId`(십진 문자열)이고 값은
- * `{ policy:{recipients:[{account,bps,reason,tag}],platformBps}, policyHash, priceUsdCentsByTier,
+ * `{ orgId, policy:{recipients:[{account,bps,reason,tag}],platformBps}, policyHash, priceUsdCentsByTier,
  * setBy, txHash, updatedAt }` 다. **공개 읽기**(공개 정산 현황 페이지) — 권위는 온체인/인덱서이고
- * 이 문서는 표시용 거울이다. 쓰는 길은 서버(`relaySetPolicy`) 하나다.
+ * 이 문서는 표시용 거울이다. 쓰는 길은 relayAction `publishEvent` 확정 훅(`lib/postConfirm.ts`) 하나다 —
+ * 콜러블이 확정을 못 보면 `reconcileRelays` 가 같은 훅을 다시 돌린다.
  */
 export const SETTLEMENTS = 'settlements';
 /**

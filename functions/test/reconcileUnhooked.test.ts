@@ -14,7 +14,7 @@ vi.mock('../src/lib/db.js', async () => {
   return { ...actual, db: fake.db };
 });
 
-const { sweepUnhookedRelays } = await import('../src/functions/reconcileRelays.js');
+const { sweepRelays, sweepUnhookedRelays } = await import('../src/functions/reconcileRelays.js');
 
 const TICKET = getAddress(`0x${'ce'.repeat(20)}`);
 const VAULT = getAddress(`0x${'5a'.repeat(20)}`);
@@ -80,5 +80,19 @@ describe('sweepUnhookedRelays — confirmed by someone else (e.g. the v1 sweep) 
     await sweepUnhookedRelays(client);
     expect((client as unknown as { getTransactionReceipt: ReturnType<typeof vi.fn> }).getTransactionReceipt).not.toHaveBeenCalled();
     expect(fake.snapshot('settlements/1001').data()).toEqual(first);
+  });
+});
+
+describe('sweepRelays — purchase relays belong to sweepSentOrders', () => {
+  it('leaves a stale sent purchase relay untouched (no RPC, no status change)', async () => {
+    fake.write('relays/p1', {
+      kind: 'purchase',
+      status: 'sent',
+      txHash: TX,
+      sentAt: Timestamp.fromMillis(Date.now() - 30 * 60 * 1000),
+    });
+    // chain 모의의 publicClient() 는 빈 객체다 — 영수증을 물으면 TypeError 로 터진다.
+    await sweepRelays();
+    expect(fake.snapshot('relays/p1').get('status')).toBe('sent');
   });
 });
