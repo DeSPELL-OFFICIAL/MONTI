@@ -3,6 +3,7 @@ import { error } from 'firebase-functions/logger';
 import type { Hex, PersonStatus } from '@monti/shared';
 import {
   DEVICES,
+  NICKNAMES,
   PASSKEYS,
   PERSONS,
   PHONE_INDEX,
@@ -140,6 +141,15 @@ export async function erasePerson(input: {
       await user.ref.delete();
       firestoreDocs += 1;
     }
+  }
+
+  // 닉네임 장부(v2 P5)는 personId 로 묶여 있다. 놓아줘야 그 이름을 다른 사람이 쓸 수 있고,
+  // 이름→사람 조회(resolveRecipient)가 파기된 사람에게 닿지 않는다. users.nickname 사본은
+  // 위에서 users 문서와 함께 사라졌다.
+  const nicknames = await db.collection(NICKNAMES).where('personId', '==', personId).get();
+  for (const nickname of nicknames.docs) {
+    await nickname.ref.delete();
+    firestoreDocs += 1;
   }
 
   const passkeys = await db.collection(PASSKEYS).where('personId', '==', personId).get();

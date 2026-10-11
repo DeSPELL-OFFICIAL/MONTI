@@ -34,7 +34,7 @@ vi.mock('firebase-functions/logger', async (importOriginal) => ({
   error: () => undefined,
 }));
 
-const { DEVICES, PASSKEYS, PERSONS, PHONE_INDEX, USERS } = await import('../src/lib/db.js');
+const { DEVICES, NICKNAMES, PASSKEYS, PERSONS, PHONE_INDEX, USERS } = await import('../src/lib/db.js');
 const { DiditErasureFailed, erasePerson } = await import('../src/lib/erasePerson.js');
 
 /** 파기 대상이 실제로 흩어져 있는 다섯 자리 전부를 심는다. */
@@ -88,6 +88,25 @@ describe('erasePerson', () => {
 
     // phoneIndex + users + passkeys×2 + devices = 5. 사람 문서는 남기고 털기만 하므로 세지 않는다.
     expect(result).toEqual({ diditSessions: 2, firestoreDocs: 5, authDeleted: true });
+  });
+
+  it("frees the person's nickname (v2 P5) so the name can be taken again, and only theirs", async () => {
+    write(`${NICKNAMES}/taewan`, { personId: PERSON_ID, account: ACCOUNT.toLowerCase(), display: 'Taewan' });
+    write(`${NICKNAMES}/someone`, { personId: OTHER_PERSON_ID, account: '0xother', display: 'someone' });
+
+    const result = await run();
+
+    expect(snapshot(`${NICKNAMES}/taewan`).exists).toBe(false);
+    expect(snapshot(`${NICKNAMES}/someone`).exists).toBe(true);
+    // users/{uid} 는 통째로 지워지므로 그 안의 nickname 사본도 함께 사라진다.
+    expect(snapshot(`${USERS}/uid-1`).exists).toBe(false);
+    expect(result.firestoreDocs).toBe(6);
+  });
+
+  it('frees the nickname even when the uid is unknown (keyed by personId)', async () => {
+    write(`${NICKNAMES}/taewan`, { personId: PERSON_ID, account: ACCOUNT.toLowerCase(), display: 'Taewan' });
+    await run({ uid: undefined });
+    expect(snapshot(`${NICKNAMES}/taewan`).exists).toBe(false);
   });
 
   it('keeps the person row the chain points at, stripped of every personal field', async () => {
