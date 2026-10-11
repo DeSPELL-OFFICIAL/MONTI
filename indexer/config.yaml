@@ -20,7 +20,6 @@ contracts:
       - event: RotationCancelled(bytes32 indexed personId, address indexed account)
       - event: DeviceChanged(address indexed account, bytes32 x, bytes32 y)
       - event: DeviceLocked(address indexed account, bool locked)
-      - event: NicknameSet(address indexed account, bytes32 indexed nicknameHash, string nickname)
       - event: KycLevelSet(address indexed account, uint8 level)
   - name: Organizers
     handler: src/EventHandlers.ts
@@ -38,7 +37,6 @@ contracts:
     events:
       - event: EventCreated(uint256 indexed eventId, uint256 indexed orgId, address indexed creator)
       - event: EventStatusChanged(uint256 indexed eventId, uint8 status)
-      - event: EventMetaUpdated(uint256 indexed eventId)
       - event: Claimed(uint256 indexed tokenId, uint256 indexed eventId, address indexed to, uint8 tier)
       - event: ClaimRequested(uint256 indexed eventId, uint256 indexed requestId, address indexed requester, uint8 tier)
       - event: ClaimApproved(uint256 indexed eventId, uint256 indexed requestId, uint256 tokenId)
@@ -46,7 +44,6 @@ contracts:
       - event: Transfer(address indexed from, address indexed to, uint256 indexed tokenId)
       - event: CheckedIn(uint256 indexed tokenId, uint256 indexed eventId, uint256 indexed gateId, bytes32 nonceHash, uint64 ts)
       - event: CheckedInLate(uint256 indexed tokenId, uint256 indexed gateId, uint64 issuedAt, uint64 ts)
-      - event: OverrideRequested(uint256 indexed tokenId, uint256 indexed gateId, address indexed requester, uint8 reason)
       - event: ManualOverride(uint256 indexed tokenId, uint256 indexed gateId, address indexed approver, uint8 role, uint8 reason)
       - event: Revoked(uint256 indexed tokenId, uint8 reason)
       - event: Migrated(uint256 indexed tokenId, address indexed from, address indexed to)
@@ -82,4 +79,3 @@ networks:
       - name: SettlementVault
         address:
           - "0xA84FDb64C9DDc3B25eF8BDeA58561BDbE53ABD69"
-        start_block: 67253867

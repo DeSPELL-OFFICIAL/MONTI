@@ -5,25 +5,28 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 /**
- * 생성기가 SettlementVault 를 **배포 유/무에 맞춰** 다루는지 못 박는다.
- *  - 배포 파일에 `settlementVault` 키가 없으면(오늘) 금고를 깨끗이 건너뛰고도 유효한 config 를 낸다.
- *  - 키가 들어오면 금고 컨트랙트를 더하고, 자기 배포 블록(`settlementVaultBlock`)을 컨트랙트
- *    start_block 으로 단다(없으면 코어 `block` 으로 안전하게 폴백). 네트워크 start_block 은 코어 그대로.
+ * 생성기가 v2 배포 파일(`{chainId, block, identity, forwarder, organizers, ticket, settlementVault, usdc,
+ * attester}`, 금고가 코어와 같은 블록)을 다루는 모양을 못 박는다.
+ *  - 금고는 필수다(v2 는 한 번에 배포) — 키가 없으면 크게 실패한다.
+ *  - 컨트랙트별 start_block 은 없다. 네트워크 start_block = `block` 하나.
+ *  - v2 에서 삭제된 이벤트(NicknameSet, EventMetaUpdated, OverrideRequested)는 구독하지 않는다.
  *
  * 배포 파일은 DEPLOYMENT_FILE 로 먹인다(생성기가 지원). ABI·이벤트 시그니처는 커밋된
  * packages/shared(코어)와 src/vendored/settlement-vault-abi.json(금고)에서 실제로 읽는다.
  */
 const genConfig = join(process.cwd(), 'scripts', 'gen-config.mjs');
 
-const CORE = {
-  block: 66724502,
+const V2 = {
   chainId: 10143,
-  identity: '0x10Fa9977363c40240381BEEfFc2D997BC9Edcd6b',
-  organizers: '0xAF80CbfDD08284E3aae67FFaaf20A27E281C360A',
-  ticket: '0x7E1fdfCB3688C5b0539101cEAE6a7Ee5bD9b51Cf',
-  previous: [] as unknown[],
+  block: 70000000,
+  identity: '0x1000000000000000000000000000000000000001',
+  forwarder: '0x1000000000000000000000000000000000000002',
+  organizers: '0x1000000000000000000000000000000000000003',
+  ticket: '0x1000000000000000000000000000000000000004',
+  settlementVault: '0x1000000000000000000000000000000000000005',
+  usdc: '0x534b2f3A21130d7a60830c2Df862319e593943A3',
+  attester: '0x6af898aA4d99375839d7069431A7019a6D84C4Ed',
 };
-const VAULT = '0xA84FDb64C9DDc3B25eF8BDeA58561BDbE53ABD69';
 
 function gen(deployment: Record<string, unknown>): { status: number; stdout: string; config: string } {
   const dir = mkdtempSync(join(tmpdir(), 'gen-config-test-'));
@@ -42,34 +45,33 @@ const VAULT_EVENTS = [
   'Paid', 'PayoutDeferred', 'Withdrawn', 'TokenAllowed', 'DepositorSet',
 ];
 
-describe('gen-config SettlementVault', () => {
-  it('produces a valid config that skips the vault when the key is absent', () => {
-    const { status, stdout, config } = gen(CORE);
-    expect(status).toBe(0);
-    expect(config).toContain('name: Identity');
-    expect(config).toContain('name: Ticket');
-    expect(config).not.toContain('name: SettlementVault');
-    expect(config).toContain('start_block: 66724502');
-    expect(stdout).toContain('SettlementVault 미배포');
-  });
-
-  it('includes the vault with its deploy block as the contract start_block when present', () => {
-    const { status, config } = gen({ ...CORE, settlementVault: VAULT, settlementVaultBlock: 67253867 });
+describe('gen-config v2', () => {
+  it('watches the five-key v2 deployment with the vault in the same start block', () => {
+    const { status, config } = gen(V2);
     expect(status).toBe(0);
     expect(config).toContain('name: SettlementVault');
-    expect(config).toContain(`"${VAULT}"`);
+    expect(config).toContain(`"${V2.settlementVault}"`);
     for (const ev of VAULT_EVENTS) expect(config).toContain(`- event: ${ev}(`);
-    // 일시정지 토글은 버린다.
     expect(config).not.toContain('- event: PausedSet(');
-    // 네트워크 start_block 은 코어(66724502), 금고 컨트랙트는 자기 배포 블록(67253867).
-    expect(config).toContain('    start_block: 66724502');
-    expect(config).toContain('        start_block: 67253867');
+    expect(config).toContain('    start_block: 70000000');
+    // 컨트랙트별 start_block 은 더 이상 없다(금고가 코어와 같은 배포).
+    expect(config).not.toMatch(/^ {8}start_block:/m);
   });
 
-  it('falls back to the core block when the vault is present but no deploy block is recorded', () => {
-    const { status, config } = gen({ ...CORE, settlementVault: VAULT });
-    expect(status).toBe(0);
-    expect(config).toContain('name: SettlementVault');
-    expect(config).toContain('        start_block: 66724502');
+  it('drops the events v2 removed from the contracts', () => {
+    const { config } = gen(V2);
+    for (const gone of ['NicknameSet', 'EventMetaUpdated', 'OverrideRequested']) {
+      expect(config).not.toContain(`- event: ${gone}(`);
+    }
+    // 같은 tx 에 GateRegistered → GateOpened 가 함께 온다(등록 즉시 개장) — 둘 다 구독.
+    expect(config).toContain('- event: GateRegistered(');
+    expect(config).toContain('- event: GateOpened(');
+  });
+
+  it('fails loudly when the vault key is missing (v2 deploys it with the core)', () => {
+    const { settlementVault: _omit, ...core } = V2;
+    const { status, stdout } = gen(core);
+    expect(status).not.toBe(0);
+    expect(stdout).toContain('"settlementVault" 키가 없다');
   });
 });
