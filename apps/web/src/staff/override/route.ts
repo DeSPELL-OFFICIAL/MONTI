@@ -4,8 +4,9 @@
 //
 // **Which call** is `Organizers`' answer, read fresh. A manager who may approve, and an admin
 // holding `PERM_APPROVE_OVERRIDE`, send `manualOverride` — the person walks in and the chain
-// records who said so. A manager without that right sends `requestOverride`, which files the
-// request and admits nobody; somebody with the right approves it elsewhere. Anybody else is
+// records who said so. A manager without that right files a request through the backend
+// `requestOverride` callable (P4 — off chain, no passkey prompt, admits nobody); somebody with the
+// right sees it in their own dialog (`listOverrideRequests`) and approves it with `manualOverride`. Anybody else is
 // `denied` and nothing is sent, because `manualOverride` from an unauthorised account reverts
 // `Unauthorized` (Ticket.sol:408) and the only thing the attendee learns is that the door broke.
 //
@@ -27,6 +28,7 @@ import { encodeFunctionData, type Address } from 'viem';
 
 import { OVERRIDE_ROLE, PERM_APPROVE_OVERRIDE, ticketAbi, type OverrideReasonCode } from '@monti/shared';
 
+import { api, type OverrideReason } from '../../shared/api/functions';
 import { getStaffAccount } from '../../shared/chain/accounts';
 import type { OverrideCall, OverrideRole, OverrideRoute } from '../types';
 import { readOrganizers } from '../../shared/chain/reads';
@@ -107,9 +109,13 @@ export async function decideOverrideRoute(who: OverrideWho): Promise<OverrideRou
 
 export interface SubmitOverrideParams {
   orgId: bigint;
+  /** The event the request is filed under (the callable checks `tokenId >> 96 == eventId`). */
+  eventId: bigint;
   tokenId: bigint;
   gateId: bigint;
   reason: OverrideReasonCode;
+  /** A short free-text note for the approver; request path only, blank is left off. */
+  note?: string;
 }
 
 /**
@@ -129,10 +135,22 @@ export interface OverrideSubmission {
   settled: Promise<void>;
 }
 
+/** The request path: one backend record, resolved once the server has stored it. */
+async function fileRequest(params: SubmitOverrideParams): Promise<void> {
+  const note = params.note?.trim();
+  await api.requestOverride({
+    eventId: params.eventId.toString(),
+    tokenId: params.tokenId.toString(),
+    gateId: params.gateId.toString(),
+    reason: params.reason as OverrideReason,
+    ...(note ? { note } : {}),
+  });
+}
+
 /**
- * Files or approves one override, from the staff member's own passkey account.
+ * Files or approves one override, as the signed-in staff member.
  *
- * The passkey signs the ForwardRequest, so a biometric prompt is expected here and is the point:
+ * Approving: the passkey signs the ForwardRequest, so a biometric prompt is expected here and is the point:
  * it is the moment a person, not a terminal, stands behind the door opening. The MONTI relayer
  * pays the gas and forwards the call, the same as a check-in — the budget belongs to the event
  * either way. The authority is read against the account that will sign, never one handed in, so
@@ -145,12 +163,17 @@ export async function submitOverride(params: SubmitOverrideParams): Promise<Over
   if (route === 'denied') throw new OverrideDenied();
 
   // Kicked off now, awaited by the caller through `settled`: the passkey prompt and the relay wait
-  // both live on that promise, so the console shows who is approving the moment this returns.
-  const settled = sendAction(
-    route,
-    'ticket',
-    encodeFunctionData({ abi: ticketAbi, functionName: route, args: [params.tokenId, params.gateId, params.reason] }),
-  ).then(() => undefined);
+  // (or the request callable) live on that promise, so the console shows who is acting the moment
+  // this returns. A request is a backend record, not a chain write — its refusal (`details.code`
+  // `UNKNOWN_EVENT`/`WRONG_EVENT`/`GATE_MISMATCH`/`NOT_ALLOWED`) rejects `settled` the same way.
+  const settled =
+    route === 'manualOverride'
+      ? sendAction(
+          route,
+          'ticket',
+          encodeFunctionData({ abi: ticketAbi, functionName: route, args: [params.tokenId, params.gateId, params.reason] }),
+        ).then(() => undefined)
+      : fileRequest(params);
 
   return { route, role, approver, reason: params.reason, settled };
 }

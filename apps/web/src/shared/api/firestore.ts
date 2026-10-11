@@ -539,10 +539,11 @@ export interface OrderView {
   tier: number;
   tokenId?: string;
   amountUsdCents: number;
-  status: 'deposited' | 'released' | 'refunded' | 'pending' | 'minted';
+  /** The v2 order machine: `pending → sent → deposited → released | refunded`, or `failed` (one
+   *  atomic step — no ticket and no charge). */
+  status: 'pending' | 'sent' | 'deposited' | 'released' | 'refunded' | 'failed';
   createdAt?: number;
   depositTxHash?: Hex;
-  receiptTxHash?: Hex;
 }
 
 export function watchOrder(
@@ -562,7 +563,8 @@ export function watchOrder(
 
 /**
  * A relayed write's progress, as the server writes it to `relays/{relayId}`. `purchaseTicket`
- * answers with a `relayId` the attendee follows here for the mint; `relaySetPolicy` answers with
+ * answers with a `relayId` (kind `purchase`) the attendee follows here for the one-step ticket +
+ * payment; `relaySetPolicy` answers with
  * one too. `null` is a relay id that has no document yet. Modelled on {@link watchChatRoom}.
  */
 export interface RelayStatusView {

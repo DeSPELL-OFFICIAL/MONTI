@@ -560,7 +560,60 @@ describe('OverrideDialog', () => {
     await user.selectOptions(screen.getByLabelText(staffKo.override.reasonLabel), '2');
     await user.click(screen.getByRole('button', { name: staffKo.override.request }));
     // No ticket was picked and none was handed in, so the wiring falls back to the tap on screen.
-    expect(onSubmit).toHaveBeenCalledWith('1234', 2, undefined);
+    expect(onSubmit).toHaveBeenCalledWith('1234', 2, undefined, {});
+  });
+
+  it('lets a staff member who may only ask add a note to the request', async () => {
+    const onSubmit = vi.fn();
+    const user = userEvent.setup();
+    render(<OverrideDialog canApprove={false} ticket={ticket({ tokenId: '1042' })} onSubmit={onSubmit} onCancel={noop} />);
+    await user.type(screen.getByLabelText(staffKo.override.pin), '1234');
+    await user.type(screen.getByLabelText(staffKo.override.noteLabel), '휴대폰 화면이 깨졌어요');
+    await user.click(screen.getByRole('button', { name: staffKo.override.request }));
+    expect(onSubmit).toHaveBeenCalledWith('1234', 1, '1042', { note: '휴대폰 화면이 깨졌어요' });
+  });
+
+  it('offers no note field to an approver — approving needs no note', () => {
+    render(<OverrideDialog canApprove onSubmit={noop} onCancel={noop} />);
+    expect(screen.queryByLabelText(staffKo.override.noteLabel)).toBeNull();
+  });
+
+  it('shows an approver the open requests, and picking one fills the person, reason and gate', async () => {
+    const onSubmit = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <OverrideDialog
+        canApprove
+        requests={[{ id: 'req-1', tokenId: '1042', gateId: '9', reason: 2, note: '배터리 없음', displayName: '박관객' }]}
+        onSubmit={onSubmit}
+        onCancel={noop}
+      />,
+    );
+    expect(screen.getByRole('heading', { name: staffKo.override.requestsTitle })).toBeInTheDocument();
+    expect(screen.getByText('배터리 없음')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: `박관객 ••1042 · ${staffKo.override.reason2}` }));
+
+    // The person and the reason come from the request; the list steps aside once one is chosen.
+    expect(screen.getByText('박관객 ••1042')).toBeInTheDocument();
+    expect((screen.getByLabelText(staffKo.override.reasonLabel) as HTMLSelectElement).value).toBe('2');
+    expect(screen.queryByRole('heading', { name: staffKo.override.requestsTitle })).toBeNull();
+
+    await user.type(screen.getByLabelText(staffKo.override.pin), '4821');
+    await user.click(screen.getByRole('button', { name: staffKo.override.approve }));
+    // Approved at the gate the requester stands at.
+    expect(onSubmit).toHaveBeenCalledWith('4821', 2, '1042', { gateId: '9' });
+  });
+
+  it('does not show the open requests to somebody who may only ask', () => {
+    render(
+      <OverrideDialog
+        canApprove={false}
+        requests={[{ id: 'req-1', tokenId: '1042', gateId: '9', reason: 2, displayName: '박관객' }]}
+        onSubmit={noop}
+        onCancel={noop}
+      />,
+    );
+    expect(screen.queryByRole('heading', { name: staffKo.override.requestsTitle })).toBeNull();
   });
 
   it('backs out without submitting', async () => {
@@ -673,7 +726,7 @@ describe('OverrideDialog', () => {
     expect(screen.getByText(/박관객/)).toBeInTheDocument();
     await user.type(screen.getByLabelText(staffKo.override.pin), '4821');
     await user.click(screen.getByRole('button', { name: staffKo.override.approve }));
-    expect(onSubmit).toHaveBeenCalledWith('4821', 1, '1042');
+    expect(onSubmit).toHaveBeenCalledWith('4821', 1, '1042', {});
   });
 
   it('lists a match by name and the last four digits, and a nameless one as 게스트', async () => {
@@ -904,7 +957,7 @@ describe('GateConsole', () => {
     renderConsole({ state: 'override' }, { canApprove: true, onOverrideSubmit, onOverrideCancel });
     await user.type(screen.getByLabelText(staffKo.override.pin), '99');
     await user.click(screen.getByRole('button', { name: staffKo.override.approve }));
-    expect(onOverrideSubmit).toHaveBeenCalledWith('99', 1, undefined);
+    expect(onOverrideSubmit).toHaveBeenCalledWith('99', 1, undefined, {});
     await user.click(screen.getByRole('button', { name: staffKo.override.cancel }));
     expect(onOverrideCancel).toHaveBeenCalledTimes(1);
   });

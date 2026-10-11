@@ -14,8 +14,10 @@ import {
   StaffShell,
   StaleDoorBanner,
   TapPrompt,
+  type OverrideSubmitExtra,
 } from './components';
 import type { SettledTap, TapRefusal } from './gate/machine';
+import type { OpenOverrideRequest } from './override/useOverrideRequests';
 import type { GateContext, OverrideReason, PrecheckResult, SnapshotTicket } from './types';
 
 /** 표 번호에서 마지막 두 글자만 남긴다. 관객이 같이 보는 화면에 전체 번호를 띄우지 않는다. */
@@ -82,7 +84,9 @@ export interface GateConsoleProps {
    */
   gateOpenStale?: boolean;
   onDone?: () => void;
-  onOverrideSubmit?: (pin: string, reason: OverrideReason, tokenId?: string) => void;
+  /** 승인 권한자에게 보여 줄, 다른 입구에서 들어온 열린 승인 요청(P4). */
+  overrideRequests?: readonly OpenOverrideRequest[];
+  onOverrideSubmit?: (pin: string, reason: OverrideReason, tokenId: string | undefined, extra: OverrideSubmitExtra) => void;
   onOverrideCancel?: () => void;
 }
 
@@ -116,6 +120,7 @@ export function GateConsole({
   onOverrideResolve,
   gateOpenStale,
   onDone,
+  overrideRequests,
   onOverrideSubmit,
   onOverrideCancel,
 }: GateConsoleProps): ReactElement {
@@ -172,6 +177,7 @@ export function GateConsole({
             ticket={ticket}
             onSearch={onOverrideSearch}
             onResolve={onOverrideResolve}
+            requests={overrideRequests}
             outcome={context.override}
             onSubmit={onOverrideSubmit ?? noop}
             onCancel={onOverrideCancel ?? noop}

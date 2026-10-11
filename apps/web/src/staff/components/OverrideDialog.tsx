@@ -4,6 +4,7 @@ import { OVERRIDE_REASONS } from '@monti/shared';
 
 import { Button } from '../../shared/ui';
 import { useStaffCopy } from '../copy';
+import type { OpenOverrideRequest } from '../override/useOverrideRequests';
 import type { OverrideOutcome, OverrideReason, SnapshotTicket } from '../types';
 import { ROLE_KEY, STATUS_KEY, approverLine, guestLine, reasonKey } from './overrideText';
 
@@ -34,11 +35,24 @@ export interface OverrideDialogProps {
    * 표를 세운다. 없으면 `undefined` — 창은 '명단에 없음'으로 남는다.
    */
   onResolve?: (query: string) => Promise<SnapshotTicket | undefined>;
+  /**
+   * 다른 입구에서 들어온 열린 승인 요청(P4, `override/useOverrideRequests.ts`). 승인할 수 있는
+   * 사람에게만 보인다. 하나를 누르면 그 사람·사유·요청한 입구가 채워지고, 승인은 평소와 같다.
+   */
+  requests?: readonly OpenOverrideRequest[];
   /** 이 승인이 어떻게 됐는지(04 T32). 창을 닫지 않고 여기서 그대로 보여준다. */
   outcome?: OverrideOutcome;
-  onSubmit: (pin: string, reason: OverrideReason, tokenId?: string) => void;
+  onSubmit: (pin: string, reason: OverrideReason, tokenId: string | undefined, extra: OverrideSubmitExtra) => void;
   onCancel: () => void;
 }
+
+/** 요청에만 붙는 메모, 그리고 요청을 골라 승인할 때 그 요청이 선 입구. 빈 값은 싣지 않는다. */
+export interface OverrideSubmitExtra {
+  note?: string;
+  gateId?: string;
+}
+
+const NOTE_MAX = 140;
 
 /**
  * 수동 승인 창.
@@ -65,6 +79,7 @@ export function OverrideDialog({
   ticket,
   onSearch,
   onResolve,
+  requests = [],
   outcome,
   onSubmit,
   onCancel,
@@ -73,7 +88,10 @@ export function OverrideDialog({
   const [pin, setPin] = useState('');
   const [reason, setReason] = useState<OverrideReason>(OVERRIDE_REASONS[0]);
   const [query, setQuery] = useState('');
-  const [picked, setPicked] = useState<SnapshotTicket | undefined>(ticket);
+  const [picked, setPicked] = useState<Pick<SnapshotTicket, 'tokenId' | 'displayName'> | undefined>(ticket);
+  const [note, setNote] = useState('');
+  // 요청을 골라 승인하는 중이면 그 요청. 승인은 요청한 사람이 선 입구에 기록된다.
+  const [fromRequest, setFromRequest] = useState<OpenOverrideRequest | undefined>(undefined);
 
   // 보내는 중이거나 이미 끝난 승인은 두 번 보내지 않는다. 실패만 다시 누를 수 있다.
   const settled = outcome?.status === 'requested' || outcome?.status === 'approved';
@@ -116,6 +134,31 @@ export function OverrideDialog({
     <div className="gate-dialog" role="dialog" aria-modal="true" aria-label={copy.override.title}>
       <h2 className="gate-dialog__title">{copy.override.title}</h2>
 
+      {canApprove && picked === undefined && requests.length > 0 ? (
+        <section className="gate-dialog__requests">
+          <h3>{copy.override.requestsTitle}</h3>
+          <p className="gate-dialog__hint">{copy.override.requestsHint}</p>
+          <ul className="gate-dialog__matches">
+            {requests.map((request) => (
+              <li key={request.id}>
+                <Button
+                  variant="ghost"
+                  disabled={locked}
+                  onClick={() => {
+                    setPicked({ tokenId: request.tokenId, displayName: request.displayName });
+                    setReason(request.reason);
+                    setFromRequest(request);
+                  }}
+                >
+                  {`${guestLine(copy, request)} · ${copy.override[reasonKey(request.reason)]}`}
+                </Button>
+                {request.note ? <p className="gate-dialog__hint">{request.note}</p> : null}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
       {picked === undefined ? (
         <>
           <label className="gate-dialog__field">
@@ -154,6 +197,7 @@ export function OverrideDialog({
               variant="ghost"
               onClick={() => {
                 setPicked(undefined);
+                setFromRequest(undefined);
                 setQuery('');
               }}
             >
@@ -191,10 +235,33 @@ export function OverrideDialog({
         </select>
       </label>
 
+      {canApprove ? null : (
+        <label className="gate-dialog__field">
+          <span>{copy.override.noteLabel}</span>
+          <input
+            type="text"
+            autoComplete="off"
+            maxLength={NOTE_MAX}
+            value={note}
+            disabled={locked}
+            onChange={(event) => setNote(event.target.value)}
+          />
+        </label>
+      )}
+
       {outcome === undefined ? null : <Outcome outcome={outcome} />}
 
       {settled ? null : (
-        <Button onClick={() => onSubmit(pin, reason, picked?.tokenId)} disabled={busy}>
+        <Button
+          onClick={() => {
+            const extra: OverrideSubmitExtra = {};
+            const trimmed = note.trim();
+            if (!canApprove && trimmed !== '') extra.note = trimmed;
+            if (canApprove && fromRequest !== undefined) extra.gateId = fromRequest.gateId;
+            onSubmit(pin, reason, picked?.tokenId, extra);
+          }}
+          disabled={busy}
+        >
           {canApprove ? copy.override.approve : copy.override.request}
         </Button>
       )}
