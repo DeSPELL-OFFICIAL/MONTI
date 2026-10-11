@@ -24,7 +24,7 @@ export { saveEventArt } from './functions/eventArt.js';
 export { registerPasskey } from './functions/registerPasskey.js';
 export { recoverAccess } from './functions/recoverAccess.js';
 export { resolveRecipient } from './functions/resolveRecipient.js';
-export { purchaseTicket, refundOrder, relaySetPolicy } from './functions/settlement.js';
+export { purchaseTicket, refundOrder } from './functions/settlement.js';
 export { startKyc } from './functions/startKyc.js';
 export { startSignup } from './functions/startSignup.js';
 export { tenderlyWebhook } from './functions/tenderlyWebhook.js';

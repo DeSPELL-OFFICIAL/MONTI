@@ -88,7 +88,6 @@ vi.mock('../src/functions/relay.js', () => ({ runRelayClaim }));
 
 const settlement = await import('../src/functions/settlement.js');
 const functionsTest = (await import('firebase-functions-test')).default();
-const relaySetPolicy = functionsTest.wrap(settlement.relaySetPolicy);
 const purchaseTicket = functionsTest.wrap(settlement.purchaseTicket);
 const refundOrder = functionsTest.wrap(settlement.refundOrder);
 
@@ -176,48 +175,6 @@ beforeEach(() => {
   waitTreasury.mockClear();
   runRelayClaim.mockClear();
   runRelayClaim.mockResolvedValue({ relayId: `${ACCOUNT}:${EVENT_ID}:0`, status: 'confirmed', txHash: TX, tokenId: TOKEN_ID.toString() });
-});
-
-describe('relaySetPolicy', () => {
-  it('stores a policy whose hash matches an independent keccak of the abi-encoded policy', async () => {
-    const res = (await relaySetPolicy({ data: policyReq(), auth } as never)) as { relayId: string; status: string; txHash?: string };
-    expect(res.status).toBe('confirmed');
-    expect(res.relayId).toBe(`setPolicy:${ACCOUNT}:0`);
-    const doc = fake.snapshot(`settlements/${EVENT_ID}`);
-    expect(doc.get('policyHash')).toBe(EXPECTED_HASH);
-    const policy = doc.get('policy') as { platformBps: number; recipients: Record<string, unknown>[] };
-    expect(policy.platformBps).toBe(2000);
-    expect(policy.recipients[0]).toMatchObject({ account: ARTIST, bps: 6000, reason: '출연료', tag: 'artist' });
-    expect(doc.get('priceUsdCentsByTier')).toEqual({ '0': 3000 });
-    expect(fake.snapshot(`relays/setPolicy:${ACCOUNT}:0`).get('kind')).toBe('setPolicy');
-    expect(sendRelayed).toHaveBeenCalledTimes(1);
-  });
-
-  it('computes the hash locally when the hashPolicy view is unavailable (pre-deploy)', async () => {
-    hashView = null; // readContract('hashPolicy') throws → 로컬 계산으로 진행
-    const res = (await relaySetPolicy({ data: policyReq(), auth } as never)) as { status: string };
-    expect(res.status).toBe('confirmed');
-    expect(fake.snapshot(`settlements/${EVENT_ID}`).get('policyHash')).toBe(EXPECTED_HASH);
-  });
-
-  it('rejects a split that does not sum to 10000 before any send', async () => {
-    const bad = { recipients: [{ account: ARTIST, bps: 5000, reason: 'x', tag: 'artist' }, { account: PLATFORM, bps: 2000, reason: 'p', tag: 'platform' }], platformBps: 2000 };
-    await expect(relaySetPolicy({ data: policyReq({ policy: bad }), auth } as never)).rejects.toMatchObject({ details: { code: 'BAD_SPLIT_SUM' } });
-    expect(sendRelayed).not.toHaveBeenCalled();
-  });
-
-  it('maps a NotPolicyAuthorizer simulation revert to NOT_ORGANIZER', async () => {
-    estimateContractGas.mockRejectedValueOnce(reverted('NotPolicyAuthorizer'));
-    await expect(relaySetPolicy({ data: policyReq(), auth } as never)).rejects.toMatchObject({ details: { code: 'NOT_ORGANIZER' } });
-    expect(sendRelayed).not.toHaveBeenCalled();
-  });
-
-  it('is idempotent — an existing confirmed setPolicy relay returns without a second send', async () => {
-    fake.write(`relays/setPolicy:${ACCOUNT}:0`, { status: 'confirmed', txHash: TX, personId: PERSON_ID });
-    const res = (await relaySetPolicy({ data: policyReq(), auth } as never)) as { status: string };
-    expect(res.status).toBe('confirmed');
-    expect(sendRelayed).not.toHaveBeenCalled();
-  });
 });
 
 describe('purchaseTicket', () => {

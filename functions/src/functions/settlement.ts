@@ -8,7 +8,6 @@ import {
   WaitForTransactionReceiptTimeoutError,
   encodeFunctionData,
   erc20Abi,
-  getAddress,
   parseEventLogs,
   type TransactionReceipt,
 } from 'viem';
@@ -18,21 +17,13 @@ import { isEventOrganizer, resolveCallerAccount } from '../lib/auth.js';
 import { deployment, publicClient } from '../lib/chain.js';
 import { ORDERS, RELAYS, SETTLEMENTS, USERS, db } from '../lib/db.js';
 import { getRelayerAccount, sendRelayed } from '../lib/relayer.js';
-import { claimRelayId, setPolicyRelayId, type RelayKind } from '../lib/relayTypes.js';
-import {
-  hashPolicy,
-  reasonHashOf,
-  settlementAbi,
-  tagToBytes32,
-  type OnChainRecipient,
-  type SignedPolicy,
-} from '../lib/settlementAbi.js';
+import { claimRelayId } from '../lib/relayTypes.js';
+import { settlementAbi } from '../lib/settlementAbi.js';
 import { getTreasuryAccount, sendFromTreasury, waitTreasury } from '../lib/treasury.js';
 import { runRelayClaim } from './relay.js';
 
 /**
  * 프로그래머블 정산 백엔드(설계 2026-10-01 §2~§5, Batch C). 세 콜러블 + 입장 트리거 + 스윕:
- *  - `relaySetPolicy` — 주최자 기기서명으로 행사별 분배정책을 금고에 설정(릴레이어 제출).
  *  - `purchaseTicket` — mock 카드결제 → relayClaim 민팅 → 트레저리가 USDC 를 금고에 예치.
  *  - `refundOrder`    — 분배 전 환불(주문자/주최자) → 트레저리가 금고 refund 호출.
  *  - `onCheckInConfirmed` — 입장 확정 직후 그 토큰 에스크로를 분배(permissionless release).
@@ -45,9 +36,7 @@ import { runRelayClaim } from './relay.js';
 const B32_RE = /^0x[0-9a-fA-F]{64}$/;
 const SIG_RE = /^0x[0-9a-fA-F]{128}$/;
 const UINT_RE = /^\d+$/;
-const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 
-const RELAY_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 /** 확정을 기다리는 상한. 넘으면 `sent`/`minted` 로 응답하고 스윕/대사가 마무리한다. */
 const RECEIPT_WAIT_MS = 8_000;
 /** 스윕이 건드리기 전 주문이 멈춰 있어야 하는 시간(살아 있는 콜러블과 경합하지 않게). */
@@ -57,10 +46,6 @@ const SWEEP_LIMIT = 200;
 /** settleNoShows 한 번에 넣는 tokenId 상한(유계 배치, 설계 §3). */
 const NOSHOW_BATCH = 20;
 
-const BPS_DENOMINATOR = 10_000;
-const MIN_PLATFORM_BPS = 500;
-const MAX_RECIPIENTS = 10;
-const TAG_PLATFORM = 'platform';
 /** USDC 6dp: 1 cent = 1e4 units(설계 §8: 18 가정 금지). */
 const USDC_UNITS_PER_CENT = 10_000n;
 const MAX_UINT256 = (1n << 256n) - 1n;
@@ -69,22 +54,6 @@ const EVENT_ENDED = 3;
 
 // ─────────────────────────────────────── revert → code 매핑
 
-const SET_POLICY_CODES: Record<string, string> = {
-  UnknownEvent: 'UNKNOWN_EVENT',
-  NotPolicyAuthorizer: 'NOT_ORGANIZER',
-  PolicyFrozen: 'POLICY_FROZEN',
-  AuthExpired: 'AUTH_EXPIRED',
-  BadNonce: 'BAD_NONCE',
-  BadDeviceSignature: 'BAD_DEVICE_SIG',
-  InvalidRecipients: 'INVALID_RECIPIENTS',
-  ZeroRecipient: 'ZERO_RECIPIENT',
-  ZeroBps: 'ZERO_BPS',
-  BadSplitSum: 'BAD_SPLIT_SUM',
-  PlatformShareTooLow: 'PLATFORM_TOO_LOW',
-  PlatformMirrorMismatch: 'PLATFORM_MISMATCH',
-  BadReserve: 'BAD_RESERVE',
-  Paused: 'PAUSED',
-};
 const DEPOSIT_CODES: Record<string, string> = {
   NotDepositor: 'NOT_DEPOSITOR',
   TokenNotAllowed: 'TOKEN_NOT_ALLOWED',
@@ -192,203 +161,6 @@ function orderRef(orderId: string) {
 }
 function relayRef(relayId: string) {
   return db.collection(RELAYS).doc(relayId);
-}
-
-// ─────────────────────────────────────── relaySetPolicy
-
-export interface SetPolicyRecipient {
-  account: string;
-  bps: number;
-  reason: string;
-  tag: string;
-}
-export interface RelaySetPolicyRequest {
-  eventId: string;
-  policy: { recipients: SetPolicyRecipient[]; platformBps?: number };
-  auth: { nonce: string; deadline: string };
-  deviceSig: string;
-  /** 티어별 가격(센트). 구매 검증용으로 settlements 거울에 함께 저장한다(설계 §5, 온체인은 무료 민팅). */
-  priceUsdCentsByTier?: Record<string, number>;
-}
-export interface RelaySetPolicyResult {
-  relayId: string;
-  status: 'sent' | 'confirmed';
-  txHash?: string;
-}
-
-/**
- * 주최자가 행사 분배정책을 금고에 설정한다(설계 §1/§3). 세션 계정 = 주최자이고, 기기키 서명
- * (deviceSig)이 금고에서 self-verify 된다. 서버는 정책 모양(합계 10000·플랫폼 미러)을 먼저 보고,
- * policyHash 를 **컨트랙트와 바이트 단위로 같게** 계산(+view 교차검증)해 settlements 거울에 둔다.
- * 멱등키는 `(organizer, policyNonce)`.
- */
-export const relaySetPolicy = onCall({ secrets: [RELAYER_PK] }, async (request): Promise<RelaySetPolicyResult> => {
-  const organizer = await resolveCallerAccount(request);
-  const personId = await callerPersonId(request);
-  const body = (request.data ?? {}) as Partial<RelaySetPolicyRequest>;
-
-  const eventId = toBigInt(body.eventId, 'BAD_EVENT_ID');
-  const eventIdStr = eventId.toString();
-  const pol = body.policy;
-  if (!pol || typeof pol !== 'object' || !Array.isArray(pol.recipients)) {
-    throw new HttpsError('invalid-argument', 'BAD_POLICY');
-  }
-  const a = body.auth;
-  if (!a || typeof a !== 'object') throw new HttpsError('invalid-argument', 'BAD_AUTH');
-  const nonce = toBigInt(a.nonce, 'BAD_NONCE_ARG');
-  const deadline = toBigInt(a.deadline, 'BAD_DEADLINE');
-  const deviceSig = requireSig(body.deviceSig, 'BAD_DEVICE_SIG');
-
-  const recipients = pol.recipients;
-  if (recipients.length === 0 || recipients.length > MAX_RECIPIENTS) {
-    throw new HttpsError('invalid-argument', 'INVALID_RECIPIENTS');
-  }
-  let sum = 0;
-  let platformSum = 0;
-  const onChain: OnChainRecipient[] = [];
-  const stored: SetPolicyRecipient[] = [];
-  for (const r of recipients) {
-    if (!r || typeof r.account !== 'string' || !ADDRESS_RE.test(r.account)) {
-      throw new HttpsError('invalid-argument', 'BAD_RECIPIENT');
-    }
-    if (typeof r.bps !== 'number' || !Number.isInteger(r.bps) || r.bps <= 0 || r.bps > BPS_DENOMINATOR) {
-      throw new HttpsError('invalid-argument', 'BAD_BPS');
-    }
-    const reason = typeof r.reason === 'string' ? r.reason : '';
-    const tag = typeof r.tag === 'string' ? r.tag : '';
-    sum += r.bps;
-    if (tag === TAG_PLATFORM) platformSum += r.bps;
-    const account = getAddress(r.account);
-    onChain.push({ account, bps: r.bps, reasonHash: reasonHashOf(reason), tag: tagToBytes32(tag) });
-    stored.push({ account, bps: r.bps, reason, tag });
-  }
-  if (sum !== BPS_DENOMINATOR) throw new HttpsError('failed-precondition', 'BAD_SPLIT_SUM', { code: 'BAD_SPLIT_SUM' });
-  const platformBps = typeof pol.platformBps === 'number' ? pol.platformBps : platformSum;
-  if (platformBps !== platformSum) throw new HttpsError('failed-precondition', 'PLATFORM_MISMATCH', { code: 'PLATFORM_MISMATCH' });
-  if (platformBps < MIN_PLATFORM_BPS) throw new HttpsError('failed-precondition', 'PLATFORM_TOO_LOW', { code: 'PLATFORM_TOO_LOW' });
-
-  const signed: SignedPolicy = { recipients: onChain, platformBps, reserveBps: 0, noShowRefund: false };
-  const policyHash = hashPolicy(signed);
-
-  const pc = publicClient();
-  const vault = vaultAddress();
-  // 전체 SplitPolicy(frozen/version 포함) — 컨트랙트가 받는 calldata 모양. frozen/version 은 금고가 덮어쓴다.
-  const fullPolicy = { ...signed, frozen: false, version: 0 };
-
-  // view 로 hashPolicy 교차검증(설계 §1 "call the view to be safe"). view 가 안 되면 로컬값으로 간다.
-  try {
-    const onChainHash = (await pc.readContract({
-      address: vault,
-      abi: settlementAbi,
-      functionName: 'hashPolicy',
-      args: [fullPolicy],
-    })) as Hex;
-    if (onChainHash.toLowerCase() !== policyHash.toLowerCase()) {
-      throw new HttpsError('internal', 'POLICY_HASH_MISMATCH', { code: 'POLICY_HASH_MISMATCH' });
-    }
-  } catch (err) {
-    if (err instanceof HttpsError) throw err;
-    info('relaySetPolicy.hashView.skipped', { eventId: eventIdStr, reason: (err as Error).message });
-  }
-
-  // nonce 재대조 — 진부한 서명을 가스 전에 막고 현재 nonce 를 돌려준다(relayClaim 규약).
-  const chainNonce = (await pc.readContract({
-    address: vault,
-    abi: settlementAbi,
-    functionName: 'policyNonce',
-    args: [organizer],
-  })) as bigint;
-  if (chainNonce !== nonce) {
-    throw new HttpsError('failed-precondition', 'BAD_NONCE', { code: 'BAD_NONCE', nonce: chainNonce.toString() });
-  }
-
-  // 멱등: (organizer, nonce).
-  const relayId = setPolicyRelayId(organizer, nonce);
-  const ref = relayRef(relayId);
-  const existing = await ref.get();
-  if (existing.exists) {
-    const status = existing.get('status') as string;
-    if (status === 'confirmed') return { relayId, status: 'confirmed', txHash: existing.get('txHash') as string | undefined };
-    if (status === 'sent' || status === 'pending') return { relayId, status: 'sent', txHash: existing.get('txHash') as string | undefined };
-  }
-
-  const policyAuth = { organizer, nonce, deadline };
-  let gasEstimate: bigint;
-  try {
-    gasEstimate = await vaultSimulate('setPolicy', [eventId, fullPolicy, policyAuth, deviceSig], getRelayerAccount().address);
-  } catch (err) {
-    throw mapRevert(err, SET_POLICY_CODES, 'REVERTED');
-  }
-  const data = vaultCalldata('setPolicy', [eventId, fullPolicy, policyAuth, deviceSig]);
-
-  const kind: RelayKind = 'setPolicy';
-  await ref.set({
-    kind,
-    personId,
-    account: organizer,
-    eventId: eventIdStr,
-    idemKey: relayId,
-    status: 'pending',
-    createdAt: FieldValue.serverTimestamp(),
-    expireAt: Timestamp.fromMillis(Date.now() + RELAY_TTL_MS),
-  });
-
-  let sent;
-  try {
-    sent = await sendRelayed({ to: vault, data, gasLimit: gasEstimate });
-  } catch (err) {
-    await ref.set(
-      { status: 'failed', failedAt: FieldValue.serverTimestamp(), error: { code: 'SEND_FAILED', message: (err as Error).message } },
-      { merge: true },
-    );
-    throw new HttpsError('internal', 'SEND_FAILED', { code: 'SEND_FAILED' });
-  }
-  await ref.set(
-    {
-      status: 'sent',
-      txHash: sent.hash,
-      nonce: sent.nonce,
-      gasLimit: Number(sent.gasLimit),
-      sentAt: FieldValue.serverTimestamp(),
-      expireAt: Timestamp.fromMillis(Date.now() + RELAY_TTL_MS),
-    },
-    { merge: true },
-  );
-
-  // 공개 정산 거울(설계 §5). truth 는 체인/인덱서이고 이 문서는 표시용 — 사유·태그 원문을 여기 둔다.
-  const settlement: Record<string, unknown> = {
-    policy: { recipients: stored, platformBps },
-    policyHash,
-    setBy: organizer,
-    txHash: sent.hash,
-    updatedAt: FieldValue.serverTimestamp(),
-  };
-  if (body.priceUsdCentsByTier && typeof body.priceUsdCentsByTier === 'object') {
-    settlement.priceUsdCentsByTier = sanitizePrices(body.priceUsdCentsByTier);
-  }
-  await settlementRef(eventIdStr).set(settlement, { merge: true });
-  info('relaySetPolicy.sent', { relayId, eventId: eventIdStr, txHash: sent.hash });
-
-  const receipt = await receiptWithin(sent.hash);
-  if (!receipt) return { relayId, status: 'sent', txHash: sent.hash };
-  if (receipt.status !== 'success') {
-    await ref.set(
-      { status: 'failed', failedAt: FieldValue.serverTimestamp(), error: { code: 'REVERTED', message: 'execution reverted' } },
-      { merge: true },
-    );
-    throw new HttpsError('aborted', 'REVERTED', { code: 'REVERTED' });
-  }
-  await ref.set({ status: 'confirmed', confirmedAt: FieldValue.serverTimestamp() }, { merge: true });
-  return { relayId, status: 'confirmed', txHash: sent.hash };
-});
-
-/** 티어별 가격 맵을 정리한다 — 양의 정수 센트만 남긴다. */
-function sanitizePrices(raw: Record<string, number>): Record<string, number> {
-  const out: Record<string, number> = {};
-  for (const [tier, cents] of Object.entries(raw)) {
-    if (/^\d+$/.test(tier) && typeof cents === 'number' && Number.isInteger(cents) && cents > 0) out[tier] = cents;
-  }
-  return out;
 }
 
 // ─────────────────────────────────────── purchaseTicket
