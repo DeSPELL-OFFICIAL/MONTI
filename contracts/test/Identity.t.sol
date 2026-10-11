@@ -291,26 +291,6 @@ contract IdentityTest is Test {
         assertEq(identity.kycLevelOf(ALICE), 1);
     }
 
-    function test_rotateAccountTransfersNickname() public {
-        vm.prank(ATTESTER);
-        identity.register(PERSON_A, ALICE, DEV_X, DEV_Y, 1);
-
-        // Alice sets a nickname
-        bytes32 nicknameHash = keccak256(bytes("alice_01"));
-        vm.prank(ALICE);
-        identity.setNickname(nicknameHash, "alice_01");
-
-        vm.warp(block.timestamp + 7 days);
-
-        vm.prank(ATTESTER);
-        identity.rotateAccount(PERSON_A, BOB);
-
-        // Nickname should be transferred to BOB
-        assertEq(identity.nicknameOf(BOB), nicknameHash);
-        assertEq(identity.nicknameOwner(nicknameHash), BOB);
-        assertEq(identity.nicknameOf(ALICE), bytes32(0));
-    }
-
     /// @dev 회전은 폰을 잃어버려서 하는 절차다(5.5). 잃어버린 폰은 그 순간부터 문에서 막힌다.
     function test_rotateAccountLocksTheOldDevice() public {
         vm.prank(ATTESTER);
@@ -486,24 +466,6 @@ contract IdentityTest is Test {
         vm.prank(ATTESTER);
         vm.expectRevert(Identity.CooldownActive.selector);
         identity.rotateAccount(PERSON_A, BOB);
-    }
-
-    function test_cancelRotationTakesTheNicknameBack() public {
-        vm.prank(ATTESTER);
-        identity.register(PERSON_A, ALICE, DEV_X, DEV_Y, 1);
-        bytes32 nick = keccak256(bytes("alice_01"));
-        vm.prank(ALICE);
-        identity.setNickname(nick, "alice_01");
-        vm.warp(block.timestamp + 7 days);
-        vm.prank(ATTESTER);
-        identity.rotateAccount(PERSON_A, BOB);
-
-        vm.prank(ALICE);
-        identity.cancelRotation();
-
-        assertEq(identity.nicknameOf(ALICE), nick);
-        assertEq(identity.nicknameOwner(nick), ALICE);
-        assertEq(identity.nicknameOf(BOB), bytes32(0));
     }
 
     function test_cancelRotationRejectsTheCurrentAccountAndStrangers() public {

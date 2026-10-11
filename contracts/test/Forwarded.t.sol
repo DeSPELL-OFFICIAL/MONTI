@@ -46,19 +46,17 @@ contract ForwardedTest is MontiTest {
 
     // --- happy paths through the forwarder --------------------------------------------------------
 
-    /// @notice An organizer owner creates and publishes an event entirely via execute; the Ticket sees
-    ///         the appended owner in _msgSender(), so both permission checks pass.
+    /// @notice An organizer owner publishes an event in one forwarded call (v2 D2); the Ticket sees the
+    ///         appended owner in _msgSender(), so the permission check passes.
     function test_forwarded_organizerCreatesAndPublishesEvent() public {
         uint256 orgId = _org();
         (Ticket.EventMeta memory m, Ticket.Tier[] memory t) = _meta(orgId);
 
-        bytes memory ret = _execFwd(ORG_OWNER, address(ticket), abi.encodeCall(Ticket.createEvent, (m, t)));
+        bytes memory ret =
+            _execFwd(ORG_OWNER, address(ticket), abi.encodeCall(Ticket.publishEvent, (m, t, _emptyPolicy())));
         uint256 eventId = abi.decode(ret, (uint256));
 
         assertEq(ticket.eventOrg(eventId), orgId, "event bound to the org the owner controls");
-        assertEq(uint8(ticket.eventStatus(eventId)), uint8(Ticket.EventStatus.Draft), "created as Draft");
-
-        _execFwd(ORG_OWNER, address(ticket), abi.encodeCall(Ticket.publishEvent, (eventId)));
         assertEq(uint8(ticket.eventStatus(eventId)), uint8(Ticket.EventStatus.Published), "published via forwarder");
     }
 
@@ -85,7 +83,7 @@ contract ForwardedTest is MontiTest {
 
         // Build the request/signature outside the expectRevert window (their view calls would eat it).
         MontiForwarder.ForwardRequest memory r =
-            _fwdReq(BOB, address(ticket), abi.encodeCall(Ticket.createEvent, (m, t)));
+            _fwdReq(BOB, address(ticket), abi.encodeCall(Ticket.publishEvent, (m, t, _emptyPolicy())));
         bytes memory sig = _fwdSign(r);
 
         vm.prank(RELAYER);

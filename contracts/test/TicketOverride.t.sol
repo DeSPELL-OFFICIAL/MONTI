@@ -21,7 +21,6 @@ contract TicketOverrideTest is MontiTest {
     address internal constant MANAGER_NO = address(0x0C);
     address internal constant GATE_C = address(0x6A80);
 
-    event OverrideRequested(uint256 indexed tokenId, uint256 indexed gateId, address indexed requester, uint8 reason);
     event ManualOverride(
         uint256 indexed tokenId, uint256 indexed gateId, address indexed approver, uint8 role, uint8 reason
     );
@@ -41,9 +40,9 @@ contract TicketOverrideTest is MontiTest {
         organizers.setManager(orgId, MANAGER_YES, true, true);
         organizers.setManager(orgId, MANAGER_NO, true, false);
         gateId = organizers.registerGate(eventId, GATE_A, GATE_KX, GATE_KY);
-        organizers.openGate(gateId);
-        // Left closed on purpose: an override is not a tap, so it does not need an open door.
+        // Closed on purpose (v2 registers open): an override is not a tap, so it does not need an open door.
         closedGateId = organizers.registerGate(eventId, GATE_B, bytes32(uint256(0x6B01)), bytes32(uint256(0x6B02)));
+        organizers.closeGate(closedGateId);
         vm.stopPrank();
 
         otherEventId = _freeEvent(orgId, 1, 1, true);
@@ -54,12 +53,8 @@ contract TicketOverrideTest is MontiTest {
         roleManager = ticket.ROLE_MANAGER();
     }
 
-    function test_managerWithoutApprovalCanOnlyRequest() public {
-        vm.expectEmit(true, true, true, true);
-        emit OverrideRequested(tokenId, gateId, MANAGER_NO, 3);
-        vm.prank(MANAGER_NO);
-        ticket.requestOverride(tokenId, gateId, 3);
-
+    /// @dev v2 D5: the request is an off-chain record; on chain a manager without canApprove admits nobody.
+    function test_managerWithoutApprovalCannotAdmit() public {
         vm.prank(MANAGER_NO);
         vm.expectRevert(Ticket.Unauthorized.selector);
         ticket.manualOverride(tokenId, gateId, 3);
@@ -89,10 +84,7 @@ contract TicketOverrideTest is MontiTest {
         assertTrue(ticket.usedAt(tokenId) != 0);
     }
 
-    function test_strangerCanNeitherRequestNorApprove() public {
-        vm.prank(BOB);
-        vm.expectRevert(Ticket.Unauthorized.selector);
-        ticket.requestOverride(tokenId, gateId, 1);
+    function test_strangerCannotApprove() public {
         vm.prank(BOB);
         vm.expectRevert(Ticket.Unauthorized.selector);
         ticket.manualOverride(tokenId, gateId, 1);
@@ -116,23 +108,11 @@ contract TicketOverrideTest is MontiTest {
     }
 
     /// @dev Overrides come from a staff passkey account, never from the gate account itself.
-    function test_gateAccountCanNeitherRequestNorApprove() public {
-        vm.prank(GATE_A);
-        vm.expectRevert(Ticket.Unauthorized.selector);
-        ticket.requestOverride(tokenId, gateId, 2);
+    function test_gateAccountCannotApprove() public {
         vm.prank(GATE_A);
         vm.expectRevert(Ticket.Unauthorized.selector);
         ticket.manualOverride(tokenId, gateId, 2);
         assertEq(ticket.checkInOf(tokenId).ts, 0);
-    }
-
-    /// @dev Someone who may approve may also file a request, so the staff screen needs no branch.
-    function test_approverCanAlsoFileRequest() public {
-        vm.expectEmit(true, true, true, true);
-        emit OverrideRequested(tokenId, gateId, ADMIN, 4);
-        vm.prank(ADMIN);
-        ticket.requestOverride(tokenId, gateId, 4);
-        assertEq(ticket.checkInOf(tokenId).ts, 0, "a request admits nobody");
     }
 
     /// @dev The indexer subscribes to CheckedIn only; a manual admit has to show up there too.
@@ -155,10 +135,7 @@ contract TicketOverrideTest is MontiTest {
         ticket.transferFrom(ALICE, BOB, tokenId);
     }
 
-    function test_unknownTicketRevertsForBothPaths() public {
-        vm.prank(MANAGER_YES);
-        vm.expectRevert(Ticket.NoSuchTicket.selector);
-        ticket.requestOverride(999, gateId, 1);
+    function test_unknownTicketReverts() public {
         vm.prank(MANAGER_YES);
         vm.expectRevert(Ticket.NoSuchTicket.selector);
         ticket.manualOverride(999, gateId, 1);
@@ -193,35 +170,25 @@ contract TicketOverrideTest is MontiTest {
     }
 
     /// @dev The gate on the record has to be a door of this event, or the audit trail lies.
-    function test_gateOfAnotherEventRejectedForBothPaths() public {
-        vm.prank(MANAGER_NO);
-        vm.expectRevert(Ticket.GateMismatch.selector);
-        ticket.requestOverride(tokenId, otherGateId, 3);
+    function test_gateOfAnotherEventRejected() public {
         vm.prank(MANAGER_YES);
         vm.expectRevert(Ticket.GateMismatch.selector);
         ticket.manualOverride(tokenId, otherGateId, 3);
         assertEq(ticket.checkInOf(tokenId).ts, 0);
     }
 
-    function test_unregisteredGateRejectedForBothPaths() public {
-        vm.prank(MANAGER_NO);
-        vm.expectRevert(Ticket.GateMismatch.selector);
-        ticket.requestOverride(tokenId, 0, 3);
+    function test_unregisteredGateRejected() public {
         vm.prank(MANAGER_YES);
         vm.expectRevert(Ticket.GateMismatch.selector);
         ticket.manualOverride(tokenId, 0, 3);
         assertEq(ticket.checkInOf(tokenId).ts, 0);
     }
 
-    /// @dev A voided ticket cannot be waved in by hand either, and there is nothing to ask about
-    ///      once it is voided, so both paths report the same DENY (Task 23).
-    function test_revokedTicketRejectedForBothPaths() public {
+    /// @dev A voided ticket cannot be waved in by hand either (Task 23).
+    function test_revokedTicketRejected() public {
         vm.prank(ORG_OWNER);
         ticket.revoke(tokenId, 2);
 
-        vm.prank(MANAGER_NO);
-        vm.expectRevert(Ticket.TicketRevoked.selector);
-        ticket.requestOverride(tokenId, gateId, 3);
         vm.prank(MANAGER_YES);
         vm.expectRevert(Ticket.TicketRevoked.selector);
         ticket.manualOverride(tokenId, gateId, 3);
@@ -230,11 +197,8 @@ contract TicketOverrideTest is MontiTest {
 
     /// @dev An override is a human decision, not a tap, so a closed door of this event still counts.
     function test_closedGateOfTheSameEventIsAccepted() public {
-        vm.expectEmit(true, true, true, true);
-        emit OverrideRequested(tokenId, closedGateId, MANAGER_NO, 3);
-        vm.prank(MANAGER_NO);
-        ticket.requestOverride(tokenId, closedGateId, 3);
-
+        (,,,, bool open,) = organizers.gateInfo(closedGateId);
+        assertFalse(open, "fixture gate is closed");
         vm.expectEmit(true, true, true, true);
         emit ManualOverride(tokenId, closedGateId, MANAGER_YES, roleManager, 3);
         vm.prank(MANAGER_YES);
@@ -242,27 +206,10 @@ contract TicketOverrideTest is MontiTest {
         assertTrue(ticket.usedAt(tokenId) != 0);
     }
 
-    /// @dev Minor 5. 승인할 수 없는 요청은 애초에 올라가지 않는다 — manualOverride 와 같은 기준이다.
-    function test_requestOverrideRejectsAnEndedEvent() public {
-        vm.warp(T0 + 3 days);
-        vm.prank(MANAGER_NO);
-        vm.expectRevert(Ticket.EventEnded.selector);
-        ticket.requestOverride(tokenId, gateId, 1);
-    }
-
-    function test_requestOverrideRejectsACancelledEvent() public {
-        vm.prank(ORG_OWNER);
-        ticket.cancelEvent(eventId);
-        vm.prank(MANAGER_NO);
-        vm.expectRevert(Ticket.EventCancelled.selector);
-        ticket.requestOverride(tokenId, gateId, 1);
-    }
-
-    /// @dev 살아 있는 행사에서는 그대로 올라간다. 위의 두 거부가 문을 통째로 닫은 게 아님을 고정한다.
-    function test_requestOverrideStillWorksWhileTheEventRuns() public {
-        vm.expectEmit(true, true, true, true);
-        emit OverrideRequested(tokenId, gateId, MANAGER_NO, 1);
-        vm.prank(MANAGER_NO);
-        ticket.requestOverride(tokenId, gateId, 1);
+    /// @dev v2 D5: the on-chain request path is gone.
+    function test_requestOverrideIsGone() public {
+        (bool ok,) =
+            address(ticket).call(abi.encodeWithSignature("requestOverride(uint256,uint256,uint8)", tokenId, gateId, 1));
+        assertFalse(ok, "no requestOverride selector on v2 Ticket");
     }
 }

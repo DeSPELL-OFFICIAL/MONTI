@@ -4,7 +4,6 @@ pragma solidity 0.8.31;
 import {MontiTest} from "./Base.t.sol";
 import {Ticket} from "../src/Ticket.sol";
 import {Organizers} from "../src/Organizers.sol";
-import {Identity} from "../src/Identity.sol";
 import {MontiForwarder} from "../src/MontiForwarder.sol";
 import {P256} from "solady/utils/P256.sol";
 import {P256Vectors} from "./utils/P256Vectors.sol";
@@ -37,7 +36,6 @@ contract ForwardGasTest is MontiTest {
 
     uint256 internal orgId;
     uint256 internal freeEventId;
-    uint256 internal draftEventId;
     uint256 internal approvalEventId;
     uint256 internal closedGateId;
     uint256 internal tokenForOffer;
@@ -57,15 +55,16 @@ contract ForwardGasTest is MontiTest {
         orgId = organizers.createOrganizer(ORG_OWNER);
         freeEventId = _event(orgId, 10, 2, true, false); // published, transferable — 오퍼용
 
-        draftEventId = _draftEvent(); // publishEvent 측정용, 초안으로 남겨둔다
-
         approvalEventId = _approvalEvent(); // approveClaims/cancelRequest 측정용
         for (uint256 i; i < 10; ++i) {
             _requestClaimForFixture(ALICE, approvalEventId, 0); // rid 1..10, 모두 대기
         }
 
-        vm.prank(ORG_OWNER);
-        closedGateId = organizers.registerGate(freeEventId, GATE_A, GATE_KX, GATE_KY); // openGate 측정용(닫힘)
+        // openGate 측정용: v2 는 등록이 곧 개장이므로 한 번 닫아 둔다.
+        vm.startPrank(ORG_OWNER);
+        closedGateId = organizers.registerGate(freeEventId, GATE_A, GATE_KX, GATE_KY);
+        organizers.closeGate(closedGateId);
+        vm.stopPrank();
 
         tokenForOffer = _claimForFixture(ALICE, freeEventId); // createOffer 측정용
         tokenForAccept = _claimForFixture(ALICE, freeEventId); // acceptOffer 측정용
@@ -140,18 +139,21 @@ contract ForwardGasTest is MontiTest {
             Ticket.Tier({name: "General", priceUsdCents: 0, supply: 100, minted: 0, maxPerWallet: mpw, seated: false});
     }
 
-    function _draftEvent() internal returns (uint256 eventId) {
-        (Ticket.EventMeta memory m, Ticket.Tier[] memory t) = _meta(10, true, false);
-        vm.prank(ORG_OWNER);
-        eventId = ticket.createEvent(m, t);
-    }
-
     function _approvalEvent() internal returns (uint256 eventId) {
         (Ticket.EventMeta memory m, Ticket.Tier[] memory t) = _meta(20, false, true);
         vm.prank(ORG_OWNER);
-        eventId = ticket.createEvent(m, t);
-        vm.prank(ORG_OWNER);
-        ticket.publishEvent(eventId);
+        eventId = ticket.publishEvent(m, t, _emptyPolicy());
+    }
+
+    function _paidPublishData() internal view returns (bytes memory) {
+        (Ticket.EventMeta memory m, Ticket.Tier[] memory t) = _meta(10, true, false);
+        t[0].priceUsdCents = 1000;
+        return abi.encodeCall(Ticket.publishEvent, (m, t, _goodPolicy()));
+    }
+
+    function _freePublishData() internal view returns (bytes memory) {
+        (Ticket.EventMeta memory m, Ticket.Tier[] memory t) = _meta(10, true, false);
+        return abi.encodeCall(Ticket.publishEvent, (m, t, _emptyPolicy()));
     }
 
     function _ids(uint256 n) internal pure returns (uint256[] memory a) {
@@ -196,30 +198,24 @@ contract ForwardGasTest is MontiTest {
         _logDirect("createOrganizer", _directGas(ALICE, address(organizers), data));
     }
 
-    // --- createEvent (ticket, owner) -------------------------------------------------------------
+    // --- publishEvent free (ticket, owner) -------------------------------------------------------
 
-    function test_createEvent_fwd() public {
-        (Ticket.EventMeta memory m, Ticket.Tier[] memory t) = _meta(10, true, false);
-        bytes memory data = abi.encodeCall(Ticket.createEvent, (m, t));
-        _logFwd("createEvent", _fwdGas(ORG_OWNER, address(ticket), data));
+    function test_publishEventFree_fwd() public {
+        _logFwd("publishEvent(free)", _fwdGas(ORG_OWNER, address(ticket), _freePublishData()));
     }
 
-    function test_createEvent_direct() public {
-        (Ticket.EventMeta memory m, Ticket.Tier[] memory t) = _meta(10, true, false);
-        bytes memory data = abi.encodeCall(Ticket.createEvent, (m, t));
-        _logDirect("createEvent", _directGas(ORG_OWNER, address(ticket), data));
+    function test_publishEventFree_direct() public {
+        _logDirect("publishEvent(free)", _directGas(ORG_OWNER, address(ticket), _freePublishData()));
     }
 
-    // --- publishEvent (ticket, owner) ------------------------------------------------------------
+    // --- publishEvent paid: create + frozen policy + publish (ticket → vault, owner) -------------
 
-    function test_publishEvent_fwd() public {
-        bytes memory data = abi.encodeCall(Ticket.publishEvent, (draftEventId));
-        _logFwd("publishEvent", _fwdGas(ORG_OWNER, address(ticket), data));
+    function test_publishEventPaid_fwd() public {
+        _logFwd("publishEvent(paid, 4 recipients)", _fwdGas(ORG_OWNER, address(ticket), _paidPublishData()));
     }
 
-    function test_publishEvent_direct() public {
-        bytes memory data = abi.encodeCall(Ticket.publishEvent, (draftEventId));
-        _logDirect("publishEvent", _directGas(ORG_OWNER, address(ticket), data));
+    function test_publishEventPaid_direct() public {
+        _logDirect("publishEvent(paid, 4 recipients)", _directGas(ORG_OWNER, address(ticket), _paidPublishData()));
     }
 
     // --- registerGate (organizers, owner) --------------------------------------------------------
@@ -314,17 +310,5 @@ contract ForwardGasTest is MontiTest {
     function test_cancelRequest_direct() public {
         bytes memory data = abi.encodeCall(Ticket.cancelRequest, (approvalEventId, 1));
         _logDirect("cancelRequest", _directGas(ALICE, address(ticket), data));
-    }
-
-    // --- setNickname (identity, member) ----------------------------------------------------------
-
-    function test_setNickname_fwd() public {
-        bytes memory data = abi.encodeCall(Identity.setNickname, (keccak256(bytes("alice")), "alice"));
-        _logFwd("setNickname", _fwdGas(ALICE, address(identity), data));
-    }
-
-    function test_setNickname_direct() public {
-        bytes memory data = abi.encodeCall(Identity.setNickname, (keccak256(bytes("alice")), "alice"));
-        _logDirect("setNickname", _directGas(ALICE, address(identity), data));
     }
 }

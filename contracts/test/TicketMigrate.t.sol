@@ -3,6 +3,7 @@ pragma solidity 0.8.31;
 
 import {MontiTest} from "./Base.t.sol";
 import {Ticket} from "../src/Ticket.sol";
+import {ITicket} from "../src/interfaces/ITicket.sol";
 
 contract TicketMigrateTest is MontiTest {
     uint256 internal orgId;
@@ -403,10 +404,8 @@ contract TicketRotationQuarantineTest is MontiTest {
         });
         Ticket.Tier[] memory t = new Ticket.Tier[](1);
         t[0] = Ticket.Tier({name: "General", priceUsdCents: 0, supply: 100, minted: 0, maxPerWallet: 3, seated: false});
-        vm.startPrank(ORG_OWNER);
-        id = ticket.createEvent(m, t);
-        ticket.publishEvent(id);
-        vm.stopPrank();
+        vm.prank(ORG_OWNER);
+        id = ticket.publishEvent(m, t, _emptyPolicy());
     }
 
     function _rotateAliceTo(address newAccount) internal {
@@ -420,7 +419,7 @@ contract TicketRotationQuarantineTest is MontiTest {
         _rotateAliceTo(BOB);
         _giveDeviceKey(BOB);
 
-        (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(BOB, eventId, 0);
+        (ITicket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(BOB, eventId, 0);
         vm.expectRevert(Ticket.RotationPending.selector);
         ticket.claimFor(a, sig);
 
@@ -440,7 +439,7 @@ contract TicketRotationQuarantineTest is MontiTest {
         uint256 closes = opened + identity.ROTATION_UNDO_WINDOW();
 
         vm.warp(closes - 1);
-        (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(BOB, eventId, 0);
+        (ITicket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(BOB, eventId, 0);
         vm.expectRevert(Ticket.RotationPending.selector);
         ticket.claimFor(a, sig);
 
@@ -469,7 +468,7 @@ contract TicketRotationQuarantineTest is MontiTest {
         assertEq(ticket.ownerOf(fresh), ALICE, "the restored account is not quarantined by its own stamp");
 
         // 쫓겨난 새 계정은 격리가 아니라 멤버십으로 막힌다 — 그게 취소의 의미다.
-        (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(BOB, eventId, 0);
+        (ITicket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(BOB, eventId, 0);
         vm.expectRevert(Ticket.NotMember.selector);
         ticket.claimFor(a, sig);
     }

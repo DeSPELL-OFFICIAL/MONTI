@@ -3,130 +3,80 @@ pragma solidity 0.8.31;
 
 import {MontiTest} from "./Base.t.sol";
 import {Ticket} from "../src/Ticket.sol";
-import {SettlementVault} from "../src/SettlementVault.sol";
-import {ISettlementVault} from "../src/interfaces/ISettlementVault.sol";
-import {MockUSD} from "../src/mocks/MockUSD.sol";
+import {ITicket} from "../src/interfaces/ITicket.sol";
 import {P256Vectors} from "./utils/P256Vectors.sol";
 
-/// @notice Batch A / A3 — measured execution gas for the settlement ops (plan 2026-10-01 §A3), replacing
-///         the design §6 estimates with real numbers for relayer-limit sizing. Methodology mirrors
-///         ForwardGas: every P-256 signature (vm.signP256) and sha256 is built in setUp, OUTSIDE the
-///         `gasleft()` window, so a cold precompile is not pre-warmed into the measurement.
+/// @notice Measured execution gas for the v2 settlement ops (v2 design §14), for relayer/treasury gas-limit
+///         sizing. Methodology mirrors ForwardGas: every P-256 signature (vm.signP256) and sha256 is built in
+///         setUp, OUTSIDE the `gasleft()` window, so a cold precompile is not pre-warmed into the measurement.
 ///
 ///         ── P-256 normalisation ──────────────────────────────────────────────────────────────
 ///         Local EVM (evm_version "osaka") has the real P256VERIFY precompile at 6,900 gas/verify; Monad's
-///         RIP-7212 does it in 3,450. Only `setPolicy` verifies a P-256 signature (exactly once), so only
-///         it is normalised: monad-eq = local − 3,450. deposit/release/settleNoShows/refund do no P-256
-///         work (they read Ticket.usedAt/eventStatus), so their Monad equivalent is the local number.
+///         RIP-7212 does it in 3,450. Only `purchase` verifies a P-256 signature (the attendee's ClaimAuth,
+///         exactly once inside Ticket.mintPaid), so only it is normalised: monad-eq = local − 3,450.
+///         publishEvent (direct)/release/settleNoShows/refund do no P-256 work.
 contract SettlementGasTest is MontiTest {
     uint256 internal constant LOCAL_P256_VERIFY = 6_900;
     uint256 internal constant MONAD_P256_VERIFY = 3_450;
     uint256 internal constant P256_DELTA = LOCAL_P256_VERIFY - MONAD_P256_VERIFY; // 3,450
 
-    SettlementVault internal vault;
-    MockUSD internal usd;
+    uint256 internal constant PRICE_CENTS = 3000; // $30
+
     uint256 internal orgId;
     uint256 internal eventId;
-    uint256 internal eventId2; // fresh (no policy) for the setPolicy measurement
     uint256 internal gateId;
 
-    address internal constant TREASURY = address(0x7EA50);
-    address internal constant R_ARTIST = address(0xA4715);
-    address internal constant R_VENUE = address(0xACE);
-    address internal constant R_ORG = address(0x0B6);
-    address internal constant R_PLATFORM = address(0x9147);
-    uint128 internal constant PRICE = 30_000_000;
+    uint256 internal tokenRelease; // purchased + admitted
+    uint256 internal tokenRefund; // purchased
+    uint256[] internal tokensNoShow; // 10 purchased, not admitted
 
-    uint256 internal tokenRelease; // deposited + admitted
-    uint256 internal tokenDeposit; // claimed, not deposited
-    uint256 internal tokenRefund; // deposited
-    uint256[] internal tokensNoShow; // 10 deposited, not admitted
-
-    // pre-built setPolicy authorisation (signature outside the gas window)
-    ISettlementVault.PolicyAuth internal auth2;
-    bytes internal sig2;
+    // pre-built purchase authorisation (signature outside the gas window)
+    ITicket.ClaimAuth internal purchaseAuth;
+    bytes internal purchaseSig;
+    Ticket.EventMeta internal publishMeta;
 
     function setUp() public {
         _deployMonti();
-        _memberWithDeviceKey(ORG_OWNER, 0x0140);
         _memberWithDeviceKey(ALICE, 0xA1A1);
 
         orgId = organizers.createOrganizer(ORG_OWNER);
-        eventId = _event(orgId, 50, 2, true, false);
-        eventId2 = _event(orgId, 50, 2, true, false);
+        eventId = _paidEventCap(PRICE_CENTS, 50);
         gateId = _openRealGate(eventId, GATE_A);
 
-        usd = new MockUSD();
-        vault = new SettlementVault(address(ticket), address(organizers), address(identity), TREASURY, address(usd));
-        usd.mint(TREASURY, 100_000_000_000);
-        vm.prank(TREASURY);
-        usd.approve(address(vault), type(uint256).max);
-
-        // policy on eventId (frozen by the first staged deposit below)
-        ISettlementVault.SplitPolicy memory p = _policy();
-        (ISettlementVault.PolicyAuth memory a, bytes memory s) = _signPolicy(eventId, p, 0);
-        vault.setPolicy(eventId, p, a, s);
-
-        // stage release target: claim, deposit, admit
-        tokenRelease = _claim();
-        _deposit(tokenRelease);
+        // stage release target: purchase, admit
+        tokenRelease = _purchase(ALICE, eventId, 0);
         _admit(tokenRelease);
 
-        // stage deposit target (post-freeze, steady state)
-        tokenDeposit = _claim();
-
         // stage refund target
-        tokenRefund = _claim();
-        _deposit(tokenRefund);
+        tokenRefund = _purchase(ALICE, eventId, 0);
 
         // stage 10 no-show targets
         for (uint256 i; i < 10; ++i) {
-            uint256 t = _claim();
-            _deposit(t);
-            tokensNoShow.push(t);
+            tokensNoShow.push(_purchase(ALICE, eventId, 0));
         }
 
-        // pre-build the setPolicy authorisation for eventId2 (signature OUTSIDE the gas window)
-        ISettlementVault.SplitPolicy memory p2 = _policy();
-        (auth2, sig2) = _signPolicy(eventId2, p2, 0);
+        // pre-build the next purchase (steady state: event slots already warm on chain)
+        (ITicket.ClaimAuth memory a, bytes memory s) = _signClaimAuth(ALICE, eventId, 0);
+        purchaseAuth = a;
+        purchaseSig = s;
+        publishMeta = _meta(orgId, 2, true, false);
     }
 
     // --- helpers --------------------------------------------------------------------------------
 
-    function _policy() internal pure returns (ISettlementVault.SplitPolicy memory p) {
-        ISettlementVault.Recipient[] memory r = new ISettlementVault.Recipient[](4);
-        r[0] = ISettlementVault.Recipient(R_ARTIST, 6000, keccak256("appearance fee"), "artist");
-        r[1] = ISettlementVault.Recipient(R_VENUE, 2000, keccak256("venue rental"), "venue");
-        r[2] = ISettlementVault.Recipient(R_ORG, 1500, keccak256("organizing fee"), "organizer");
-        r[3] = ISettlementVault.Recipient(R_PLATFORM, 500, keccak256("platform fee"), "platform");
-        p.recipients = r;
-        p.platformBps = 500;
-    }
-
-    function _signPolicy(uint256 ev, ISettlementVault.SplitPolicy memory p, uint256 nonceOverride)
-        internal
-        view
-        returns (ISettlementVault.PolicyAuth memory auth, bytes memory sig)
-    {
-        uint256 nonce = nonceOverride == 0 ? vault.policyNonce(ORG_OWNER) : nonceOverride;
-        auth = ISettlementVault.PolicyAuth({organizer: ORG_OWNER, nonce: nonce, deadline: uint64(block.timestamp + 1 hours)});
-        bytes32 digest = vault.setPolicyDigest(ev, vault.hashPolicy(p), auth.nonce, auth.deadline);
-        (bytes32 r, bytes32 s) = vm.signP256(P256Vectors.DEVICE_PRIV, digest);
-        sig = abi.encode(r, s);
-    }
-
-    function _claim() internal returns (uint256) {
-        return _claimForFixture(ALICE, eventId, 0);
-    }
-
-    function _deposit(uint256 tokenId) internal {
-        vm.prank(TREASURY);
-        vault.deposit(eventId, tokenId, address(usd), PRICE);
+    function _paidEventCap(uint256 price, uint16 maxPerWallet) internal returns (uint256 id) {
+        Ticket.Tier[] memory t = new Ticket.Tier[](1);
+        t[0] = Ticket.Tier({
+            name: "General", priceUsdCents: price, supply: 100, minted: 0, maxPerWallet: maxPerWallet, seated: false
+        });
+        vm.prank(ORG_OWNER);
+        id = ticket.publishEvent(_meta(orgId, 2, true, false), t, _goodPolicy());
     }
 
     function _admit(uint256 tokenId) internal {
-        Ticket.GateCode memory g =
-            Ticket.GateCode({gateId: gateId, eventId: eventId, issuedAt: uint64(block.timestamp), nonce: P256Vectors.NONCE});
+        Ticket.GateCode memory g = Ticket.GateCode({
+            gateId: gateId, eventId: eventId, issuedAt: uint64(block.timestamp), nonce: P256Vectors.NONCE
+        });
         bytes memory gs = _gateSig(g);
         bytes memory ds = _deviceSig(tokenId, g);
         vm.prank(RELAYER);
@@ -144,17 +94,24 @@ contract SettlementGasTest is MontiTest {
 
     // --- measurements ---------------------------------------------------------------------------
 
-    function test_gas_setPolicy() public {
+    function test_gas_publishEvent_paid() public {
+        Ticket.Tier[] memory t = new Ticket.Tier[](1);
+        t[0] =
+            Ticket.Tier({name: "General", priceUsdCents: 1000, supply: 100, minted: 0, maxPerWallet: 4, seated: false});
+        Ticket.EventMeta memory m = publishMeta;
+        vm.prank(ORG_OWNER);
         uint256 g = gasleft();
-        vault.setPolicy(eventId2, _policy(), auth2, sig2);
-        _logP256("setPolicy(4 recipients + P-256)", g - gasleft());
+        ticket.publishEvent(m, t, _goodPolicy());
+        _logFlat("publishEvent(paid, 1 tier, 4 recipients, direct)", g - gasleft());
     }
 
-    function test_gas_deposit() public {
+    function test_gas_purchase() public {
+        ITicket.ClaimAuth memory a = purchaseAuth;
+        bytes memory s = purchaseSig;
         vm.prank(TREASURY);
         uint256 g = gasleft();
-        vault.deposit(eventId, tokenDeposit, address(usd), PRICE);
-        _logFlat("deposit", g - gasleft());
+        vault.purchase(a, s, address(usd));
+        _logP256("purchase(mint + escrow + USDC pull)", g - gasleft());
     }
 
     function test_gas_release() public {

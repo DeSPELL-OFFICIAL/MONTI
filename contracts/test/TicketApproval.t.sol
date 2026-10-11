@@ -3,6 +3,7 @@ pragma solidity 0.8.31;
 
 import {MontiTest} from "./Base.t.sol";
 import {Ticket} from "../src/Ticket.sol";
+import {ITicket} from "../src/interfaces/ITicket.sol";
 
 /// @notice 승인제(01c) — requestClaimFor / approveClaims / rejectClaims / cancelRequest.
 ///         선례는 TicketOverride.t.sol(권한 축)과 TicketClaimFor.t.sol(자격 검사)이다.
@@ -42,7 +43,7 @@ contract TicketApprovalTest is MontiTest {
     // --- request -------------------------------------------------------------------------------
 
     function test_requestClaimStoresPendingAndReservesSupplyWithoutMinting() public {
-        (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, eventId, 0);
+        (ITicket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, eventId, 0);
         vm.expectEmit(true, true, true, true);
         emit Ticket.ClaimRequested(eventId, 1, ALICE, 0);
         uint256 rid = ticket.requestClaimFor(a, sig);
@@ -65,14 +66,14 @@ contract TicketApprovalTest is MontiTest {
     }
 
     function test_claimRevertsApprovalRequired() public {
-        (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, eventId, 0);
+        (ITicket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, eventId, 0);
         vm.expectRevert(Ticket.ApprovalRequired.selector);
         ticket.claimFor(a, sig);
     }
 
     function test_requestClaimRevertsOnFirstComeEvent() public {
         uint256 openId = _freeEvent(orgId, 1, 1, true); // approvalRequired == false
-        (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, openId, 0);
+        (ITicket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, openId, 0);
         vm.expectRevert(Ticket.ApprovalNotRequired.selector);
         ticket.requestClaimFor(a, sig);
     }
@@ -80,14 +81,14 @@ contract TicketApprovalTest is MontiTest {
     function test_requestClaimEligibilityMirrorsClaim() public {
         // non-member
         {
-            (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(address(0xDEAD), eventId, 0);
+            (ITicket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(address(0xDEAD), eventId, 0);
             vm.expectRevert(Ticket.NotMember.selector);
             ticket.requestClaimFor(a, sig);
         }
 
         // unknown tier
         {
-            (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, eventId, 5);
+            (ITicket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, eventId, 5);
             vm.expectRevert(Ticket.UnknownTier.selector);
             ticket.requestClaimFor(a, sig);
         }
@@ -95,7 +96,7 @@ contract TicketApprovalTest is MontiTest {
         // outside sale window
         vm.warp(T0 + 1 days + 1);
         {
-            (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, eventId, 0);
+            (ITicket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, eventId, 0);
             vm.expectRevert(Ticket.SaleClosed.selector);
             ticket.requestClaimFor(a, sig);
         }
@@ -103,37 +104,36 @@ contract TicketApprovalTest is MontiTest {
         // after end
         vm.warp(T0 + 2 days + 1);
         {
-            (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, eventId, 0);
+            (ITicket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, eventId, 0);
             vm.expectRevert(Ticket.EventEnded.selector);
             ticket.requestClaimFor(a, sig);
         }
     }
 
     function test_requestClaimRejectsDraftPaidAndKyc() public {
-        // draft
-        Ticket.EventMeta memory m = ticket.eventMeta(eventId);
-        Ticket.Tier[] memory t = ticket.tiers(eventId);
-        vm.prank(ORG_OWNER);
-        uint256 draftId = ticket.createEvent(m, t);
+        // never published (v2 has no on-chain draft: an unknown id reads as Draft)
         {
-            (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, draftId, 0);
+            (ITicket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, 999_999, 0);
             vm.expectRevert(Ticket.EventNotPublished.selector);
             ticket.requestClaimFor(a, sig);
         }
 
-        // paid tier on an approval event
-        uint256 paidId = _paidApprovalEvent();
+        // a paid approval event cannot exist: publishing one is refused (v2 PaidApprovalUnsupported)
         {
-            (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, paidId, 0);
-            vm.expectRevert(Ticket.PaidTiersNotEnabled.selector);
-            ticket.requestClaimFor(a, sig);
+            Ticket.EventMeta memory pm = ticket.eventMeta(eventId);
+            Ticket.Tier[] memory pt = new Ticket.Tier[](1);
+            pt[0] =
+                Ticket.Tier({name: "VIP", priceUsdCents: 5000, supply: 100, minted: 0, maxPerWallet: 1, seated: false});
+            vm.prank(ORG_OWNER);
+            vm.expectRevert(Ticket.PaidApprovalUnsupported.selector);
+            ticket.publishEvent(pm, pt, _goodPolicy());
         }
 
         // kyc required, requester at level 0
         uint256 kycId = _approvalEvent(orgId, 100, 1, true);
         _memberWithLevel(address(0xD0), 0xD0D0, 0);
         {
-            (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(address(0xD0), kycId, 0);
+            (ITicket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(address(0xD0), kycId, 0);
             vm.expectRevert(Ticket.KycRequired.selector);
             ticket.requestClaimFor(a, sig);
         }
@@ -243,7 +243,7 @@ contract TicketApprovalTest is MontiTest {
 
         // second request while first still pending -> cap hit.
         {
-            (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, eventId, 0);
+            (ITicket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, eventId, 0);
             vm.expectRevert(Ticket.MaxPerWalletExceeded.selector);
             ticket.requestClaimFor(a, sig);
         }
@@ -252,7 +252,7 @@ contract TicketApprovalTest is MontiTest {
         vm.prank(ORG_OWNER);
         ticket.approveClaims(eventId, _ids(1));
         {
-            (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, eventId, 0);
+            (ITicket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, eventId, 0);
             vm.expectRevert(Ticket.MaxPerWalletExceeded.selector);
             ticket.requestClaimFor(a, sig);
         }
@@ -264,7 +264,7 @@ contract TicketApprovalTest is MontiTest {
 
         // the single seat is reserved -> the next requester is turned away.
         {
-            (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(BOB, oneSeat, 0);
+            (ITicket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(BOB, oneSeat, 0);
             vm.expectRevert(Ticket.SoldOut.selector);
             ticket.requestClaimFor(a, sig);
         }
@@ -277,7 +277,7 @@ contract TicketApprovalTest is MontiTest {
 
         // still sold out for everyone else.
         {
-            (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(BOB, oneSeat, 0);
+            (ITicket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(BOB, oneSeat, 0);
             vm.expectRevert(Ticket.SoldOut.selector);
             ticket.requestClaimFor(a, sig);
         }
@@ -410,18 +410,6 @@ contract TicketApprovalTest is MontiTest {
             name: "General", priceUsdCents: 0, supply: supply, minted: 0, maxPerWallet: maxPerWallet, seated: false
         });
         vm.prank(ORG_OWNER);
-        eventId_ = ticket.createEvent(m, t);
-        vm.prank(ORG_OWNER);
-        ticket.publishEvent(eventId_);
-    }
-
-    function _paidApprovalEvent() internal returns (uint256 eventId_) {
-        Ticket.EventMeta memory m = ticket.eventMeta(eventId);
-        Ticket.Tier[] memory t = new Ticket.Tier[](1);
-        t[0] = Ticket.Tier({name: "VIP", priceUsdCents: 5000, supply: 100, minted: 0, maxPerWallet: 1, seated: false});
-        vm.prank(ORG_OWNER);
-        eventId_ = ticket.createEvent(m, t);
-        vm.prank(ORG_OWNER);
-        ticket.publishEvent(eventId_);
+        eventId_ = ticket.publishEvent(m, t, _emptyPolicy());
     }
 }
