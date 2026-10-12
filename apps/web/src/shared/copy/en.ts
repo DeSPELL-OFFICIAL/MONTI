@@ -149,7 +149,8 @@ export const en: typeof ko = {
     artNoTitle: "Couldn't load the event name", artNoTier: 'Ticket',
     artGuest: 'Guest',
     refundedState: "Refunded ticket · it can't be used to enter",
-    ticketNumber: 'Ticket number', copyNumber: 'Copy number', numberCopied: 'Copied',
+    ticketNumber: 'Ticket number', numberPrefix: 'No.', copyNumber: 'Copy number', numberCopied: 'Copied',
+    numberDetails: 'Details', numberFull: 'Full number',
   },
   claim: {
     cta: 'Get a ticket', checking: 'Checking…', working: 'Getting your ticket', done: "You got your ticket · It's in My Tickets", tierLabel: 'Ticket type',

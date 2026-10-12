@@ -6,7 +6,7 @@ import { describeFailure } from '../../shared/errors';
 import { useTicketArtProps } from './useTicketArt';
 import { useTicketDetail } from './useTicketDetail';
 import { useStateLabel } from './List';
-import { deriveDetailView, splitTicketNumber } from './ticketState';
+import { deriveDetailView, shortTicketNumber } from './ticketState';
 import { Receipt } from '../purchase/Receipt';
 
 /**
@@ -77,23 +77,30 @@ export function TicketDetail() {
   // in the body, where there is no bar.
   // A refunded or used ticket takes both away and says why (deriveDetailView).
   const { canEnter, canTransfer, refunded, entered } = deriveDetailView(ticket.state, orderStatus);
-  const number = splitTicketNumber(tokenId);
+  const number = shortTicketNumber(tokenId);
   return (
     <Screen title={props.titleLoading ? copy.tickets.title : props.title}>
       <div className="ticket-detail-art">
         <TicketArt {...props} animated />
       </div>
-      {/* The number staff search by in manual approval; they read back the last four digits. */}
-      <p className="ticket-number">
+      {/* The number staff search by in manual approval: a short reference whose last four digits
+          (bold) are what they read back. The full 31-digit id is for copying, so it waits under
+          상세 and rides on the copy button. */}
+      <p className="ticket-number" data-ticket-number={tokenId}>
         {copy.tickets.ticketNumber}{' '}
         <span className="ticket-number__digits">
-          {number.head}
+          {copy.tickets.numberPrefix} {number.lead === '' ? null : `${number.lead}-`}
           <strong>{number.tail}</strong>
         </span>{' '}
         <button type="button" className="ticket-number__copy" onClick={() => void copyNumber()}>
           {numberCopied ? copy.tickets.numberCopied : copy.tickets.copyNumber}
         </button>
       </p>
+      <details className="more">
+        <summary>{copy.tickets.numberDetails}</summary>
+        <p className="muted">{copy.tickets.numberFull}</p>
+        <p className="ticket-number__digits">{tokenId}</p>
+      </details>
       {refunded ? (
         <p>{copy.tickets.refundedState}</p>
       ) : entered ? (

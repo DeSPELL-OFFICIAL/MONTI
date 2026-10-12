@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { encodeFunctionData } from 'viem';
 import type { Hex } from 'viem';
-import { Alert, Button, Field, Screen, Spinner } from '../../shared/ui';
+import { Alert, Button, CopyValue, Field, Screen, Spinner } from '../../shared/ui';
+import { shortId } from '../../shared/shortId';
 import { api, type PendingGate } from '../../shared/api/functions';
 import { organizersAbi } from '../../shared/chain/abis';
 import { getStaffAccount } from '../../shared/chain/accounts';
@@ -169,9 +170,15 @@ export function Gates() {
           <ul style={{ listStyle: 'none', padding: 0 }}>
             {pending.map((gate) => (
               <li key={gate.gateAccount} style={{ marginBottom: 12 }}>
-                <p style={{ wordBreak: 'break-all' }}>
-                  {copy.account} {gate.gateAccount}
+                {/* A short name to match against the terminal's own screen; the full value is under 상세. */}
+                <p data-gate-account={gate.gateAccount}>
+                  {copy.pendingLabel} · <span className="mono">{shortId(gate.gateAccount)}</span>
                 </p>
+                <details className="more">
+                  <summary>{copy.gateDetails}</summary>
+                  <p>{copy.account}</p>
+                  <CopyValue value={gate.gateAccount} copyLabel={copy.copyValue} copiedLabel={copy.copiedValue} />
+                </details>
                 <p style={{ color: 'var(--muted)', fontSize: 13 }}>
                   {copy.submittedAt} {new Date(gate.submittedAt).toLocaleString()}
                 </p>
@@ -191,10 +198,13 @@ export function Gates() {
           {registered.map((gate) => (
             <li key={gate.id} style={{ marginBottom: 12 }}>
               {/* The number a person can say out loud; the raw address waits under 상세. */}
-              <p>{fmt(copy.gateLabel, { n: gate.id })}</p>
+              <p data-gate-account={gate.account}>
+                {fmt(copy.gateLabel, { n: gate.id })} · <span className="mono">{shortId(gate.account)}</span>
+              </p>
               <details className="more">
                 <summary>{copy.gateDetails}</summary>
-                <p style={{ wordBreak: 'break-all' }}>{copy.account} {gate.account}</p>
+                <p>{copy.account}</p>
+                <CopyValue value={gate.account} copyLabel={copy.copyValue} copiedLabel={copy.copiedValue} />
               </details>
               {/* The indexer's column is `isOpen`, after the contract view `isOpenGate`. */}
               <p>{gate.revoked ? copy.isRevoked : gate.isOpen ? copy.isOpen : copy.isClosed}</p>
@@ -240,7 +250,10 @@ export function Gates() {
       </section>
 
       {mayManage ? (
-        <section>
+        // The typed-in fallback is folded away: on a normal evening the queue above is the way in,
+        // and three empty hex boxes up front read as the job.
+        <details className="more">
+          <summary>{copy.manualSummary}</summary>
           <p style={{ color: 'var(--muted)', fontSize: 13 }}>{copy.manualHelp}</p>
           <Field label={copy.account}>
             <input
@@ -269,7 +282,7 @@ export function Gates() {
           <Button disabled={busy} onClick={() => register(paste)}>
             {copy.manual}
           </Button>
-        </section>
+        </details>
       ) : null}
     </Screen>
   );

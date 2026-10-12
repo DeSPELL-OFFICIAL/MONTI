@@ -10,6 +10,7 @@ export { Countdown } from './Countdown';
 export { Spinner } from './Spinner';
 export { Skeleton, type SkeletonProps } from './Skeleton';
 export { Field } from './Field';
+export { CopyValue } from './CopyValue';
 export { KycBadge } from './KycBadge';
 export { ContactLink } from './ContactLink';
 export { Chip, type ChipProps } from './Chip';

@@ -8,7 +8,6 @@ const S = {
   eventLabel: '행사 번호',
   apply: '이 행사에 등록 요청',
   submitted: '등록을 요청했어요. 관리자가 승인하면 이 화면이 저절로 넘어가요.',
-  payload: '게이트 계정 주소',
   pendingHeading: '승인을 기다리는 단말기',
   register: '등록',
   // v2 (design D3): registerGate opens the terminal; 다시 열기 exists only for one that was closed.
@@ -53,11 +52,12 @@ export async function fileGateRequest(page: Page, eventId: string): Promise<Hex>
     await field.fill(eventId);
     await shot(page, 'staff-setup-event-number');
     await page.getByRole('button', { name: S.apply, exact: true }).click();
-    await expect(page.getByText(S.submitted, { exact: true }).or(page.getByText(S.payload, { exact: true })).first())
+    // The fallback block shows only a short device name; its full account rides on `data-gate-account`.
+    await expect(page.getByText(S.submitted, { exact: true }).or(page.locator('[data-gate-account]')).first())
       .toBeVisible({ timeout: 45_000 });
     await page.waitForTimeout(2000);
     await shot(page, 'staff-setup-pending');
-    if (!gateAccount) gateAccount = (await page.locator('input[value^="0x"]').first().inputValue().catch(() => '')) || undefined;
+    if (!gateAccount) gateAccount = (await page.locator('[data-gate-account]').first().getAttribute('data-gate-account').catch(() => null)) ?? undefined;
   } finally {
     page.off('response', sniff);
   }

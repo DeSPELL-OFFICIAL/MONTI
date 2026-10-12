@@ -134,9 +134,14 @@ describe('gate setup screen', () => {
     const user = userEvent.setup();
     await renderSetup();
 
-    expect(screen.getByText(ADDRESS)).toBeInTheDocument();
-    expect(screen.getByText(KX)).toBeInTheDocument();
-    expect(screen.getByText(KY)).toBeInTheDocument();
+    // Up front only a short name; the long values sit under a closed 상세, each with a copy button.
+    expect(screen.getByText('cf83…edb1')).toBeInTheDocument();
+    const details = screen.getByText(staffSetupKo.detailsLabel).closest('details');
+    expect(details).not.toBeNull();
+    expect(details).not.toHaveAttribute('open');
+    for (const value of [ADDRESS, KX, KY]) expect(details).toContainElement(screen.getByText(value));
+    expect(screen.getAllByRole('button', { name: staffSetupKo.copyValue })).toHaveLength(3);
+    expect(screen.queryByText(/공개키/)).not.toBeInTheDocument();
     // The QR is drawn from the same payload; it is asynchronous, so it is awaited.
     expect(await screen.findByRole('img', { name: staffSetupKo.qrAlt })).toBeInTheDocument();
 

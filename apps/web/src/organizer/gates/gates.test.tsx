@@ -117,6 +117,17 @@ describe('the pending-gate queue', () => {
     await waitFor(() => expect(listPendingGates.mock.calls.length).toBeGreaterThan(before));
   });
 
+  it('shows a queued terminal by a short name, with the full value only under 상세', async () => {
+    open();
+    const label = await screen.findByText(/^단말기 ·/);
+    expect(label).toHaveTextContent('단말기 · dddd…dddd');
+    expect(label).not.toHaveTextContent(GATE);
+    expect(label).toHaveAttribute('data-gate-account', GATE);
+    const details = label.parentElement?.querySelector('details');
+    expect(details).not.toHaveAttribute('open');
+    expect(details).toHaveTextContent(GATE);
+  });
+
   it('tells an organiser without the gate permission instead of letting them send', async () => {
     hasPermission.mockResolvedValue(false);
     open();
@@ -231,7 +242,13 @@ describe('the registered list', () => {
       Gate: [{ id: '7', eventId: '5', account: GATE, kx: KX, ky: KY, isOpen: false, revoked: false }],
     });
     open();
-    expect(await screen.findByText('단말기 7')).toBeInTheDocument();
+    const label = await screen.findByText(/^단말기 7 ·/);
+    expect(label).toHaveTextContent('단말기 7 · dddd…dddd');
+    expect(label).not.toHaveTextContent(GATE);
+    // The full address is kept, but only under a closed 상세 with a copy button.
+    const details = label.parentElement?.querySelector('details');
+    expect(details).not.toHaveAttribute('open');
+    expect(details).toHaveTextContent(GATE);
     await user.click(screen.getByRole('button', { name: copy.revoke }));
     await user.click(screen.getByRole('button', { name: copy.revokeKeep }));
     expect(screen.queryByText(copy.revokeConfirm)).toBeNull();

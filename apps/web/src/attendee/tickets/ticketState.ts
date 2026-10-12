@@ -63,12 +63,15 @@ export function deriveDetailView(state: TicketState, orderStatus: string | null)
 /** How many trailing digits the gate staff match a ticket by in manual approval. */
 const TICKET_NUMBER_TAIL = 4;
 
+/** How many digits ahead of the tail the short reference keeps, so two tickets rarely look alike. */
+const TICKET_NUMBER_LEAD = 2;
+
 /**
- * The ticket number split for display: the last four digits set apart, since that is what staff
- * read back at the door. Pure string work — the id is a 31-digit number that a JS `number` would
- * round, so it is never parsed.
+ * The ticket number as a person reads it: a short reference — two digits, then the last four that
+ * staff match in manual approval — e.g. `28-6337`. The full id (31 digits) is shown only under
+ * 상세. Pure string work — the id is too long for a JS `number`, so it is never parsed.
  */
-export function splitTicketNumber(tokenId: string): { head: string; tail: string } {
+export function shortTicketNumber(tokenId: string): { lead: string; tail: string } {
   const cut = Math.max(0, tokenId.length - TICKET_NUMBER_TAIL);
-  return { head: tokenId.slice(0, cut), tail: tokenId.slice(cut) };
+  return { lead: tokenId.slice(Math.max(0, cut - TICKET_NUMBER_LEAD), cut), tail: tokenId.slice(cut) };
 }

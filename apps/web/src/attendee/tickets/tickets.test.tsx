@@ -256,6 +256,20 @@ describe('TicketDetail', () => {
     expect(screen.getByRole('button', { name: '번호 복사' })).toBeInTheDocument();
   });
 
+  it('shows a short ticket number up front and keeps the full one under 상세', async () => {
+    const tokenId = '7930739067677860193113749428633';
+    gql.mockImplementation(async (query: string) =>
+      query.includes('OwnedTickets') ? { Ticket: [...OWNED, ticket(tokenId)], Offer: OFFERS } : answerIndexer(query));
+    renderDetail(tokenId);
+    const line = await screen.findByText(/티켓 번호/);
+    expect(line).toHaveTextContent('No. 42-8633');
+    expect(line).not.toHaveTextContent(tokenId);
+    const details = screen.getByText('상세').closest('details');
+    expect(details).not.toBeNull();
+    expect(details).toHaveTextContent(tokenId);
+    expect(details).not.toHaveAttribute('open');
+  });
+
   it('drops the entry and handover buttons once the ticket is used', async () => {
     renderDetail('2');
     expect(await screen.findByText('입장 완료')).toBeInTheDocument();
