@@ -108,8 +108,10 @@ vi.mock('../../shared/i18n', async (orig) => ({
   setLocale,
 }));
 
+const authMode = vi.fn(() => 'phone');
 vi.mock('../../shared/config', () => ({
   getConfig: () => ({ explorerUrl: 'https://explorer.test' }),
+  authMode: () => authMode(),
 }));
 
 const navigate = vi.fn();
@@ -154,6 +156,7 @@ beforeEach(() => {
   deviceUpdatedAt.mockResolvedValue(BigInt(NOW() - 2 * DAY));
   lockDevice.mockResolvedValue({ txHash: '0xaa' });
   getSignupStatus.mockResolvedValue({ status: 'active', kycLevel: 1 });
+  authMode.mockReset().mockReturnValue('phone');
 });
 
 describe('DeviceLock', () => {
@@ -572,5 +575,21 @@ describe('Profile', () => {
     expect(signOut).not.toHaveBeenCalled();
     // The dialog is still up, so a second try is one tap away.
     expect(screen.getByRole('button', { name: ko.me.deleteConfirmCta })).toBeInTheDocument();
+  });
+});
+
+describe('Profile in open mode (VITE_AUTH_MODE=open)', () => {
+  it('shows the phone lock and the new-phone move in phone mode', async () => {
+    wrap(<Profile />);
+    expect(await screen.findByRole('heading', { name: ko.me.lockDevice })).toBeInTheDocument();
+  });
+
+  it('hides the phone lock and the new-phone move, and keeps the language switcher', async () => {
+    authMode.mockReturnValue('open');
+    wrap(<Profile />);
+    expect(await screen.findByLabelText(ko.me.language)).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: ko.me.lockDevice })).toBeNull();
+    expect(screen.queryByText(ko.me.newDevice)).toBeNull();
+    expect(screen.queryByRole('button', { name: ko.me.lockCta })).toBeNull();
   });
 });

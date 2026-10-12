@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Capacitor } from '@capacitor/core';
 import { Alert, Button, Screen, Spinner, Steps } from '../../shared/ui';
 import { useCopy } from '../../shared/i18n';
 import type { Hex } from '@monti/shared';
@@ -8,16 +7,10 @@ import type { Copy } from '../../shared/copy/index';
 import { RP_NAME, createPasskey, passkeyProblem } from '../../shared/passkey';
 import { ATTENDEE_KEY_ALIAS, DeviceKeyUnavailable, ensureDeviceKey } from '../../shared/deviceKey';
 import { api, callableFailure } from '../../shared/api/functions';
-import { getFirebaseAuth } from '../../shared/api/firebase';
+import { platform, refreshClaims, registerIdentityWithRetry } from './registerWithRetry';
 import { deferRegistration, markRegistered } from '../../shared/registration';
 import { getSession } from '../../shared/session';
 import { readSignup, writeSignup } from './useSignup';
-
-/** The three the server accepts; anything else (a desktop browser) registers as `web`. */
-function platform(): 'ios' | 'android' | 'web' {
-  const current = Capacitor.getPlatform();
-  return current === 'ios' || current === 'android' ? current : 'web';
-}
 
 /** The server's own words for "this signup cannot continue"; retrying the step would loop. */
 const RESTART_REASONS = new Set([
@@ -74,22 +67,6 @@ function message(copy: Copy, step: Step, failure: unknown): string {
   return copy.signup.deviceFailed;
 }
 
-/**
- * The session is never written by hand here. `shared/api/sessionHydrator` reads `{ personId,
- * account }` out of the Firebase token's claims and is the only thing that may say "signed in";
- * a local `setSession` would be a second source of truth that the next `onIdTokenChanged`
- * contradicts. Forcing a refresh is how the claims the server just wrote reach that hydrator.
- * The registration itself already succeeded, so a refresh that fails must not undo it — and
- * until the server sets the claims this is simply a no-op and signup still finishes.
- */
-async function refreshClaims(): Promise<void> {
-  try {
-    await getFirebaseAuth().currentUser?.getIdToken(true);
-  } catch {
-    // A stale token costs one sign-in, a thrown one costs the whole signup.
-  }
-}
-
 /** A challenge is good for 60 seconds; one held longer than this is replaced rather than used. */
 const CHALLENGE_TTL_MS = 45_000;
 /**
@@ -103,31 +80,11 @@ const CHALLENGE_REFRESH_MS = 40_000;
 const SLOW_AFTER_MS = 10_000;
 
 /**
- * `registerIdentity` goes through a single attester that sends one registration at a time, so a
- * burst of signups queues behind it and the ones that cannot get a turn come back as
- * `resource-exhausted` / `ATTESTER_BUSY`. That is "the queue is full, come back", not "this
- * failed", so the run waits it out on its own — three times, longer each time — before the
- * screen says a word about it. Only when the queue is still full after all three does the
- * ordinary busy message surface.
- */
-const REGISTER_RETRY_DELAYS_MS = [3_000, 6_000, 10_000];
-
-/**
  * The stepper line shown while a busy answer is being waited out. Inlined here rather than added
  * to `shared/copy`: this one screen is the only place a retry is waited out, and the copy files
  * are outside this change's scope.
  */
 const REGISTER_BUSY_LINE = '잠시 붐벼요 · 다시 시도 중…';
-
-/** A momentary "the attester is busy", worth waiting out — not a refusal that retrying would loop on. */
-function isAttesterBusy(failure: unknown): boolean {
-  const { code, reason } = callableFailure(failure);
-  return code === 'resource-exhausted' || reason === 'ATTESTER_BUSY';
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => { setTimeout(resolve, ms); });
-}
 
 /**
  * The registration challenge, minted **before** the tap and kept fresh for as long as the
@@ -346,20 +303,7 @@ export function Register() {
       // on chain already and sent nothing — there is no hash to wait for and nothing to redo.
       // A busy attester is not a failure, so the run waits it out and comes back on its own
       // ({@link REGISTER_RETRY_DELAYS_MS}) before the catch below ever surfaces the busy answer.
-      for (let attempt = 0; ; attempt += 1) {
-        try {
-          await api.registerIdentity({ personId, deviceX: x, deviceY: y, platform: platform() });
-          break;
-        } catch (failure) {
-          // `undefined` here means the retries are spent (index past the end); a non-busy
-          // answer is a real failure. Either way the catch below gets it.
-          const backoff = REGISTER_RETRY_DELAYS_MS[attempt];
-          if (backoff === undefined || !isAttesterBusy(failure)) throw failure;
-          setRetrying(true);
-          await delay(backoff);
-          setRetrying(false);
-        }
-      }
+      await registerIdentityWithRetry({ personId, deviceX: x, deviceY: y }, setRetrying);
       await refreshClaims();
       // The guard asked the server once; saying so here is cheaper and truer than asking again.
       markRegistered();

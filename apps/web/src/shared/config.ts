@@ -65,6 +65,19 @@ export function approvalModesEnabled(): boolean {
 }
 
 /**
+ * How a visitor gets an identity. `phone` (the default) is SMS + passkey; `open` is one tap on
+ * `/start` — an anonymous Firebase user, a device key on this browser, and the server deriving the
+ * account from that key — with the session persisted by Firebase like any other. Only the exact
+ * value `open` switches it, so an unset or misspelled build keeps the phone flow. Read at call time,
+ * like {@link approvalModesEnabled}.
+ */
+export type AuthMode = 'open' | 'phone';
+
+export function authMode(): AuthMode {
+  return optionalEnv('VITE_AUTH_MODE') === 'open' ? 'open' : 'phone';
+}
+
+/**
  * Whether the programmable-settlement feature is live for this build. True only when BOTH the
  * vault and the USDC token address are configured — a vault with no token to escrow is a
  * half-wired feature, so the screens stay hidden until both are present. Read at call time, the

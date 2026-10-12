@@ -8,7 +8,7 @@ import { api } from '../../shared/api/functions';
 import { getFirebaseAuth } from '../../shared/api/firebase';
 import { MAX_DISPLAY_NAME_CHARS, saveUserProfile } from '../../shared/api/firestore';
 import { useDisplayName } from '../../shared/displayName';
-import { getConfig } from '../../shared/config';
+import { authMode, getConfig } from '../../shared/config';
 import { useSession } from '../../shared/session';
 import { useOrganizerEntry } from '../../organizer/useOrganizerEntry';
 import { Nickname } from './Nickname';
@@ -263,8 +263,14 @@ export function Profile() {
           <option value="en">{copy.me.languageEn}</option>
         </select>
       </Field>
-      <DeviceLock />
-      <NewDevice />
+      {/* Both are about a phone — locking a lost one, moving to a new one — and an open-mode
+          identity (VITE_AUTH_MODE=open) lives in this browser with no phone behind it. */}
+      {authMode() === 'open' ? null : (
+        <>
+          <DeviceLock />
+          <NewDevice />
+        </>
+      )}
       <p>
         <a href={`${explorerBase}/address/${session.account ?? ''}`}>{copy.me.publicRecord}</a>
       </p>

@@ -50,3 +50,18 @@ describe('getConfig', () => {
     expect(getConfig().explorerUrl).toBe('https://monadexplorer.com');
   });
 });
+
+describe('authMode', () => {
+  it('is phone unless VITE_AUTH_MODE is exactly open', async () => {
+    const { authMode } = await import('./config');
+    vi.stubEnv('VITE_AUTH_MODE', '');
+    expect(authMode()).toBe('phone');
+    vi.stubEnv('VITE_AUTH_MODE', 'Open');
+    expect(authMode()).toBe('phone');
+    vi.stubEnv('VITE_AUTH_MODE', 'phone');
+    expect(authMode()).toBe('phone');
+    vi.stubEnv('VITE_AUTH_MODE', 'open');
+    expect(authMode()).toBe('open');
+    vi.unstubAllEnvs();
+  });
+});

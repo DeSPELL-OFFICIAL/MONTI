@@ -6,6 +6,7 @@ import { fmt, useCopy, useLocale } from '../../shared/i18n';
 import { LIST_STAGGER, m, useReducedMotion } from '../../shared/motion';
 import { describeFailure } from '../../shared/errors';
 import { useSession } from '../../shared/session';
+import { authMode } from '../../shared/config';
 import { useKycLevel } from '../me/useKycLevel';
 import { Filters } from './Filters';
 import {
@@ -26,6 +27,14 @@ import {
  * be the tallest thing on it. The detail screen shows all of them (plan section B-2).
  */
 const CARD_TAGS = 2;
+
+/**
+ * Where 만들기 sends a visitor who is not signed in: phone signup, or in open mode the one-tap
+ * start, which brings them back to the creation scene once they have an identity.
+ */
+function signUpPath(): string {
+  return authMode() === 'open' ? `/start?returnTo=${encodeURIComponent('/org/new')}` : '/signup/phone';
+}
 
 
 export function Discover() {
@@ -170,7 +179,7 @@ export function Discover() {
       <Fab
         label={copy.discover.create}
         disabled={sessionLoading}
-        onClick={() => navigate(signedIn ? '/org/new' : '/signup/phone')}
+        onClick={() => navigate(signedIn ? '/org/new' : signUpPath())}
       />
     </Screen>
   );
