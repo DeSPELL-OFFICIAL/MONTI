@@ -422,6 +422,18 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
   border-bottom: 1px solid var(--glass-hairline);
 }
 .tier-list li > span { min-width: 0; }
+/* A type with tickets left is tappable: the whole row opens the claim with that type chosen. */
+.tier-list__pick {
+  display: flex; justify-content: space-between; align-items: center; gap: var(--s-3);
+  width: 100%; min-width: 0; min-height: var(--tap);
+  margin: calc(-1 * var(--s-2)) 0; padding: var(--s-2) 0;
+  background: none; border: 0; font: inherit; color: inherit; text-align: left; text-decoration: none;
+  cursor: pointer;
+}
+.tier-list__pick > span { min-width: 0; }
+.tier-list__pick > span:first-child { flex: 1; }
+.tier-list__pick::after { content: '›'; color: var(--brand-ink); font-size: 20px; line-height: 1; }
+.tier-list__pick:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: var(--r-sm); }
 .tier-list li:first-child { padding-top: 0; }
 .tier-list li:last-child { padding-bottom: 0; border-bottom: 0; }
 .muted { color: var(--ink-2); font-size: var(--t-cap); line-height: var(--t-cap-lh); }

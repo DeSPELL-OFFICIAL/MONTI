@@ -111,6 +111,9 @@ export interface ClaimFlowProps {
   /** The numeric event id the claim is for. Both entries hand this in rather than reading a route. */
   eventId: string;
   present: ClaimPresentation;
+  /** The ticket type tapped on the event page, preselected in the picker. The address's `tier`
+   *  (a resume through verification) wins when both are present. */
+  initialTier?: number;
 }
 
 /**
@@ -118,7 +121,7 @@ export interface ClaimFlowProps {
  * as one component both entries render (plan B1). Nothing is copied between the route and the
  * sheet: this is the single place the state machine lives.
  */
-export function ClaimFlow({ eventId, present }: ClaimFlowProps) {
+export function ClaimFlow({ eventId, present, initialTier }: ClaimFlowProps) {
   const copy = useCopy();
   const navigate = useNavigate();
   const [params, setSearchParams] = useSearchParams();
@@ -126,7 +129,8 @@ export function ClaimFlow({ eventId, present }: ClaimFlowProps) {
   // The type survives the trip through verification in the address; the picker is the owner of
   // it from the first render on, so the initial read happens once and never again.
   const [tier, setTier] = useState(() => {
-    const asked = Number(params.get('tier'));
+    const raw = params.get('tier');
+    const asked = raw === null ? (initialTier ?? 0) : Number(raw);
     return Number.isInteger(asked) && asked >= 0 ? asked : 0;
   });
   const [error, setError] = useState('');

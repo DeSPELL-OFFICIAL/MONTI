@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
@@ -658,6 +658,58 @@ describe('EventDetail · 받기 시트 (B1)', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Get a ticket' }));
     const sheet = await screen.findByRole('dialog', { name: 'Get a ticket' });
     expect(within(sheet).getByText("It's free")).toBeInTheDocument();
+  });
+
+  const TWO_TIERS = [
+    ...TIERS,
+    { id: '1-1', eventId: '1', idx: 1, name: 'Supporter', priceUsdCents: '0', supply: '50', minted: '50', maxPerWallet: '1', seated: false },
+    { id: '1-2', eventId: '1', idx: 2, name: 'Backstage', priceUsdCents: '0', supply: '10', minted: '0', maxPerWallet: '1', seated: false },
+  ];
+
+  it('opens the claim on the ticket type whose row was tapped', async () => {
+    claimIndexer();
+    gql.mockImplementation(async (query: string) => {
+      if (query.includes('OwnedTickets')) return { Ticket: [], Offer: [] };
+      if (query.includes('TicketContext')) return { CheckIn: [], Event: [], Tier: [], Ticket: [] };
+      if (query.includes('MyRequests')) return { ClaimRequest: [] };
+      return { Event: [EVENT_ONE], Tier: TWO_TIERS };
+    });
+    setSession({ status: 'signedIn', account: ME });
+    const seen = renderDetailTracked();
+    await userEvent.click(await screen.findByRole('button', { name: /Backstage/ }));
+    const sheet = await screen.findByRole('dialog', { name: 'Get a ticket' });
+    expect(await within(sheet).findByRole('combobox')).toHaveValue('2');
+    expect(seen.at(-1)).toBe('/events/1');
+    // A sold-out type is listed but is not a way in.
+    expect(screen.queryByRole('button', { name: /Supporter/ })).toBeNull();
+  });
+
+  it('still opens the bar claim on the first type after a type row was used', async () => {
+    gql.mockImplementation(async (query: string) => {
+      if (query.includes('OwnedTickets')) return { Ticket: [], Offer: [] };
+      if (query.includes('TicketContext')) return { CheckIn: [], Event: [], Tier: [], Ticket: [] };
+      if (query.includes('MyRequests')) return { ClaimRequest: [] };
+      return { Event: [EVENT_ONE], Tier: TWO_TIERS };
+    });
+    setSession({ status: 'signedIn', account: ME });
+    renderDetail();
+    await userEvent.click(await screen.findByRole('button', { name: /Backstage/ }));
+    await screen.findByRole('dialog', { name: 'Get a ticket' });
+    // Dismissed by a tap on the scrim, the sheet's own way out.
+    await userEvent.click(document.querySelector('.sheet-scrim') as HTMLElement);
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await userEvent.click(screen.getByRole('button', { name: 'Get a ticket' }));
+    const sheet = await screen.findByRole('dialog', { name: 'Get a ticket' });
+    expect(await within(sheet).findByRole('combobox')).toHaveValue('0');
+  });
+
+  it('sends a signed-out visitor to /claim with the tapped type in the address', async () => {
+    gql.mockResolvedValue({ Event: [EVENT_ONE], Tier: TWO_TIERS });
+    setSession({ status: 'anonymous' });
+    renderDetail();
+    expect(await screen.findByRole('link', { name: /Backstage/ })).toHaveAttribute('href', '/claim/1?tier=2');
+    expect(screen.getByRole('link', { name: /General/ })).toHaveAttribute('href', '/claim/1?tier=0');
+    expect(screen.getByRole('link', { name: 'Get a ticket' })).toHaveAttribute('href', '/claim/1');
   });
 
   it('keeps the /claim route as the entry for a visitor who is not signed in yet', async () => {
