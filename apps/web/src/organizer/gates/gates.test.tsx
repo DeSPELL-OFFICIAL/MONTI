@@ -117,6 +117,17 @@ describe('the pending-gate queue', () => {
     await waitFor(() => expect(listPendingGates.mock.calls.length).toBeGreaterThan(before));
   });
 
+  it('shows a queued terminal by a short name, with the full value only under 상세', async () => {
+    open();
+    const label = await screen.findByText(/^단말기 ·/);
+    expect(label).toHaveTextContent('단말기 · dddd…dddd');
+    expect(label).not.toHaveTextContent(GATE);
+    expect(label).toHaveAttribute('data-gate-account', GATE);
+    const details = label.parentElement?.querySelector('details');
+    expect(details).not.toHaveAttribute('open');
+    expect(details).toHaveTextContent(GATE);
+  });
+
   it('tells an organiser without the gate permission instead of letting them send', async () => {
     hasPermission.mockResolvedValue(false);
     open();
@@ -181,6 +192,18 @@ describe('the registered list', () => {
     expect(gql).toHaveBeenCalledWith(expect.stringContaining('isOpen'), { eventId: '5' });
   });
 
+  /** v2 (design D3): registerGate opens the gate in the same write, so an open one offers no 열기. */
+  it('shows an approved terminal as open, with 닫기 and 폐기 but no open step', async () => {
+    gql.mockResolvedValue({
+      Gate: [{ id: '7', eventId: '5', account: GATE, kx: KX, ky: KY, isOpen: true, revoked: false }],
+    });
+    open();
+    expect(await screen.findByText(copy.isOpen)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: copy.close })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: copy.revoke })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: copy.reopen })).toBeNull();
+  });
+
   it('closes an open terminal by its gate number', async () => {
     const user = userEvent.setup();
     gql.mockResolvedValue({
@@ -193,13 +216,13 @@ describe('the registered list', () => {
     );
   });
 
-  it('opens a closed terminal and retires it on request', async () => {
+  it('reopens a terminal that was closed, and retires it on request', async () => {
     const user = userEvent.setup();
     gql.mockResolvedValue({
       Gate: [{ id: '7', eventId: '5', account: GATE, kx: KX, ky: KY, isOpen: false, revoked: false }],
     });
     open();
-    await user.click(await screen.findByRole('button', { name: copy.open }));
+    await user.click(await screen.findByRole('button', { name: copy.reopen }));
     await waitFor(() =>
       expect(sendAction).toHaveBeenCalledWith('openGate', 'organizers', data('openGate', [7n])),
     );
@@ -219,7 +242,13 @@ describe('the registered list', () => {
       Gate: [{ id: '7', eventId: '5', account: GATE, kx: KX, ky: KY, isOpen: false, revoked: false }],
     });
     open();
-    expect(await screen.findByText('단말기 7')).toBeInTheDocument();
+    const label = await screen.findByText(/^단말기 7 ·/);
+    expect(label).toHaveTextContent('단말기 7 · dddd…dddd');
+    expect(label).not.toHaveTextContent(GATE);
+    // The full address is kept, but only under a closed 상세 with a copy button.
+    const details = label.parentElement?.querySelector('details');
+    expect(details).not.toHaveAttribute('open');
+    expect(details).toHaveTextContent(GATE);
     await user.click(screen.getByRole('button', { name: copy.revoke }));
     await user.click(screen.getByRole('button', { name: copy.revokeKeep }));
     expect(screen.queryByText(copy.revokeConfirm)).toBeNull();

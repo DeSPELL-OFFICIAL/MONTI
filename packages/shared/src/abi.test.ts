@@ -43,6 +43,9 @@ describe('Identity ABI', () => {
       expect.arrayContaining(['Registered', 'AccountRotated', 'DeviceChanged', 'DeviceLocked', 'KycLevelSet',
         'RotationCancelled']),
     );
+    // v2: nicknames live off chain (design D6).
+    expect(names(identityAbi, 'function')).not.toContain('setNickname');
+    expect(names(identityAbi, 'event')).not.toContain('NicknameSet');
   });
 
   it('has no nickname surface any more (v2 P5: nicknames are off-chain)', () => {

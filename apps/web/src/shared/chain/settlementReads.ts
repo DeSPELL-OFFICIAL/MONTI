@@ -15,20 +15,6 @@ function settlementVault(): Address {
   return vault;
 }
 
-/**
- * `SettlementVault.policyNonce(organizer)` — the per-organizer replay counter the device key signs
- * over. The next `setPolicy` auth must carry exactly this value, so the organiser screen reads it
- * immediately before building the digest, never from a cache.
- */
-export function readPolicyNonce(organizer: Address): Promise<bigint> {
-  return getPublicClient().readContract({
-    address: settlementVault(),
-    abi: settlementVaultAbi,
-    functionName: 'policyNonce',
-    args: [organizer],
-  });
-}
-
 /** One payout line as the chain holds it (`SettlementVault.Recipient`). */
 export interface ChainRecipient {
   account: Hex;

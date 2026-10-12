@@ -25,9 +25,8 @@ describe('staff constants match the spec parameter table (§7.3, §11)', () => {
 
   it('pins the gate registration parameters', () => {
     expect(C.GATE_REGISTRATION_POLL_MS).toBe(3000);
-    // The seeded demo event, not a gate id: the setup screen reads `gateOf(account)` and is
-    // told which gate it became. See contracts/deployments/seed-10143.json.
-    expect(C.SEEDED_EVENT_ID).toBe('1');
+    // v2: nothing is pre-seeded (events start at 1001), so there is no event to prefill.
+    expect('SEEDED_EVENT_ID' in C).toBe(false);
   });
 
   it('names the staff device database', () => {

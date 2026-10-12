@@ -270,6 +270,12 @@ export interface RelayActionRequest {
   req: ForwardRequestWire;
   deviceSig: Hex;
   kind: string;
+  /**
+   * `publishEvent` only: one human-readable reason per split-policy recipient, in recipient
+   * order (each ≤80 chars). The chain carries only `keccak256(reason)`; the confirm hook stores
+   * a reason in `settlements/{eventId}` when its hash matches, so the public page can show it.
+   */
+  reasons?: string[];
 }
 
 /**
@@ -300,33 +306,6 @@ export interface RelayActionResponse {
 }
 
 /**
- * web → backend contract for setting an event's split policy through the relayer
- * (functions/src/functions/relaySetPolicy.ts). The server authorises it against the organiser's
- * device signature over the settlement digest, writes the policy to `settlements/{eventId}`, and
- * relays `SettlementVault.setPolicy`.
- *
- * `priceUsdCentsByTier` rides in this payload on purpose: it is the ONLY path by which the
- * organiser's per-tier USD price reaches the backend's `settlements/{eventId}` document — there is
- * no on-chain price for a free-mint tier — keyed by tier index as a decimal string.
- */
-export interface RelaySetPolicyRequest {
-  eventId: string;
-  policy: {
-    recipients: { account: Hex; bps: number; reason: string; tag: string }[];
-    platformBps?: number;
-  };
-  priceUsdCentsByTier: Record<string, number>;
-  auth: { nonce: string; deadline: string };
-  deviceSig: Hex;
-}
-
-export interface RelaySetPolicyResponse {
-  relayId: string;
-  status: string;
-  txHash?: Hex;
-}
-
-/**
  * web → backend contract for buying one ticket (functions/src/functions/purchaseTicket.ts): the
  * backend mints the ticket for `auth.account` and deposits the USDC into escrow. `payment` is the
  * mock card charge for the demo; `auth` is the attendee's device-signed {@link ClaimAuthWire} and
@@ -340,12 +319,49 @@ export interface PurchaseTicketRequest {
   payment: { method: 'card-mock'; amountUsdCents: number };
 }
 
+/**
+ * v2: one atomic `SettlementVault.purchase` (mint + escrow in the same transaction), so there is
+ * no "minted but not deposited" state. `deposited` = already mined, `sent` = broadcast; follow
+ * `relays/{relayId}` (kind `purchase`) or `orders/{orderId}` for the outcome.
+ */
 export interface PurchaseTicketResponse {
   orderId: string;
   relayId: string;
-  status: 'minted' | 'deposited' | 'sent';
+  status: 'deposited' | 'sent';
   tokenId?: string;
-  depositTxHash?: Hex;
+  txHash?: Hex;
+}
+
+/** Why a staff member asks for a manual admission (P4). 1–4 mirror the staff override reasons. */
+export type OverrideReason = 1 | 2 | 3 | 4;
+
+/**
+ * A manager without approval rights files a manual-admission request off chain
+ * (functions/src/functions/overrideRequests.ts). Refusals (`details.code`): `UNKNOWN_EVENT`,
+ * `WRONG_EVENT`, `GATE_MISMATCH`, `NOT_ALLOWED`.
+ */
+export interface RequestOverrideRequest {
+  eventId: string;
+  tokenId: string;
+  gateId: string;
+  reason: OverrideReason;
+  note?: string;
+}
+
+/** One open request as an approver sees it. `createdAt` is epoch milliseconds. */
+export interface OverrideRequestRow {
+  id: string;
+  tokenId: string;
+  gateId: string;
+  reason: OverrideReason;
+  note?: string;
+  requesterAccount: Hex;
+  createdAt: number;
+}
+
+/** Refusals (`details.code`): `NICKNAME_INVALID`, `NICKNAME_TAKEN`, `NO_PERSON`. */
+export interface SetNicknameRequest {
+  nickname: string;
 }
 
 export const api = {
@@ -680,20 +696,20 @@ export const api = {
     'requestAccountDeletion',
   ),
   /**
-   * Sets an event's split policy through the relayer (functions/src/functions/relaySetPolicy.ts).
-   * Organiser-only, authorised server-side by the device signature over the settlement digest. The
-   * server writes `settlements/{eventId}` — including `priceUsdCentsByTier`, the web→backend price
-   * contract (see {@link RelaySetPolicyRequest}) — and relays `SettlementVault.setPolicy`. The
-   * answer carries a `relayId` to follow and, once it lands, a `txHash`.
-   */
-  relaySetPolicy: call<RelaySetPolicyRequest, RelaySetPolicyResponse>('relaySetPolicy'),
-  /**
    * Buys one ticket (functions/src/functions/purchaseTicket.ts): the backend mints it for the
    * attendee and deposits the USDC into the settlement escrow. The answer's `relayId` is the one
    * `watchRelayStatus` follows for the mint, and `orderId` is what `watchOrder` follows for the
    * escrow — both in `shared/api/firestore.ts`.
    */
   purchaseTicket: call<PurchaseTicketRequest, PurchaseTicketResponse>('purchaseTicket'),
+  /** P4: files a manual-admission request (no chain write). Approval stays `manualOverride`. */
+  requestOverride: call<RequestOverrideRequest, { requestId: string }>('requestOverride'),
+  /** P4: the open requests of one event, for an approver. */
+  listOverrideRequests: call<{ eventId: string }, { requests: OverrideRequestRow[] }>('listOverrideRequests'),
+  /** P5: the server-held nickname (unique, off chain). Answers the normalised name it stored. */
+  setNickname: call<SetNicknameRequest, { nickname: string }>('setNickname'),
+  /** P5: display names for up to 100 accounts; keys are lowercase accounts, unknown ones absent. */
+  resolveNicknames: call<{ accounts: string[] }, { names: Record<string, string> }>('resolveNicknames'),
   /**
    * Refunds one order's escrowed deposit before it is released
    * (functions/src/functions/refundOrder.ts). Owner of the order only; idempotent on an already

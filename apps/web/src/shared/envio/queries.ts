@@ -173,21 +173,6 @@ export const ORG_EVENTS_QUERY = `
     }
   }`;
 
-/** One account's chosen display name. The chain stores only `keccak256(nickname)`, so the indexer
- *  is the single place the plaintext exists (the same source the chat and gate snapshot read). A
- *  row with a null nickname is an account that never set one, shown by number instead. */
-export interface EnvioIdentityAccount {
-  id: string;
-  nickname: string | null;
-}
-
-/** Resolve a set of accounts to their nicknames, for a list that names requesters. Accounts travel
- *  lowercase — the id column is stored that way and `_in` is exact, so a checksummed one misses. */
-export const IDENTITY_NAMES_QUERY = `
-  query IdentityNames($accounts: [String!]!) {
-    IdentityAccount(where: { id: { _in: $accounts } }) { id nickname }
-  }`;
-
 /** The status of one approval-mode request, as the indexer holds it — the enum's name, not a
  *  number. A self-cancel lands on `Rejected` too: the contract emits the same `ClaimRejected`
  *  for it, so the indexer cannot tell an attendee's cancel from an organiser's rejection. */

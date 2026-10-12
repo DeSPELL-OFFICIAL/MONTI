@@ -43,6 +43,17 @@ describe('sendAction', () => {
     expect(watchRelay).not.toHaveBeenCalled();
   });
 
+  it('carries the publish reasons in the relayAction body, and on the BAD_NONCE retry too', async () => {
+    relayAction
+      .mockRejectedValueOnce(badNonceError('12'))
+      .mockResolvedValueOnce({ relayId: 'r1', status: 'confirmed', result: { eventId: '1001' } });
+    await sendAction('publishEvent', 'ticket', DATA, undefined, { reasons: ['밴드', 'MONTI 플랫폼'] });
+    expect(relayAction).toHaveBeenCalledTimes(2);
+    for (const [body] of relayAction.mock.calls) {
+      expect(body).toEqual({ req: BUILT.req, deviceSig: BUILT.deviceSig, kind: BUILT.kind, reasons: ['밴드', 'MONTI 플랫폼'] });
+    }
+  });
+
   it('follows the relay doc when the answer is sent, returning the settled result', async () => {
     relayAction.mockResolvedValue({ relayId: 'r1', status: 'sent' });
     watchRelay.mockImplementation((_id, onChange) => {

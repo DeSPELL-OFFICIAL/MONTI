@@ -3,7 +3,9 @@ import {
   bpsToPercent,
   blankRow,
   exampleSplit,
+  parseSplit,
   percentToBps,
+  serializeSplit,
   platformBpsOf,
   platformRow,
   toRecipients,
@@ -68,6 +70,62 @@ describe('validateRows', () => {
 
   it('treats an empty editor as invalid', () => {
     expect(validateRows([]).error).toBe('EMPTY');
+  });
+});
+
+describe('validateRows — what the vault and the relayer refuse', () => {
+  it('refuses more than ten recipients (the vault takes 1–10)', () => {
+    const many = Array.from({ length: 10 }, (_, i) => ({ id: String(i), name: `r${i}`, account: ACCT_A, bps: 950, tag: 't' }));
+    expect(validateRows([...many, { ...platformRow(PLATFORM), bps: 500 }]).error).toBe('TOO_MANY');
+  });
+
+  it('refuses a role name over 80 characters (the relayer caps each reason)', () => {
+    const rows = validSplit();
+    rows[0] = { ...(rows[0] as RecipientRow), name: 'ㄱ'.repeat(81) };
+    expect(validateRows(rows).error).toBe('NAME_TOO_LONG');
+  });
+
+  it('refuses a tag that does not fit in 32 bytes', () => {
+    const rows = validSplit();
+    rows[0] = { ...(rows[0] as RecipientRow), tag: '가'.repeat(11) }; // 33 bytes of UTF-8
+    expect(validateRows(rows).error).toBe('BAD_TAG');
+  });
+});
+
+describe('splitJson — the draft carries the rows as one string', () => {
+  it('round-trips the rows without their React ids', () => {
+    const json = serializeSplit(validSplit());
+    expect(JSON.parse(json)).toEqual([
+      { name: '아티스트', account: ACCT_A, bps: 9000, tag: 'artist', platform: false },
+      { name: 'MONTI 플랫폼', account: PLATFORM, bps: 1000, tag: 'platform', platform: true },
+    ]);
+    const back = parseSplit(json, PLATFORM);
+    expect(back.map(({ id: _id, ...row }) => row)).toEqual([
+      { name: '아티스트', account: ACCT_A, bps: 9000, tag: 'artist', platform: false },
+      { name: 'MONTI 플랫폼', account: PLATFORM, bps: 1000, tag: 'platform', platform: true },
+    ]);
+    expect(new Set(back.map((row) => row.id)).size).toBe(2);
+  });
+
+  it('starts from the one locked 5% platform row when there is nothing stored', () => {
+    for (const empty of ['', 'not json', '{"a":1}', '[]']) {
+      const rows = parseSplit(empty, PLATFORM);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ platform: true, account: PLATFORM, bps: 500, tag: 'platform' });
+    }
+  });
+
+  it('pins the platform row to the configured account, whatever the draft says', () => {
+    const json = JSON.stringify([{ name: 'x', account: ACCT_B, bps: 600, tag: 'platform', platform: true }]);
+    expect(parseSplit(json, PLATFORM)[0]).toMatchObject({ account: PLATFORM, bps: 600, platform: true });
+  });
+
+  it('fits the draft rule cap even at the largest split the editor accepts', () => {
+    const widest = Array.from({ length: 10 }, (_, i) => ({
+      id: String(i), name: 'ㄱ'.repeat(80), account: ACCT_A, bps: 1000, tag: 'x'.repeat(32),
+    }));
+    expect(validateRows(widest).ok).toBe(true);
+    expect(serializeSplit(widest).length).toBeLessThanOrEqual(4_000);
   });
 });
 

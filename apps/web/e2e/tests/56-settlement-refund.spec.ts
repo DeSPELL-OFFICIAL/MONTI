@@ -2,13 +2,14 @@ import { expect, test, type Response } from '@playwright/test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { USERS } from '../fixtures/personas';
 import { closePersona, ensureAccount, openPersona } from '../utils/session';
+import { fmtMon, monBalance, TREASURY } from '../utils/chain';
 import { shot } from '../utils/shots';
 
 /** Ticket price in USD asserted on the CTA. Default unchanged ($30). */
 const PRICE = process.env.E2E_PRICE_USD ?? '30';
 
 /**
- * Batch H — Run 5, step 5. A SECOND fresh attendee buys the $30 ticket and then refunds it BEFORE
+ * v2 step 5. A SECOND fresh attendee buys the ticket (ONE `purchase`, mint + escrow) and refunds it BEFORE
  * admission, self-contained in one process (the order id is device-local, so purchase + refund must
  * share the context). Pass the step-1 event via EVENT_ID and the attendee via E2E_USER_FROM.
  *
@@ -29,7 +30,7 @@ test('56 · settlement step 5 — attendee B buys then refunds before admission'
   mkdirSync(ARTIFACTS, { recursive: true });
   const attendee = USERS[0]!;
   const diag: Record<string, unknown> = { persona: attendee.id, eventId: EVENT_ID, startedAt: new Date().toISOString() };
-  // depositTxHash = purchaseTicket result.txHash (mint+deposit); refundTxHash = refundOrder result
+  // depositTxHash = purchaseTicket result.txHash (the one purchase tx); refundTxHash = refundOrder result
   // (the treasury-key vault.refund, returned after the receipt is awaited → ≈ on-chain confirmation).
   const wire: { account?: string; orderId?: string; tokenId?: string; status?: string; depositTxHash?: string; refundTxHash?: string; refundStatus?: string } = {};
 
@@ -76,12 +77,14 @@ test('56 · settlement step 5 — attendee B buys then refunds before admission'
     await expect(payBtn).toBeEnabled({ timeout: 10_000 });
     await shot(page, 'refund-attendee-payment-card-filled');
     const payClickAt = Date.now();
+    const treasuryBefore = await monBalance(TREASURY);
     await payBtn.click();
     const doneAlert = sheet.getByText('결제 완료 · 티켓을 받았어요', { exact: true });
     const toTickets = sheet.getByRole('link', { name: /^(영수증 보기|내 티켓 보기)$/ });
     let purchased = false; const pd = Date.now() + 180_000;
     while (Date.now() < pd) { if (await doneAlert.isVisible().catch(() => false) || await toTickets.isVisible().catch(() => false)) { purchased = true; break; } await page.waitForTimeout(2000); }
     diag.purchased = purchased; diag.wire = { ...wire };
+    diag.treasuryMonPurchase = fmtMon(treasuryBefore - (await monBalance(TREASURY)));
     diag.purchaseLatencyMs = Date.now() - payClickAt;
     await shot(page, 'refund-attendee-payment-done');
     console.log(`[56] purchased=${purchased} latency=${diag.purchaseLatencyMs}ms wire=${JSON.stringify(wire)}`);

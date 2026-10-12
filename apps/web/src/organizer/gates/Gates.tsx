@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { encodeFunctionData } from 'viem';
 import type { Hex } from 'viem';
-import { Alert, Button, Field, Screen, Spinner } from '../../shared/ui';
+import { Alert, Button, CopyValue, Field, Screen, Spinner } from '../../shared/ui';
+import { shortId } from '../../shared/shortId';
 import { api, type PendingGate } from '../../shared/api/functions';
 import { organizersAbi } from '../../shared/chain/abis';
 import { getStaffAccount } from '../../shared/chain/accounts';
@@ -39,9 +40,10 @@ const EMPTY_PASTE = { gateAccount: '', kx: '', ky: '' };
 /**
  * The organiser's half of spec §5.7 step 1. The staff terminal makes its own key in its secure
  * chip and submits the public half through the backend (`submitPendingGate`); this screen
- * lists that queue and puts a chosen entry on the event's allowlist with `registerGate`, then
- * opens and closes it. Nothing is granted before that write lands — a queued row has no
- * permission of any kind.
+ * lists that queue and puts a chosen entry on the event's allowlist with `registerGate`, which
+ * opens it in the same write (v2, design D3) — there is no separate 열기 step. 닫기 pauses a door
+ * and 다시 열기 undoes only that; 폐기 is final. Nothing is granted before the register write
+ * lands — a queued row has no permission of any kind.
  *
  * The typed-in form beside the queue is the fallback for the evening when the staff app cannot
  * reach the backend: the same three values, read off the terminal's own screen, through the
@@ -163,13 +165,20 @@ export function Gates() {
       {mayManage ? (
         <section>
           <h2>{copy.pending}</h2>
+          <p className="muted">{copy.registerHelp}</p>
           {pending.length === 0 ? <p>{copy.none}</p> : null}
           <ul style={{ listStyle: 'none', padding: 0 }}>
             {pending.map((gate) => (
               <li key={gate.gateAccount} style={{ marginBottom: 12 }}>
-                <p style={{ wordBreak: 'break-all' }}>
-                  {copy.account} {gate.gateAccount}
+                {/* A short name to match against the terminal's own screen; the full value is under 상세. */}
+                <p data-gate-account={gate.gateAccount}>
+                  {copy.pendingLabel} · <span className="mono">{shortId(gate.gateAccount)}</span>
                 </p>
+                <details className="more">
+                  <summary>{copy.gateDetails}</summary>
+                  <p>{copy.account}</p>
+                  <CopyValue value={gate.gateAccount} copyLabel={copy.copyValue} copiedLabel={copy.copiedValue} />
+                </details>
                 <p style={{ color: 'var(--muted)', fontSize: 13 }}>
                   {copy.submittedAt} {new Date(gate.submittedAt).toLocaleString()}
                 </p>
@@ -189,10 +198,13 @@ export function Gates() {
           {registered.map((gate) => (
             <li key={gate.id} style={{ marginBottom: 12 }}>
               {/* The number a person can say out loud; the raw address waits under 상세. */}
-              <p>{fmt(copy.gateLabel, { n: gate.id })}</p>
+              <p data-gate-account={gate.account}>
+                {fmt(copy.gateLabel, { n: gate.id })} · <span className="mono">{shortId(gate.account)}</span>
+              </p>
               <details className="more">
                 <summary>{copy.gateDetails}</summary>
-                <p style={{ wordBreak: 'break-all' }}>{copy.account} {gate.account}</p>
+                <p>{copy.account}</p>
+                <CopyValue value={gate.account} copyLabel={copy.copyValue} copiedLabel={copy.copiedValue} />
               </details>
               {/* The indexer's column is `isOpen`, after the contract view `isOpenGate`. */}
               <p>{gate.revoked ? copy.isRevoked : gate.isOpen ? copy.isOpen : copy.isClosed}</p>
@@ -204,7 +216,7 @@ export function Gates() {
                     </Button>
                   ) : (
                     <Button disabled={busy} onClick={() => void send('openGate', [BigInt(gate.id)])}>
-                      {copy.open}
+                      {copy.reopen}
                     </Button>
                   )}
                   {/* 폐기 cannot be undone, so it asks first (the same in-place warning 행사 취소 uses). */}
@@ -238,7 +250,10 @@ export function Gates() {
       </section>
 
       {mayManage ? (
-        <section>
+        // The typed-in fallback is folded away: on a normal evening the queue above is the way in,
+        // and three empty hex boxes up front read as the job.
+        <details className="more">
+          <summary>{copy.manualSummary}</summary>
           <p style={{ color: 'var(--muted)', fontSize: 13 }}>{copy.manualHelp}</p>
           <Field label={copy.account}>
             <input
@@ -267,7 +282,7 @@ export function Gates() {
           <Button disabled={busy} onClick={() => register(paste)}>
             {copy.manual}
           </Button>
-        </section>
+        </details>
       ) : null}
     </Screen>
   );

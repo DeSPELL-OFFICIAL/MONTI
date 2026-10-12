@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EventDraft, StoredEventDraft } from '../../shared/api/firestore';
 
@@ -8,11 +8,10 @@ import type { EventDraft, StoredEventDraft } from '../../shared/api/firestore';
  * The poster after the founder's phone test: one modal, and then an upload that runs behind a
  * scene nobody is waiting on (plan section D). Every test here is about that handover — the
  * bytes on screen, the modal closing, the scene staying usable, a refusal that keeps the bytes
- * and `만들기` waiting rather than refusing.
+ * and `다음` waiting rather than refusing.
  *
- * `usePublish` is a stub. What is under test is whether the publish is reached and what the
- * draft looked like when it was, not what the chain then did with it; `scenePublish.test.tsx`
- * owns the rest.
+ * `다음` only moves to the publish screen (v2: the scene never touches the chain). What is under
+ * test is whether that move is reached and what the draft looked like when it was.
  */
 let store: StoredEventDraft[] = [];
 const listEventDrafts = vi.fn(async () => [...store].sort((a, b) => b.updatedAt - a.updatedAt));
@@ -53,14 +52,14 @@ vi.mock('../../shared/ui/a4Crop', async (orig) => ({
   })),
 }));
 
-const publish = vi.fn(async () => undefined);
-let handed: { draft: EventDraft } | null = null;
-vi.mock('./usePublish', () => ({
-  usePublish: (options: { draft: EventDraft }) => {
-    handed = options;
-    return { phase: 'idle' as const, problem: '' as const, publish };
-  },
-}));
+/** Where `다음` landed, and the poster the draft mirror carried at that moment. */
+let landedPoster: string | null = null;
+function PublishProbe() {
+  const path = useLocation().pathname;
+  const mirror = JSON.parse(localStorage.getItem('monti.eventDraft') ?? '{}') as { draft?: EventDraft };
+  landedPoster = mirror.draft?.posterCid ?? null;
+  return <p>{`landed:${path}`}</p>;
+}
 
 vi.mock('../../shared/config', async (orig) => ({
   ...(await orig<typeof import('../../shared/config')>()),
@@ -92,6 +91,7 @@ function open(path = '/org/new'): void {
       <Routes>
         <Route path="/org/new" element={<CreateEvent />} />
         <Route path="/org/new/:draftId" element={<CreateEvent />} />
+        <Route path="/org/new/:draftId/publish" element={<PublishProbe />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -129,7 +129,7 @@ beforeEach(() => {
   localStorage.clear();
   store = [];
   pending = [];
-  handed = null;
+  landedPoster = null;
   pinEventImage.mockImplementation(
     () => new Promise<{ cid: string }>((resolve, reject) => {
       pending.push({ resolve: (cid) => resolve({ cid }), reject });
@@ -252,51 +252,46 @@ describe('the poster modal', () => {
   });
 });
 
-describe('만들기 while the poster is still going up', () => {
-  it('waits for the upload and then publishes, rather than asking for a poster', async () => {
+describe('다음 while the poster is still going up', () => {
+  it('waits for the upload and then moves on, rather than asking for a poster', async () => {
     const user = userEvent.setup();
     store = [{ id: 'd-1', updatedAt: 1_000, data: ALMOST }];
     open('/org/new/d-1');
     await waitFor(() => expect(screen.getByLabelText(copy.titleLabel)).toHaveValue(ALMOST.title));
     await crop(user);
 
-    await user.click(screen.getByRole('button', { name: copy.tiers.create }));
+    await user.click(screen.getByRole('button', { name: copy.tiers.next }));
     expect(screen.getByText(copy.posterWaiting)).toBeInTheDocument();
-    expect(publish).not.toHaveBeenCalled();
+    expect(screen.queryByText(/^landed:/)).toBeNull();
 
     await land();
-    await waitFor(() => expect(publish).toHaveBeenCalledTimes(1));
-    expect(screen.queryByText(copy.posterWaiting)).toBeNull();
-    // And it published the draft the CID had landed on, not the one that was waiting.
-    expect(handed?.draft.posterCid).toBe('bafkposter');
+    expect(await screen.findByText('landed:/org/new/d-1/publish')).toBeInTheDocument();
+    // And the draft it moved on with carries the CID that landed.
+    expect(landedPoster).toBe('bafkposter');
   });
 
-  it('publishes without a poster — the default is generated at publish (T-SIMP-9)', async () => {
+  it('moves on without a poster — the default is generated at publish (T-SIMP-9)', async () => {
     const user = userEvent.setup();
     store = [{ id: 'd-2', updatedAt: 1_000, data: ALMOST }];
     open('/org/new/d-2');
     await waitFor(() => expect(screen.getByLabelText(copy.titleLabel)).toHaveValue(ALMOST.title));
-
-    // A blank poster no longer blocks 만들기 (plan B-2): `usePublish` synthesises a default A4
-    // poster from the title and theme backdrop at publish, so the scene lets the press through.
-    await user.click(screen.getByRole('button', { name: copy.tiers.create }));
-    await waitFor(() => expect(publish).toHaveBeenCalledTimes(1));
-    expect(screen.queryByText(copy.posterWaiting)).toBeNull();
+    await user.click(screen.getByRole('button', { name: copy.tiers.next }));
+    expect(await screen.findByText('landed:/org/new/d-2/publish')).toBeInTheDocument();
   });
 
-  it('does not publish behind a refusal — the chip is the way on', async () => {
+  it('does not move on behind a refusal — the chip is the way on', async () => {
     const user = userEvent.setup();
     store = [{ id: 'd-3', updatedAt: 1_000, data: ALMOST }];
     open('/org/new/d-3');
     await waitFor(() => expect(screen.getByLabelText(copy.titleLabel)).toHaveValue(ALMOST.title));
     await crop(user);
 
-    await user.click(screen.getByRole('button', { name: copy.tiers.create }));
+    await user.click(screen.getByRole('button', { name: copy.tiers.next }));
     expect(screen.getByText(copy.posterWaiting)).toBeInTheDocument();
 
     await refuse('PIN_QUOTA');
     expect(screen.getByText(copy.imageProblems.quota)).toBeInTheDocument();
-    expect(publish).not.toHaveBeenCalled();
+    expect(screen.queryByText(/^landed:/)).toBeNull();
     expect(screen.getByRole('button', { name: copy.posterRetry })).toBeInTheDocument();
   });
 });

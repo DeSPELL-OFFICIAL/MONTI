@@ -157,8 +157,11 @@ export const ko = {
     // 표시 이름을 비워 둔 사람의 티켓에 찍히는 말. 빈 줄보다 낫고, '이름 없음'보다 낫다.
     artGuest: '게스트',
     refundedState: '환불된 티켓이에요 · 입장할 수 없어요',
-    // 수동 승인에서 스태프가 찾는 번호. 끝 네 자리를 따로 보여 준다.
-    ticketNumber: '티켓 번호', copyNumber: '번호 복사', numberCopied: '복사했어요',
+    // 수동 승인에서 스태프가 찾는 번호. 짧은 번호(끝 네 자리 굵게)만 보이고 전체 번호는 '상세' 안에 둔다.
+    ticketNumber: '티켓 번호', numberPrefix: 'No.', copyNumber: '번호 복사', numberCopied: '복사했어요',
+    numberDetails: '상세', numberFull: '전체 번호',
+    // 환불·사용·취소된 티켓으로 입장·선물 화면을 직접 열었을 때 돌아가는 단추.
+    backToTicket: '티켓으로 돌아가기',
   },
   claim: {
     cta: '티켓 받기', checking: '확인 중…', working: '받는 중이에요', done: '티켓을 받았어요 · 내 티켓에 있어요', tierLabel: '티켓 종류',
@@ -274,9 +277,7 @@ export const ko = {
     nickname: '별명', nicknameHint: '영문 소문자, 숫자, 밑줄 3~20자',
     nicknameTaken: '이미 쓰는 별명이에요.', nicknameSaved: '별명을 저장했어요',
     nicknameInvalid: '영문 소문자, 숫자, 밑줄만 3~20자로 써 주세요.',
-    nicknameMine: '이미 쓰고 있는 별명이에요',
     nicknameNeedsAccount: '가입을 먼저 마쳐 주세요.',
-    nicknameConfirming: '아직 확인 중이에요. 잠시 뒤 다시 열어 확인해 주세요.',
     language: '언어', languageKo: '한국어', languageEn: 'English',
     lockDevice: '휴대폰 잠금', lockCta: '지금 잠그기', locked: '잠겨 있어요',
     lockBody: '잠그면 이 휴대폰으로는 입장할 수 없어요. 휴대폰을 잃어버렸을 때 쓰세요.',
@@ -343,14 +344,18 @@ export const ko = {
     slow: '시간이 걸리고 있어요. 결제는 진행 중이고 티켓은 곧 내 티켓에 나타나요.',
     slowCheck: '내 티켓에서 확인하기',
     failed: '결제하지 못했어요. 잠시 뒤 다시 시도해 주세요',
+    notCharged: '결제가 완료되지 않았어요 · 청구된 금액은 없어요. 다시 시도해 주세요',
+    unavailable: '지금은 결제를 받을 수 없어요. 잠시 후 다시 시도해 주세요',
     priceChanged: '티켓 값이 바뀌었어요. 새로고침 후 다시 시도해 주세요',
     soldOut: '이 종류는 마감됐어요',
+    ended: '이미 끝난 행사예요',
+    kycRequired: '본인 확인을 마친 뒤에 결제할 수 있어요',
+    busy: '앞선 결제를 처리하고 있어요. 잠시 뒤 내 티켓에서 확인해 주세요',
     receiptTitle: '영수증',
     paidAt: '결제 시각',
     statusHeld: '결제 금액 보관 중 · 입장하면 자동으로 나눠 보내요',
     statusReleased: '정산 완료 · 정해진 비율대로 나눠 보냈어요',
     statusRefunded: '환불됨',
-    statusPending: '처리 중이에요',
     splitHeading: '역할별 분배',
     refund: '환불받기',
     refunding: '환불하는 중이에요',

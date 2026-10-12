@@ -51,7 +51,7 @@ const { fmt } = await import('../../shared/i18n');
 const { THEME_CODES } = await import('../../shared/eventThemes');
 const { toLocalInput } = await import('./datetime');
 const { ko: sharedCopy } = await import('../../shared/copy/index');
-const { EVENT_DRAFT_KEY, emptyEventDraft, nextWeekendStart } = await import('../useEventDraft');
+const { EVENT_DRAFT_KEY, emptyEventDraft, emptyEventDraftTier, nextWeekendStart } = await import('../useEventDraft');
 const { organizerCopy } = await import('../copy');
 const { PROBLEM_SECTION, MAX_BODY_CHARS, MAX_TAG_CHARS } = await import('./draftRules');
 const copy = organizerCopy.ko.scene;
@@ -202,23 +202,35 @@ describe('the one button', () => {
     const user = userEvent.setup();
     open();
     await waitFor(() => expect(listEventDrafts).toHaveBeenCalled());
-    expect(screen.getByRole('button', { name: copy.tiers.create })).toBeEnabled();
+    expect(screen.getByRole('button', { name: copy.tiers.next })).toBeEnabled();
     expect(screen.queryByText(copy.problems.title)).toBeNull();
 
-    await user.click(screen.getByRole('button', { name: copy.tiers.create }));
+    await user.click(screen.getByRole('button', { name: copy.tiers.next }));
     expect(screen.getByText(copy.problems.title)).toBeInTheDocument();
     // 장소는 이제 선택이라 빈 장소는 더 이상 막지 않는다 — 남은 건 제목뿐.
     // Still here: an unfinished field is a message, not a wall — and never a second screen.
     expect(screen.queryByText(/^landed:/)).toBeNull();
   });
 
-  /** The founder's second tap: 다음 followed by 행사 만들기 was two for one intention. */
-  it('is the only button in the bar, and there is no 다음 left to press', async () => {
+  /** v2: 다음 never touches the chain — it saves the draft and moves to that draft's publish screen. */
+  it('moves to the draft\'s publish screen, sending nothing', async () => {
+    const user = userEvent.setup();
     seed('d-42', READY);
     open('/org/new/d-42');
     await waitFor(() => expect(screen.getByLabelText(copy.titleLabel)).toHaveValue(READY.title));
-    expect(screen.getByRole('button', { name: copy.tiers.create })).toBeEnabled();
-    expect(screen.queryByText('landed:/org/new/d-42/tickets')).toBeNull();
+    await user.click(screen.getByRole('button', { name: copy.tiers.next }));
+    expect(await screen.findByText('landed:/org/new/d-42/publish')).toBeInTheDocument();
+  });
+
+  /** A paid kind is allowed here now: its price goes on chain at publish. */
+  it('lets a paid draft move on to the publish screen', async () => {
+    const user = userEvent.setup();
+    seed('d-42', { ...READY, tiers: [{ ...emptyEventDraftTier, currency: 'USDC', amount: 30 }] });
+    open('/org/new/d-42');
+    await waitFor(() => expect(screen.getByLabelText(copy.titleLabel)).toHaveValue(READY.title));
+    expect(screen.getByRole('button', { name: copy.tiers.next })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: copy.tiers.next }));
+    expect(await screen.findByText('landed:/org/new/d-42/publish')).toBeInTheDocument();
   });
 
   /**
@@ -260,14 +272,14 @@ describe('the one button', () => {
     open('/org/new/d-old');
     await waitFor(() => expect(screen.getByLabelText(copy.titleLabel)).toHaveValue(READY.title));
     expect(screen.getByText(copy.problems.eventPast)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: copy.tiers.create })).toBeDisabled();
+    expect(screen.getByRole('button', { name: copy.tiers.next })).toBeDisabled();
   });
 
   it('says the end has to come after the start', async () => {
     seed('d-1', { ...READY, endsAt: READY.startsAt });
     open('/org/new/d-1');
     await waitFor(() => expect(screen.getByLabelText(copy.titleLabel)).toHaveValue(READY.title));
-    await userEvent.setup().click(screen.getByRole('button', { name: copy.tiers.create }));
+    await userEvent.setup().click(screen.getByRole('button', { name: copy.tiers.next }));
     expect(screen.getByText(copy.problems.schedule)).toBeInTheDocument();
     // Both times live behind the fold, so the sentence is only a sentence once it is open.
     expect(fold().open).toBe(true);
@@ -285,7 +297,7 @@ describe('the one button', () => {
     await waitFor(() => expect(screen.getByLabelText(copy.titleLabel)).toHaveValue(READY.title));
     expect(fold().open).toBe(false);
 
-    await userEvent.setup().click(screen.getByRole('button', { name: copy.tiers.create }));
+    await userEvent.setup().click(screen.getByRole('button', { name: copy.tiers.next }));
     expect(fold().open).toBe(true);
     expect(screen.getByText(copy.problems.tags)).toBeInTheDocument();
     // It is inside the fold and not beside it, which is the whole reason the fold had to open.
@@ -297,7 +309,7 @@ describe('the one button', () => {
     seed('d-1', { ...READY, title: '' });
     open('/org/new/d-1');
     await waitFor(() => expect(screen.getByLabelText(copy.titleLabel)).toHaveValue(''));
-    await userEvent.setup().click(screen.getByRole('button', { name: copy.tiers.create }));
+    await userEvent.setup().click(screen.getByRole('button', { name: copy.tiers.next }));
     expect(screen.getByText(copy.problems.title)).toBeInTheDocument();
     expect(fold().open).toBe(false);
   });
@@ -466,11 +478,11 @@ describe('the resume sheet', () => {
     // The scene is inert and 만들기 is disabled — nothing can be typed before the decision.
     const scene = document.querySelector('.scene');
     expect(scene).toHaveAttribute('inert');
-    expect(screen.getByRole('button', { name: copy.tiers.create })).toBeDisabled();
+    expect(screen.getByRole('button', { name: copy.tiers.next })).toBeDisabled();
 
     await userEvent.setup().click(screen.getByRole('button', { name: copy.resume.keep }));
     expect(scene).not.toHaveAttribute('inert');
-    expect(screen.getByRole('button', { name: copy.tiers.create })).toBeEnabled();
+    expect(screen.getByRole('button', { name: copy.tiers.next })).toBeEnabled();
   });
 
   it('calls a draft with no title what it is rather than showing a gap', async () => {
@@ -496,15 +508,6 @@ describe('the resume sheet', () => {
     open('/org/new/kept');
     await waitFor(() => expect(screen.getByLabelText(copy.titleLabel)).toHaveValue('지목한 초안'));
     expect(screen.queryByText(copy.resume.title)).toBeNull();
-  });
-
-  /** T-EV-W12: `/org/new` starts a creation, so an abandoned edit is not offered back here. */
-  it('never asks about a draft that was opened from an event', async () => {
-    seed('edit-7', { title: '고치던 행사', editingEventId: '7' }, FIVE_MINUTES_AGO());
-    open();
-    await waitFor(() => expect(listEventDrafts).toHaveBeenCalled());
-    expect(screen.queryByText(copy.resume.title)).toBeNull();
-    expect(screen.getByLabelText(copy.titleLabel)).toHaveValue('');
   });
 
   it('never asks when this account has nothing stored', async () => {

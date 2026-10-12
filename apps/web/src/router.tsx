@@ -132,6 +132,7 @@ import { TransferInvite } from './attendee/transfer/Invite';
 import { InviteLanding } from './attendee/transfer/InviteLanding';
 import { Inbox } from './attendee/tickets/Inbox';
 import { Enter } from './attendee/enter/Enter';
+import { TicketGate } from './attendee/tickets/TicketGate';
 import { ChatList } from './attendee/chats/ChatList';
 import { ChatRoom } from './attendee/chats/ChatRoom';
 import { Profile } from './attendee/me/Profile';
@@ -170,10 +171,11 @@ export const routes: RouteObject[] = [
           { path: '/tickets', element: <TicketList /> },
           { path: '/tickets/inbox', element: <Inbox /> },
           { path: '/tickets/:tokenId', element: <TicketDetail /> },
-          { path: '/tickets/:tokenId/transfer', element: <TransferRecipient /> },
+          { path: '/tickets/:tokenId/transfer', element: <TicketGate need="transfer"><TransferRecipient /></TicketGate> },
           { path: '/tickets/:tokenId/transfer/confirm', element: <TransferConfirm /> },
           { path: '/tickets/:tokenId/transfer/invite', element: <TransferInvite /> },
-          { path: '/tickets/:tokenId/enter', element: <Enter /> },
+          // The detail hides these two for a refunded/used/cancelled ticket; the routes ask again.
+          { path: '/tickets/:tokenId/enter', element: <TicketGate need="enter"><Enter /></TicketGate> },
           { path: '/chats', element: <ChatList /> },
           { path: '/chats/:eventId', element: <ChatRoom /> },
           { path: '/me', element: <Profile /> },

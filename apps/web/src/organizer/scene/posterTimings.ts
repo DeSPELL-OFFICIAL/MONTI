@@ -5,7 +5,7 @@ export type PosterStage = 'decode' | 'crop' | 'rescue' | 'base64' | 'upload';
 
 /** A finished poster's whole journey, in milliseconds, plus what came out of it. */
 export interface PosterTimings extends CropTimings {
-  /** The `pinEventImage` round trip: base64 up to us-east1, Pinata, and a CID back. */
+  /** The `pinEventImage` round trip: base64 up to the functions region, Pinata, and a CID back. */
   uploadMs: number;
   /** The encoded blob's size, because the upload figure means nothing without it. */
   bytes: number;

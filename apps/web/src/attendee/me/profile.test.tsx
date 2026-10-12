@@ -30,7 +30,6 @@ const UNDO_WINDOW_SECONDS = 30 * 3_600;
 
 const isLocked = vi.fn(async () => false);
 const deviceUpdatedAt = vi.fn(async () => BigInt(NOW() - 2 * DAY));
-const nicknameOwner = vi.fn(async () => `0x${'00'.repeat(20)}`);
 const rotationUndoWindow = vi.fn(async () => BigInt(UNDO_WINDOW_SECONDS));
 const rotatedFrom = vi.fn(async (): Promise<string> => NO_ACCOUNT);
 const rotatedAt = vi.fn(async () => 0n);
@@ -40,7 +39,7 @@ const eventMeta = vi.fn(async () => ({ orgId: 9n }));
 vi.mock('../../shared/chain/reads', async (orig) => ({
   ...(await orig<typeof import('../../shared/chain/reads')>()),
   readIdentity: () => ({
-    isLocked, deviceUpdatedAt, nicknameOwner, rotationUndoWindow, rotatedFrom, rotatedAt,
+    isLocked, deviceUpdatedAt, rotationUndoWindow, rotatedFrom, rotatedAt,
   }),
   readTicket: () => ({ migrateDelay, eventOf, eventMeta }),
 }));
@@ -64,10 +63,11 @@ const startDeviceChange = vi.fn(async () => ({
   allowedAt: NOW(), now: NOW(), cooldownSeconds: DEVICE_COOLDOWN_SECONDS, allowed: true,
 }));
 const getSignupStatus = vi.fn(async () => ({ status: 'active', kycLevel: 1 }));
+const setNickname = vi.fn(async (req: { nickname: string }) => req);
 const requestAccountDeletion = vi.fn(async () => ({ scheduledFor: SCHEDULED_FOR, onChainRetained: true as const }));
 vi.mock('../../shared/api/functions', async (orig) => ({
   ...(await orig<typeof import('../../shared/api/functions')>()),
-  api: { lockDevice, startDeviceChange, getSignupStatus, requestAccountDeletion },
+  api: { lockDevice, startDeviceChange, getSignupStatus, requestAccountDeletion, setNickname },
 }));
 
 const signOut = vi.fn(async () => undefined);
@@ -437,9 +437,9 @@ describe('the display name', () => {
     await userEvent.click(within(nameSection(box)).getByRole('button', { name: ko.common.save }));
     await waitFor(() => expect(saveUserProfile).toHaveBeenCalledWith({ displayName: '김민지' }));
 
-    // 별명 costs a sponsored write and is unique across everybody; this costs neither.
+    // 별명 is unique across everybody and saved by its own call; this one touches neither.
     expect(sendAction).not.toHaveBeenCalled();
-    expect(nicknameOwner).not.toHaveBeenCalled();
+    expect(setNickname).not.toHaveBeenCalled();
     expect(screen.getByLabelText(ko.me.nickname)).toHaveValue('');
   });
 });

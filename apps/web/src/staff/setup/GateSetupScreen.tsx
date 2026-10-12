@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { fmt } from '../../shared/i18n';
-import { Alert, Button, Field, Screen, Spinner } from '../../shared/ui';
-import { SEEDED_EVENT_ID } from '../constants';
+import { Alert, Button, CopyValue, Field, Screen, Spinner } from '../../shared/ui';
+import { shortId } from '../../shared/shortId';
 import { useStaffSetupCopy, type StaffSetupCopy } from '../copy';
 import { PinStep } from '../override/PinSetup';
 import { gatePayloadText, useGateRegistration, type GateSetupError } from './useGateRegistration';
@@ -92,7 +92,8 @@ export function GateSetupScreen() {
   // separate from the field's text: a hook keyed on every keystroke would send an application
   // per character typed.
   const [chosenEventId, setChosenEventId] = useState<string | undefined>(undefined);
-  const [draft, setDraft] = useState<string>(SEEDED_EVENT_ID);
+  // Empty to begin with: nothing is pre-seeded, and the staff member types the event's number.
+  const [draft, setDraft] = useState<string>('');
   // Whether this terminal can approve anything by hand yet (04 T32). The door is not offered
   // until it can: the only calm moment to agree on four digits is this panel, and the moment
   // they are needed is an attendee whose phone will not open with a queue behind them.
@@ -191,14 +192,21 @@ export function GateSetupScreen() {
           <h2>{copy.fallbackTitle}</h2>
           <p>{copy.fallbackHint}</p>
           <PayloadQr text={gatePayloadText(payload)} alt={copy.qrAlt} />
-          <dl className="gate-setup__facts">
-            <dt>{copy.accountLabel}</dt>
-            <dd className="mono selectable">{payload.gateAccount}</dd>
-            <dt>{copy.kxLabel}</dt>
-            <dd className="mono selectable">{payload.kx}</dd>
-            <dt>{copy.kyLabel}</dt>
-            <dd className="mono selectable">{payload.ky}</dd>
-          </dl>
+          {/* A short name a person can read back; the full values wait under 상세. */}
+          <p className="gate-setup__device" data-gate-account={payload.gateAccount}>
+            {copy.deviceLabel} · <span className="mono">{shortId(payload.gateAccount)}</span>
+          </p>
+          <details className="more">
+            <summary>{copy.detailsLabel}</summary>
+            <dl className="gate-setup__facts">
+              <dt>{copy.accountLabel}</dt>
+              <dd><CopyValue value={payload.gateAccount} copyLabel={copy.copyValue} copiedLabel={copy.copiedValue} /></dd>
+              <dt>{copy.kxLabel}</dt>
+              <dd><CopyValue value={payload.kx} copyLabel={copy.copyValue} copiedLabel={copy.copiedValue} /></dd>
+              <dt>{copy.kyLabel}</dt>
+              <dd><CopyValue value={payload.ky} copyLabel={copy.copyValue} copiedLabel={copy.copiedValue} /></dd>
+            </dl>
+          </details>
           <Button variant="ghost" onClick={registration.resubmit}>
             {copy.resubmit}
           </Button>

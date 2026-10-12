@@ -157,24 +157,21 @@ describe('the kinds', () => {
 });
 
 describe('the 무료 | 유료 segment', () => {
-  it('blocks the card the moment 유료 is chosen, and locks 만들기', async () => {
+  /** v2: a paid kind is priced on chain at publish, so choosing 유료 blocks nothing. */
+  it('lets 유료 be chosen without locking 다음, and asks for a whole-dollar price', async () => {
     const user = userEvent.setup();
     open();
     await ready();
-    expect(screen.getByRole('button', { name: copy.tiers.create })).toBeEnabled();
-
-    // 유료 is the segment's paid half; choosing it sets the one currency the backend takes, which
-    // the deployed contract's claim still refuses — so the card blocks on the spot, as before.
     await user.click(screen.getByRole('button', { name: copy.tiers.paid }));
     expect(mirror().tiers[0]?.currency).toBe('USDC');
-    expect(screen.getByText(copy.tiers.paidBlocked)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: copy.tiers.create })).toBeDisabled();
-    expect(screen.getByText(copy.tierProblems.paidTier)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: copy.tiers.next })).toBeEnabled();
+
+    // The default amount is 0, which would publish a "paid" kind free — named on 다음.
+    await user.click(screen.getByRole('button', { name: copy.tiers.next }));
+    expect(screen.getByText(copy.tierProblems.tierPrice)).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: copy.tiers.free }));
     expect(mirror().tiers[0]?.currency).toBe('free');
-    expect(screen.queryByText(copy.tiers.paidBlocked)).toBeNull();
-    expect(screen.getByRole('button', { name: copy.tiers.create })).toBeEnabled();
   });
 
   it('shows the price, the fixed currency line, the limit and its tooltip only for 유료', async () => {
@@ -357,12 +354,12 @@ describe('the rules that belong to the event', () => {
   });
 });
 
-describe('행사 만들기', () => {
+describe('다음', () => {
   /** The event fields are in the same scroll now, so a missing one is named where it is. */
   it('names the missing event field rather than sending anybody to a second screen', async () => {
     open({ ...READY, title: '' });
     await ready();
-    await userEvent.setup().click(screen.getByRole('button', { name: copy.tiers.create }));
+    await userEvent.setup().click(screen.getByRole('button', { name: copy.tiers.next }));
     expect(screen.getByText(copy.problems.title)).toBeInTheDocument();
     expect(screen.queryByText(/^landed:/)).toBeNull();
   });
@@ -370,7 +367,7 @@ describe('행사 만들기', () => {
   it('names an unnamed kind under the cards', async () => {
     open({ ...READY, tiers: [{ ...emptyEventDraftTier, name: '' }] });
     await waitFor(() => expect(screen.getByLabelText(copy.tiers.name)).toHaveValue(''));
-    await userEvent.setup().click(screen.getByRole('button', { name: copy.tiers.create }));
+    await userEvent.setup().click(screen.getByRole('button', { name: copy.tiers.next }));
     expect(screen.getByText(copy.tierProblems.tierName)).toBeInTheDocument();
   });
 
@@ -410,14 +407,14 @@ describe('the quick-start presets', () => {
     expect(screen.getByRole('button', { name: copy.tiers.quickApproval })).toBeDisabled();
   });
 
-  it('유료 일반 sets the first kind paid, and the honest block still lands', async () => {
+  it('유료 일반 sets the first kind paid and turns approval off', async () => {
     const user = userEvent.setup();
-    open();
+    open({ ...READY, approvalRequired: true });
     await ready();
     await user.click(screen.getByRole('button', { name: copy.tiers.quickPaid }));
     expect(mirror().tiers[0]).toMatchObject({ currency: 'USDC', maxPerWallet: 1 });
-    expect(screen.getByText(copy.tiers.paidBlocked)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: copy.tiers.create })).toBeDisabled();
+    expect(mirror().approvalRequired).toBe(false);
+    expect(screen.getByRole('button', { name: copy.tiers.next })).toBeEnabled();
   });
 });
 
@@ -454,7 +451,6 @@ describe('the preview is the form', () => {
         draft={{ ...emptyEventDraft, title: '재즈 나이트', tiers: [{ ...emptyEventDraftTier, name: '일반' }] }}
         patch={vi.fn()}
         problems={[]}
-        blocked={false}
         onEditTitle={onEditTitle}
       />,
     );

@@ -42,6 +42,10 @@ vi.mock('../../shared/chain/client', () => ({ getPublicClient: () => ({ readCont
 const sendAction = vi.fn();
 vi.mock('../../shared/relay/sendAction', () => ({ sendAction }));
 
+// A request is a backend callable (P4): no chain write, no passkey prompt.
+const requestOverride = vi.fn();
+vi.mock('../../shared/api/functions', () => ({ api: { requestOverride } }));
+
 const staffAccount = { address: STAFF };
 const getStaffAccount = vi.fn(async () => staffAccount);
 vi.mock('../../shared/chain/accounts', () => ({ getStaffAccount: () => getStaffAccount() }));
@@ -64,6 +68,7 @@ function sentCall(): { kind: string; target: string; data: Hex } {
 beforeEach(() => {
   readContract.mockReset();
   sendAction.mockReset();
+  requestOverride.mockReset();
   sendAction.mockResolvedValue(undefined);
 });
 
@@ -117,6 +122,7 @@ describe('the override operation', () => {
     chainSays([true, true], false);
     const submission = await submitOverride({
       orgId: 5n,
+      eventId: 42n,
       tokenId: 123n,
       gateId: 7n,
       reason: OVERRIDE_REASON.photoChecked,
@@ -137,20 +143,41 @@ describe('the override operation', () => {
     expect(submission.reason).toBe(OVERRIDE_REASON.photoChecked);
   });
 
-  it('relays requestOverride when that is what this account may do', async () => {
+  it('files the request through the requestOverride callable — nothing on chain, nothing signed', async () => {
     chainSays([true, false], false);
+    requestOverride.mockResolvedValueOnce({ requestId: 'req-1' });
     const submission = await submitOverride({
       orgId: 5n,
+      eventId: 42n,
       tokenId: 9n,
       gateId: 7n,
       reason: OVERRIDE_REASON.phoneTrouble,
+      note: '  배터리가 없어요  ',
     });
     await submission.settled;
-    const { functionName, args } = decodeFunctionData({ abi: ticketAbi, data: sentCall().data });
-    expect(functionName).toBe('requestOverride');
-    expect(args).toEqual([9n, 7n, 2]);
+    expect(requestOverride).toHaveBeenCalledWith({ eventId: '42', tokenId: '9', gateId: '7', reason: 2, note: '배터리가 없어요' });
+    expect(sendAction).not.toHaveBeenCalled();
     expect(submission.route).toBe('requestOverride');
     expect(submission.role).toBe('none');
+  });
+
+  it('leaves an empty note off the request', async () => {
+    chainSays([true, false], false);
+    requestOverride.mockResolvedValueOnce({ requestId: 'req-2' });
+    const submission = await submitOverride({
+      orgId: 5n, eventId: 42n, tokenId: 9n, gateId: 7n, reason: OVERRIDE_REASON.other, note: '   ',
+    });
+    await submission.settled;
+    expect(requestOverride).toHaveBeenCalledWith({ eventId: '42', tokenId: '9', gateId: '7', reason: 4 });
+  });
+
+  it('carries the callable refusal on settled, for the console to name', async () => {
+    chainSays([true, false], false);
+    requestOverride.mockRejectedValueOnce({ code: 'permission-denied', details: { code: 'NOT_ALLOWED' } });
+    const submission = await submitOverride({
+      orgId: 5n, eventId: 42n, tokenId: 9n, gateId: 7n, reason: OVERRIDE_REASON.other,
+    });
+    await expect(submission.settled).rejects.toMatchObject({ details: { code: 'NOT_ALLOWED' } });
   });
 
   /**
@@ -160,16 +187,17 @@ describe('the override operation', () => {
    */
   it('measures the rights of the account it is about to sign with', async () => {
     chainSays([true, true], false);
-    await submitOverride({ orgId: 5n, tokenId: 1n, gateId: 7n, reason: OVERRIDE_REASON.other });
+    await submitOverride({ orgId: 5n, eventId: 42n, tokenId: 1n, gateId: 7n, reason: OVERRIDE_REASON.other });
     expect(readContract).toHaveBeenNthCalledWith(1, expect.objectContaining({ args: [5n, STAFF] }));
   });
 
   it('refuses a denied account before anything is signed or sent', async () => {
     chainSays([false, false], false);
     await expect(
-      submitOverride({ orgId: 5n, tokenId: 1n, gateId: 7n, reason: OVERRIDE_REASON.other }),
+      submitOverride({ orgId: 5n, eventId: 42n, tokenId: 1n, gateId: 7n, reason: OVERRIDE_REASON.other }),
     ).rejects.toBeInstanceOf(OverrideDenied);
     expect(sendAction).not.toHaveBeenCalled();
+    expect(requestOverride).not.toHaveBeenCalled();
   });
 
   /**

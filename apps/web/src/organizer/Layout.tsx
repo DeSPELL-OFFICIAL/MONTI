@@ -14,7 +14,7 @@ import { AcceptInvite } from './invites/Accept';
 import { CreateEvent } from './scene/CreateEvent';
 import { Created } from './scene/Created';
 import { PendingCreateBanner } from './PendingCreateBanner';
-import { EditEvent } from './scene/EditEvent';
+import { DraftPublish } from './scene/DraftPublish';
 import { Requests } from './requests/Requests';
 
 /** The indexer's own words for an event's state; anything else is shown exactly as it came. */
@@ -197,14 +197,14 @@ export function OrganizerRoutes() {
           not read as a draft id. */}
       <Route path="new/done/:eventId" element={<Created />} />
       <Route path="new/:draftId" element={<CreateEvent />} />
+      {/* The draft's last screen: summary, split rules for a paid event, and 공개하기 — the one
+          on-chain write of the whole flow (design §5). */}
+      <Route path="new/:draftId/publish" element={<DraftPublish />} />
       {/* The ticket screen the scene absorbed (plan section B-1). Addresses to it are already
           out there — an organiser's own back button, a draft resumed from another tab — and
           they land where those tickets are now: in the scene itself. */}
       <Route path="new/:draftId/tickets" element={<TicketsMoved />} />
       <Route path="events/:eventId" element={<Dashboard />} />
-      {/* Reopens the same scene on an event that already exists, by writing a draft from it
-          and handing over. Only ever offered while the event is a Draft (T-EV-W12). */}
-      <Route path="events/:eventId/edit" element={<EditEvent />} />
       <Route path="events/:eventId/gates" element={<Gates />} />
       {/* 신청 관리 — approve or reject the requests waiting on an approvalRequired event. */}
       <Route path="events/:eventId/requests" element={<Requests />} />

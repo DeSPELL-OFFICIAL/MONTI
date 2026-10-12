@@ -14,7 +14,7 @@ const draft: ChainDraft = {
   startsAt: 1_790_000_000, endsAt: 1_790_010_000, saleStart: 1_789_000_000, saleEnd: 1_789_900_000,
   transferable: true, transferCutoffHours: 2, maxTransfers: 3, approvalRequired: false,
   requireKyc: true,
-  tiers: [{ name: '일반', supply: 100, maxPerWallet: 2, seated: false }],
+  tiers: [{ name: '일반', priceUsdCents: 0, supply: 100, maxPerWallet: 2, seated: false }],
   orgId: '9',
 };
 
@@ -53,9 +53,11 @@ describe('buildEventMeta', () => {
     expect(buildEventMeta({ ...draft, requireKyc: false }, 'bafyMetaJson').requireKyc).toBe(false);
   });
 
-  it('builds tiers with minted zero and no price: the contract mints free tiers only', () => {
-    expect(buildTiers(draft)).toEqual([
+  it('builds tiers with minted zero and the price in cents, which v2 keeps on chain', () => {
+    const priced = { ...draft, tiers: [...draft.tiers, { name: 'VIP', priceUsdCents: 3_000, supply: 10, maxPerWallet: 1, seated: false }] };
+    expect(buildTiers(priced)).toEqual([
       { name: '일반', priceUsdCents: 0n, supply: 100, minted: 0, maxPerWallet: 2, seated: false },
+      { name: 'VIP', priceUsdCents: 3_000n, supply: 10, minted: 0, maxPerWallet: 1, seated: false },
     ]);
   });
 });

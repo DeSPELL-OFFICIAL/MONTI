@@ -82,10 +82,12 @@ describe('getFirebaseApp', () => {
 });
 
 describe('getFirebaseFunctions', () => {
-  it('binds callables to the region sub-plan 02 deploys to, once', async () => {
+  it('binds callables to the v2 backend region (us-east4) when the env names none, once', async () => {
+    // A developer's .env.local may still name the v1 region; the default must not depend on it.
+    vi.stubEnv('VITE_FUNCTIONS_REGION', '');
     const { getFirebaseFunctions, DEFAULT_FUNCTIONS_REGION } = await load();
-    expect(DEFAULT_FUNCTIONS_REGION).toBe('us-east1');
-    expect(getFirebaseFunctions()).toMatchObject({ region: 'us-east1' });
+    expect(DEFAULT_FUNCTIONS_REGION).toBe('us-east4');
+    expect(getFirebaseFunctions()).toMatchObject({ region: 'us-east4' });
     getFirebaseFunctions();
     expect(getFunctions).toHaveBeenCalledTimes(1);
   });

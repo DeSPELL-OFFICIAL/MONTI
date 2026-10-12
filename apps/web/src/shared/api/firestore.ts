@@ -332,12 +332,11 @@ export async function savePushToken(account: Hex, token: string): Promise<void> 
 }
 
 /**
- * The currencies SCENE 2 offers. Only `free` can be created today: `Ticket.claim` reverts
- * `PaidTiersNotEnabled` on any tier whose `priceUsdCents` is not zero, so the rest are a
- * promise the screen makes and then blocks on the spot. They never reach the chain or the
- * public metadata — the amount lives in the draft and nowhere else.
+ * A kind is free, or priced in US dollars. `USDC` is the one token the vault escrows, and the
+ * name never reaches a screen (the card says 달러). The price goes on chain at publish as
+ * `Tier.priceUsdCents = amount × 100` (`draftRules.priceUsdCentsOf`).
  */
-export type EventDraftCurrency = 'free' | 'MON' | 'USDT' | 'USDC';
+export type EventDraftCurrency = 'free' | 'USDC';
 
 /** One ticket kind as SCENE 2 edits it. */
 export interface EventDraftTier {
@@ -345,7 +344,7 @@ export interface EventDraftTier {
   supply: number;
   maxPerWallet: number;
   currency: EventDraftCurrency;
-  /** Whole currency units, not cents. Display only, per {@link EventDraftCurrency}. */
+  /** Whole US dollars, not cents. Ignored for a `free` kind. */
   amount: number;
   /**
    * The bundled artwork key, or `''` when the organiser uploaded a picture of their own.
@@ -395,29 +394,28 @@ export interface EventDraft {
   approvalRequired: boolean;
   tiers: EventDraftTier[];
   /**
-   * The `relays/{relayId}` of a `createEvent` the relayer has broadcast (`sent`) but not yet
-   * settled, or `''`. The draft outlives the page, so a reopen resumes by following that document
-   * ({@link watchRelay}) to `confirmed`/`failed` rather than sending a second `createEvent` — which
+   * The `relays/{relayId}` of a publish the relayer has broadcast (`sent`) but not yet settled,
+   * or `''`. The draft outlives the page, so a reopen resumes by following that document
+   * ({@link watchRelay}) to `confirmed`/`failed` rather than sending a second publish — which
    * would be a second event.
    */
   submittedRelayId: string;
   /**
-   * The id of the event this draft already created, or `''`. Written the moment the chain
+   * The id of the event this draft already published, or `''`. Written the moment the chain
    * names it and **before** anything that could still fail, so a draft can never make a second
    * event — and so the two writes that need the id (`saveEventArt`, `setEventPrivate`) can be
    * tried again later. The draft is only deleted once both of them have landed.
    */
   createdEventId: string;
   /**
-   * The id of the event this draft is **editing**, or `''` for a draft that will make a new
-   * one. An event is editable only while the chain still calls it a Draft (`Ticket.sol:235`),
-   * and the difference this field makes is the whole of it: the scene is the same, the rules
-   * are the same, and the last button sends `updateEventMeta` instead of `createEvent`.
-   *
-   * It is never set on the same draft as {@link createdEventId}: one is an event this draft
-   * made, the other an event this draft was opened from.
+   * The revenue split the organiser set on the publish screen, as
+   * `JSON.stringify(Array<{ name, account, bps, tag, platform }>)`, or `''` before one was set.
+   * One string rather than a list of maps on purpose: the draft rule's expression budget is spent
+   * on the tier checks, so the rule caps this at 4,000 characters and checks nothing inside —
+   * the screen (`settlementModel.validateRows`) and the vault (`_validatePolicy`) do. Only a
+   * draft with a paid kind carries one onto the chain.
    */
-  editingEventId: string;
+  splitJson: string;
   /**
    * The name a new organisation is being created under, or `''`. Written **before**
    * `createOrganizerForMe` is called and cleared once it answers, because that callable is not
@@ -477,7 +475,7 @@ export async function deleteEventDraft(draftId: string): Promise<void> {
 /**
  * One event's settlement, as the server writes it to `settlements/{eventId}` — the split policy,
  * its on-chain hash, and the per-tier USD price the chain has no room for. The rules open it to any
- * signed-in reader and the server alone writes it (`relaySetPolicy`), the same shape
+ * signed-in reader and the server alone writes it (the `relayAction` publish confirm hook), the same shape
  * `orgProfiles`/`eventArt` have.
  *
  * The field names are stable on purpose: `priceUsdCentsByTier`, `policyHash` and the recipient
@@ -541,10 +539,11 @@ export interface OrderView {
   tier: number;
   tokenId?: string;
   amountUsdCents: number;
-  status: 'deposited' | 'released' | 'refunded' | 'pending' | 'minted';
+  /** The v2 order machine: `pending → sent → deposited → released | refunded`, or `failed` (one
+   *  atomic step — no ticket and no charge). */
+  status: 'pending' | 'sent' | 'deposited' | 'released' | 'refunded' | 'failed';
   createdAt?: number;
   depositTxHash?: Hex;
-  receiptTxHash?: Hex;
 }
 
 export function watchOrder(
@@ -564,7 +563,8 @@ export function watchOrder(
 
 /**
  * A relayed write's progress, as the server writes it to `relays/{relayId}`. `purchaseTicket`
- * answers with a `relayId` the attendee follows here for the mint; `relaySetPolicy` answers with
+ * answers with a `relayId` (kind `purchase`) the attendee follows here for the one-step ticket +
+ * payment; `relaySetPolicy` answers with
  * one too. `null` is a relay id that has no document yet. Modelled on {@link watchChatRoom}.
  */
 export interface RelayStatusView {

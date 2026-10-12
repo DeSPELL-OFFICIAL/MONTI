@@ -32,8 +32,8 @@ const ko = {
     create: '만들기',
     retry: '다시 시도',
     // 45s 하드캡에서 '나중에 확인'으로 나온 뒤, 홈에서 그 생성 op를 이어서 확인하는 배경 배너(계획 §2a).
-    pendingCreate: '만들던 행사를 확인하고 있어요',
-    pendingCreateFailed: '행사를 만들지 못했어요. 다시 시도해 주세요',
+    pendingCreate: '공개하던 행사를 확인하고 있어요',
+    pendingCreateFailed: '행사를 공개하지 못했어요. 다시 시도해 주세요',
     pendingCreateOpen: '이어서 확인',
 
     manual: '행사 번호로 열기',
@@ -66,31 +66,16 @@ const ko = {
   },
 
   lifecycle: {
-    publish: '공개하기',
-    publishConfirm: '공개하면 누구나 이 행사를 보고 신청할 수 있어요. 공개한 뒤에는 내용을 고칠 수 없어요',
     cancel: '행사 취소하기',
     // 01b 재배포 뒤에는 취소된 행사의 티켓을 남에게 넘길 수 없다. 확인 창에서 미리 말해 둔다.
     cancelConfirm: '취소하면 되돌릴 수 없어요. 신청이 닫히고, 결제한 분들은 환불받을 수 있어요.',
     confirm: '네, 진행할게요',
     back: '아니요',
     working: '보내고 있어요',
-    published: '공개했어요',
     cancelled: '취소했어요',
-    confirming: '아직 확인 중이에요. 잠시 뒤 이 화면을 다시 열어 주세요',
-    notDraft: '이미 공개한 행사예요',
-    // updateEventMeta 가 낼 수 있는 나머지 두 되돌림(Ticket.sol:208). 발행·취소에서는 안 난다.
-    schedule: '행사 시간이 이미 지났어요',
-    tiers: '티켓 종류를 확인해 주세요',
     closed: '이미 끝났거나 취소된 행사예요',
     notAllowed: '이 행사를 다룰 권한이 없어요',
     failed: '보내지 못했어요. 잠시 뒤 다시 시도해 주세요',
-    // 발행 전에 무엇을 공개하는지 한눈에 보여주는 요약 시트(계획 §2b).
-    summary: {
-      heading: '이대로 공개할까요?',
-      title: '제목', date: '날짜', place: '장소', tiers: '티켓 종류', kyc: '본인 확인',
-      tiersValue: '{{count}}종', kycOn: '필요', kycOff: '없음',
-      placeRegionOnly: '{{region}} · 자세한 장소는 티켓 소지자에게만',
-    },
   },
 
   gates: {
@@ -98,9 +83,12 @@ const ko = {
     pending: '승인을 기다리는 단말기',
     none: '승인을 기다리는 단말기가 없어요',
     register: '등록',
+    // v2: registerGate 가 열린 상태로 등록한다(설계 D3). 따로 여는 단계가 없다.
+    registerHelp: '등록하면 바로 입장을 받을 수 있어요',
     registered: '등록한 단말기',
     noneRegistered: '아직 등록한 단말기가 없어요',
-    open: '열기',
+    // 잠시 닫았던 단말기만 다시 연다. 등록 직후에는 이미 열려 있다.
+    reopen: '다시 열기',
     close: '닫기',
     revoke: '폐기',
     revokeConfirm: '폐기하면 이 단말기로 다시 입장을 받을 수 없어요. 폐기할까요?',
@@ -111,20 +99,26 @@ const ko = {
     gateId: '단말기 번호',
     gateLabel: '단말기 {{n}}',
     gateDetails: '상세',
+    // 화면에는 '단말기 · 3f9a…c21e' 같은 짧은 이름만. 긴 값은 '상세' 안에서 복사한다.
+    pendingLabel: '단말기',
     submittedAt: '올라온 시각',
     manual: '직접 옮겨 적기',
-    manualHelp: '스태프 앱이 올린 줄이 안 보이면 단말기 화면의 값을 그대로 옮겨 적으세요',
-    account: '단말기 주소',
-    kx: '키 X',
-    ky: '키 Y',
+    // 손으로 옮겨 적는 칸은 접어 둔다. 단말기 화면 '상세'의 이름과 같은 이름을 쓴다.
+    manualSummary: '목록에 없을 때 직접 옮겨 적기',
+    manualHelp: '스태프 앱이 올린 줄이 안 보이면 단말기 화면 상세의 값을 그대로 옮겨 적으세요',
+    account: '단말기 식별값',
+    kx: '확인값 X',
+    ky: '확인값 Y',
+    copyValue: '복사',
+    copiedValue: '복사했어요',
     working: '보내고 있어요',
     done: '보냈어요',
     problems: {
-      account: '단말기 주소를 0x로 시작하는 42자로 옮겨 적어 주세요',
-      key: '키 값을 0x로 시작하는 66자로 옮겨 적어 주세요',
+      account: '단말기 식별값을 0x로 시작하는 42자로 옮겨 적어 주세요',
+      key: '확인값을 0x로 시작하는 66자로 옮겨 적어 주세요',
       // 컨트랙트는 두 쪽이 모두 0일 때만 막는다. 한 쪽만 0인 키는 그대로 올라가고,
       // 그 단말기는 어떤 입장도 확인하지 못한다 — 그래서 여기서 막는다.
-      halfZero: '키 한 쪽이 비어 있어요. 단말기에서 키를 다시 만들어 주세요',
+      halfZero: '확인값 한 쪽이 비어 있어요. 단말기에서 등록을 다시 요청해 주세요',
       inUse: '이 단말기는 이미 다른 행사에 등록돼 있어요',
       unknownGate: '없는 단말기 번호예요',
       unknownEvent: '없는 행사 번호예요',
@@ -224,8 +218,6 @@ const ko = {
     notCheckedIn: '아직',
     gates: '입구 단말기',
     requests: '신청 관리',
-    // 공개 전에만 열린다 — updateEventMeta 는 Draft 에서만 된다(Ticket.sol:235).
-    edit: '행사 정보 고치기',
     notIndexed: '없는 행사 번호이거나 아직 색인 전이에요',
     failed: '현황을 불러오지 못했어요. 잠시 뒤 다시 시도해 주세요',
 
@@ -295,14 +287,6 @@ const ko = {
     stepPublish: '공개',
     // 기본 다섯 칸(포스터·제목·시작·장소·티켓) 밖의 모든 것이 이 안에 접혀 있다(계획 B-2).
     more: '더 설정하기',
-
-    /** 이미 만들어진 행사를 같은 씬에서 고친다(T-EV-W12). 공개 전에만 열린다. */
-    edit: {
-      title: '행사 정보 고치기',
-      loading: '행사 정보를 불러오고 있어요',
-      notDraft: '이미 공개한 행사는 고칠 수 없어요',
-      back: '행사 화면으로',
-    },
 
     saveAuto: '적는 대로 저장돼요',
     saving: '저장 중…',
@@ -385,7 +369,8 @@ const ko = {
 
     tiers: {
       title: '티켓',
-      create: '행사 만들기',
+      // 만들기는 초안 저장일 뿐 체인을 안 건드린다. 다음 화면(공개)에서 정산 규칙과 공개를 한다.
+      next: '다음',
       add: '종류 추가',
       remove: '빼기',
       kind: '{{index}}번째 종류',
@@ -401,7 +386,6 @@ const ko = {
       price: '가격',
       free: '무료',
       amount: '금액',
-      save: '저장',
       art: '티켓 그림',
       // The carousel's own name for a screen reader; the tiles inside carry the preset names.
       artCarousel: '티켓 그림 고르기',
@@ -416,8 +400,6 @@ const ko = {
       artUpload: '직접 올리기',
       artUploadClose: '그만두기',
       artWorking: '그림을 올리고 있어요',
-      // 유료 종류를 고른 그 자리에서 막는다 — 마지막에 거절당하는 게 제일 나쁘다(계획 B-3).
-      paidBlocked: '유료 티켓은 곧 열려요. 지금은 무료로만 만들 수 있어요',
       // 무료 | 유료 세그먼트: 통화 칩 4개와 접힘을 대체하고 카드 상단에 항상 노출된다(계획 A-1).
       paid: '유료',
       // 결제는 달러 테스트 결제 하나뿐이라 고를 통화가 없다. 저장 값은 서버가 받는 그 하나다.
@@ -449,19 +431,15 @@ const ko = {
       editKind: '종류 이름 편집',
       editTitle: '행사 제목 편집',
       editPrice: '가격 설정',
-      feeNote: '만드는 비용은 MONTI가 대신 내요',
+      feeNote: '공개하는 비용은 MONTI가 대신 내요',
     },
 
 
 
     done: {
-      title: '행사를 만들었어요',
-      // 발행 전에는 공유 링크·QR을 숨기고, 이 사실을 그대로 말한다(T-SIMP-6). 공개는 이 화면에서 바로 한다.
-      notYetPublic: '아직 아무에게도 안 보여요',
-      // 이 화면의 1차 버튼: 다른 화면으로 보내지 않고 여기서 바로 공개한다(T-SIMP-6).
-      publishNow: '지금 공개하기',
-      // 공개에 성공한 뒤, 그 자리서 나타나는 공유 링크·QR 카드 위에 놓는 안내(T-SIMP-6).
-      nowPublic: '공개했어요 · 이제 아래 링크로 초대할 수 있어요',
+      // v2: 공개는 한 번에 끝난다. 이 화면에 오면 행사는 이미 공개 상태다.
+      title: '행사를 공개했어요',
+      nowPublic: '이제 아래 링크로 초대할 수 있어요',
       manage: '행사 화면 열기',
       link: '행사 주소',
       copy: '주소 복사',
@@ -481,9 +459,8 @@ const ko = {
     publish: {
       pinning: '행사 정보를 올리고 있어요',
       org: '팀을 만들고 있어요',
-      sending: '행사를 만들고 있어요',
+      sending: '행사를 공개하고 있어요',
       finishing: '마무리하고 있어요',
-      updating: '행사 정보를 저장하고 있어요',
       // 45s 하드캡에 걸렸을 때 결정 블록의 문구와 버튼(계획 §2a·§3). 시간 초과는 실패가 아니고,
       // 다시 시도는 op 해시를 재확인하므로 두 번 눌러도 행사는 하나다.
       stuck: '아직 확인 중이에요. 다시 시도하거나 나중에 주최자 화면에서 확인할 수 있어요',
@@ -498,7 +475,7 @@ const ko = {
       orgFailed: '주최자 정보를 만들지 못했어요. 잠시 뒤 다시 시도해 주세요',
       // 행사는 만들어졌는데 영수증에서 번호를 못 읽은 경우. 초안과 오퍼레이션 해시를 남겨 두고,
       // 버튼을 다시 누르면 그 해시로 번호를 찾아온다 — 새 행사를 만들지 않는다.
-      noEventId: '행사는 만들어졌어요. 번호만 아직 못 읽었으니 아래 \'행사 만들기\'를 한 번 더 눌러 번호를 찾아 주세요. 행사가 두 개로 만들어지지는 않아요',
+      noEventId: '행사는 공개됐어요. 번호만 아직 못 읽었으니 아래 \'공개하기\'를 한 번 더 눌러 번호를 찾아 주세요. 행사가 두 개로 만들어지지는 않아요',
       // 기록해 둔 옵이 문턱 미달이거나 너무 오래돼(만료) 새 수수료로 다시 보낼 때 뜨는 진행 안내. 고칠 문제가 아니다.
       opExpired: '이전 요청이 만료되어 다시 보내요',
       pinFailed: '지금은 저장할 수 없어요. 잠시 뒤 다시 시도해 주세요',
@@ -508,14 +485,38 @@ const ko = {
       badMeta: '제목이나 소개가 너무 길어요. 줄이고 다시 시도해 주세요',
       badTags: '태그를 다시 확인해 주세요',
       badPoster: '포스터를 다시 올려 주세요',
-      notDraft: '이미 공개한 행사는 고칠 수 없어요',
-      // 초안인 채로 종료 시각이 지나면 신청 기간(지금~종료)이 거꾸로가 되어 InvalidSchedule 이 난다.
-      eventPast: '행사 시간이 이미 지났어요. 종료 시각을 고치고 다시 저장해 주세요',
-      tiersInvalid: '티켓 종류를 확인해 주세요',
-      followUpFailed: '티켓 그림이나 장소를 저장하지 못했어요. 저장을 한 번 더 눌러 주세요',
       schedule: '종료 시각이 시작 시각보다 뒤여야 해요',
       tiersEmpty: '티켓 종류를 하나 이상 만들어 주세요',
-      failed: '행사를 만들지 못했어요. 잠시 뒤 다시 시도해 주세요',
+      paidApproval: '유료 티켓은 관리자 승인으로 받을 수 없어요. 내용 고치기에서 선착순으로 바꿔 주세요',
+      notSettlementManager: '이 팀에서 정산을 정할 권한이 없어요. 팀 오너에게 권한을 요청해 주세요',
+      settlementPaused: '지금은 유료 행사를 공개할 수 없어요. 잠시 뒤 다시 시도해 주세요',
+      splitInvalid: '정산 규칙을 다시 확인해 주세요',
+      failed: '행사를 공개하지 못했어요. 잠시 뒤 다시 시도해 주세요',
+    },
+
+    /** 초안 → 정산 규칙 → 공개의 마지막 화면. 공개하기가 유일한 체인 기록이다(설계 §5). */
+    publishScreen: {
+      title: '공개하기',
+      back: '내용 고치기',
+      summary: '공개할 내용',
+      date: '날짜', place: '장소', tiers: '티켓', kyc: '본인 확인', split: '정산 규칙',
+      kycOn: '필요', kycOff: '없음',
+      placeRegionOnly: '{{region}} · 자세한 장소는 티켓 소지자에게만',
+      free: '무료',
+      tierLine: '{{name}} · {{price}}',
+      splitLine: '{{name}} · {{percent}}%',
+      splitIntro: '티켓 값이 들어오면 누구에게 얼마씩 나눌지 정해요. 입장이 확인되면 각자 몫이 자동으로 보내져요. 공개한 뒤에는 바꿀 수 없어요',
+      linkNote: '공개하면 행사 주소가 생겨요',
+      publish: '공개하기',
+      // 공개 전에 무엇을 공개하는지 한눈에 보여주는 확인 시트. 되돌릴 수 없다는 것을 마지막에 말한다.
+      confirmHeading: '이대로 공개할까요?',
+      confirmBody: '공개하면 누구나 이 행사를 보고 신청할 수 있어요. 공개한 뒤에는 내용과 정산 규칙을 고칠 수 없어요',
+      confirm: '네, 공개할게요',
+      cancel: '아니요',
+      blockers: {
+        draft: '고칠 곳이 있어요. 내용 고치기에서 확인해 주세요',
+        settlementOff: '지금은 유료 티켓을 공개할 수 없어요. 잠시 뒤 다시 시도해 주세요',
+      },
     },
 
     tierProblems: {
@@ -525,7 +526,9 @@ const ko = {
       tierSupply: '수량을 1장 이상으로 적어 주세요',
       tierMaxPerWallet: '1인당 한도를 1장에서 65535장 사이로 적어 주세요',
       cutoff: '친구에게 주기 마감 시간을 0시간 이상으로 적어 주세요',
-      paidTier: '무료가 아닌 종류가 있어요. 무료로 바꾸면 만들 수 있어요',
+      tierPrice: '유료 티켓 가격을 1달러 이상, 달러 단위로 적어 주세요',
+      // 승인제는 무료 티켓만 발급한다 — 유료 + 승인제는 아무도 받을 수 없는 행사가 된다.
+      paidApproval: '유료 티켓은 관리자 승인으로 받을 수 없어요. 선착순으로 바꿔 주세요',
     },
 
     imageProblems: {
@@ -538,12 +541,9 @@ const ko = {
     },
   },
   settlement: {
-    title: '정산 설정',
-    intro: '티켓 값을 정하고, 들어온 돈을 누구에게 얼마씩 나눌지 미리 정해요. 입장이 확인되면 각자 몫이 자동으로 보내져요.',
+    title: '정산',
+    intro: '들어온 티켓 값은 아래 비율대로 나눠요. 입장이 확인되면 각자 몫이 자동으로 보내져요.',
     testBadge: '테스트 환경',
-    confirmed: '정산 규칙 확정됨',
-    priceHeading: '티켓 값',
-    priceHint: '테스트 결제로 받아요 · 실제 돈이 오가지 않아요',
     splitHeading: '수익 배분',
     nameLabel: '역할/이름',
     percentLabel: '비율 %',
@@ -554,21 +554,18 @@ const ko = {
     removeRow: '삭제',
     platformNote: 'MONTI 운영비예요 (기본 5%)',
     sumLabel: '합계',
-    exampleHeading: '예시 · $30 티켓이면',
-    confirm: '정산 규칙 확정',
-    confirming: '확정하는 중이에요',
-    frozenNote: '첫 판매 뒤로는 바꿀 수 없어요',
+    exampleFor: '예시 · {{price}} 티켓이면',
+    frozenNote: '공개할 때 정해져서 바꿀 수 없어요',
     publicLink: '정산 내역 보기',
-    edit: '정산 규칙 바꾸기',
     errors: {
       empty: '수령인을 한 명 이상 넣어 주세요',
       badAccount: '수령 계정 주소를 다시 확인해 주세요',
       badBps: '비율은 0보다 크고 100% 이하여야 해요',
       platformLow: 'MONTI 운영비는 5% 아래로 내릴 수 없어요',
       badSum: '비율 합계가 100%가 되어야 해요',
-      needPrices: '모든 티켓 값을 정해 주세요',
-      noPlatform: '지금은 정산을 설정할 수 없어요. 잠시 뒤 다시 시도해 주세요',
-      failed: '정산 규칙을 저장하지 못했어요. 잠시 뒤 다시 시도해 주세요',
+      tooMany: '수령인은 MONTI를 포함해 10명까지예요',
+      nameTooLong: '역할/이름은 80자 안으로 적어 주세요',
+      badTag: '태그를 더 짧게 적어 주세요',
     },
   },
 };
@@ -597,8 +594,8 @@ const en: typeof ko = {
     create: 'Create',
     retry: 'Try again',
     // See the Korean block: the background banner that resolves a create left mid-confirm.
-    pendingCreate: 'Checking on the event you were making',
-    pendingCreateFailed: 'Could not create the event. Please try again',
+    pendingCreate: 'Checking on the event you were publishing',
+    pendingCreateFailed: 'Could not publish the event. Please try again',
     pendingCreateOpen: 'Check it',
 
     manual: 'Open by event number',
@@ -631,31 +628,16 @@ const en: typeof ko = {
   },
 
   lifecycle: {
-    publish: 'Make public',
-    publishConfirm: 'Once it is public, anyone can see this event and sign up. You cannot change the details afterwards',
     cancel: 'Cancel this event',
     // After the 01b redeploy a cancelled event's tickets can no longer be handed over.
     cancelConfirm: 'Cancelling cannot be undone. Sign-ups close, and anyone who paid can get a refund.',
     confirm: 'Yes, go ahead',
     back: 'No',
     working: 'Sending',
-    published: 'Made public',
     cancelled: 'Cancelled',
-    confirming: 'Still confirming. Please open this screen again in a moment',
-    notDraft: 'This event is already public',
-    /** The other two `updateEventMeta` can revert with; publish and cancel never raise them. */
-    schedule: 'This event\'s time has already passed',
-    tiers: 'Please check the ticket kinds',
     closed: 'This event is already over or cancelled',
     notAllowed: 'You may not manage this event',
     failed: 'Could not send that. Please try again in a moment',
-    // See the Korean block: the summary sheet shown before publishing.
-    summary: {
-      heading: 'Make it public as it is?',
-      title: 'Title', date: 'When', place: 'Where', tiers: 'Ticket kinds', kyc: 'Identity check',
-      tiersValue: '{{count}}', kycOn: 'Required', kycOff: 'Not needed',
-      placeRegionOnly: '{{region}} · exact place shown to ticket holders only',
-    },
   },
 
   gates: {
@@ -663,9 +645,10 @@ const en: typeof ko = {
     pending: 'Terminals waiting for approval',
     none: 'No terminal is waiting for approval',
     register: 'Approve',
+    registerHelp: 'An approved terminal takes entries straight away',
     registered: 'Approved terminals',
     noneRegistered: 'No terminal approved yet',
-    open: 'Open',
+    reopen: 'Reopen',
     close: 'Close',
     revoke: 'Retire',
     revokeConfirm: 'A retired terminal can never take entries again. Retire it?',
@@ -676,20 +659,24 @@ const en: typeof ko = {
     gateId: 'Terminal number',
     gateLabel: 'Terminal {{n}}',
     gateDetails: 'Details',
+    pendingLabel: 'Terminal',
     submittedAt: 'Sent at',
     manual: 'Type it in instead',
-    manualHelp: 'If the staff app\'s entry is not listed, copy the values from the terminal screen exactly',
-    account: 'Terminal address',
-    kx: 'Key X',
-    ky: 'Key Y',
+    manualSummary: 'Not listed? Type it in instead',
+    manualHelp: 'If the staff app\'s entry is not listed, copy the values under Details on the terminal screen exactly',
+    account: 'Device ID',
+    kx: 'Check value X',
+    ky: 'Check value Y',
+    copyValue: 'Copy',
+    copiedValue: 'Copied',
     working: 'Sending',
     done: 'Sent',
     problems: {
-      account: 'Copy the terminal address as 42 characters starting with 0x',
-      key: 'Copy the key as 66 characters starting with 0x',
+      account: 'Copy the device ID as 42 characters starting with 0x',
+      key: 'Copy the check value as 66 characters starting with 0x',
       // The contract only refuses a key whose halves are BOTH zero. A half-zero key is
       // accepted and then verifies no entry at all, so it is refused here instead.
-      halfZero: 'One half of the key is empty. Please make the key again on the terminal',
+      halfZero: 'One check value is empty. Please request registration again on the terminal',
       inUse: 'This terminal is already approved for another event',
       unknownGate: 'No terminal has that number',
       unknownEvent: 'No event has that number',
@@ -789,8 +776,6 @@ const en: typeof ko = {
     notCheckedIn: 'Not yet',
     gates: 'Entry terminals',
     requests: 'Requests',
-    /** Only before publishing: the chain refuses `updateEventMeta` past Draft. */
-    edit: 'Edit this event',
     notIndexed: 'No event has that number, or it has not been indexed yet',
     failed: 'Could not load the status. Please try again in a moment',
 
@@ -854,14 +839,6 @@ const en: typeof ko = {
     stepPublish: 'Publish',
     // See the Korean block: everything but the five fields that make an event is folded here.
     more: 'More settings',
-
-    /** See the Korean block: the same scene, opened on an event that already exists. */
-    edit: {
-      title: 'Edit this event',
-      loading: 'Loading the event',
-      notDraft: 'An event that is already public cannot be edited',
-      back: 'Back to the event',
-    },
 
     saveAuto: 'Saved as you write',
     saving: 'Saving…',
@@ -943,7 +920,7 @@ const en: typeof ko = {
 
     tiers: {
       title: 'Tickets',
-      create: 'Create the event',
+      next: 'Next',
       add: 'Add a kind',
       remove: 'Remove',
       kind: 'Kind {{index}}',
@@ -959,7 +936,6 @@ const en: typeof ko = {
       price: 'Price',
       free: 'Free',
       amount: 'Amount',
-      save: 'Save',
       art: 'Ticket picture',
       // The carousel's own name for a screen reader; the tiles inside carry the preset names.
       artCarousel: 'Choose the ticket picture',
@@ -970,8 +946,6 @@ const en: typeof ko = {
       artUpload: 'Upload your own',
       artUploadClose: 'Never mind',
       artWorking: 'Uploading the picture',
-      // Blocked where the choice was made, not at the end (plan section B-3).
-      paidBlocked: 'Paid tickets are coming soon. For now an event can only be free',
       // The 무료 | 유료 segment, always at the top of the card, replacing the fold and the four
       // currency chips (plan section A-1).
       paid: 'Paid',
@@ -1005,19 +979,14 @@ const en: typeof ko = {
       editKind: 'Edit the kind name',
       editTitle: 'Edit the event title',
       editPrice: 'Set the price',
-      feeNote: 'MONTI covers the cost of creating it',
+      feeNote: 'MONTI covers the cost of publishing it',
     },
 
 
 
     done: {
-      title: 'Your event is made',
-      // See the Korean block: before publishing the share link and QR are hidden; publishing runs here.
-      notYetPublic: 'Nobody can see it yet',
-      // See the Korean block: the primary button that publishes the event right on this screen.
-      publishNow: 'Make it public',
-      // See the Korean block: shown above the share link and QR once the event is public.
-      nowPublic: "It's public now · share the link below to invite people",
+      title: 'Your event is public',
+      nowPublic: 'Share the link below to invite people',
       manage: 'Open the event screen',
       link: 'Event address',
       copy: 'Copy the address',
@@ -1037,9 +1006,8 @@ const en: typeof ko = {
     publish: {
       pinning: 'Uploading the event details',
       org: 'Creating your team',
-      sending: 'Creating the event',
+      sending: 'Publishing the event',
       finishing: 'Finishing up',
-      updating: 'Saving the event',
       // See the Korean block: the decision block's line and buttons at the 45s cap. A timeout is not
       // a failure, and 다시 시도 re-checks the op hash, so pressing twice still makes one event.
       stuck: 'Still confirming. Try again, or check it later on your organiser screen',
@@ -1054,7 +1022,7 @@ const en: typeof ko = {
       orgFailed: 'Could not create your organiser. Please try again in a moment',
       // The event was made but the receipt did not name it. The draft and the operation hash
       // are kept, and pressing again looks the number up by that hash — it makes no new event.
-      noEventId: 'Your event was created. Only its number has not come back yet — press "Create the event" once more to look it up. It will not create a second event',
+      noEventId: 'Your event is public. Only its number has not come back yet — press "Publish" once more to look it up. It will not create a second event',
       // Shown while a recorded op that was underpriced or too old is being resent at the current
       // fee — progress, not a problem the organiser has to fix.
       opExpired: 'The earlier request expired — sending again',
@@ -1064,14 +1032,37 @@ const en: typeof ko = {
       badMeta: 'The title or the description is too long. Please shorten it and try again',
       badTags: 'Please check the tags again',
       badPoster: 'Please upload the poster again',
-      notDraft: 'An event that is already public cannot be edited',
-      /** A Draft left past its end date makes the derived sign-up window run backwards. */
-      eventPast: 'This event\'s time has already passed. Please fix the end time and save again',
-      tiersInvalid: 'Please check the ticket kinds',
-      followUpFailed: 'Could not save the ticket picture or the venue. Please press Save once more',
       schedule: 'The end has to come after the start',
       tiersEmpty: 'Add at least one ticket kind',
-      failed: 'Could not create the event. Please try again in a moment',
+      paidApproval: 'Paid tickets cannot be issued by approval. Switch to first come, first served under Edit details',
+      notSettlementManager: 'You may not set the split for this team. Ask the team owner for the permission',
+      settlementPaused: 'Paid events cannot be published right now. Please try again in a moment',
+      splitInvalid: 'Please check the split rules again',
+      failed: 'Could not publish the event. Please try again in a moment',
+    },
+
+    /** See the Korean block: the last screen of draft → split rules → publish. */
+    publishScreen: {
+      title: 'Publish',
+      back: 'Edit details',
+      summary: 'What goes public',
+      date: 'When', place: 'Where', tiers: 'Tickets', kyc: 'Identity check', split: 'Split rules',
+      kycOn: 'Required', kycOff: 'Not needed',
+      placeRegionOnly: '{{region}} · exact place shown to ticket holders only',
+      free: 'Free',
+      tierLine: '{{name}} · {{price}}',
+      splitLine: '{{name}} · {{percent}}%',
+      splitIntro: 'Decide who gets how much of each ticket sale. Each share is paid out automatically once entry is confirmed. It cannot be changed after publishing',
+      linkNote: 'Publishing gives the event its address',
+      publish: 'Publish',
+      confirmHeading: 'Publish it as it is?',
+      confirmBody: 'Once it is public, anyone can see this event and sign up. The details and the split rules cannot be changed afterwards',
+      confirm: 'Yes, publish it',
+      cancel: 'No',
+      blockers: {
+        draft: 'Something needs fixing. Check it under Edit details',
+        settlementOff: 'Paid tickets cannot be published right now. Please try again in a moment',
+      },
     },
 
     tierProblems: {
@@ -1081,7 +1072,8 @@ const en: typeof ko = {
       tierSupply: 'Write how many as 1 or more',
       tierMaxPerWallet: 'Write the per-person limit as a number from 1 to 65535',
       cutoff: 'Write the giving cut-off as 0 hours or more',
-      paidTier: 'One of the kinds is not free. Make it free and you can create the event',
+      tierPrice: 'Write a paid ticket price in whole dollars, $1 or more',
+      paidApproval: 'Paid tickets cannot be issued by approval. Switch to first come, first served',
     },
 
     imageProblems: {
@@ -1095,11 +1087,8 @@ const en: typeof ko = {
   },
   settlement: {
     title: 'Revenue split',
-    intro: 'Set the ticket price and decide who gets what share. When a guest is admitted, each share is sent automatically.',
+    intro: 'Ticket income is split by the shares below. When a guest is admitted, each share is sent automatically.',
     testBadge: 'Test environment',
-    confirmed: 'Split confirmed',
-    priceHeading: 'Ticket price',
-    priceHint: 'Paid as a test payment · no real money moves',
     splitHeading: 'Revenue split',
     nameLabel: 'Role / name',
     percentLabel: 'Share %',
@@ -1110,21 +1099,18 @@ const en: typeof ko = {
     removeRow: 'Remove',
     platformNote: "MONTI's running costs (5% by default)",
     sumLabel: 'Total',
-    exampleHeading: 'Example · a $30 ticket',
-    confirm: 'Confirm split',
-    confirming: 'Confirming…',
-    frozenNote: 'Locked once the first ticket sells',
+    exampleFor: 'Example · a {{price}} ticket',
+    frozenNote: 'Set when the event was published and cannot be changed',
     publicLink: 'See the split',
-    edit: 'Change the split',
     errors: {
       empty: 'Add at least one recipient',
       badAccount: 'Please check the payout account address',
       badBps: 'Each share must be above 0 and at most 100%',
       platformLow: "MONTI's running costs can't go below 5%",
       badSum: 'The shares must add up to 100%',
-      needPrices: 'Set a price for every ticket',
-      noPlatform: "Can't set the split right now. Please try again in a moment",
-      failed: "Couldn't save the split. Please try again in a moment",
+      tooMany: 'Up to 10 recipients, MONTI included',
+      nameTooLong: 'Keep the role/name to 80 characters',
+      badTag: 'Please make the tag shorter',
     },
   },
 };

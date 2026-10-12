@@ -142,9 +142,9 @@ describe('deviceDigestV2', () => {
  * - 위 `V2_INPUT` 은 컨트랙트 테스트가 쓰는 가상의 배포본(chain 31337, Ticket 0x7111…1111)이라
  *   Solidity 쪽 고정 벡터(`P256Vectors.SHARED_DIGEST`)와 1:1 로 맞춰 볼 수 있다. 존재하지
  *   않는 주소이므로 체인에 물어볼 수는 없다.
- * - 아래 `LIVE_INPUT` 은 2026-09-23 에 실제로 올라간 Ticket 이 `deviceDigest(...)` 뷰로
- *   되돌려준 값이다(abi-delta-01b §10). 다섯 개의 caller 입력은 위와 똑같고, 앞의 두 워드
- *   —`chainid` 와 `address(this)`— 만 다르다.
+ * - 아래 `LIVE_INPUT` 은 2026-10-12 v2 rc1 Ticket 이 `deviceDigest(...)` 뷰로
+ *   되돌려주는 값이다(deviceDigest.parity.test.ts 가 라이브 컨트랙트로 대조). 다섯 개의 caller
+ *   입력은 위와 똑같고, 앞의 두 워드 —`chainid` 와 `address(this)`— 만 다르다.
  *
  * 그 두 워드가 바로 클라이언트가 고를 수 없는 입력이고, 로컬 재구현이 틀리는 곳도 정확히
  * 거기다. 한쪽만 남기면 "도메인 워드가 정말 다이제스트를 바꾸는가"와 "그 바꾸는 방식이

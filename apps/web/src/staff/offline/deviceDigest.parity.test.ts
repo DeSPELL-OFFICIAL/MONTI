@@ -49,8 +49,8 @@ import { checkInDigest, type DeviceDigestDomain } from './offlineVerify';
 /** The public endpoint the 01b redeploy was broadcast through (abi-delta-01b.md §10). */
 const RPC_URL = 'https://testnet-rpc.monad.xyz';
 const CHAIN_ID = 10143;
-/** The Ticket deployed 2026-09-30. A fixture derived against any other address is meaningless. */
-const TICKET = '0x7E1fdfCB3688C5b0539101cEAE6a7Ee5bD9b51Cf' as const;
+/** The v2 rc1 Ticket deployed 2026-10-12. A fixture derived against any other address is meaningless. */
+const TICKET = '0x8544c531A3EF7f702fe3A64Ff20D57bA774d9edC' as const;
 
 /** The five caller-chosen inputs of the doc's vector (§7.2, re-derived on chain in §10). */
 const VECTOR = {
@@ -88,7 +88,7 @@ const DOMAIN: DeviceDigestDomain = { chainId: BigInt(CHAIN_ID), ticket: TICKET }
  * two words itself. The pair of vectors is the point — same five inputs, different domain,
  * different digest.
  */
-const EXPECTED = '0x5e3dc13903f0324d285dd06664b0af93191290ecd3fa5d843737c68b39de8319';
+const EXPECTED = '0xcaba7b087bd89614721b46d73391176cf543c4ec91548b62e388c968a537b505';
 
 /** Generous, because a public testnet RPC is slow; bounded, because CI must not hang on it. */
 const TIMEOUT_MS = 20_000;

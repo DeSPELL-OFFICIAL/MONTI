@@ -297,6 +297,24 @@ describe('security headers', () => {
     expect(ENVIO_TIER_ORIGINS).toContain(new URL(example ?? '').origin);
   });
 
+  /**
+   * The Firebase SDK calls a callable at `https://{region}-{projectId}.cloudfunctions.net/{name}`,
+   * so the v2 backend (codebase v2 in `us-east4`) is the host `us-east4-<project>.cloudfunctions.net`.
+   * It is covered by the one-label `*.cloudfunctions.net` wildcard, never pinned per project.
+   */
+  it('lets the page reach the callables in the region the env example names', () => {
+    const region = envExample.get('VITE_FUNCTIONS_REGION');
+    expect(region).toBe('us-east4');
+    const connectSrc = cspDirectives().get('connect-src') ?? [];
+    const host = `${region}-mon-ti.cloudfunctions.net`;
+    const allowed = connectSrc.some((source) => {
+      const match = /^https:\/\/\*\.(.+)$/.exec(source);
+      if (match) return host.endsWith(`.${match[1]}`) && !host.slice(0, -match[1]!.length - 1).includes('.');
+      return source === `https://${host}`;
+    });
+    expect(allowed, `connect-src must allow https://${host}`).toBe(true);
+  });
+
   it('locks the page down by default', () => {
     const directives = cspDirectives();
     expect(directives.get('default-src')).toEqual(["'self'"]);

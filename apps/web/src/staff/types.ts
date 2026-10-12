@@ -109,7 +109,6 @@ export const NON_GATE_ERRORS = [
   'KycRequired',
   'MaxPerWalletExceeded',
   'NoOffer',
-  'NotDraft',
   'NotRotatedAccount',
   'NothingToMigrate',
   'OfferExpired',
@@ -127,6 +126,17 @@ export const NON_GATE_ERRORS = [
   'TransfersDisabled',
   'UnknownEvent',
   'UnknownTier',
+  // v2 (abi-delta-v2.md): the one-write publish and the vault-minted paid purchase. Publishing is
+  // the organiser's write and `purchase` the treasury's; `setVault` is a deploy-time call. None
+  // is reachable from a door tap.
+  'NotDeployer',
+  'NotPaidTier',
+  'NotVault',
+  'PaidApprovalUnsupported',
+  'PolicyRequired',
+  'UnexpectedPolicy',
+  'VaultAlreadySet',
+  'ZeroAddress',
 ] as const;
 
 /**
@@ -242,20 +252,24 @@ export type QueueMark = typeof DRY_RUN_MARK | typeof LATE_WINDOW_ELAPSED | typeo
 /**
  * The four reasons spec §7.5 recognises for letting somebody in by hand.
  *
- * The numbers are `@monti/shared`'s, because they are what `Ticket.requestOverride` and
- * `Ticket.manualOverride` record on chain as `uint8 reason` — not a screen's enum. They used to
+ * The numbers are `@monti/shared`'s, because they are what `Ticket.manualOverride` records on
+ * chain as `uint8 reason` (and the `requestOverride` callable stores as `reason`) — not a screen's enum. They used to
  * be spelled out here as `1 | 2 | 3 | 4`, which was the same four values written down twice:
  * the contracts' copy and the console's, with nothing to notice if 01b ever added a fifth.
  */
 export type OverrideReason = OverrideReasonCode;
 
-/** The two calls. `denied` is not one of them — it is what happens instead of sending. */
+/**
+ * The two calls. `manualOverride` is the relayed chain write; `requestOverride` is the backend
+ * callable (P4 — an off-chain request record). `denied` is not one of them — it is what happens
+ * instead of sending.
+ */
 export type OverrideCall = 'manualOverride' | 'requestOverride';
 export type OverrideRoute = OverrideCall | 'denied';
 
 /**
  * The role tag `Ticket.ManualOverride` carries, named (`Ticket.sol:80-82`). `'none'` is what a
- * filed request has: `OverrideRequested` records a requester and no role, because a request is
+ * filed request has: the request record names a requester and no role, because a request is
  * precisely the case where nobody has approved anything yet.
  */
 export type OverrideRole = 'approver' | 'manager' | 'none';

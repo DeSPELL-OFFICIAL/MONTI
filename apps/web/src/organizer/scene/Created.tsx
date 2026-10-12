@@ -1,12 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
-import { Alert, Button, Card, OpProgress, Screen, StickyBar, Steps, SuccessCheck, posterUrl } from '../../shared/ui';
-import { useCopy } from '../../shared/i18n';
-import { readTicket } from '../../shared/chain/reads';
+import { Alert, Button, Card, Screen, StickyBar, Steps, SuccessCheck, posterUrl } from '../../shared/ui';
 import { useOrganizerCopy } from '../copy';
-import { publishEvent, type LifecycleProblem } from '../lifecycle';
 import { forgetEventDraft } from '../useEventDraft';
-import { useEventStatusWithFallback } from '../useEventStatusWithFallback';
 import { followUpsDone, runFollowUps, type FollowUpResult } from './followUps';
 import type { CreatedEvent } from './usePublish';
 
@@ -26,16 +22,11 @@ type Handover = Partial<Omit<CreatedEvent, 'eventId'>>;
 const ALL_SAVED: FollowUpResult = { artSaved: true, venueSaved: true };
 
 /**
- * The publish (Draft → Published) this screen now runs itself, so completion and sharing are one
- * screen with no navigation between them (T-SIMP-6). `saving` is the wait; only at `done` — the
- * event is public — do the share link and the QR appear, in place.
+ * The done screen. The single publish write already made the event public (v2: no Draft on
+ * chain), so the share link and the QR are here from the first paint.
  */
-type PublishState = 'idle' | 'saving' | 'done';
-
 export function Created() {
   const scene = useOrganizerCopy().scene;
-  const life = useOrganizerCopy().lifecycle;
-  const common = useCopy().common;
   const copy = scene.done;
   const { eventId = '' } = useParams();
   const handed = (useLocation().state ?? {}) as Handover;
@@ -45,16 +36,6 @@ export function Created() {
   // somebody opened this address from history, and there is no draft left to repair.
   const [saved, setSaved] = useState<FollowUpResult>(handed.done ?? ALL_SAVED);
   const [retrying, setRetrying] = useState(false);
-  // Publishing is the whole point of this screen now: it starts idle, and the link and the QR
-  // stay hidden until it reaches `done`.
-  const [publishing, setPublishing] = useState<PublishState>('idle');
-  const [problem, setProblem] = useState<LifecycleProblem | ''>('');
-  // The event's status from the indexer, or the chain while it lags. It is what stops this screen
-  // offering 지금 공개하기 for an event that is already public — reopened from history, or published
-  // in another tab — where the publish would only revert `NotDraft`.
-  const chainStatus = useEventStatusWithFallback(eventId);
-  const alreadyPublic = chainStatus.status === 'Published' || chainStatus.status === 'Ended';
-  const published = publishing === 'done' || alreadyPublic;
   const plan = handed.plan;
   const missing = plan !== undefined && !followUpsDone(plan, saved);
 
@@ -95,31 +76,6 @@ export function Created() {
     setRetrying(false);
   }
 
-  /**
-   * 지금 공개하기 — Draft → Published, run right here so the share link appears on the very same
-   * screen with no navigation (T-SIMP-6). The organisation is read off the chain, not the indexer,
-   * because an indexer running behind would name the wrong one. `publishEvent` replaces rather than
-   * adds, so a second press after a timeout is safe.
-   */
-  async function goPublic(): Promise<void> {
-    if (publishing === 'saving') return;
-    setProblem('');
-    setPublishing('saving');
-    const orgId = await readTicket().eventOrg(BigInt(eventId)).catch(() => null);
-    if (orgId === null || orgId === 0n) {
-      setPublishing('idle');
-      setProblem('failed');
-      return;
-    }
-    const result = await publishEvent(BigInt(eventId), orgId);
-    if (result.state === 'done') {
-      setPublishing('done');
-    } else {
-      setPublishing('idle');
-      setProblem(result.problem);
-    }
-  }
-
   async function copyLink(): Promise<void> {
     try {
       await navigator.clipboard.writeText(link);
@@ -134,8 +90,8 @@ export function Created() {
   return (
     <Screen title={copy.title}>
       <div className="scene">
-        {/* 2단계 헤더: 만들기는 끝났고 공개가 이 화면에서 이어진다(계획 §2b). */}
-        <Steps labels={[scene.stepCreate, scene.stepPublish]} at={1} />
+        {/* 2단계 헤더: 만들기와 공개가 모두 끝났다. */}
+        <Steps labels={[scene.stepCreate, scene.stepPublish]} at={2} />
         <SuccessCheck />
         {handed.posterCid ? (
           <div className="poster-card">
@@ -158,36 +114,15 @@ export function Created() {
         ) : null}
         {!missing && handed.followUpFailed ? <p className="muted">{copy.retryDone}</p> : null}
 
-        {published ? (
-          <>
-            {/* 되돌아가기 0: the very screen the publish ran on now carries the link and the QR. */}
-            <Alert tone="info">{copy.nowPublic}</Alert>
-            <Card title={copy.link}>
-              <p className="event-link">{link}</p>
-              {copied !== '' ? <p className="muted">{copied}</p> : null}
-              {dataUrl !== '' ? <img className="event-qr" src={dataUrl} alt={copy.qr} /> : null}
-            </Card>
-            <p>
-              <Link to={`/events/${eventId}`}>{copy.view}</Link>
-            </p>
-          </>
-        ) : (
-          <>
-            {/* Before it is public the link and the QR are deliberately absent: an address nobody
-                can open yet is a false promise, and `claim` refuses anything but Published. */}
-            {/* 공개 전 상태는 입력창처럼 보이던 info 박스가 아니라 상태 칩으로 읽힌다(visual R1-9). */}
-            <p>
-              <span className="badge">{copy.notYetPublic}</span>
-            </p>
-            {publishing === 'saving' ? (
-              <OpProgress phase="saving" />
-            ) : (
-              // 안심어: 공개도 무료고, 어려운 건 MONTI가 대신 처리한다(T-SIMP-6). 주행동은 하단 바로.
-              <p className="muted">{common.publishFree}</p>
-            )}
-            {problem !== '' ? <Alert tone="error">{life[problem]}</Alert> : null}
-          </>
-        )}
+        <Alert tone="info">{copy.nowPublic}</Alert>
+        <Card title={copy.link}>
+          <p className="event-link">{link}</p>
+          {copied !== '' ? <p className="muted">{copied}</p> : null}
+          {dataUrl !== '' ? <img className="event-qr" src={dataUrl} alt={copy.qr} /> : null}
+        </Card>
+        <p>
+          <Link to={`/events/${eventId}`}>{copy.view}</Link>
+        </p>
 
         <p>
           <Link to={`/org/events/${eventId}`}>{copy.manage}</Link>
@@ -196,19 +131,9 @@ export function Created() {
           <Link to="/org">{copy.home}</Link>
         </p>
 
-        {/* 주행동은 하단 바로 내려가 화면 아래 절반이 비지 않게 한다(visual R1-5): 공개 전에는 지금
-            공개하기(공개 중에는 잠김), 공개 뒤에는 링크 복사. */}
+        {/* 주행동은 하단 바로 내려가 화면 아래 절반이 비지 않게 한다(visual R1-5): 링크 복사. */}
         <StickyBar>
-          {published ? (
-            <Button onClick={() => void copyLink()}>{copy.copy}</Button>
-          ) : (
-            <Button
-              onClick={() => void goPublic()}
-              disabled={publishing === 'saving'}
-            >
-              {copy.publishNow}
-            </Button>
-          )}
+          <Button onClick={() => void copyLink()}>{copy.copy}</Button>
         </StickyBar>
       </div>
     </Screen>

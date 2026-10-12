@@ -10,14 +10,16 @@ import { purchaseCopy } from './purchaseErrors';
 import { rememberOrder } from './orderStore';
 
 /**
- * Where a purchase is in its 결제 확인 → 티켓 발급 → 보관 완료 wait.
+ * Where a purchase is in its one-tap wait. The backend runs ticket + payment as one atomic step
+ * (order `pending → sent → deposited`, or `failed` with nothing charged), so the sheet mirrors it:
  *   - `idle`    — the card sheet is up; nothing sent.
- *   - `paying`  — the mock charge is accepted and `purchaseTicket` is building/calling (결제 확인).
- *   - `minting` — the mint is in flight; the relay doc is followed (티켓 발급).
- *   - `done`    — the ticket is minted (escrow deposited or deferred) — a real completion (보관 완료).
- *   - `error`   — a determinate refusal; the sheet shows its sentence and the retry.
+ *   - `paying`  — `purchaseTicket` is building/calling (order `pending`).
+ *   - `sent`    — the step is in flight; the `purchase` relay doc is followed (order `sent`).
+ *   - `done`    — the ticket is issued and the payment held (order `deposited`).
+ *   - `error`   — a refusal or a failed step: no ticket, no charge; the sheet shows its sentence
+ *                 and the retry.
  */
-export type PurchasePhase = 'idle' | 'paying' | 'minting' | 'done' | 'error';
+export type PurchasePhase = 'idle' | 'paying' | 'sent' | 'done' | 'error';
 
 export interface PurchaseParams {
   eventId: string;
@@ -35,12 +37,12 @@ export interface PurchaseState {
 
 /**
  * Buys one ticket through `purchaseTicket`: the device key signs the same {@link buildClaimAuth}
- * the free claim uses (the mint underneath is a relayed claim), the mock card charge rides beside
- * it, and the backend mints the ticket and deposits the USDC into escrow. A `sent` answer means
- * the mint is still in flight, so the relay doc is followed to 완료; a `minted`/`deposited` answer
- * is already done. The order id is remembered on this device so the ticket detail can show the
- * receipt. The single BAD_NONCE retry mirrors the claim flow: the server reports the fresh nonce
- * and the auth is rebuilt once, never a loop.
+ * the free claim uses, the mock card charge rides beside it, and the backend issues the ticket and
+ * holds the payment in one step. A `deposited` answer is done; a `sent` answer means the step is
+ * still in flight, so the `purchase` relay doc is followed until it confirms (or fails — then
+ * nothing was charged). The order id is remembered on this device so the ticket detail can show
+ * the receipt. The single BAD_NONCE retry mirrors the claim flow: the server reports the fresh
+ * nonce and the auth is rebuilt once, never a loop.
  */
 export function usePurchase({ eventId, tier, amountUsdCents }: PurchaseParams): PurchaseState {
   const copy = useCopy();
@@ -79,9 +81,8 @@ export function usePurchase({ eventId, tier, amountUsdCents }: PurchaseParams): 
       if (result.tokenId !== undefined) setTokenId(result.tokenId);
       if (result.status === 'sent') {
         setRelayId(result.relayId);
-        setPhase('minting');
+        setPhase('sent');
       } else {
-        // 'minted' or 'deposited' — the ticket exists; the escrow may settle in the background.
         setPhase('done');
       }
     } catch (cause) {
@@ -90,10 +91,11 @@ export function usePurchase({ eventId, tier, amountUsdCents }: PurchaseParams): 
     }
   }, [eventId, tier, amountUsdCents, copy]);
 
-  // Follow the mint's relay doc while it is in flight: `confirmed` lands on 완료 (and records the
-  // minted token), `failed` shows the code's sentence. A dropped listener leaves the wait in place.
+  // Follow the purchase relay doc while the step is in flight: `confirmed` lands on 완료 (and
+  // records the issued token), `failed` is a reverted step — nothing charged — so it says so.
+  // A dropped listener leaves the wait in place; past the timeout the sheet offers 내 티켓.
   useEffect(() => {
-    if (relayId === null || phase !== 'minting') return undefined;
+    if (relayId === null || phase !== 'sent') return undefined;
     return watchRelayStatus(
       relayId,
       (relay) => {
@@ -107,7 +109,8 @@ export function usePurchase({ eventId, tier, amountUsdCents }: PurchaseParams): 
           setPhase('done');
         } else if (relay.status === 'failed') {
           setRelayId(null);
-          setError(purchaseCopy(relay.error?.code ?? '', copy));
+          const code = relay.error?.code;
+          setError(code ? purchaseCopy(code, copy) : copy.purchase.notCharged);
           setPhase('error');
         }
       },

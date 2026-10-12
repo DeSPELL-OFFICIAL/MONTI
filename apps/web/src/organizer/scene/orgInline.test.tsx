@@ -59,7 +59,7 @@ vi.mock('../../shared/config', async (orig) => ({
   getConfig: () => ({ addresses: { ticket: TICKET }, ipfsGateway: 'https://gw.test/' }),
 }));
 
-const { CreateEvent } = await import('./CreateEvent');
+const { DraftPublish } = await import('./DraftPublish');
 const { emptyEventDraft, emptyEventDraftTier } = await import('../useEventDraft');
 const { organizerCopy } = await import('../copy');
 const copy = organizerCopy.ko.scene;
@@ -68,7 +68,7 @@ function Probe() {
   return <p>{`landed:${useLocation().pathname}`}</p>;
 }
 
-/** The org id the event was created under, decoded from the one relayed `createEvent` calldata. */
+/** The org id the event was created under, decoded from the one relayed `publishEvent` calldata. */
 function sentOrgId(call = 0): bigint {
   const data = sendAction.mock.calls[call]?.[2] as Hex;
   const { args = [] } = decodeFunctionData({ abi: ticketAbi, data });
@@ -92,9 +92,9 @@ const READY: EventDraft = {
 function open(draft: EventDraft = READY, id = 'd-42'): void {
   store = [{ id, updatedAt: 1_000, data: draft }];
   render(
-    <MemoryRouter initialEntries={[`/org/new/${id}`]}>
+    <MemoryRouter initialEntries={[`/org/new/${id}/publish`]}>
       <Routes>
-        <Route path="/org/new/:draftId" element={<CreateEvent />} />
+        <Route path="/org/new/:draftId/publish" element={<DraftPublish />} />
         <Route path="*" element={<Probe />} />
       </Routes>
     </MemoryRouter>,
@@ -102,7 +102,7 @@ function open(draft: EventDraft = READY, id = 'd-42'): void {
 }
 
 async function ready(): Promise<void> {
-  await waitFor(() => expect(screen.getByLabelText(copy.titleLabel)).toHaveValue(READY.title));
+  await screen.findByRole('heading', { name: READY.title });
 }
 
 /**
@@ -124,8 +124,12 @@ async function readyToPublish(orgName: string): Promise<void> {
   await waitFor(() => expect(screen.getByLabelText(copy.org.label)).toHaveValue(orgName));
 }
 
+/** 공개하기, and — when the confirm sheet opens — 네, 공개할게요. */
 async function create(): Promise<void> {
-  await userEvent.setup().click(screen.getByRole('button', { name: copy.tiers.create }));
+  const user = userEvent.setup();
+  await user.click(screen.getByRole('button', { name: copy.publishScreen.publish }));
+  const confirm = screen.queryByRole('button', { name: copy.publishScreen.confirm });
+  if (confirm !== null) await user.click(confirm);
 }
 
 beforeAll(() => {
@@ -177,7 +181,7 @@ describe('the organiser line', () => {
   });
 });
 
-describe('resolving the organisation inside 만들기', () => {
+describe('resolving the organisation inside 공개하기', () => {
   it('makes one under the name in the box, and creates the event under it', async () => {
     open();
     await readyToPublish('김태완');
@@ -263,8 +267,9 @@ describe('resolving the organisation inside 만들기', () => {
     open({ ...READY, orgPendingName: '몬티 크루' });
     await readyToPublish('몬티 크루');
 
-    const button = screen.getByRole('button', { name: copy.tiers.create });
+    const button = screen.getByRole('button', { name: copy.publishScreen.publish });
     await act(async () => { fireEvent.click(button); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: copy.publishScreen.confirm })); });
     // The indexer has not answered; without the fix the button is still live here.
     expect(button).toBeDisabled();
     await act(async () => { fireEvent.click(button); });

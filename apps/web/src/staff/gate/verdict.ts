@@ -206,7 +206,7 @@ function roleOf(code: number): OverrideRole {
 /**
  * Watches for **somebody else** approving a request this terminal filed (Task 32, ruling 2).
  *
- * `requestOverride` emits `OverrideRequested` and writes no check-in, so the screen that filed it
+ * A request is a backend record (`requestOverride` callable) and writes no check-in, so the screen that filed it
  * has nothing else to learn from: the tap watch above matches on a nonce and a manual approval
  * carries `bytes32(0)` there (`Ticket.sol:426`), which is exactly why that watch cannot be reused.
  * This one filters on the approval event itself, narrowed to this ticket by its indexed `tokenId`.

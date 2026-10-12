@@ -58,6 +58,8 @@ import { useStaffCopy } from '../copy';
 import { warn } from '../log';
 import { checkPin } from '../override/pin';
 import { OverrideDenied, readOverrideAuthority, submitOverride as sendOverride } from '../override/route';
+import { useOverrideRequests, type OpenOverrideRequest } from '../override/useOverrideRequests';
+import type { OverrideSubmitExtra } from '../components/OverrideDialog';
 import { createOnlineWatcher } from '../net/online';
 import { offlineAdmit } from '../offline/offlineAdmit';
 import { drainQueue, parkedCount, pendingCount } from '../queue/opQueue';
@@ -192,7 +194,12 @@ export type UseGateResult = GateContext & {
    * The PIN, then the chain. `tokenId` is whoever the dialog picked; without one it falls back to
    * the tap on screen. Never throws: every outcome is a sentence in the dialog.
    */
-  submitOverride(pin: string, reason: OverrideReason, tokenId?: string): Promise<void>;
+  submitOverride(pin: string, reason: OverrideReason, tokenId?: string, extra?: OverrideSubmitExtra): Promise<void>;
+  /**
+   * The event's open approval requests (P4), polled while the dialog is open and this staff
+   * member may approve; `[]` otherwise. Picking one approves it at the gate it was filed from.
+   */
+  overrideRequests: readonly OpenOverrideRequest[];
   /** The one receiving path NFC and the QR fallback (Task 31) share. */
   handleResponse(response: GateResponseWire): Promise<void>;
   /** Clear the verdict and wait for the next attendee. The only thing that clears one. */
@@ -706,6 +713,13 @@ export function useGate(params: UseGateParams): UseGateResult {
   /** The dialog's search, bound to the snapshot this gate is running on. */
   const searchGuests = useCallback((query: string) => searchSnapshot(query), []);
 
+  /** The guest-list name behind a ticket number, for the approver's request list. */
+  const guestNameOf = useCallback(
+    (tokenId: string) => searchSnapshot(tokenId).find((row) => row.tokenId === tokenId)?.displayName ?? '',
+    [],
+  );
+  const overrideRequests = useOverrideRequests(eventId, context.state === 'override' && canApprove, guestNameOf);
+
   /**
    * The second path for when the snapshot cannot find them. The guest list is built from the
    * indexer's `Ticket` table, so a frozen indexer leaves a just-minted ticket off it — and the
@@ -730,7 +744,7 @@ export function useGate(params: UseGateParams): UseGateResult {
    * button that does nothing in front of a queue, so every ending is a sentence.
    */
   const submitOverride = useCallback(
-    async (pin: string, reason: OverrideReason, picked?: string): Promise<void> => {
+    async (pin: string, reason: OverrideReason, picked?: string, extra: OverrideSubmitExtra = {}): Promise<void> => {
       const fail = (detail: string, extra: Partial<OverrideOutcome> = {}): void =>
         machine.onOverrideResult({ status: 'failed', reason, detail, ...extra });
 
@@ -756,7 +770,15 @@ export function useGate(params: UseGateParams): UseGateResult {
 
       let submission;
       try {
-        submission = await sendOverride({ orgId, gateId, tokenId: BigInt(tokenId), reason });
+        submission = await sendOverride({
+          orgId,
+          eventId,
+          // An approval picked from a request is recorded at the gate the requester stands at.
+          gateId: extra.gateId !== undefined ? BigInt(extra.gateId) : gateId,
+          tokenId: BigInt(tokenId),
+          reason,
+          note: extra.note,
+        });
       } catch (error) {
         warn('gate', 'override was not sent', error);
         // Two endings the send helper raises before anything is signed: this account may not
@@ -787,6 +809,12 @@ export function useGate(params: UseGateParams): UseGateResult {
           fail(copy.override.unreachable, who);
           return;
         }
+        // The request callable's own refusal for an account that is not on the team (or lost its
+        // place since the dialog opened) — the same sentence as a denied route.
+        if (relayRefusalCode(error) === 'NOT_ALLOWED') {
+          fail(copy.override.denied, who);
+          return;
+        }
         fail(mapCallableDeny(error).detail, who);
         return;
       }
@@ -798,7 +826,7 @@ export function useGate(params: UseGateParams): UseGateResult {
         ...who,
       });
     },
-    [copy, gateId, machine, orgId],
+    [copy, eventId, gateId, machine, orgId],
   );
 
   const retry = useCallback(() => {
@@ -834,6 +862,7 @@ export function useGate(params: UseGateParams): UseGateResult {
     gateOpenStale,
     emulationUnavailable,
     canApprove,
+    overrideRequests,
     openOverride,
     searchGuests,
     searchGuestsOnChain,

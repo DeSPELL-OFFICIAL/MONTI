@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { deriveDetailView, deriveTicketState, splitTicketNumber } from './ticketState';
+import { deriveDetailView, deriveTicketState, shortTicketNumber } from './ticketState';
 
 const base = { ownerIsMe: true, revoked: false, checkIn: null, offer: null, now: 1_790_000_000 };
 
@@ -50,13 +50,14 @@ describe('deriveDetailView', () => {
   });
 });
 
-describe('splitTicketNumber', () => {
-  it('keeps the full number as text and sets the last four digits apart', () => {
-    const id = '1234567890123456789012345678901';
-    expect(splitTicketNumber(id)).toEqual({ head: '123456789012345678901234567', tail: '8901' });
+describe('shortTicketNumber', () => {
+  it('keeps two digits and the last four of a long number', () => {
+    const id = '7930739067677860193113749428633';
+    expect(shortTicketNumber(id)).toEqual({ lead: '42', tail: '8633' });
   });
 
   it('leaves a short number whole in the tail', () => {
-    expect(splitTicketNumber('42')).toEqual({ head: '', tail: '42' });
+    expect(shortTicketNumber('42')).toEqual({ lead: '', tail: '42' });
+    expect(shortTicketNumber('12345')).toEqual({ lead: '1', tail: '2345' });
   });
 });
