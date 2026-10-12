@@ -316,7 +316,7 @@ export const staffEn: typeof staffKo = {
     qrAlt: 'Gate registration code',
     errKeyUnavailable: 'This device cannot create a gate key. Use a different one.',
     errAuthRequired: 'Sign in first to request registration.',
-    signIn: 'Sign in with a phone number',
+    signIn: 'Sign in to continue',
     errNotYourGate: 'Someone else already requested registration for this device. Ask them to request it again, or ask the organizer.',
     errTooManyPending: 'Too many devices are waiting for approval. The organizer has to approve or clear one first.',
     errUnknownEvent: 'There is no event with that number. Check it again.',
