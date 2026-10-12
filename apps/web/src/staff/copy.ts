@@ -395,7 +395,7 @@ export const staffEn: typeof staffKo = {
   deny: {
     ALREADY_USED: 'Already checked in',
     WRONG_EVENT: 'Wrong event',
-    REVOKED: 'Ticket revoked',
+    REVOKED: 'Ticket cancelled',
     EXPIRED_CODE: 'That code has expired. Tap again',
     NO_TICKET: 'No ticket',
     GATE_CLOSED: 'This door is not open yet',
