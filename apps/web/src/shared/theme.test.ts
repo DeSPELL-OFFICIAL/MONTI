@@ -261,3 +261,24 @@ describe('motion, type and focus cleanup', () => {
     expect(block).toMatch(/transition-duration:\s*0\.001ms\s*!important/);
   });
 });
+
+/**
+ * The ticket detail pins Not used / Enter in a fixed bar over the foot of a long scroll (the
+ * door instructions sit just above it). Measured headless at 390×844 scrolled to the bottom, the
+ * last line ends ~70px above the bar; this keeps that true by rule: the screen reserves the bar's
+ * height plus the safe area, and the bar's own contents can never grow past that height.
+ */
+describe('the sticky action bar never covers the end of the scroll', () => {
+  const px = (name: string): number => Number.parseFloat(TOKENS.get(name) ?? 'NaN');
+
+  it('pads a screen holding the bar by the bar height and the safe area', () => {
+    const rule = /\.screen:has\(\.sticky-bar\)\s*\{([^}]*)\}/.exec(CSS)?.[1] ?? '';
+    expect(rule).toMatch(/padding-bottom:[^;]*var\(--sab\)[^;]*var\(--sticky-bar-h\)/);
+  });
+
+  it('fits the bar button and its 10px top and bottom padding inside the reserved height', () => {
+    const bar = /\n\.sticky-bar\s*\{([^}]*)\}/.exec(CSS)?.[1] ?? '';
+    expect(bar).toMatch(/padding:\s*10px var\(--s-4\) calc\(var\(--sab\) \+ 10px\)/);
+    expect(px('--tap') + 20).toBeLessThanOrEqual(px('--sticky-bar-h'));
+  });
+});
