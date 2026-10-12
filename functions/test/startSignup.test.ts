@@ -92,6 +92,7 @@ beforeEach(() => {
   docs.clear();
   directWrites = 0;
   transactions = 0;
+  delete process.env.AUTH_MODE;
 });
 
 describe('startSignup', () => {
@@ -109,7 +110,7 @@ describe('startSignup', () => {
 
     const user = snapshot(`${USERS}/uid-1`);
     expect(user.get('personId')).toBe(result.personId);
-    expect(user.get('locale')).toBe('ko');
+    expect(user.get('locale')).toBe('en');
     expect(user.get('chatOrder')).toEqual([]);
     // 색인 문서 id 와 같은 값이라야 번호를 풀지 않고도 phoneIndex 로 갈 수 있다.
     expect(user.get('phoneHmac')).toBe(hmacPhone(PHONE, KEY));
@@ -185,5 +186,66 @@ describe('startSignup', () => {
     } as never)) as { personId: string };
     expect(b.personId).not.toBe(a.personId);
     expect([...docs.keys()].filter((p) => p.startsWith(`${PHONE_INDEX}/`))).toHaveLength(2);
+  });
+});
+
+describe('startSignup — AUTH_MODE=open', () => {
+  const anonymous = { uid: 'anon-1', token: { firebase: { sign_in_provider: 'anonymous' } } };
+
+  beforeEach(() => {
+    process.env.AUTH_MODE = 'open';
+  });
+
+  it('starts an anonymous user with no phone fields and no phone index', async () => {
+    const result = (await wrapped({ data: {}, auth: anonymous } as never)) as { personId: string };
+    expect(result.personId).toMatch(/^0x[0-9a-f]{64}$/);
+
+    const person = snapshot(`${PERSONS}/${result.personId}`);
+    expect(person.get('status')).toBe('pending');
+    expect(person.get('kycLevel')).toBe(0);
+    expect(person.get('authMode')).toBe('open');
+    expect(person.get('account')).toBeUndefined();
+
+    const user = snapshot(`${USERS}/anon-1`);
+    expect(user.get('personId')).toBe(result.personId);
+    expect(user.get('locale')).toBe('en');
+    expect(user.get('chatOrder')).toEqual([]);
+    expect(user.get('phoneEnc')).toBeUndefined();
+    expect(user.get('phoneHmac')).toBeUndefined();
+    expect([...docs.keys()].filter((p) => p.startsWith(`${PHONE_INDEX}/`))).toHaveLength(0);
+    expect(transactions).toBe(1);
+    expect(directWrites).toBe(0);
+  });
+
+  it('returns the same personId on a repeat call and writes nothing the second time', async () => {
+    const first = (await wrapped({ data: {}, auth: anonymous } as never)) as { personId: string };
+    const second = (await wrapped({ data: {}, auth: anonymous } as never)) as { personId: string };
+    expect(second.personId).toBe(first.personId);
+    expect([...docs.keys()].filter((p) => p.startsWith(`${PERSONS}/`))).toHaveLength(1);
+    expect(transactions).toBe(1);
+  });
+
+  it('still runs the phone path (with its index) for a phone user', async () => {
+    const result = (await wrapped({ data: {}, auth } as never)) as { personId: string };
+    expect(snapshot(`${USERS}/uid-1`).get('phoneHmac')).toBe(hmacPhone(PHONE, KEY));
+    expect(snapshot(`${PERSONS}/${result.personId}`).get('authMode')).toBeUndefined();
+    expect(snapshot(`${PHONE_INDEX}/${hmacPhone(PHONE, KEY)}`).get('personId')).toBe(result.personId);
+  });
+
+  it('refuses a session that is neither anonymous nor phone', async () => {
+    await expect(
+      wrapped({ data: {}, auth: { uid: 'g-1', token: { firebase: { sign_in_provider: 'google.com' } } } } as never),
+    ).rejects.toThrow('PHONE_REQUIRED');
+    expect(docs.size).toBe(0);
+  });
+});
+
+describe('startSignup — AUTH_MODE=phone refuses anonymous users', () => {
+  it('answers PHONE_REQUIRED to an anonymous session when the flag is phone or unset', async () => {
+    const anonymous = { uid: 'anon-1', token: { firebase: { sign_in_provider: 'anonymous' } } };
+    await expect(wrapped({ data: {}, auth: anonymous } as never)).rejects.toThrow('PHONE_REQUIRED');
+    process.env.AUTH_MODE = 'phone';
+    await expect(wrapped({ data: {}, auth: anonymous } as never)).rejects.toThrow('PHONE_REQUIRED');
+    expect(docs.size).toBe(0);
   });
 });

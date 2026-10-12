@@ -261,6 +261,16 @@ describe('createTransferInvite', () => {
     expect(/[가-힣]/.test(smsText)).toBe(false);
   });
 
+  it('writes Korean only for a sender whose locale is ko, and English when the locale is missing', async () => {
+    givenUser('uid-sender', SENDER_PHONE, 'ko');
+    expect(/[가-힣]/.test((await givenInvite()).smsText)).toBe(true);
+
+    givenUser('uid-sender', SENDER_PHONE);
+    const { smsText } = await givenInvite();
+    expect(smsText).toContain('A ticket is waiting for you.');
+    expect(/[가-힣]/.test(smsText)).toBe(false);
+  });
+
   it('refuses a token the caller does not own', async () => {
     await expect(
       create({ data: { tokenId: '7', phoneE164: PHONE }, auth: outsiderAuth } as never),
@@ -307,6 +317,7 @@ describe('createTransferInvite', () => {
 
   it('adds one identity-verification sentence when the event requires it', async () => {
     chain.requireKyc = true;
+    givenUser('uid-sender', SENDER_PHONE, 'ko');
 
     const { smsText } = await givenInvite();
 
@@ -335,6 +346,7 @@ describe('createTransferInvite', () => {
 
   it('keeps crypto vocabulary out of the identity-verification sentence too', async () => {
     chain.requireKyc = true;
+    givenUser('uid-sender', SENDER_PHONE, 'ko');
     const korean = (await givenInvite()).smsText;
     givenUser('uid-sender', SENDER_PHONE, 'en');
     const english = (await givenInvite()).smsText;

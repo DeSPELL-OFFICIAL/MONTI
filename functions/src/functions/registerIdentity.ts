@@ -1,10 +1,12 @@
 import { FieldValue } from 'firebase-admin/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { identityAbi, type Hex, type PersonStatus } from '@monti/shared';
-import { ATTESTER_PK } from '../config.js';
+import { ATTESTER_PK, authMode } from '../config.js';
+import { predictAccount } from '../lib/account.js';
 import { sendSerialized } from '../lib/attesterLock.js';
 import { awaitFinalized, deployment, publicClient, sendAttesterTx } from '../lib/chain.js';
 import { mintSessionClaims } from '../lib/claims.js';
+import { ownerBytes } from '../lib/webauthn.js';
 import { DEVICES, PERSONS, USERS, assertStatusTransition, db } from '../lib/db.js';
 
 const B32_RE = /^0x[0-9a-fA-F]{64}$/;
@@ -77,6 +79,32 @@ async function settle(input: {
 }
 
 /**
+ * open 모드: 패스키가 없으니 **기기 키**가 소유자인 Coinbase Smart Wallet 주소를 계정으로 쓴다.
+ * 소유자 형식(64바이트 x||y)은 패스키 소유자와 같아서 `predictAccount` 를 그대로 쓴다.
+ *
+ * 팩토리 조회(eth_call)는 트랜잭션 **밖에서** 끝낸다. 트랜잭션 안에서는 그 사이 다른 호출이나
+ * 패스키 등록이 계정을 먼저 적었는지만 다시 보고 — 있으면 그 계정을 그대로 쓴다(패스키 계정은 덮지 않는다).
+ */
+async function deviceAccount(
+  personRef: FirebaseFirestore.DocumentReference,
+  deviceX: Hex,
+  deviceY: Hex,
+): Promise<Hex> {
+  const derived = await predictAccount(ownerBytes(deviceX, deviceY));
+  return db.runTransaction(async (tx) => {
+    const current = await tx.get(personRef);
+    const existing = current.get('account') as Hex | undefined;
+    if (existing) return existing;
+    tx.set(
+      personRef,
+      { account: derived, accountOwner: 'device', updatedAt: FieldValue.serverTimestamp() },
+      { merge: true },
+    );
+    return derived;
+  });
+}
+
+/**
  * 어테스터가 `Identity.register(personId, account, deviceX, deviceY, kycLevel)` 를 보낸다.
  * 서버가 가진 유일한 체인 쓰기 권한이고, 관객 키는 어디에도 없다.
  *
@@ -130,8 +158,11 @@ export const registerIdentity = onCall(
     if (status !== 'pending' && status !== 'active') {
       throw new HttpsError('failed-precondition', 'BAD_SIGNUP_STATE');
     }
-    const account = person.get('account') as Hex | undefined;
-    if (!account) throw new HttpsError('failed-precondition', 'PASSKEY_REQUIRED');
+    let account = person.get('account') as Hex | undefined;
+    if (!account) {
+      if (authMode() !== 'open') throw new HttpsError('failed-precondition', 'PASSKEY_REQUIRED');
+      account = await deviceAccount(personRef, device.deviceX, device.deviceY);
+    }
     // 가입은 언제나 0이다. 본인인증을 이미 통과한 사람을 다시 등록하는 경우만 1이 된다.
     const kycLevel = person.get('kycLevel') === 1 ? 1 : 0;
 

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { DEV_ORIGINS, REGION, RP_ID, RP_NAME, expectedOrigins } from '../src/config.js';
+import { AUTH_MODE, DEV_ORIGINS, REGION, RP_ID, RP_NAME, authMode, expectedOrigins } from '../src/config.js';
 
 /**
  * 서명 인증서의 SHA-256 을 base64url 로 쓴 값 — 패딩 없이 정확히 43글자다.
@@ -12,7 +12,7 @@ const STAFF_HASH = 'x5m2PJ8h2drdMq_6aS848UymRmR4kt6zna-vGQlGS2A';
  * `defineString` 은 `.value()` 를 부를 때 `process.env` 를 읽는다. 테스트 파일은 한 프로세스를
  * 나눠 쓰므로(`fileParallelism: false`) 여기서 건드린 값은 반드시 원래대로 돌려놓는다.
  */
-const ENV_KEYS = ['RP_ID', 'ANDROID_APK_KEY_HASH', 'DEV_ORIGINS'] as const;
+const ENV_KEYS = ['RP_ID', 'ANDROID_APK_KEY_HASH', 'DEV_ORIGINS', 'AUTH_MODE'] as const;
 const saved = new Map<string, string | undefined>(ENV_KEYS.map((key) => [key, process.env[key]]));
 
 afterEach(() => {
@@ -117,5 +117,22 @@ describe('config', () => {
     process.env.ANDROID_APK_KEY_HASH = '';
     process.env.DEV_ORIGINS = 'http://localhost:5173,,  ,';
     expect(expectedOrigins()).toEqual(['https://monti.despell.io', 'http://localhost:5173']);
+  });
+
+  it('ships phone as the deployed AUTH_MODE default', () => {
+    expect(AUTH_MODE.options.default).toBe('phone');
+  });
+
+  it("reads AUTH_MODE as open only for the exact value 'open'; anything else is phone", () => {
+    process.env.AUTH_MODE = 'open';
+    expect(authMode()).toBe('open');
+    process.env.AUTH_MODE = ' open ';
+    expect(authMode()).toBe('open');
+    for (const value of ['phone', '', 'OPEN', 'anonymous', 'true']) {
+      process.env.AUTH_MODE = value;
+      expect(authMode()).toBe('phone');
+    }
+    delete process.env.AUTH_MODE;
+    expect(authMode()).toBe('phone');
   });
 });
