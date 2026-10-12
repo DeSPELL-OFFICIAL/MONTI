@@ -124,6 +124,25 @@ describe('the organiser dashboard', () => {
     expect(await screen.findByText(new RegExp(`^${dash.guest} · 7954…7350 ·`))).toBeInTheDocument();
   });
 
+  it('reads the notices at once and shows their empty state while the indexer is still answering', async () => {
+    gql.mockReturnValue(new Promise(() => undefined));
+    listPinned.mockClear();
+    open();
+    expect(await screen.findByText(organizerCopy.en.announce.none)).toBeInTheDocument();
+    expect(listPinned).toHaveBeenCalledWith({ eventId: '5' });
+    expect(screen.queryByText(organizerCopy.en.announce.loading)).not.toBeInTheDocument();
+  });
+
+  it('shows the event while the attendee list is still on its way, without waiting on it', async () => {
+    listAttendees.mockReturnValueOnce(new Promise(() => undefined));
+    open();
+    expect(await screen.findByText(`${dash.sold} 40`)).toBeInTheDocument();
+    expect(screen.getByText(dash.attendees)).toBeInTheDocument();
+    expect(screen.queryByText(dash.none)).not.toBeInTheDocument();
+    expect(screen.queryByText(new RegExp(dash.checkins))).not.toBeInTheDocument();
+    expect(await screen.findByText(organizerCopy.en.announce.none)).toBeInTheDocument();
+  });
+
   it('says the title is loading, not that the event is unnamed, while its document is on its way', async () => {
     fetchEventMetadata.mockReturnValueOnce(new Promise(() => undefined));
     open();

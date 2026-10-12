@@ -41,30 +41,47 @@ export function Dashboard() {
   const [indexerTiers, setIndexerTiers] = useState<EnvioTier[]>([]);
   const [attendees, setAttendees] = useState<AttendeeRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [failed, setFailed] = useState(false);
+  const [attendeesLoading, setAttendeesLoading] = useState(true);
+  // Both reads failing is the one outage worth an alert; either alone leaves the other half usable.
+  const [indexFailed, setIndexFailed] = useState(false);
+  const [attendeesFailed, setAttendeesFailed] = useState(false);
+  const failed = indexFailed && attendeesFailed;
   // The cancel confirmation; nothing is sent without it.
   const [confirmingCancel, setConfirmingCancel] = useState(false);
   const [outcome, setOutcome] = useState<LifecycleResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [reload, setReload] = useState(0);
 
+  // The indexer row and the attendee list are two independent reads, and the callable is the
+  // slow one (a cold start runs to seconds). The screen waits on the indexer only: the event,
+  // its title read and the notices start as soon as it answers, and the attendee list fills in
+  // on its own when the callable does.
   useEffect(() => {
     if (eventId === '') return undefined;
     let cancelled = false;
+    setLoading(true);
+    setAttendeesLoading(true);
+    setIndexFailed(false);
+    setAttendeesFailed(false);
 
-    void (async () => {
-      setLoading(true);
-      const [indexed, rows] = await Promise.all([
-        gql<{ Event: EnvioEvent[]; Tier: EnvioTier[] }>(EVENT_QUERY, { id: eventId, eventId }).catch(() => null),
-        api.listAttendees({ eventId }).catch(() => null),
-      ]);
-      if (cancelled) return;
-      setEvent(indexed?.Event[0] ?? null);
-      setIndexerTiers(indexed?.Tier ?? []);
-      setAttendees(rows ?? []);
-      setFailed(indexed === null && rows === null);
-      setLoading(false);
-    })();
+    void gql<{ Event: EnvioEvent[]; Tier: EnvioTier[] }>(EVENT_QUERY, { id: eventId, eventId })
+      .catch(() => null)
+      .then((indexed) => {
+        if (cancelled) return;
+        setEvent(indexed?.Event[0] ?? null);
+        setIndexerTiers(indexed?.Tier ?? []);
+        setIndexFailed(indexed === null);
+        setLoading(false);
+      });
+    void api
+      .listAttendees({ eventId })
+      .catch(() => null)
+      .then((rows) => {
+        if (cancelled) return;
+        setAttendees(rows ?? []);
+        setAttendeesFailed(rows === null);
+        setAttendeesLoading(false);
+      });
 
     return () => {
       cancelled = true;
@@ -102,14 +119,6 @@ export function Dashboard() {
   // Until the name resolves the event goes by its number, never by a blank header.
   const placeholder = fmt(copy.home.eventFallback, { id: eventId });
 
-  if (loading) {
-    return (
-      <Screen title={placeholder}>
-        <Spinner />
-      </Screen>
-    );
-  }
-
   const entered = attendees.filter((row) => row.checkedIn).length;
   // The indexer's status when it has the row, the chain's while it lags. `chainStatus` already
   // applies the precedence (the indexer wins once it is not older than the chain), so it is the
@@ -124,98 +133,115 @@ export function Dashboard() {
 
   return (
     <Screen title={title || draftFallback?.title || placeholder}>
-      {failed ? <Alert tone="error">{dash.failed}</Alert> : null}
-      {/* The indexer has no row and the chain has no such event either: a number that was mistyped
-          on the home screen. When the chain *does* have it (an event created a moment ago), the row
-          below is rendered from the chain status instead — no warning, and the writes are offered. */}
-      {!failed && event === null && chainStatus.source === 'none' && !chainStatus.loading ? (
-        <Alert tone="warn">{dash.notIndexed}</Alert>
-      ) : null}
+      {/* Everything above the notices waits on the indexer row. The notices do not: they are their
+          own callable, and mounting them only after the indexer answered queued their read behind
+          it (and behind a cold start), which kept "Loading the notices" up for seconds. They sit at
+          one fixed place in the tree so the indexer answering never remounts them. */}
+      {loading ? (
+        <Spinner />
+      ) : (
+        <>
+          {failed ? <Alert tone="error">{dash.failed}</Alert> : null}
+          {/* The indexer has no row and the chain has no such event either: a number that was mistyped
+              on the home screen. When the chain *does* have it (an event created a moment ago), the row
+              below is rendered from the chain status instead — no warning, and the writes are offered. */}
+          {!failed && event === null && chainStatus.source === 'none' && !chainStatus.loading ? (
+            <Alert tone="warn">{dash.notIndexed}</Alert>
+          ) : null}
 
-      {outcome?.state === 'refused' ? <Alert tone="error">{life[outcome.problem]}</Alert> : null}
-      {/* The sentence comes from the write that ran, not from an indexer that may be behind. */}
-      {outcome?.state === 'done' ? <Alert tone="info">{life.cancelled}</Alert> : null}
-      {busy ? <Alert tone="info">{life.working}</Alert> : null}
+          {outcome?.state === 'refused' ? <Alert tone="error">{life[outcome.problem]}</Alert> : null}
+          {/* The sentence comes from the write that ran, not from an indexer that may be behind. */}
+          {outcome?.state === 'done' ? <Alert tone="info">{life.cancelled}</Alert> : null}
+          {busy ? <Alert tone="info">{life.working}</Alert> : null}
 
-      <h2>{dash.title}</h2>
-      <table>
-        <tbody>
-          {tiers.map((tier) => (
-            <tr key={tier.id}>
-              <td>{tier.name}</td>
-              <td>
-                {dash.sold} {tier.minted}
-              </td>
-              <td>
-                {dash.remaining} {BigInt(tier.supply) - BigInt(tier.minted)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+          <h2>{dash.title}</h2>
+          <table>
+            <tbody>
+              {tiers.map((tier) => (
+                <tr key={tier.id}>
+                  <td>{tier.name}</td>
+                  <td>
+                    {dash.sold} {tier.minted}
+                  </td>
+                  <td>
+                    {dash.remaining} {BigInt(tier.supply) - BigInt(tier.minted)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
 
-      <p>
-        {dash.checkins} {entered} / {attendees.length}
-      </p>
+          {attendeesLoading ? null : (
+            <p>
+              {dash.checkins} {entered} / {attendees.length}
+            </p>
+          )}
 
-      <h2>{dash.attendees}</h2>
-      {attendees.length === 0 ? <p>{dash.none}</p> : null}
-      <ul style={{ listStyle: 'none', padding: 0 }}>
-        {attendees.map((row) => (
-          <li key={row.tokenId}>
-            {attendeeLabel(row, dash.guest)} · {row.checkedIn ? dash.checkedIn : dash.notCheckedIn} · {dash.kyc}{' '}
-            {row.kycLevel >= 1 ? dash.kycYes : dash.kycNo}
-          </li>
-        ))}
-      </ul>
+          <h2>{dash.attendees}</h2>
+          {attendeesLoading ? <Spinner /> : null}
+          {!attendeesLoading && attendees.length === 0 ? <p>{dash.none}</p> : null}
+          <ul style={{ listStyle: 'none', padding: 0 }}>
+            {attendees.map((row) => (
+              <li key={row.tokenId}>
+                {attendeeLabel(row, dash.guest)} · {row.checkedIn ? dash.checkedIn : dash.notCheckedIn} · {dash.kyc}{' '}
+                {row.kycLevel >= 1 ? dash.kycYes : dash.kycNo}
+              </li>
+            ))}
+          </ul>
 
-      {/* Shown whatever the status is: the picture is the one part of a ticket that stays
-          editable once the event is public, which is exactly why it is not on the chain. */}
-      <EventArt
-        eventId={eventId}
-        tiers={tiers}
-        title={shownTitle}
-        startsAt={Number(event?.startsAt ?? draftFallback?.startsAt ?? 0)}
-      />
+          {/* Shown whatever the status is: the picture is the one part of a ticket that stays
+              editable once the event is public, which is exactly why it is not on the chain. */}
+          <EventArt
+            eventId={eventId}
+            tiers={tiers}
+            title={shownTitle}
+            startsAt={Number(event?.startsAt ?? draftFallback?.startsAt ?? 0)}
+          />
 
-      {/* 정산 설정 (Batch D): per-tier price + revenue split, set before publish and read-only once the
-          first ticket sells. Hidden by SettlementSection itself unless the feature is wired. */}
-      <SettlementSection eventId={eventId} tiers={tiers} />
+          {/* 정산 설정 (Batch D): per-tier price + revenue split, set before publish and read-only once the
+              first ticket sells. Hidden by SettlementSection itself unless the feature is wired. */}
+          <SettlementSection eventId={eventId} tiers={tiers} />
+        </>
+      )}
 
       <Announce eventId={eventId} />
 
-      <p>
-        <Link to={`/org/events/${eventId}/gates`}>{dash.gates}</Link>
-      </p>
+      {loading ? null : (
+        <>
+          <p>
+            <Link to={`/org/events/${eventId}/gates`}>{dash.gates}</Link>
+          </p>
 
-      {/* Only an approvalRequired event has a request queue; the count rides along when there is one. */}
-      {event?.approvalRequired ? (
-        <p>
-          <Link to={`/org/events/${eventId}/requests`}>
-            {dash.requests}
-            {pendingRequests.length > 0 ? ` (${pendingRequests.length})` : ''}
-          </Link>
-        </p>
-      ) : null}
+          {/* Only an approvalRequired event has a request queue; the count rides along when there is one. */}
+          {event?.approvalRequired ? (
+            <p>
+              <Link to={`/org/events/${eventId}/requests`}>
+                {dash.requests}
+                {pendingRequests.length > 0 ? ` (${pendingRequests.length})` : ''}
+              </Link>
+            </p>
+          ) : null}
 
-      {/* 행사 취소 is the one irreversible write here, so it sits at the very foot as a quiet
-          button, and asks before it sends anything. */}
-      {!confirmingCancel && status === 'Published' ? (
-        <Button variant="ghost" onClick={() => setConfirmingCancel(true)}>
-          {life.cancel}
-        </Button>
-      ) : null}
-      {confirmingCancel ? (
-        <Alert tone="warn">
-          {life.cancelConfirm}
-          <Button variant="danger" disabled={busy} onClick={() => void cancel()}>
-            {life.confirm}
-          </Button>
-          <Button variant="ghost" disabled={busy} onClick={() => setConfirmingCancel(false)}>
-            {life.back}
-          </Button>
-        </Alert>
-      ) : null}
+          {/* 행사 취소 is the one irreversible write here, so it sits at the very foot as a quiet
+              button, and asks before it sends anything. */}
+          {!confirmingCancel && status === 'Published' ? (
+            <Button variant="ghost" onClick={() => setConfirmingCancel(true)}>
+              {life.cancel}
+            </Button>
+          ) : null}
+          {confirmingCancel ? (
+            <Alert tone="warn">
+              {life.cancelConfirm}
+              <Button variant="danger" disabled={busy} onClick={() => void cancel()}>
+                {life.confirm}
+              </Button>
+              <Button variant="ghost" disabled={busy} onClick={() => setConfirmingCancel(false)}>
+                {life.back}
+              </Button>
+            </Alert>
+          ) : null}
+        </>
+      )}
     </Screen>
   );
 }
