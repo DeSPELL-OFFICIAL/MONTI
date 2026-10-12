@@ -81,8 +81,12 @@ function FinishSignupFirst() {
   const registration = useRegistration();
   const location = useLocation();
   if (registration === 'pending') {
-    const returnTo = encodeURIComponent(`${location.pathname}${location.search}`);
     const finishAt = authMode() === 'open' ? '/start' : '/signup/register';
+    // Same as RequireSession above: the exiting screen stays mounted for its slide-out and reads
+    // the new location, so without this it would redirect the finish screen to itself and nest
+    // the target inside its own returnTo.
+    if (location.pathname === finishAt) return null;
+    const returnTo = encodeURIComponent(`${location.pathname}${location.search}`);
     return <Navigate to={`${finishAt}?returnTo=${returnTo}`} replace />;
   }
   return <HealthyDeviceFirst registrationDone={registration === 'done'} />;
