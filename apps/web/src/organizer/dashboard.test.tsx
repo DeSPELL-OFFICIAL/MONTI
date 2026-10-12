@@ -116,6 +116,14 @@ describe('the organiser dashboard', () => {
     expect(listAttendees).toHaveBeenCalledWith({ eventId: '5' });
   });
 
+  it('names an attendee with no nickname as a guest with the ticket short number', async () => {
+    listAttendees.mockResolvedValueOnce([
+      { tokenId: '79545075164321394943918126137350', nickname: '', tier: 0, checkedIn: false, kycLevel: 0 as const },
+    ]);
+    open();
+    expect(await screen.findByText(new RegExp(`^${dash.guest} · 7954…7350 ·`))).toBeInTheDocument();
+  });
+
   it('says the title is loading, not that the event is unnamed, while its document is on its way', async () => {
     fetchEventMetadata.mockReturnValueOnce(new Promise(() => undefined));
     open();

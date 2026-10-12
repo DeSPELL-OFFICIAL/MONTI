@@ -9,6 +9,7 @@ import { useEventTitles } from '../shared/envio/useEventTitles';
 import { fmt } from '../shared/i18n';
 import { useEventRequests } from '../shared/envio/claimRequests';
 import { Announce } from './Announce';
+import { attendeeLabel } from './attendeeLabel';
 import { SettlementSection } from './settlement/SettlementSection';
 import { useOrganizerCopy } from './copy';
 import { EventArt } from './EventArt';
@@ -162,7 +163,7 @@ export function Dashboard() {
       <ul style={{ listStyle: 'none', padding: 0 }}>
         {attendees.map((row) => (
           <li key={row.tokenId}>
-            {row.nickname} · {row.checkedIn ? dash.checkedIn : dash.notCheckedIn} · {dash.kyc}{' '}
+            {attendeeLabel(row, dash.guest)} · {row.checkedIn ? dash.checkedIn : dash.notCheckedIn} · {dash.kyc}{' '}
             {row.kycLevel >= 1 ? dash.kycYes : dash.kycNo}
           </li>
         ))}
