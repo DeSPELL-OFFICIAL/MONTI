@@ -2,6 +2,10 @@ import { expect, type Page } from '@playwright/test';
 import { OTP_CODE, type Persona } from '../fixtures/personas';
 import { timed } from '../fixtures/timings';
 import { shot } from './shots';
+import { openStart } from './openStart';
+
+/** `E2E_AUTH_MODE=open`: the target build has no phone sign-in — a person is made by Get started. */
+export const OPEN_MODE = process.env.E2E_AUTH_MODE === 'open';
 
 /** Copy strings, verbatim from apps/web/src/shared/copy/en.ts — the selectors are the words. */
 const C = {
@@ -44,6 +48,15 @@ export interface SignupResult {
  * drives recovery as a user would. `recovered` in the result lets reuse logic record what happened.
  */
 export async function signUp(page: Page, persona: Persona): Promise<SignupResult> {
+  if (OPEN_MODE) {
+    // Open mode: no phone, no OTP, no passkey — one tap on /start makes a fresh person in this context.
+    await timed(persona.id, 'signup.open', async () => {
+      await openStart(page);
+      await page.waitForTimeout(1500);
+      await shot(page, `${persona.id}-after-get-started`);
+    });
+    return { recovered: false };
+  }
   await timed(persona.id, 'signup.phone', async () => {
     await page.goto('/signup/phone');
     await page.getByLabel(C.phoneLabel, { exact: true }).fill(persona.phone);

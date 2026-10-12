@@ -101,6 +101,32 @@ describe('Sheet', () => {
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 
+  it('dismisses on Escape when there is a way out, and ignores it when there is none', async () => {
+    const onDismiss = vi.fn();
+    const { unmount } = render(
+      <MotionProvider>
+        <Sheet label="이어서 쓸까요?" onDismiss={onDismiss}><p>본문</p></Sheet>
+      </MotionProvider>,
+    );
+    await settle();
+    fireEvent.keyDown(document, { key: 'Enter' });
+    expect(onDismiss).not.toHaveBeenCalled();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    unmount();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+
+    render(
+      <MotionProvider>
+        <Sheet label="이어서 쓸까요?"><p>본문</p></Sheet>
+      </MotionProvider>,
+    );
+    await settle();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
   it('keeps a summary sheet with no way out up when its scrim is tapped', async () => {
     const { container } = render(
       <MotionProvider>

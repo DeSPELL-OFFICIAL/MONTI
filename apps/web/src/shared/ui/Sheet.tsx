@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import type { PanInfo } from 'motion/react';
 import { m, SPRING, useReducedMotion } from '../motion';
 
@@ -36,6 +36,16 @@ const DISMISS_VELOCITY = 500;
  */
 export function Sheet({ label, children, onDismiss }: SheetProps) {
   const reduce = useReducedMotion();
+  // Escape leaves the same way a fling or a tap on the scrim does — the caller's own close path —
+  // matching the app's `<dialog>` modals. A sheet with no way out ignores it.
+  useEffect(() => {
+    if (onDismiss === undefined) return undefined;
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') onDismiss();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onDismiss]);
   const drag =
     onDismiss === undefined
       ? undefined
