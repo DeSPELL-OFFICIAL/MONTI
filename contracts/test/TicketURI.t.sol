@@ -89,9 +89,7 @@ contract TicketURITest is MontiTest {
         Ticket.Tier[] memory t = new Ticket.Tier[](1);
         t[0] = Ticket.Tier({name: tierName, priceUsdCents: 0, supply: 10, minted: 0, maxPerWallet: 1, seated: true});
         vm.prank(ORG_OWNER);
-        id = ticket.createEvent(m, t);
-        vm.prank(ORG_OWNER);
-        ticket.publishEvent(id);
+        id = ticket.publishEvent(m, t, _emptyPolicy());
     }
 
     function test_uriCarriesNameImageAndNotYetEnteredStatus() public view {
@@ -114,7 +112,7 @@ contract TicketURITest is MontiTest {
                 '"description":"MONTI on-chain admission. The chain decides, not our server.",',
                 '"image":"ipfs://bafyTestCid",',
                 '"attributes":[',
-                '{"trait_type":"Event","value":"1"},',
+                '{"trait_type":"Event","value":"1001"},',
                 '{"trait_type":"Tier","value":"General"},',
                 '{"trait_type":"Starts","display_type":"date","value":1800086400},',
                 '{"trait_type":"Seated","value":"false"},',

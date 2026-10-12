@@ -3,6 +3,7 @@ pragma solidity 0.8.31;
 
 import {MontiTest} from "./Base.t.sol";
 import {Ticket} from "../src/Ticket.sol";
+import {ITicket} from "../src/interfaces/ITicket.sol";
 import {P256Vectors} from "./utils/P256Vectors.sol";
 
 /// @notice 릴레이된 발급(설계 §2-3). claimFor/requestClaimFor 는 관객 기기 P-256 서명(ClaimAuth)이
@@ -25,9 +26,9 @@ contract TicketClaimForTest is MontiTest {
     function _auth(address account, uint256 eventId_, uint8 tier, uint256 nonce, uint64 deadline)
         internal
         view
-        returns (Ticket.ClaimAuth memory a, bytes memory sig)
+        returns (ITicket.ClaimAuth memory a, bytes memory sig)
     {
-        a = Ticket.ClaimAuth({eventId: eventId_, tier: tier, account: account, nonce: nonce, deadline: deadline});
+        a = ITicket.ClaimAuth({eventId: eventId_, tier: tier, account: account, nonce: nonce, deadline: deadline});
         (bytes32 r, bytes32 s) = vm.signP256(P256Vectors.DEVICE_PRIV, ticket.claimAuthDigest(a));
         sig = abi.encode(r, s);
     }
@@ -37,7 +38,7 @@ contract TicketClaimForTest is MontiTest {
     function test_memberClaimsFreeTicket() public {
         // tokenId 는 eventId<<96 | tier<<88 | serial 로 인코딩된다(설계 §12-1). 첫 티켓의 serial 은 1.
         uint256 expectedId = (eventId << 96) | uint256(1);
-        (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, eventId, 0);
+        (ITicket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, eventId, 0);
         vm.expectEmit(true, true, true, true);
         emit Claimed(expectedId, eventId, ALICE, 0);
         vm.prank(RELAYER);
@@ -57,7 +58,7 @@ contract TicketClaimForTest is MontiTest {
 
     /// @dev 게이트도 관객도 아닌 임의 EOA 가 유효한 승인서를 대신 제출할 수 있다(permissionless).
     function test_anyRelayerCanSubmit() public {
-        (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, eventId, 0);
+        (ITicket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, eventId, 0);
         vm.prank(address(0xBEEF));
         uint256 tokenId = ticket.claimFor(a, sig);
         assertEq(ticket.ownerOf(tokenId), ALICE);
@@ -77,7 +78,7 @@ contract TicketClaimForTest is MontiTest {
     // --- signature / auth failures -------------------------------------------------------------
 
     function test_badNonceRejected() public {
-        (Ticket.ClaimAuth memory a, bytes memory sig) =
+        (ITicket.ClaimAuth memory a, bytes memory sig) =
             _auth(ALICE, eventId, 0, 7, uint64(block.timestamp + 10 minutes));
         vm.expectRevert(Ticket.BadNonce.selector);
         ticket.claimFor(a, sig);
@@ -85,7 +86,7 @@ contract TicketClaimForTest is MontiTest {
 
     function test_expiredDeadlineRejected() public {
         vm.warp(T0 + 100);
-        (Ticket.ClaimAuth memory a, bytes memory sig) = _auth(ALICE, eventId, 0, 0, uint64(block.timestamp - 1));
+        (ITicket.ClaimAuth memory a, bytes memory sig) = _auth(ALICE, eventId, 0, 0, uint64(block.timestamp - 1));
         vm.expectRevert(Ticket.AuthExpired.selector);
         ticket.claimFor(a, sig);
     }
@@ -93,19 +94,19 @@ contract TicketClaimForTest is MontiTest {
     function test_deviceLockedRejected() public {
         vm.prank(ALICE);
         identity.lockDevice(ALICE);
-        (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, eventId, 0);
+        (ITicket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, eventId, 0);
         vm.expectRevert(Ticket.DeviceLocked.selector);
         ticket.claimFor(a, sig);
     }
 
     function test_nonMemberRejected() public {
-        (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(CAROL, eventId, 0);
+        (ITicket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(CAROL, eventId, 0);
         vm.expectRevert(Ticket.NotMember.selector);
         ticket.claimFor(a, sig);
     }
 
     function test_forgedSignatureRejected() public {
-        Ticket.ClaimAuth memory a = Ticket.ClaimAuth({
+        ITicket.ClaimAuth memory a = ITicket.ClaimAuth({
             eventId: eventId,
             tier: 0,
             account: ALICE,
@@ -119,14 +120,14 @@ contract TicketClaimForTest is MontiTest {
     }
 
     function test_malformedSignatureRejected() public {
-        (Ticket.ClaimAuth memory a,) = _signClaimAuth(ALICE, eventId, 0);
+        (ITicket.ClaimAuth memory a,) = _signClaimAuth(ALICE, eventId, 0);
         vm.expectRevert(Ticket.BadDeviceSignature.selector);
         ticket.claimFor(a, new bytes(63));
     }
 
     /// @dev 같은 승인서를 두 번 제출하면 두 번째는 nonce 가 이미 소비돼(BadNonce) 막힌다.
     function test_replayOfTheSameAuthRejected() public {
-        (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, eventId, 0);
+        (ITicket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, eventId, 0);
         ticket.claimFor(a, sig);
         vm.expectRevert(Ticket.BadNonce.selector);
         ticket.claimFor(a, sig);
@@ -135,20 +136,20 @@ contract TicketClaimForTest is MontiTest {
     // --- eligibility ---------------------------------------------------------------------------
 
     function test_perWalletLimitEnforced() public {
-        (Ticket.ClaimAuth memory a1, bytes memory s1) = _signClaimAuth(ALICE, eventId, 0);
+        (ITicket.ClaimAuth memory a1, bytes memory s1) = _signClaimAuth(ALICE, eventId, 0);
         ticket.claimFor(a1, s1);
-        (Ticket.ClaimAuth memory a2, bytes memory s2) = _signClaimAuth(ALICE, eventId, 0);
+        (ITicket.ClaimAuth memory a2, bytes memory s2) = _signClaimAuth(ALICE, eventId, 0);
         vm.expectRevert(Ticket.MaxPerWalletExceeded.selector);
         ticket.claimFor(a2, s2);
     }
 
     function test_soldOutRejected() public {
         uint256 soldOut = _oneSeatEvent();
-        (Ticket.ClaimAuth memory a1, bytes memory s1) = _signClaimAuth(ALICE, soldOut, 0);
+        (ITicket.ClaimAuth memory a1, bytes memory s1) = _signClaimAuth(ALICE, soldOut, 0);
         ticket.claimFor(a1, s1);
         assertEq(ticket.tiers(soldOut)[0].minted, 1);
 
-        (Ticket.ClaimAuth memory a2, bytes memory s2) = _signClaimAuth(BOB, soldOut, 0);
+        (ITicket.ClaimAuth memory a2, bytes memory s2) = _signClaimAuth(BOB, soldOut, 0);
         vm.expectRevert(Ticket.SoldOut.selector);
         ticket.claimFor(a2, s2);
     }
@@ -156,30 +157,28 @@ contract TicketClaimForTest is MontiTest {
     function test_saleWindowEnforced() public {
         vm.warp(T0 + 1 days + 1);
         {
-            (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, eventId, 0);
+            (ITicket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, eventId, 0);
             vm.expectRevert(Ticket.SaleClosed.selector);
             ticket.claimFor(a, sig);
         }
         vm.warp(T0 + 2 days + 1);
         {
-            (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, eventId, 0);
+            (ITicket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, eventId, 0);
             vm.expectRevert(Ticket.EventEnded.selector);
             ticket.claimFor(a, sig);
         }
     }
 
     function test_unknownTierRejected() public {
-        (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, eventId, 3);
+        (ITicket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, eventId, 3);
         vm.expectRevert(Ticket.UnknownTier.selector);
         ticket.claimFor(a, sig);
     }
 
-    function test_draftEventRejected() public {
-        Ticket.EventMeta memory m = ticket.eventMeta(eventId);
-        Ticket.Tier[] memory t = ticket.tiers(eventId);
-        vm.prank(ORG_OWNER);
-        uint256 draftId = ticket.createEvent(m, t);
-        (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, draftId, 0);
+    /// @dev v2 has no on-chain draft; an id that was never published reads as Draft (0) and is refused.
+    function test_unpublishedEventRejected() public {
+        uint256 draftId = 999_999;
+        (ITicket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, draftId, 0);
         vm.expectRevert(Ticket.EventNotPublished.selector);
         ticket.claimFor(a, sig);
     }
@@ -187,7 +186,7 @@ contract TicketClaimForTest is MontiTest {
     function test_kycRequiredRejectedForLevelZero() public {
         uint256 kycEventId = _kycEvent(orgId);
         _memberWithLevel(address(0xD0), 0xD0D0, 0);
-        (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(address(0xD0), kycEventId, 0);
+        (ITicket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(address(0xD0), kycEventId, 0);
         vm.expectRevert(Ticket.KycRequired.selector);
         ticket.claimFor(a, sig);
     }
@@ -206,12 +205,12 @@ contract TicketClaimForTest is MontiTest {
         uint256 apId = _approvalEvent();
         // 직접 발급은 막힌다.
         {
-            (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, apId, 0);
+            (ITicket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, apId, 0);
             vm.expectRevert(Ticket.ApprovalRequired.selector);
             ticket.claimFor(a, sig);
         }
         // 신청은 ClaimRequested 를 남긴다.
-        (Ticket.ClaimAuth memory ra, bytes memory rsig) = _signClaimAuth(ALICE, apId, 0);
+        (ITicket.ClaimAuth memory ra, bytes memory rsig) = _signClaimAuth(ALICE, apId, 0);
         vm.expectEmit(true, true, true, true);
         emit Ticket.ClaimRequested(apId, 1, ALICE, 0);
         uint256 rid = ticket.requestClaimFor(ra, rsig);
@@ -232,9 +231,7 @@ contract TicketClaimForTest is MontiTest {
         Ticket.Tier[] memory t = new Ticket.Tier[](1);
         t[0] = Ticket.Tier({name: "Only seat", priceUsdCents: 0, supply: 1, minted: 0, maxPerWallet: 1, seated: false});
         vm.prank(ORG_OWNER);
-        soldOutEventId = ticket.createEvent(m, t);
-        vm.prank(ORG_OWNER);
-        ticket.publishEvent(soldOutEventId);
+        soldOutEventId = ticket.publishEvent(m, t, _emptyPolicy());
     }
 
     function _approvalEvent() internal returns (uint256 apId) {
@@ -242,8 +239,6 @@ contract TicketClaimForTest is MontiTest {
         m.approvalRequired = true;
         Ticket.Tier[] memory t = ticket.tiers(eventId);
         vm.prank(ORG_OWNER);
-        apId = ticket.createEvent(m, t);
-        vm.prank(ORG_OWNER);
-        ticket.publishEvent(apId);
+        apId = ticket.publishEvent(m, t, _emptyPolicy());
     }
 }

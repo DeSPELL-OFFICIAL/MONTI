@@ -10,7 +10,7 @@ pragma solidity 0.8.31;
 ///         벡터와 같은 답을 낸다는 것을 못박으므로, 생성된 것과 파생된 것의 신뢰도는 같다.
 library P256Vectors {
     uint256 internal constant TOKEN_ID = 1;
-    uint256 internal constant EVENT_ID = 1;
+    uint256 internal constant EVENT_ID = 1001;
     uint256 internal constant GATE1_ID = 1;
     uint256 internal constant GATE2_ID = 2;
     bytes32 internal constant NONCE = 0x1111111111111111111111111111111111111111111111111111111111111111;

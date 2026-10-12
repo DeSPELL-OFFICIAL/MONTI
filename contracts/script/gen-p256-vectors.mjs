@@ -12,7 +12,7 @@ import {p256} from '@noble/curves/nist.js';
 import {sha256} from '@noble/hashes/sha2.js';
 
 const TOKEN_ID = 1n;
-const EVENT_ID = 1n;
+const EVENT_ID = 1001n; // v2: event ids start at 1001 (design D7)
 const GATE1_ID = 1n;
 const GATE2_ID = 2n;
 const NONCE = '11'.repeat(32);

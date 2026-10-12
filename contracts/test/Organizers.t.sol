@@ -8,6 +8,8 @@ contract OrganizersTest is Test {
     Organizers internal orgs;
     address internal constant OWNER = address(0x01);
     address internal constant OTHER = address(0x02);
+    /// @dev v2 D7: organizer ids start at 1001.
+    uint256 internal constant ORG = 1001;
 
     event OrganizerCreated(uint256 indexed orgId, address indexed owner);
     event OwnerTransferred(uint256 indexed orgId, address indexed from, address indexed to);
@@ -19,31 +21,31 @@ contract OrganizersTest is Test {
         vm.warp(1_800_000_000);
     }
 
-    function test_createOrganizerStartsAtOneAndIncrements() public {
+    function test_createOrganizerStartsAt1001AndIncrements() public {
         vm.expectEmit(true, true, false, false);
-        emit OrganizerCreated(1, OWNER);
+        emit OrganizerCreated(ORG, OWNER);
         uint256 a = orgs.createOrganizer(OWNER);
         uint256 b = orgs.createOrganizer(OTHER);
-        assertEq(a, 1);
-        assertEq(b, 2);
-        assertEq(orgs.ownerOf(1), OWNER);
-        assertEq(orgs.ownerOf(2), OTHER);
+        assertEq(a, ORG);
+        assertEq(b, ORG + 1);
+        assertEq(orgs.ownerOf(ORG), OWNER);
+        assertEq(orgs.ownerOf(ORG + 1), OTHER);
     }
 
     function test_ownerTransfer() public {
         orgs.createOrganizer(OWNER);
         vm.expectEmit(true, true, true, false);
-        emit OwnerTransferred(1, OWNER, OTHER);
+        emit OwnerTransferred(ORG, OWNER, OTHER);
         vm.prank(OWNER);
-        orgs.transferOwner(1, OTHER);
-        assertEq(orgs.ownerOf(1), OTHER);
+        orgs.transferOwner(ORG, OTHER);
+        assertEq(orgs.ownerOf(ORG), OTHER);
     }
 
     function test_nonOwnerCannotTransfer() public {
         orgs.createOrganizer(OWNER);
         vm.prank(OTHER);
         vm.expectRevert(Organizers.NotOwner.selector);
-        orgs.transferOwner(1, OTHER);
+        orgs.transferOwner(ORG, OTHER);
     }
 
     function test_setTicketOnlyOnceAndOnlyDeployer() public {
@@ -67,49 +69,49 @@ contract OrganizersTest is Test {
 
     function test_ownerAlwaysHasEveryPermission() public {
         orgs.createOrganizer(OWNER);
-        assertTrue(orgs.hasPermission(1, OWNER, orgs.PERM_CREATE_EVENT()));
-        assertTrue(orgs.hasPermission(1, OWNER, orgs.PERM_MANAGE_BUDGET()));
-        assertFalse(orgs.hasPermission(1, OTHER, orgs.PERM_CREATE_EVENT()));
+        assertTrue(orgs.hasPermission(ORG, OWNER, orgs.PERM_CREATE_EVENT()));
+        assertTrue(orgs.hasPermission(ORG, OWNER, orgs.PERM_MANAGE_BUDGET()));
+        assertFalse(orgs.hasPermission(ORG, OTHER, orgs.PERM_CREATE_EVENT()));
     }
 
     function test_setAdminGrantsOnlyTheGivenBits() public {
         orgs.createOrganizer(OWNER);
         uint32 permBits = orgs.PERM_CREATE_EVENT() | orgs.PERM_MANAGE_GATES();
         vm.expectEmit(true, true, false, true);
-        emit AdminSet(1, OTHER, 3);
+        emit AdminSet(ORG, OTHER, 3);
         vm.prank(OWNER);
-        orgs.setAdmin(1, OTHER, permBits);
+        orgs.setAdmin(ORG, OTHER, permBits);
 
-        assertTrue(orgs.hasPermission(1, OTHER, orgs.PERM_CREATE_EVENT()));
-        assertTrue(orgs.hasPermission(1, OTHER, orgs.PERM_MANAGE_GATES()));
-        assertFalse(orgs.hasPermission(1, OTHER, orgs.PERM_APPROVE_OVERRIDE()));
-        assertFalse(orgs.hasPermission(1, OTHER, orgs.PERM_MANAGE_MANAGERS()));
+        assertTrue(orgs.hasPermission(ORG, OTHER, orgs.PERM_CREATE_EVENT()));
+        assertTrue(orgs.hasPermission(ORG, OTHER, orgs.PERM_MANAGE_GATES()));
+        assertFalse(orgs.hasPermission(ORG, OTHER, orgs.PERM_APPROVE_OVERRIDE()));
+        assertFalse(orgs.hasPermission(ORG, OTHER, orgs.PERM_MANAGE_MANAGERS()));
     }
 
     function test_setAdminCanRevokeByPassingZero() public {
         orgs.createOrganizer(OWNER);
         vm.startPrank(OWNER);
-        orgs.setAdmin(1, OTHER, orgs.PERM_MANAGE_GATES());
-        orgs.setAdmin(1, OTHER, 0);
+        orgs.setAdmin(ORG, OTHER, orgs.PERM_MANAGE_GATES());
+        orgs.setAdmin(ORG, OTHER, 0);
         vm.stopPrank();
-        assertFalse(orgs.hasPermission(1, OTHER, orgs.PERM_MANAGE_GATES()));
+        assertFalse(orgs.hasPermission(ORG, OTHER, orgs.PERM_MANAGE_GATES()));
     }
 
     function test_onlyOwnerSetsAdmin() public {
         orgs.createOrganizer(OWNER);
         vm.prank(OTHER);
         vm.expectRevert(Organizers.NotOwner.selector);
-        orgs.setAdmin(1, OTHER, 1);
+        orgs.setAdmin(ORG, OTHER, 1);
     }
 
     function test_ownerAppointsManagerWithApprovalRight() public {
         orgs.createOrganizer(OWNER);
         vm.expectEmit(true, true, false, true);
-        emit ManagerSet(1, OTHER, true, true);
+        emit ManagerSet(ORG, OTHER, true, true);
         vm.prank(OWNER);
-        orgs.setManager(1, OTHER, true, true);
+        orgs.setManager(ORG, OTHER, true, true);
 
-        (bool exists, bool canApprove) = orgs.managerOf(1, OTHER);
+        (bool exists, bool canApprove) = orgs.managerOf(ORG, OTHER);
         assertTrue(exists);
         assertTrue(canApprove);
     }
@@ -117,8 +119,8 @@ contract OrganizersTest is Test {
     function test_requestOnlyManagerHasNoApprovalRight() public {
         orgs.createOrganizer(OWNER);
         vm.prank(OWNER);
-        orgs.setManager(1, OTHER, true, false);
-        (bool exists, bool canApprove) = orgs.managerOf(1, OTHER);
+        orgs.setManager(ORG, OTHER, true, false);
+        (bool exists, bool canApprove) = orgs.managerOf(ORG, OTHER);
         assertTrue(exists);
         assertFalse(canApprove);
     }
@@ -126,10 +128,10 @@ contract OrganizersTest is Test {
     function test_managerCanBeRemoved() public {
         orgs.createOrganizer(OWNER);
         vm.startPrank(OWNER);
-        orgs.setManager(1, OTHER, true, true);
-        orgs.setManager(1, OTHER, false, false);
+        orgs.setManager(ORG, OTHER, true, true);
+        orgs.setManager(ORG, OTHER, false, false);
         vm.stopPrank();
-        (bool exists, bool canApprove) = orgs.managerOf(1, OTHER);
+        (bool exists, bool canApprove) = orgs.managerOf(ORG, OTHER);
         assertFalse(exists);
         assertFalse(canApprove);
     }
@@ -138,12 +140,12 @@ contract OrganizersTest is Test {
         orgs.createOrganizer(OWNER);
         address admin = address(0x0A);
         vm.startPrank(OWNER);
-        orgs.setAdmin(1, admin, orgs.PERM_MANAGE_MANAGERS());
+        orgs.setAdmin(ORG, admin, orgs.PERM_MANAGE_MANAGERS());
         vm.stopPrank();
 
         vm.prank(admin);
-        orgs.setManager(1, OTHER, true, false);
-        (bool exists,) = orgs.managerOf(1, OTHER);
+        orgs.setManager(ORG, OTHER, true, false);
+        (bool exists,) = orgs.managerOf(ORG, OTHER);
         assertTrue(exists);
     }
 
@@ -151,11 +153,11 @@ contract OrganizersTest is Test {
         orgs.createOrganizer(OWNER);
         address admin = address(0x0A);
         vm.startPrank(OWNER);
-        orgs.setAdmin(1, admin, orgs.PERM_MANAGE_GATES());
+        orgs.setAdmin(ORG, admin, orgs.PERM_MANAGE_GATES());
         vm.stopPrank();
 
         vm.prank(admin);
         vm.expectRevert(Organizers.Unauthorized.selector);
-        orgs.setManager(1, OTHER, true, false);
+        orgs.setManager(ORG, OTHER, true, false);
     }
 }

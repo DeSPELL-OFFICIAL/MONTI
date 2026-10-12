@@ -59,8 +59,7 @@ abstract contract CheckInLateBase is MontiTest {
         t[0] = Ticket.Tier({name: "General", priceUsdCents: 0, supply: 100, minted: 0, maxPerWallet: 1, seated: false});
 
         vm.startPrank(ORG_OWNER);
-        eventId = ticket.createEvent(m, t);
-        ticket.publishEvent(eventId);
+        eventId = ticket.publishEvent(m, t, _emptyPolicy());
         vm.stopPrank();
 
         tokenId = _claimForFixture(ALICE, eventId, 0);
@@ -70,7 +69,7 @@ abstract contract CheckInLateBase is MontiTest {
         organizers.openGate(gateId);
         vm.stopPrank();
 
-        assertEq(eventId, P256Vectors.EVENT_ID, "vectors were generated for event 1");
+        assertEq(eventId, P256Vectors.EVENT_ID, "vectors were generated for event 1001");
         assertEq(gateId, P256Vectors.GATE1_ID, "vectors were generated for gate 1");
 
         deviceSig = _deviceSig(tokenId, _code());

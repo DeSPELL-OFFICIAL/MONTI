@@ -4,17 +4,22 @@ pragma solidity 0.8.31;
 import {MontiTest} from "./Base.t.sol";
 import {Ticket} from "../src/Ticket.sol";
 
+/// @notice Event lifecycle on v2: publishEvent creates an event already Published (no on-chain draft, design
+///         D2 — the publish-specific paths live in TicketPublish.t.sol); cancel and the derived Ended status.
 contract TicketEventTest is MontiTest {
     event EventCreated(uint256 indexed eventId, uint256 indexed orgId, address indexed creator);
+    event EventStatusChanged(uint256 indexed eventId, uint8 status);
 
     function setUp() public {
         _deployMonti();
     }
 
-    function test_createEventStoresMetaAndTiers() public {
+    function test_publishEventStoresMetaAndTiers() public {
         uint256 orgId = _org();
         vm.expectEmit(true, true, true, false);
-        emit EventCreated(1, orgId, ORG_OWNER);
+        emit EventCreated(1001, orgId, ORG_OWNER);
+        vm.expectEmit(true, false, false, true);
+        emit EventStatusChanged(1001, uint8(Ticket.EventStatus.Published));
         uint256 eventId = _freeEvent(orgId, 2, 1, true);
 
         Ticket.EventMeta memory m = ticket.eventMeta(eventId);
@@ -24,12 +29,27 @@ contract TicketEventTest is MontiTest {
         assertEq(m.regionCode, keccak256("KR-11"));
         assertEq(m.maxTransfers, 1);
         assertEq(ticket.eventOrg(eventId), orgId);
+        assertEq(uint8(ticket.eventStatus(eventId)), uint8(Ticket.EventStatus.Published));
 
         Ticket.Tier[] memory tiers = ticket.tiers(eventId);
         assertEq(tiers.length, 1);
         assertEq(tiers[0].name, "General");
         assertEq(tiers[0].minted, 0);
         assertEq(tiers[0].maxPerWallet, 2);
+    }
+
+    function test_publishedTierStartsUnmintedWhateverTheCallerSends() public {
+        uint256 orgId = _org();
+        Ticket.Tier[] memory t = _oneFreeTier();
+        t[0].minted = 77;
+        vm.prank(ORG_OWNER);
+        uint256 eventId = ticket.publishEvent(_draftMeta(orgId), t, _emptyPolicy());
+        assertEq(ticket.tiers(eventId)[0].minted, 0);
+    }
+
+    function test_unknownEventReadsAsDraft() public view {
+        assertEq(uint8(ticket.eventStatus(424242)), uint8(Ticket.EventStatus.Draft));
+        assertEq(ticket.eventOrg(424242), 0);
     }
 
     function test_nameAndSymbol() public view {
@@ -40,110 +60,46 @@ contract TicketEventTest is MontiTest {
         assertEq(ticket.CLOCK_SKEW(), 5);
     }
 
-    function test_createEventNeedsCreatePermission() public {
+    function test_publishEventNeedsCreatePermission() public {
         uint256 orgId = _org();
-        Ticket.EventMeta memory m = ticket.eventMeta(0);
-        m.orgId = orgId;
-        m.startsAt = T0 + 1 days;
-        m.endsAt = T0 + 2 days;
-        m.saleStart = T0;
-        m.saleEnd = T0 + 1 days;
-        Ticket.Tier[] memory t = new Ticket.Tier[](1);
-        t[0] = Ticket.Tier({name: "X", priceUsdCents: 0, supply: 1, minted: 0, maxPerWallet: 1, seated: false});
-
         vm.prank(ALICE);
         vm.expectRevert(Ticket.Unauthorized.selector);
-        ticket.createEvent(m, t);
+        ticket.publishEvent(_draftMeta(orgId), _oneFreeTier(), _emptyPolicy());
+
+        // an admin with only PERM_MANAGE_GATES (2) cannot publish either
+        vm.prank(ORG_OWNER);
+        organizers.setAdmin(orgId, ALICE, 2);
+        vm.prank(ALICE);
+        vm.expectRevert(Ticket.Unauthorized.selector);
+        ticket.publishEvent(_draftMeta(orgId), _oneFreeTier(), _emptyPolicy());
     }
 
-    function test_createEventRejectsEmptyTiersAndBadTimes() public {
+    function test_publishEventRejectsEmptyOrTooManyTiersAndBadTimes() public {
         uint256 orgId = _org();
-        Ticket.EventMeta memory m = ticket.eventMeta(0);
-        m.orgId = orgId;
-        m.startsAt = T0 + 1 days;
-        m.endsAt = T0 + 2 days;
-        m.saleStart = T0;
-        m.saleEnd = T0 + 1 days;
+        Ticket.EventMeta memory m = _draftMeta(orgId);
 
-        Ticket.Tier[] memory none = new Ticket.Tier[](0);
         vm.prank(ORG_OWNER);
         vm.expectRevert(Ticket.InvalidTiers.selector);
-        ticket.createEvent(m, none);
+        ticket.publishEvent(m, new Ticket.Tier[](0), _emptyPolicy());
 
-        Ticket.Tier[] memory t = new Ticket.Tier[](1);
-        t[0] = Ticket.Tier({name: "X", priceUsdCents: 0, supply: 1, minted: 0, maxPerWallet: 1, seated: false});
+        Ticket.Tier[] memory nine = new Ticket.Tier[](9);
+        for (uint256 i; i < 9; ++i) {
+            nine[i] = Ticket.Tier({name: "X", priceUsdCents: 0, supply: 1, minted: 0, maxPerWallet: 1, seated: false});
+        }
+        vm.prank(ORG_OWNER);
+        vm.expectRevert(Ticket.InvalidTiers.selector);
+        ticket.publishEvent(m, nine, _emptyPolicy());
+
         m.endsAt = m.startsAt - 1;
         vm.prank(ORG_OWNER);
         vm.expectRevert(Ticket.InvalidSchedule.selector);
-        ticket.createEvent(m, t);
-    }
+        ticket.publishEvent(m, _oneFreeTier(), _emptyPolicy());
 
-    event EventStatusChanged(uint256 indexed eventId, uint8 status);
-
-    function test_eventStartsAsDraftAndPublishes() public {
-        uint256 orgId = _org();
-        Ticket.EventMeta memory m = _draftMeta(orgId);
-        Ticket.Tier[] memory t = _oneFreeTier();
-
+        m = _draftMeta(orgId);
+        m.saleEnd = m.saleStart;
         vm.prank(ORG_OWNER);
-        uint256 eventId = ticket.createEvent(m, t);
-        assertEq(uint8(ticket.eventStatus(eventId)), uint8(Ticket.EventStatus.Draft));
-
-        vm.expectEmit(true, false, false, true);
-        emit EventStatusChanged(eventId, uint8(Ticket.EventStatus.Published));
-        vm.prank(ORG_OWNER);
-        ticket.publishEvent(eventId);
-        assertEq(uint8(ticket.eventStatus(eventId)), uint8(Ticket.EventStatus.Published));
-    }
-
-    function test_updateEventMetaOnlyWhileDraft() public {
-        uint256 orgId = _org();
-        Ticket.EventMeta memory m = _draftMeta(orgId);
-        vm.prank(ORG_OWNER);
-        uint256 eventId = ticket.createEvent(m, _oneFreeTier());
-
-        m.titleHash = keccak256("New title");
-        vm.prank(ORG_OWNER);
-        ticket.updateEventMeta(eventId, m, _oneFreeTier());
-        assertEq(ticket.eventMeta(eventId).titleHash, keccak256("New title"));
-
-        vm.prank(ORG_OWNER);
-        ticket.publishEvent(eventId);
-        vm.prank(ORG_OWNER);
-        vm.expectRevert(Ticket.NotDraft.selector);
-        ticket.updateEventMeta(eventId, m, _oneFreeTier());
-    }
-
-    event EventMetaUpdated(uint256 indexed eventId);
-
-    /// @notice A Draft edit rewrites meta and tiers in place, so the indexer only learns about it if the
-    ///         write announces itself. The emit is the whole change: the stored state must be what it was.
-    function test_updateEventMetaEmitsEventMetaUpdated() public {
-        uint256 orgId = _org();
-        Ticket.EventMeta memory m = _draftMeta(orgId);
-        vm.prank(ORG_OWNER);
-        uint256 eventId = ticket.createEvent(m, _oneFreeTier());
-
-        m.titleHash = keccak256("Second title");
-        m.venueHash = keccak256("Busan");
-        Ticket.Tier[] memory t = _oneFreeTier();
-        t[0].supply = 42;
-
-        vm.expectEmit(true, false, false, false);
-        emit EventMetaUpdated(eventId);
-        vm.prank(ORG_OWNER);
-        ticket.updateEventMeta(eventId, m, t);
-
-        Ticket.EventMeta memory stored = ticket.eventMeta(eventId);
-        assertEq(stored.titleHash, keccak256("Second title"));
-        assertEq(stored.venueHash, keccak256("Busan"));
-        assertEq(stored.orgId, orgId, "orgId stays the one createEvent recorded");
-        assertEq(uint8(ticket.eventStatus(eventId)), uint8(Ticket.EventStatus.Draft), "still a draft");
-
-        Ticket.Tier[] memory tiers = ticket.tiers(eventId);
-        assertEq(tiers.length, 1);
-        assertEq(tiers[0].supply, 42);
-        assertEq(tiers[0].minted, 0, "a replaced tier starts unminted");
+        vm.expectRevert(Ticket.InvalidSchedule.selector);
+        ticket.publishEvent(m, _oneFreeTier(), _emptyPolicy());
     }
 
     function test_cancelEventAndEndedIsDerived() public {
@@ -154,6 +110,8 @@ contract TicketEventTest is MontiTest {
         assertEq(uint8(ticket.eventStatus(eventId)), uint8(Ticket.EventStatus.Ended), "past endsAt is Ended");
 
         vm.warp(T0);
+        vm.expectEmit(true, false, false, true);
+        emit EventStatusChanged(eventId, uint8(Ticket.EventStatus.Cancelled));
         vm.prank(ORG_OWNER);
         ticket.cancelEvent(eventId);
         assertEq(uint8(ticket.eventStatus(eventId)), uint8(Ticket.EventStatus.Cancelled));
@@ -167,6 +125,12 @@ contract TicketEventTest is MontiTest {
         vm.prank(ALICE);
         vm.expectRevert(Ticket.Unauthorized.selector);
         ticket.cancelEvent(eventId);
+    }
+
+    function test_cancelUnknownEventRejected() public {
+        vm.prank(ORG_OWNER);
+        vm.expectRevert(Ticket.UnknownEvent.selector);
+        ticket.cancelEvent(424242);
     }
 
     function test_cancelEventRejectedWhenAlreadyClosed() public {

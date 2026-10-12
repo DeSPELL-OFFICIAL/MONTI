@@ -1,6 +1,21 @@
 # MONTI 데모 데이 런북 — Monad Metropolis 발표 (2026-10-13)
 
-작성 2026-10-09 (D-4) · 대상 체인 Monad testnet(10143) · RPC `https://testnet-rpc.monad.xyz` · 웹 `https://monti.despell.io`
+작성 2026-10-09 (D-4) · **v2 개정 2026-10-12** · 대상 체인 Monad testnet(10143) · RPC `https://testnet-rpc.monad.xyz` · 웹 `https://monti.despell.io`
+
+> **v2 개정판 읽는 법 (2026-10-12).** 트랜잭션 다이어트(v2)는 **10-12 20:00 KST GO/NO-GO** 결과로 쓸지 정한다.
+> 이 문서는 두 갈래를 함께 담는다. **"v2 전환 시"** 표시가 붙은 부분은 GO일 때, **"v1 유지 시"** 표시나
+> 기존 숫자(주소·가스·잔액)는 NO-GO(v1 그대로)일 때 쓴다. 표시가 없는 부분은 공통이다.
+> v2 라이브 수치는 **10-12 오전 v2 Run 1**(운영 도메인 `monti.despell.io`에 v2 웹을 잠시 올려 하니스 V3·V4·V5를 돌린 뒤
+> v1로 되돌림, 행사 1001)에서 채웠다 — 세부는 §7 "v2 Run 1". 아직 정해지지 않은 값(v2 인덱서 id 등)은 "(K6 후 기입)"으로 남겨 둔다.
+> 하드 컷오프 **10-13 09:00 KST** —
+> 그 뒤로는 전환도 롤백도 하지 않고, 그때 살아 있는 쪽으로 시연한다.
+>
+> **v2에서 달라지는 점 (대표용 5줄)**
+> 1. 주최자: 초안 작성 → 정산 규칙은 초안 안에서 편집 → **"공개하기" 한 번**으로 행사 생성 + 정산 규칙 + 공개가 끝난다. 정산 규칙은 공개하는 순간 고정(수정은 공개 전 초안에서만).
+> 2. 단말기(스태프 기기): 신청 → 승인 **1번**이면 바로 열린다(별도 "열기" 없음. 닫기/다시 열기/폐기만 남음).
+> 3. 관객(유료): **"결제하고 받기" 한 번**이 티켓 발급 + 대금 보관을 함께 처리한다. 실패하면 티켓도 청구도 없다(중간 상태 없음).
+> 4. 수동 승인: 권한자는 승인 1건. 권한 없는 스태프의 "요청"은 서버에 기록되고 승인자 화면에 5초마다 뜬다.
+> 5. 닉네임은 서버에 기록된다. 행사·주최자 번호는 **1001부터** 시작한다.
 
 > 누가 무엇을: **대표**(=창업자) = 무대 발표·폰 조작·승인 담당(비개발자). **보조**(=운영 에이전트) =
 > 맥북에서 명령 실행·잔액/인덱서 모니터·장애 복구 담당. 이 문서는 대표가 무대에서 그대로 따라 읽는 용도다.
@@ -15,17 +30,19 @@
 
 **고정 주소 (Monad testnet 10143)**
 
-| 이름 | 주소 | 용도 |
-|---|---|---|
-| Identity | `0x10Fa9977363c40240381BEEfFc2D997BC9Edcd6b` | 신원 |
-| Organizers | `0xAF80CbfDD08284E3aae67FFaaf20A27E281C360A` | 주최자/권한 |
-| Ticket | `0x7E1fdfCB3688C5b0539101cEAE6a7Ee5bD9b51Cf` | 티켓·입장(usedAt) |
-| Forwarder | `0xb19c37374f9aAf8b0A0a4499080369E93AFB4B5F` | 릴레이 위임전송(ERC-2771 P-256) |
-| **SettlementVault(금고)** | `0xA84FDb64C9DDc3B25eF8BDeA58561BDbE53ABD69` | 정산 정책·에스크로·분배 |
-| USDC(Circle 테스트, 6dp) | `0x534b2f3A21130d7a60830c2Df862319e593943A3` | 분배에 쓰는 실제 테스트 스테이블 |
-| Treasury(전송/예치 + 플랫폼 5% 수취) | `0xAe6D18fA7dC1e2512a2dC7DaE1d4640D7D786Bb2` | USDC 예치자. `VITE_ADDR_PLATFORM` 과 동일 |
-| Relayer(릴레이어, 가스 단일 지불처) | `0xFA93A9dB40a4396a8CdcF63991FA8615d1A35fFd` | 모든 릴레이 tx 가스 |
-| Deployer(운영 지갑) | `0x509ed82E0FCaE0c8A6cdE6Ddeb12eb5dc836BCf3` | 배포·충전 재원 |
+v2는 시작 블록 **70161104** 에서 배포됐고(커밋 `130f425`, 배선 점검 19/19 OK), 행사·주최자 번호는 **1001부터**다.
+
+| 이름 | **v2 전환 시** | **v1 유지 시** | 용도 |
+|---|---|---|---|
+| Identity | `0x1EDFE1BC63e4239e8fB1c62249a33B78BAFC4B27` | `0x10Fa9977363c40240381BEEfFc2D997BC9Edcd6b` | 신원 |
+| Organizers | `0x18134b640912A6f54e83B30DD079039627173dca` | `0xAF80CbfDD08284E3aae67FFaaf20A27E281C360A` | 주최자/권한 |
+| Ticket | `0x8544c531A3EF7f702fe3A64Ff20D57bA774d9edC` | `0x7E1fdfCB3688C5b0539101cEAE6a7Ee5bD9b51Cf` | 티켓·입장(usedAt) |
+| Forwarder | `0xcE6DC3040A500545604d0Bb6c594493d4Bd1ddbb` | `0xb19c37374f9aAf8b0A0a4499080369E93AFB4B5F` | 릴레이 위임전송(ERC-2771 P-256) |
+| **SettlementVault(금고)** | `0xDC3DDd274bb22a112ba8A120De471037aeE52925` | `0xA84FDb64C9DDc3B25eF8BDeA58561BDbE53ABD69` | 정산 정책·에스크로·분배 (v2: 결제 `purchase` = 발급+보관 1건) |
+| USDC(Circle 테스트, 6dp) | `0x534b2f3A21130d7a60830c2Df862319e593943A3` (변동 없음) | 동일 | 분배에 쓰는 실제 테스트 스테이블 |
+| Treasury(전송/예치 + 플랫폼 5% 수취) | `0xAe6D18fA7dC1e2512a2dC7DaE1d4640D7D786Bb2` (변동 없음) | 동일 | USDC 예치자. `VITE_ADDR_PLATFORM` 과 동일. **v2: 유료 발급 가스도 트레저리가 냄** |
+| Relayer(릴레이어, 가스 지불처) | `0xFA93A9dB40a4396a8CdcF63991FA8615d1A35fFd` (변동 없음) | 동일 | 무료 받기·입장·주최자 동작 릴레이 가스 |
+| Deployer(운영 지갑) | `0x74f75f4Dce3b04ea18f73E862b5a009781cE4eA2` (v2 새 배포자 겸 금고 owner) | `0x509ed82E0FCaE0c8A6cdE6Ddeb12eb5dc836BCf3` (옛 키 — v1에서만) | 배포·충전 재원 |
 
 **잔액/배선 — 2026-10-10 Run 7(최종 리허설) 직후 라이브 확인값** (보조가 당일 아침 재확인, §3 T-30 점검):
 
@@ -40,6 +57,19 @@
 | vault `depositor(treasury)` | true | true | true | OK |
 | **인덱서(Envio)** | 1개 Active · `is_hyper_sync=true` · lag<100 | 동결 — 폴백으로 Run 5 통과 | 새 인덱서(d6a478c) 정상 | 당일 아침 재확인 — §3·§4 |
 
+**v2 전환 시 — 잔액/배선 기준 (위 표는 v1 값, v2는 아래로 읽는다)**
+
+| 항목 | 목표 | 최근 기록 | 상태 |
+|---|---|---|---|
+| 트레저리 MON (**v2: 유료 발급 가스를 여기서 냄**) | **≥ 1** | **3.612** (v2 Run 1 후, 10-12 10:11; 3.726에서 −0.114) | 당일 아침 재확인 |
+| 릴레이어 MON | ≥ 5 | **5.761** (v2 Run 1 후; 5.922에서 −0.161. v1 Run 8 후 기록 8.143과 차이 있음) | **기준 5에 근접 — GO 전 충전 권장** |
+| attester(가입·주최자 등록 가스) MON | — (가입 1건 ≈ 0.021) | **1.462** (v2 Run 1 후; −0.071) | 당일 아침 재확인 |
+| v2 운영(deployer `0x74f7…4eA2`) MON | ≥ 3 | 8.32 (배포 직후 03:40) | 당일 아침 재확인 |
+| 트레저리 USDC | ≥ $30 × (구매 예정 건수 + 2) | **$63.0** (v2 Run 1 후; $72.5 − $10 − $10 + $10 환불 + $0.5 플랫폼 몫) | **공식(1건 $90)에 모자람 — 창업자 충전 20:00까지** |
+| USDC 허용량 트레저리 → v2 금고 | **최대값(max)** | approve 완료(tx `0xfbf5a4d5…f2bd`) | §3-15에서 재확인 |
+| v2 금고 `tokenAllowed(USDC)` / `depositor(treasury)` | true / true | 배포 스크립트가 설정, 점검 19/19 OK | OK |
+| **인덱서(Envio)** | 1개 Active · `is_hyper_sync=true` · lag<100 | v2 인덱서 id (K6 후 기입) | v1 배포 삭제 후 v2 시작 |
+
 **지금 상태 요약:** 핵심 돈의 흐름 전체가 **2026-10-09 운영(production)에서 끝까지 라이브 검증됨**
 (행사 14번, 한 세션): 정산 규칙 확정 → **$30 결제** → **입장(수동 승인)** → **약 1초 안에 자동 분배**
 (아티스트 18 / 공연장 6 / 기획 4.5 / MONTI 1.5 USDC, **정확히 일치**) → 영수증 **"정산 완료"**.
@@ -50,6 +80,15 @@
 수동 승인 3.03초 → **같은 초에 자동 분배** → 영수증 "정산 완료"(승인 클릭 후 7.57초), 분배
 MONTI 0.5 / 아티스트 6 / 공연장 2 / 기획 1.5, 환불 구간도 화면에서 5.98초에 "환불됨". 세부는 §7.
 
+> **위 검증 전부는 v1 기준이다.** v2 전환 시에는 컨트랙트가 새로 배포됐으므로 같은 흐름(공개 1건 → 결제 1건 →
+> 수동 승인 → 자동 분배 → 환불)을 스테이징 하니스(V4·V5)와 운영 도메인 리허설(V10)로 다시 통과시켜야 한다.
+> **v2 Run 1 결과 (10-12 10:04–10:11 KST, 운영 도메인, 행사 1001, $10 등급, V3·V4·V5 모두 첫 시도 PASS):**
+> 결제 클릭→완료 **7.36초**(서버 첫 호출 — 콜드 스타트 4.3초 포함) / **2.20초**(두 번째, 예열 상태) · 수동 승인 **3.02초**
+> (하니스 폴링 기준; 서버 처리 실측 1.8–2.1초) · 영수증 "정산 완료" 승인 후 **약 6–7초**(스크린샷 기준, 미검증) ·
+> 환불됨 **6.77초**(확인 시트 포함, 하니스 관측 9.0초) · 첫 공개 **38초**(콜드 스타트 5회 = 24.5초).
+> 느린 구간은 전부 **us-east4 함수 콜드 스타트**가 원인 → §3 "T-30 / T-10 예열"(최소 인스턴스 1 + 예열 루프)로 막는다.
+> tx 수·가스·잔액은 §7 "v2 Run 1". **무대 리허설(V10)은 아직** — GO 후 운영 도메인에서 따로 돌린다.
+
 **무엇이 라이브로 검증됐나 (settle-h Run 5, 행사 14, 운영):**
 - 정산 규칙 확정(아티스트60/공연장20/기획15 + MONTI5%) → 온체인 `getPolicy` v1(합 100%) → 공개 → 공개 `/settlement/:id` 규칙 렌더 **PASS**.
 - $30 결제 → 영수증 **"보관 중"** → **수동 승인** 입장 → **인라인 자동 분배 ~1초** → 영수증 **"정산 완료"** **PASS**.
@@ -59,8 +98,14 @@ MONTI 0.5 / 아티스트 6 / 공연장 2 / 기획 1.5, 환불 구간도 화면�
 **아직 미검증 / 확인 필요 — 데모 전:**
 - ~~관객 "환불받기" 버튼 UI 한 구간~~ → **10-10 Run 6b 통과**(환불받기 → 환불됨 2.5초, 온체인 환불 확인).
 - 검증용 테스트 번호는 10-10에 `+821000000011…20`(코드 123456)으로 교체됨(옛 01~10은 소진).
-  **사용한 번호: …11–…16 및 …19. 남은(미사용) 번호: …17, …18, …20.**
+  **사용한 번호: …11–…16 및 …19, 그리고 10-12 v2 Run 1에서 …17(주최자)·…18(관객 A)·…21(관객 B). …11은 Run 1 스모크에서 로그인만(가입 없음).
+  남은(미사용) 번호: …20(무대 관객 전용, 끝까지 미사용), …22–…27.**
   리허설·데모는 반드시 미사용 번호로 — 이미 쓴 번호는 `/recover`(재설정, 하루 한도)로 빠진다.
+  **v2 전환 시:** 미사용 …17, …18, **…20(= 무대 관객 전용, 끝까지 미사용)**, 그리고 하니스용 신규 **…21–27**
+  (`E2E_PERSONA_OFFSET=20` → persona-01…07). **무대 계정(주최자·관객)은 전환 후 운영 도메인에서 새로 가입**해야 한다 —
+  v1 계정과 스테이징 도메인 계정은 v2에서 쓸 수 없다(기기 키가 다른 곳에 있고 v2 신원 장부에도 없음).
+  **주의(10-12 확인):** v1에서 가입한 계정은 v2에서 **로그인은 되지만** 첫 결제·입장에서 일반 오류로 실패하고 `/recover`도 막힌다.
+  창업자 실번호처럼 v2에서도 써야 하는 번호는 **GO 전에 `reset-persons --phone`으로 초기화**한다(§3 GO 절차 1번).
 - **금고 USDC $72.5**(10-11 충전 후 $72.5 = $30 결제 2건분; 10-10 Run 7 후 $42.0 → Run 8 후 $32.5 → 충전). 무대 전에 대표가 `faucet.circle.com`에서 한 번 더 충전하는 것을 권장(§3 "반드시 지킬 4가지" 3번).
 - **Run 8(10-10, 수정 후 회귀) PASS**(행사 16, $10 등급, 테스트 번호 …14/15/16): 결제 확정 7.36초(Run 7의 9.45초에서 단축), 영수증 "정산 완료"는 승인 클릭 후 7.56초, 환불 구간 화면 6.53초. 세부는 §7.
 - **분배 트리거(옛 gap 4) 해소됨:** 수동 승인 확정 시 백엔드가 **인라인으로 바로 분배**(5분 주기 sweep은 백업). 10-09 실측 ~1초.
@@ -74,25 +119,27 @@ MONTI 0.5 / 아티스트 6 / 공연장 2 / 기획 1.5, 환불 구간도 화면�
 1. **문제.** 공연 티켓 시장은 ① 암표(남의 티켓을 비싸게 되팖)와 ② 불투명한 정산(돈이 누구에게
    얼마씩 가는지 아무도 못 봄)으로 망가져 있다.
 2. **MONTI.** 티켓을 **본인에게 귀속**(기기·신원에 묶임 → 자유 재판매 불가)시키고, 수익 분배 규칙을
-   **공개 전에 못 박아** 블록체인에 올린다. 관객에게는 **web3 단어·지갑이 전혀 안 보인다**(전화번호
-   로그인·카드 결제·영수증뿐).
+   **공개 전에 못 박아** 누구나 볼 수 있는 공개 장부에 올린다. 관객에게는 **어려운 기술 용어가 전혀 안
+   보인다**(전화번호 로그인·카드 결제·영수증뿐).
 3. **하이라이트 장면.** 관객이 **입장하는 순간 1초 안에** 티켓값이 아티스트·공연장·기획·MONTI
    계정으로 **자동 분배**되고, **누구나 공개 페이지**에서 "누가 무슨 명목으로 얼마 받았는지" 실시간
-   확인한다. 조작이 불가능한 공개 장부 — 이것이 "왜 블록체인인가"의 답이다.
+   확인한다. 조작이 불가능한 공개 장부 — 이것이 "왜 이렇게 만들었나"의 답이다.
 
 ### 7분 버전 (3분 + 아래 보강)
-4. **왜 Monad인가.** ① **0.3초 확정** → 입장과 동시에 분배가 체감상 즉시 끝난다. ② **P-256 서명
-   가속기(precompile)** → 폰 기기키 서명을 싸고 빠르게 검증(지갑·시드문구 없이 StrongBox 키로 서명).
-   ③ Monad는 가스를 "쓴 만큼"이 아니라 **한도(gas limit)로 과금** → 이 특성 때문에 비싼 페이마스터
-   (ERC-4337)를 버리고 **릴레이어가 대신 내는 일반 위임전송(ERC-2771 Forwarder)**으로 단순화했다.
-   그 결과 외부 번들러·예치금·스테이크·사전배포 트랜잭션이 전부 사라졌다.
-5. **비용/수익으로 못 박기.** 티켓 1장 전체 가스 ≈ **0.075 MON ≈ ₩3**, 무료 행사 100명 ≈ 4.32 MON
-   ≈ ₩173. 수수료는 **5% + ₩500 ≈ ₩2,000**(₩3만 티켓) → 수수료가 가스를 **약 650배** 덮는다.
-   "비용은 제약이 아니다. 투명성과 즉시성이 가치다."
+4. **왜 이 기반(Monad)인가.** ① **0.3초 만에 확정** → 입장과 동시에 분배가 체감상 즉시 끝난다.
+   ② 폰 안의 보안 칩에 든 키로 본인 확인을 싸고 빠르게 처리 → 비밀번호도 복구 문구도 필요 없다.
+   ③ 처리 비용을 "쓴 만큼"이 아니라 **정해 둔 한도로 매기는 특성** 때문에, 값비싼 대리 결제 장치를
+   버리고 **우리 서버가 대신 내주는 단순한 방식**으로 정리했다. 외부 중개 서버·예치금·사전 준비
+   작업이 전부 사라졌다.
+5. **비용/수익으로 못 박기.** 티켓 1장 처리 비용 ≈ **₩3**, 무료 행사 100명 ≈ **₩173** (v1 실측 기준;
+   **v2 전환 시** 10-12 실측: 유료 티켓 1장(결제 + 입장 + 분배) ≈ **₩4**, 이때 배수는 "약 500배"로 말한다).
+   수수료는 **5% + ₩500 ≈ ₩2,000**(₩3만 티켓) → 수수료가 처리
+   비용을 **약 650배**(v2: 약 500배) 덮는다. "비용은 제약이 아니다. 투명성과 즉시성이 가치다."
 6. **한국 상용 경로(규제).** 원화 스테이블 법이 아직 없어, 한국에서는 **라이선스 PG(토스 등)·정산
-   대행이 실제 돈을 집행**하고 MONTI는 **정산 규칙·장부(온체인=유일 진실원본)만** 제공한다. 고객
-   돈을 직접 보관·이체하지 않아 전자금융업 등록 없이 운영(법률 자문 확인 중). 온체인 USDC 분배는
-   **오늘 데모/테스트넷용**이며, 원화 스테이블이 합법화되면 같은 금고에 토큰만 추가하면 된다.
+   대행이 실제 돈을 집행**하고 MONTI는 **정산 규칙·공개 장부(조작 불가한 유일한 원본)만** 제공한다.
+   고객 돈을 직접 보관·이체하지 않아 전자금융업 등록 없이 운영(법률 자문 확인 중). 오늘 시연의
+   분배는 **테스트용 달러 스테이블로 실제 실행**되는 데모이며, 원화 스테이블이 합법화되면 같은
+   금고에 원화 수단만 추가하면 된다.
 
 > 말투 팁: 어려운 단어("에스크로·bps·ERC-2771")는 입에 올리지 말 것. "금고에 잠긴다 / 지분 % /
 > 대신 내주는 전송" 으로 말한다.
@@ -107,8 +154,8 @@ MONTI 0.5 / 아티스트 6 / 공연장 2 / 기획 1.5, 환불 구간도 화면�
 | # | 장면 | 화면 | 누르는 버튼(카피) | 예상 대기 | 무대 멘트 |
 |---|---|---|---|---|---|
 | 1 | 사전 준비 보여주기 | `/settlement/<행사id>` (공개 페이지) | (없음, 열어두기) | 즉시 | "공연 하나를 미리 열어뒀습니다. 수익은 아티스트 60·공연장 20·기획 15·MONTI 5%로 나뉜다고 **공개 전에** 못 박았고, 지금 이 페이지는 누구나 봅니다." |
-| 2 | 관객 가입 | 폰, **`/signup/phone`** (주소창에 직접) | 번호 입력 → 코드 입력 → 패스키 등록 → **"준비가 끝났어요"** → 주소창에 **`/claim/<행사id>` 다시 열기** | ~15초 | "관객은 전화번호로만 가입합니다. 외울 비밀번호도, 따로 설치할 것도 없습니다." (보조 메모: 미사용 테스트 번호 `+821000000017, …18, …20` 중 하나, 코드 123456. 가입이 끝나면 앱이 **탐색 홈**으로 가므로 행사 주소를 다시 연다. `/signup` 단독 주소는 없음 — 탐색 홈으로 튕긴다) |
-| 3 | 결제하고 받기 | 폰, `/claim/<행사id>` | **"결제하고 받기 $30.00"** → 카드 시트 → "결제" (**한 번만**) | 카드 시트 즉시 / 발급 확정 ~9초 | "테스트 결제로 30달러를 냅니다. 화면엔 '테스트 결제예요'라고 떠요. 티켓이 발급되고, 낸 돈은 **행사 금고에 잠깁니다**." (행사 가격이 **$30**인지 D-1에 확인) |
+| 2 | 관객 가입 | 폰, **`/signup/phone`** (주소창에 직접) | 번호 입력 → 코드 입력 → 패스키 등록 → **"준비가 끝났어요"** → 주소창에 **`/claim/<행사id>` 다시 열기** | ~15초 | "관객은 전화번호로만 가입합니다. 외울 비밀번호도, 따로 설치할 것도 없습니다." (보조 메모: 미사용 테스트 번호 `+821000000017, …18, …20` 중 하나(…17·…18은 10-12 v2 Run 1에서 사용됨 → 실제 남은 것은 …20, …22–…27), 코드 123456 — **v2 전환 시 무대 관객은 …20 고정**이고 **운영 도메인에서 새로 가입한 계정**이어야 한다. 가입이 끝나면 앱이 **탐색 홈**으로 가므로 행사 주소를 다시 연다. `/signup` 단독 주소는 없음 — 탐색 홈으로 튕긴다) |
+| 3 | 결제하고 받기 | 폰, `/claim/<행사id>` | **"결제하고 받기 $30.00"** → 카드 시트 → "결제" (**한 번만**) | 카드 시트 즉시 / 발급 확정 **v2: 약 2초(예열 후) · 예열 안 하면 7–8초** · v1 유지 시 ~9초 | "테스트 결제로 30달러를 냅니다. 화면엔 '테스트 결제예요'라고 떠요. 티켓이 발급되고, 낸 돈은 **행사 금고에 잠깁니다**." (행사 가격이 **$30**인지 D-1에 확인. **v2 전환 시** 이 한 번의 "결제"가 발급과 보관을 함께 처리 — 실패하면 티켓도 청구도 없으니 다시 누르면 된다) |
 | 4 | 영수증(보관 중) | 폰, 영수증 = `/tickets/<티켓번호>` | (자동 표시) | 즉시 | "영수증이 나왔고, 지금은 돈이 '보관 중'입니다. 아직 아무에게도 안 갔어요." |
 | 5 | 입장 | 스태프 화면 → **수동 승인(티켓 번호로 검색)** | 티켓 번호 **끝 4자리** 검색 → 승인 (NFC 탭은 **네이티브 스태프 앱이 있을 때만**) | 입장 기록 ~3초 | "입장합니다. 스태프가 티켓을 확인하고 들여보내는 순간—" (보조 메모: 브라우저 게이트는 NFC·QR을 못 읽고 조용히 대기만 한다. 티켓 번호는 10-10 밤 웹 배포 후 관객 티켓 상세에 "티켓 번호 …"로 표시 — 그 전까지는 **미리 카드에 적어 둔다**) |
 | 6 | **자동 분배** | 공개 `/settlement/<행사id>` | (자동 갱신, 5초 폴링) | **분배 ~1–5초** 뒤 타일 갱신 | "보세요, 아티스트·공연장·기획·MONTI 계정에 방금 자동으로 들어왔습니다. 아티스트 18달러, 공연장 6, 기획 4.5, MONTI 1.5. 명목·태그까지 다 공개됩니다." |
@@ -118,16 +165,18 @@ MONTI 0.5 / 아티스트 6 / 공연장 2 / 기획 1.5, 환불 구간도 화면�
 > **무대 원칙 5개** (리뷰에서 나온 철칙 — 무대 위에선 이것만 기억)
 > 1. **가입한 그 폰·그 브라우저만 쓴다.** 홈화면 앱으로 전환·다른 기기·시크릿 탭 금지(로그인이 풀린다).
 > 2. **"결제"는 한 번만 누른다.** 오류가 나도 다시 누르지 말고 `/tickets/<티켓번호>`를 먼저 열어 확인.
+>    (**v2 전환 시:** 화면에 "결제가 완료되지 않았어요 · 청구되지 않았어요"가 뜨면 티켓도 청구도 없는 것이니 **다시 눌러도 된다**. 아무 문구 없이 20초 넘게 멈춰 있을 때만 다시 누르지 말고 위처럼 먼저 확인.)
 > 3. **입장은 수동 승인으로**(티켓 번호 끝 4자리로 검색).
 > 4. **화면은 직접 주소로 연다** — `/claim/<id>`, `/tickets/<id>`, `/settlement/<id>`. 둘러보기·내 티켓
 >    목록은 목록 서버(인덱서)에 기대므로 피한다.
 > 5. **한 번에 한 사람만 조작.** 심사위원은 준비된 폰으로 안내. **발표 10분 전 워밍업 1회**
 >    (로그인 + 무료 받기, 또는 수동 승인 1회 — 첫 호출이 3–8초 느림).
+>    **v2 전환 시:** 보조가 §3 "T-30 / T-10 예열"을 돌려 둔다(서버를 미리 깨워 둠). 대표는 따로 할 일 없음.
 
 **핵심 사수 5개**(이것만 되면 스토리 완성): 정책 설정 → 예치(결제) → **입장 시 자동 분배** →
 **공개 정산 장부** → 영수증. 나머지(노쇼 자동화·환불 라이브)는 말로 설명해도 된다.
 
-**결제 디테일:** ₩30,000 ≈ 30 tUSD(6dp). 카드 UI만 목업이고, **돈의 이동(예치·분배)은 Monad
+**결제 디테일 (보조 메모 — 기술 용어 허용, 무대에서 읽지 않음):** ₩30,000 ≈ 30 tUSD(6dp). 카드 UI만 목업이고, **돈의 이동(예치·분배)은 Monad
 테스트넷에서 진짜 테스트 USDC로 실제 실행**된다. 분배 수취인은 데모용 테스트 주소
 (아티스트 `0x1111…`, 공연장 `0x2222…`, 기획 `0x3333…`), 플랫폼 5%는 Treasury `0xAe6D…6Bb2`.
 정책 배열에서 **플랫폼 라인이 첫 번째**(row 0)임에 유의(화면엔 "MONTI 플랫폼"으로 표기).
@@ -148,7 +197,10 @@ MONTI 0.5 / 아티스트 6 / 공연장 2 / 기획 1.5, 환불 구간도 화면�
 3. **금고 USDC ≥ $30 × (구매 예정 건수 + 2).** 데모 1건이면 $90, 2건이면 $120. **현재 $72.5(10-11 충전 후 $72.5 = $30 결제 2건분;
    10-10 Run 7 후 $42 → Run 8 후 $32.5)** → 공식(1건 $90)에는 아직 모자라니 **무대 전 faucet 1회 더 충전 권장**. 모자란 채로 두 번째 결제를 하면 결제창은 성공으로
    보이는데 영수증이 **"처리 중이에요"에서 영원히 멈춘다**(§4). 10-09엔 구매 1건·환불 1건 후 $51.5였음.
+   **v2 전환 시:** 돈이 모자라면 멈추지 않고 **결제창에서 즉시 실패**한다(티켓·청구 없음). 대신 트레저리가 금고에 낼 수 있어야
+   하므로 **트레저리 → v2 금고 USDC 허용량이 최대값(max)** 인지 함께 본다(§3-15 2번).
 4. **전송(릴레이어) MON ≥ 5.** 10-09 종료 시 8.67, **10-10 Run 7 후 8.394**로 충분. 부족하면 운영 지갑에서 충전(§3-3).
+   **v2 전환 시 추가:** **트레저리 MON ≥ 1**(유료 발급 가스를 트레저리가 냄. 현재 3.73). v2 운영 지갑은 `0x74f7…4eA2`(옛 `0x509e…BCf3`는 v1에서만).
 
 ### 준비 명령 공통 (보조)
 ```bash
@@ -198,14 +250,23 @@ cd /Users/moomi/Downloads/z03.Vibe_Coding/MONTI/MONTI-prod
    fnm exec --using=22 pnpm --filter monti-functions exec tsx scripts/reset-persons.ts --all        # 드라이런
    # 대표 "지워" 확인 후: ... --all --yes
    ```
+   **[v2 전환 시] `--all` 금지** — 지울 번호만 `--phone` 단건으로(§3 GO 절차 1번). `--all`은 v1 시절 절차다.
 7. **행사 사전 생성 + 정책 확정 + 공개** (무대에선 구매·입장만 하도록).
    - **관리자 번호 선택(E2E_ADMIN 교훈):** **한 번 가입에 쓴 번호는 다음에 `/recover`(재설정)로
      빠진다.** 테스트 번호는 `+821000000011…20`(코드 123456), **10-10 기준 미사용은 …17, …18, …20**
-     (…11–…16·19는 사용됨). 그러니 ① **아직 안 쓴 테스트 번호**로 새로 가입하거나 ② 쓴 번호면 `/recover` →
+     (…11–…16·19는 사용됨). **10-12 v2 Run 1 후 미사용은 …20(무대 관객 전용)과 …22–…27뿐**(…17·…18·…21은 Run 1에서 v2로 가입). 그러니 ① **아직 안 쓴 테스트 번호**로 새로 가입하거나 ② 쓴 번호면 `/recover` →
      "새로 설정하기"로 재설정한 뒤 진행한다. (관객 폰 번호와 관리자 번호를 **서로 다르게**.)
-   - 주최자 폰: 행사 생성 → `/org/events/<id>` **정산 설정**에서 가격 $30, 아티스트60/공연장20/
+   - **[v1 유지 시]** 주최자 폰: 행사 생성 → `/org/events/<id>` **정산 설정**에서 가격 $30, 아티스트60/공연장20/
      기획15 입력(MONTI 5% 고정 라인은 자동, 합계 100% 강제) → **"정산 규칙 확정"**(기기서명) →
      **공개하기**. 확인: `/settlement/<id>` 에 규칙 렌더 + 온체인 `getPolicy(<id>)` 합 10000.
+   - **[v2 전환 시]** 주최자 폰(**운영 도메인에서 새로 가입한 번호**): 행사 만들기(초안, 가격 $30) → 같은 초안의
+     **정산 규칙**에서 아티스트60/공연장20/기획15 입력(MONTI 5% 고정 라인 자동, 합계 100% 강제) → **"공개하기" 한 번**
+     (되돌릴 수 없다는 확인 시트 → 확인). 이 한 번이 행사 생성 + 정산 규칙 + 공개이며 **정산 규칙은 이 순간 고정**된다
+     (바꾸려면 공개 전 초안에서만; 공개 후에는 새 행사). 첫 공개 때만 주최자 등록이 앞서 1건 더 간다(1회성).
+     행사 번호는 **1001 이상**. 확인: `/settlement/<id>` 에 규칙 렌더 + `getPolicy(<id>)` 합 10000·고정(frozen) +
+     `eventStatus(<id>)=1`.
+   - **[v2 전환 시] 스태프 단말기:** 브라우저 스태프 화면에서 **게이트 신청 → 주최자가 승인 1번** → 바로 열림
+     (별도 "열기" 없음) → PIN 설정. 잠시 닫았다면 "다시 열기"만 쓴다. 등록 후 인덱서 없이도 단말기 목록이 보이는지 확인.
 8. **드레스 리허설 full run**: §2 순서 그대로 1회. **수동 승인 → 인라인 자동 분배**가 되는지 확인
    (10-10 Run 7: 같은 초에 분배). 보조는 분배 누락 시 수동 `release` / 스케줄러 강제 실행(§4)을 손에 익힌다.
 9. **백업 영상 촬영**: 리허설 성공분을 통째로 녹화(화면공유/인덱서 실패 대비).
@@ -214,39 +275,167 @@ cd /Users/moomi/Downloads/z03.Vibe_Coding/MONTI/MONTI-prod
 
 ### 당일 아침 (10-13)
 11. §0 잔액표 **재확인**(USDC·MON 3종), 인덱서 **1개만 Active·is_hyper_sync=true·lag<100** 재확인(위 GraphQL).
-12. 사전 생성 행사 **상태 재확인**: `/settlement/<id>` 렌더 + `Ticket.eventStatus(<id>)=1`.
+12. 사전 생성 행사 **상태 재확인**: `/settlement/<id>` 렌더 + `Ticket.eventStatus(<id>)=1`
+    (**v2 전환 시:** v2 Ticket 주소로, 행사 번호는 1001 이상).
 13. 관객·관리자 테스트 번호 로그인 **각 1회 리허설**(/recover 안 걸리는지). 무대 관객 역할은
-    **아직 한 번도 안 쓴 번호**(10-10 기준 …17·18·20 중, D-1에 쓴 번호 제외)로 남겨 둔다 —
+    **아직 한 번도 안 쓴 번호**(10-10 기준 …17·18·20 중, D-1에 쓴 번호 제외; **v2 전환 시 …20 고정** — …17·…18은 10-12 Run 1에서 사용됨)로 남겨 둔다 —
     쓴 번호는 `/recover`로 빠지고 하루 한도가 있다.
 14. 미러링·소리·백업 영상 파일 열어두기.
 15. **T-30 읽기 전용 점검**(보조, 아무것도 바꾸지 않는 조회만):
     ```bash
-    export R=https://testnet-rpc.monad.xyz EV=<행사id>
-    # 1) MON 잔액 — 릴레이어 ≥5, 금고 ≥0.5
+    export R=https://testnet-rpc.monad.xyz EV=<행사id>   # v2 행사 id는 1001 이상
+    export USDC=0x534b2f3A21130d7a60830c2Df862319e593943A3 TREASURY=0xAe6D18fA7dC1e2512a2dC7DaE1d4640D7D786Bb2
+    # [v2 전환 시] 주소 (v1 유지 시는 아래 주석의 v1 주소로 바꿔 실행)
+    export TICKET=0x8544c531A3EF7f702fe3A64Ff20D57bA774d9edC VAULT=0xDC3DDd274bb22a112ba8A120De471037aeE52925
+    # [v1 유지 시] export TICKET=0x7E1fdfCB3688C5b0539101cEAE6a7Ee5bD9b51Cf VAULT=0xA84FDb64C9DDc3B25eF8BDeA58561BDbE53ABD69
+    # 1) MON 잔액 — 릴레이어 ≥5, 트레저리 ≥1 (v2: 유료 발급 가스를 트레저리가 냄. v1은 ≥0.5)
     cast balance 0xFA93A9dB40a4396a8CdcF63991FA8615d1A35fFd --rpc-url $R --ether
-    cast balance 0xAe6D18fA7dC1e2512a2dC7DaE1d4640D7D786Bb2 --rpc-url $R --ether
-    # 2) 금고 USDC — ≥ 30e6 × (구매 예정 건수 + 2)   (6dp: 90000000 = $90)
-    cast call 0x534b2f3A21130d7a60830c2Df862319e593943A3 "balanceOf(address)(uint256)" 0xAe6D18fA7dC1e2512a2dC7DaE1d4640D7D786Bb2 --rpc-url $R
+    cast balance $TREASURY --rpc-url $R --ether
+    # 2) 트레저리 USDC — ≥ 30e6 × (구매 예정 건수 + 2)   (6dp: 90000000 = $90)
+    cast call $USDC "balanceOf(address)(uint256)" $TREASURY --rpc-url $R
+    # 2b) [v2 전환 시] 트레저리 → 금고 USDC 허용량 — 최대값이어야 함 (115792089237316195423570985008687907853269984665640564039457584007913129639935)
+    cast call $USDC "allowance(address,address)(uint256)" $TREASURY $VAULT --rpc-url $R
     # 3) 릴레이어 nonce — 두 값이 같아야 함(다르면 막힌 전송이 있음)
     cast nonce 0xFA93A9dB40a4396a8CdcF63991FA8615d1A35fFd --rpc-url $R
     cast nonce 0xFA93A9dB40a4396a8CdcF63991FA8615d1A35fFd --rpc-url $R --block pending
     # 4) 인덱서 lag < 100 — 90초 동안 3번 샘플(§3 D-3 GraphQL의 chain_metadata) vs:
     cast block-number --rpc-url $R
     # 5) 행사 상태 = 1
-    cast call 0x7E1fdfCB3688C5b0539101cEAE6a7Ee5bD9b51Cf "eventStatus(uint256)(uint8)" $EV --rpc-url $R
+    cast call $TICKET "eventStatus(uint256)(uint8)" $EV --rpc-url $R
+    # 5b) 금고 배선 — 둘 다 true
+    cast call $VAULT "tokenAllowed(address)(bool)" $USDC --rpc-url $R
+    cast call $VAULT "depositor(address)(bool)" $TREASURY --rpc-url $R
     # 6) 정산 문서
     curl -s "https://firestore.googleapis.com/v1/projects/mon-ti/databases/(default)/documents/settlements/$EV" | head -c 600
     # 7) 백엔드 함수·스케줄러·최근 오류
-    gcloud functions list --regions=us-east1 --project=mon-ti --format="table(name,state)"
-    gcloud scheduler jobs describe firebase-schedule-reconcilePending-us-east1 --location=us-east1 --project=mon-ti --format="value(state,lastAttemptTime)"
+    # [v2 전환 시] 함수는 us-east4(codebase v2). 스케줄러는 v1(us-east1) 전부 PAUSED, v2(us-east4) ENABLED 여야 함
+    #   (단 scripts/ops/go-switch.sh 는 reconcilePending·dailyExport·processDeletions·closeEndedChats 4개만 바꾼다 —
+    #    relayerHealth 는 v1·v2 둘 다 ENABLED 로 남는다. 5개 전부 멈추려면 아래 GO 절차의 수동 명령을 쓴다)
+    gcloud functions list --regions=us-east4 --project=mon-ti --format="table(name,state)"
+    gcloud scheduler jobs list --location=us-east4 --project=mon-ti --format="table(name,state)"
+    gcloud scheduler jobs list --location=us-east1 --project=mon-ti --format="table(name,state)"
+    # [v1 유지 시]
+    #   gcloud functions list --regions=us-east1 --project=mon-ti --format="table(name,state)"
+    #   gcloud scheduler jobs describe firebase-schedule-reconcilePending-us-east1 --location=us-east1 --project=mon-ti --format="value(state,lastAttemptTime)"
     gcloud logging read 'severity>=ERROR' --freshness=30m --project=mon-ti --limit=20
     # 8) 웹 응답
     curl -sI https://monti.despell.io | head -1
     # 9) 메타데이터 게이트웨이 — 200, <1 s 정상 (행사 제목·홈 목록용)
     curl -s -o /dev/null -w '%{http_code} %{time_total}' https://olive-high-octopus-713.mypinata.cloud/ipfs/bafkreidwm5mmjfpzfsqqlhcde4iawvzihl6y6ui7z6ixsyvoi2kqpsgw3a
     ```
-    합격: MON 기준 충족 · USDC 기준 충족 · nonce 두 값 같음 · lag<100 꾸준히 전진 · `eventStatus=1` ·
-    정산 문서 존재 · 함수 ACTIVE · 스케줄러 ENABLED · 최근 30분 ERROR 없음(또는 설명 가능) · `HTTP/2 200`.
+    합격: MON 기준 충족 · USDC 기준 충족 · (v2) 허용량 최대값 · nonce 두 값 같음 · lag<100 꾸준히 전진 · `eventStatus=1` ·
+    (v2) 금고 배선 true/true · 정산 문서 존재 · 함수 ACTIVE · 스케줄러 상태가 위 기대와 일치(v1 유지 시 v1 ENABLED) ·
+    최근 30분 ERROR 없음(또는 설명 가능) · `HTTP/2 200`.
+
+### T-30 / T-10 예열 — 보조 전용 (v2 전환 시)
+
+**왜:** 10-12 v2 Run 1의 느린 구간(첫 공개 38초, 첫 결제 7.36초, 환불 6.77초)은 **전부 us-east4 함수 콜드 스타트**였다
+(공개 = 콜드 5회 24.5초: createOrganizerForMe 3.75 · pinEventImage 6.69 · pinEventMetadata 3.66 · relayAction 5.55 · saveEventArt 4.87초;
+결제 = purchaseTicket 콜드 4.28초, 예열 후 2.2초; 환불 = refundOrder 콜드 4.45초, 예열 후 ≈2.3초 추정). 코드 수정 없이 아래 두 겹으로 막는다.
+인스턴스는 **약 15분 쉬면 내려간다.** 영수증 폴링(1초)·확정 리스너는 지연 원인이 아님(영수증은 전송 후 13–190 ms).
+
+**(b) 최소 인스턴스 1 — 1차 방어 (GO 절차 3번에서 한 번 설정, 데모 끝나면 반드시 0으로)**
+- 순서: **K6 후 `firebase deploy --only functions:v2` → 그 다음에** 아래 명령. 배포가 새 리비전을 만들면서 최소 인스턴스를 **0으로 되돌리기** 때문에
+  순서가 바뀌면 효과가 없다(배포를 다시 했으면 이 명령도 다시).
+- 비용: 서비스당 하루 약 **$0.32**(1 vCPU, 512 Mi 대기) × 15개 ≈ 하루 $5 — 리허설+데모 창에만.
+```bash
+export CLOUDSDK_AUTH_ACCESS_TOKEN=$(GOOGLE_APPLICATION_CREDENTIALS=/Users/moomi/Downloads/z03.Vibe_Coding/MONTI/.secrets/monti-deployer.json gcloud auth application-default print-access-token)
+STAGE="loginchallenge loginverify getsignupstatus startsignup registerpasskey registeridentity createorganizerforme pineventimage pineventmetadata relayaction saveeventart purchaseticket refundorder relaycheckin issuesnapshot"
+for S in $STAGE; do
+  gcloud run services update $S --min-instances 1 --region us-east4 --project mon-ti --quiet
+done
+# 확인 — 각 서비스에 minScale '1' 이 보여야 함
+for S in $STAGE; do
+  echo "$S $(gcloud run services describe $S --region us-east4 --project mon-ti --format='value(spec.template.metadata.annotations)' | grep -o "minScale[^;,]*")"
+done
+```
+(Cloud Run 서비스 이름은 함수 이름의 **소문자**다. 토큰 값은 출력하지 않는다 — `export`만 하고 `echo` 금지.)
+
+**(a) OPTIONS 예열 루프 — 2차 방어 (T-30에 1회, T-10에 1회, 무대 중엔 5분마다)**
+OPTIONS 사전 요청(preflight)은 부작용 없이 인스턴스만 깨운다(로그인·결제 등 실제 동작 없음).
+```bash
+FNS="loginChallenge loginVerify getSignupStatus startSignup registerPasskey registerIdentity pendingOffers createOrganizerForMe pinEventImage pinEventMetadata relayAction saveEventArt setEventPrivate listAttendees listPinned purchaseTicket refundOrder submitPendingGate listPendingGates issueSnapshot listOverrideRequests relayCheckIn relayClaim"
+warm() {
+  for F in $FNS; do
+    curl -s -o /dev/null -w "%{http_code} %{time_total}s $F\n" -X OPTIONS "https://us-east4-mon-ti.cloudfunctions.net/$F" \
+      -H 'Origin: https://monti.despell.io' -H 'Access-Control-Request-Method: POST' \
+      -H 'Access-Control-Request-Headers: authorization,content-type'
+  done
+}
+warm; warm                                   # 첫 바퀴는 콜드면 3–7초씩, 두 번째 바퀴가 판정용
+# 무대 동안 별도 터미널에서 5분마다(인스턴스는 ~15분 쉬면 내려감):
+while :; do warm; sleep 300; done
+```
+합격: **전부 `204`**, **두 번째 바퀴는 모두 < 0.6초**. 204가 아니거나 두 번째 바퀴도 느리면 그 함수 이름으로
+`gcloud functions describe <이름> --region us-east4 --project mon-ti`(ACTIVE인지) 확인.
+
+**데모 후 정리 (체크리스트 — 빠뜨리면 하루 약 $5씩 계속 나감)**
+- [ ] 최소 인스턴스 0으로 되돌리기(같은 `CLOUDSDK_AUTH_ACCESS_TOKEN` 준비 후):
+  `for S in $STAGE; do gcloud run services update $S --min-instances 0 --region us-east4 --project mon-ti --quiet; done`
+  (이후 `firebase deploy --only functions:v2`를 한 번 더 해도 0으로 돌아간다.)
+- [ ] 예열 루프(`while :`) 터미널 종료(Ctrl-C).
+
+### v2 전환(GO) · 롤백 절차 — 보조 전용 (10-12 20:00 GO/NO-GO 이후)
+
+**전제 — K6(인덱서 교체) 전에는 GO 불가.** 홈(둘러보기)·내 티켓 목록·주최자 대시보드(내 주최사 목록)는 **v2 인덱서에서만**
+읽고 체인 폴백이 없다(10-12 확인). v1 인덱서(`d6a478c`)를 단 채로 전환하면 이 화면들이 비거나 v1 행사를 보여 준다.
+
+**GO 순서 (v2 전환 시) — 위에서 아래로, 건너뛰지 않는다:**
+0. **K6 완료 확인:** 창업자가 Envio에서 v1 배포 삭제 → v2 푸시 → 새 id에서 `is_hyper_sync=true`, lag<100(§3 D-3 GraphQL).
+1. **계정 초기화(웹 전환 전에):** 창업자 실번호, 그리고 v1에서 가입했는데 v2에서도 써야 하는 번호를 하나씩 지운다.
+   **왜:** v1 계정은 v2에서 로그인은 되지만(서버가 체인을 안 봄) 첫 결제·입장에서 일반 오류로 실패하고, `/recover`도
+   막힌다(v2 신원 장부에 없어서 재설정이 거절됨) — 새로 가입시키는 것 말고 길이 없다.
+   ```bash
+   cd /Users/moomi/Downloads/z03.Vibe_Coding/MONTI/MONTI-backend
+   export GOOGLE_APPLICATION_CREDENTIALS=/Users/moomi/Downloads/z03.Vibe_Coding/MONTI/.secrets/monti-deployer.json
+   export DIDIT_API_KEY=$(firebase functions:secrets:access DIDIT_API_KEY --project mon-ti)     # 출력 금지
+   fnm exec --using=22 pnpm --filter monti-functions exec tsx scripts/reset-persons.ts --phone +8210XXXXXXXX        # 드라이런(대상만 출력, 번호는 가려져 나옴)
+   fnm exec --using=22 pnpm --filter monti-functions exec tsx scripts/reset-persons.ts --phone +8210XXXXXXXX --yes  # 실제 삭제
+   ```
+   - **`--all` 절대 금지**(단건 `--phone`만). 지우는 것: users·passkeys·devices·phoneIndex·Firebase Auth 사용자·행사 초안, persons는
+     개인정보만 비우고 `deleted` 표시. 체인은 건드리지 않는다.
+   - (같은 스크립트를 `cd MONTI-backend/functions && fnm exec --using=22 npx tsx scripts/reset-persons.ts …`로 돌려도 된다 — tsx가 로컬에 설치돼 있음.)
+   - …17·…18·…20·…21–27은 v2에서 처음 가입했거나 미사용이라 초기화가 필요 없다.
+2. **백엔드를 v2 인덱서로:** `MONTI-backend/functions/.env`의 `ENVIO_GRAPHQL_URL` = `https://indexer.dev.hyperindex.xyz/<v2 id>/v1/graphql`(값 출력 금지) →
+   ```bash
+   cd /Users/moomi/Downloads/z03.Vibe_Coding/MONTI/MONTI-backend
+   GOOGLE_APPLICATION_CREDENTIALS=/Users/moomi/Downloads/z03.Vibe_Coding/MONTI/.secrets/monti-deployer.json fnm exec --using=22 firebase deploy --only functions:v2 --project mon-ti
+   ```
+   (`--force` 금지 — 삭제 프롬프트가 뜨면 멈춘다.)
+3. **최소 인스턴스 1:** §3 "T-30 / T-10 예열" (b) — **반드시 2번 배포 뒤에.**
+4. **웹·스케줄러 전환:** `scripts/ops/go-switch.sh go <ENVIO_V2_ID>` (MONTI-prod 루트에서, id만 넣는다). 하는 일:
+   - Vercel **저장된 Production env**를 v2 값으로 PATCH — `VITE_ADDR_{IDENTITY,ORGANIZERS,TICKET,FORWARDER,SETTLEMENT_VAULT}`(§0 v2 주소),
+     `VITE_FUNCTIONS_REGION=us-east4`, **`VITE_ENVIO_URL`=v2 인덱서** — 후 저장값 대조(OK/BAD).
+   - `MONTI-web`(브랜치 `v2/web`)에서 `vercel --prod` → 몇 초 뒤 **라이브 번들 점검**(v1 Ticket 0 · v2 Ticket >0 · us-east4 >0 · us-east1 0 · envio = v2 id).
+   - 스케줄러 4개(reconcilePending·dailyExport·processDeletions·closeEndedChats): **v1(us-east1) 일시정지 / v2(us-east4) 재개**.
+     relayerHealth는 손대지 않는다(5개 전부 멈추려면 아래 수동 명령).
+   - 비밀값은 출력하지 않는다. `MONTI-web`이 `v2/web` 최신 커밋인지 스크립트 출력 첫 줄(`git log -1`)로 확인.
+5. **확인:** `scripts/ops/go-switch.sh status`(라이브 번들 + 두 리전 스케줄러 상태) → 운영 스모크(`curl -sI https://monti.despell.io`, 로그인 화면,
+   공개 정산 페이지) → §3 T-30 점검을 v2 주소로.
+6. **새 가입:** 1번에서 지운 번호와 무대 계정은 **전환 후** 운영 도메인 `/signup/phone`에서 새로 가입(위 §0 테스트 번호 메모). 옛 계정은 v2에서 쓰지 않는다.
+
+수동 대안(스크립트가 중간에 실패했을 때만) — 스케줄러 5개 전부:
+```bash
+P=mon-ti
+for J in reconcilePending dailyExport processDeletions closeEndedChats relayerHealth; do
+  gcloud scheduler jobs pause firebase-schedule-$J-us-east1 --location=us-east1 --project=$P; done
+for J in reconcilePending dailyExport processDeletions closeEndedChats; do
+  gcloud scheduler jobs resume firebase-schedule-$J-us-east4 --location=us-east4 --project=$P; done
+gcloud scheduler jobs list --location=us-east4 --project=$P --format="table(name,state)"   # 실제 job 이름 확인
+```
+웹 수동: Vercel Production env를 위 값으로 바꾼 뒤 `cd MONTI-web && vercel --prod --scope despells-projects`.
+
+**롤백 (09:00 이전에만):**
+1. **웹·스케줄러:** `scripts/ops/go-switch.sh rollback`. 하는 일:
+   - `vercel rollback https://monti-93g8r25jw-despells-projects.vercel.app`(v1 운영 배포로 별칭만 되돌림, 재빌드 없음).
+   - 저장된 Production env 7개를 `.secrets/vercel-production-v1.env` 백업값으로 복원(값은 출력하지 않고 OK/BAD만) → 라이브 번들 점검.
+   - 스케줄러 4개: v2(us-east4) 일시정지 / v1(us-east1) 재개.
+   - 수동 대안: `cd MONTI-web && vercel rollback https://monti-93g8r25jw-despells-projects.vercel.app --scope despells-projects` + 위 수동 스케줄러 명령의 **정반대**.
+2. 최소 인스턴스를 0으로(§3 예열 "데모 후 정리"와 같은 명령) — v2를 안 쓰면 비용만 나간다.
+3. 인덱서: 무료 플랜은 1개만 돈다 → 먼저 Envio에서 v2 배포 삭제 → `cd MONTI-backend && git push origin v1-final/mvp-settle-indexer:envio-release --force-with-lease`.
+   새 id가 v1의 `d6a478c`와 다르면 v1 태그에서 `default` codebase 함수를 새 id로 재배포하고(`ENVIO_GRAPHQL_URL`) Vercel `VITE_ENVIO_URL`도 갱신.
+4. 롤백 뒤에는 §3 T-30 점검을 **v1 주소**로 다시 돌린다. 09:00 이후에는 전환도 롤백도 하지 않는다.
+   (10-12 Run 1 뒤 실제 롤백: `vercel rollback` → `monti-93g8r25jw`(entry `index-DjSqMrrH.js`) + 스케줄러 되돌림으로 정상 복귀.)
 
 ---
 
@@ -257,27 +446,33 @@ cd /Users/moomi/Downloads/z03.Vibe_Coding/MONTI/MONTI-prod
 | **인덱서 멈춤/지연** | 발급·입장·정책·분배는 **체인 직접 읽기(chain fallback)로 계속 동작**(웹에 내장). 목록·공개 타일만 지연 | 공개 페이지 대신 **Monad 탐색기**에서 분배 tx(금고 `Payout`/`Settled` 이벤트) 링크로 보여주기. "장부는 체인에 이미 적혔고, 보기 화면만 잠깐 느립니다." |
 | 인덱서가 아예 꺼짐 | **옛 배포 먼저 삭제 → 새 것 20초 내 시작**(§3-1). 그래도 -1이면 재빌드(README bump → envio-release) | 백업 영상 |
 | **릴레이어 MON 부족** | 운영 지갑(10-10 기준 44.7 MON)에서 `cast send <릴레이어> --value <N>ether`로 충전 | — |
-| **금고 MON 부족**(예치 서명 가스) | 운영→금고 MON 충전. 예치는 금고가 서명 | — |
+| **트레저리(금고) MON 부족** | **[v2 전환 시]** 유료 발급 가스를 트레저리가 냄 → 트레저리 MON ≥ 1 유지(현재 3.73). 부족하면 v2 운영 지갑(`0x74f75f4Dce3b04ea18f73E862b5a009781cE4eA2`)→트레저리 충전. 그 사이 결제는 실패(티켓·청구 없음). **[v1 유지 시]** 운영→금고 MON 충전. 예치는 금고가 서명 | — |
 | **faucet 고갈/한도** | 미리 여러 날 나눠 채움. USDC는 Circle faucet, MON은 Monad faucet. 데모는 구매 1~2건이면 충분 | — |
-| **결제 후 "처리 중"(예치 보류)** | 금고 USDC/ MON 부족이거나 예치 tx 지연 → order `minted-pending` | "티켓은 이미 발급됐고, 돈만 금고로 넘어가는 중입니다." (잠시 뒤 재확인) |
-| **두 번째 유료 결제인데 금고 USDC 부족** | 결제창은 **성공**으로 보이지만 영수증이 **"처리 중이에요"에서 영원히 멈춤**(서버에서 예치가 실패하고 계속 재시도). 무대에서 복구 불가 → **예방만 가능:** 금고 USDC ≥ $30 × (구매 예정 건수 + 2) 유지. **현재 $72.5(10-11 충전 후 $72.5 = $30 결제 2건분)** → 대표가 무대 전 `faucet.circle.com`에서 1회 더 충전 권장. 충전 경로: `faucet.circle.com` → **Monad Testnet** → Treasury `0xAe6D18fA7dC1e2512a2dC7DaE1d4640D7D786Bb2`로 충전 | 멈추면 백업 영상으로 전환 |
-| **결제 확정이 느림/멈춘 것 같음** | 약 **20초** 동안 변화가 없으면 새로고침 → `/tickets/<티켓번호>`를 직접 연다. **절대 다시 결제하지 않는다** | "확정되는 데 몇 초 걸립니다." |
+| **결제 실패** (v2: 발급과 보관이 한 번에 처리되므로 "발급은 됐는데 돈만 처리 중" 상태가 없다) | **v2 전환 시:** 화면에 "결제가 완료되지 않았어요 · 청구되지 않았어요" → **티켓 미발급·청구 없음, 다시 누르면 된다.** 반복되면 아래 "USDC 부족" 행과 트레저리 MON(≥1)을 점검 | "한 번 더 눌러 볼게요." |
+| **금고(트레저리) USDC 부족** | **[v2 전환 시]** 결제창에서 **즉시 실패**한다(화면: "지금은 결제를 받을 수 없어요"). 티켓도 청구도 없고 멈춤 상태도 없음. 충전 후 다시 누르면 됨. 예방: USDC ≥ $30 × (구매 예정 건수 + 2) + 허용량(allowance) 최대값 유지(§3-15). 충전 경로: `faucet.circle.com` → **Monad Testnet** → Treasury `0xAe6D18fA7dC1e2512a2dC7DaE1d4640D7D786Bb2`. **[v1 유지 시]** 두 번째 유료 결제인데 USDC가 모자라면 결제창은 **성공**으로 보이지만 영수증이 **"처리 중이에요"에서 영원히 멈춤**(서버에서 예치가 실패하고 계속 재시도) → 무대에서 복구 불가, **예방만 가능**; v1은 결제 후 "처리 중"이면 티켓은 이미 발급됐고 돈만 넘어가는 중이니 잠시 뒤 재확인. 현재 USDC(트레저리는 v1·v2 공용): **$63.0**(10-12 v2 Run 1 후; 10-11 충전 후 $72.5에서 −$9.5) → 대표가 무대 전 `faucet.circle.com`에서 1회 더 충전 권장 | v2: 충전 후 재시도, 안 되면 백업 영상 · v1: 멈추면 백업 영상으로 전환 |
+| **결제 확정이 느림/멈춘 것 같음** | 약 **20초** 동안 변화가 없으면 새로고침 → `/tickets/<티켓번호>`를 직접 연다. 실패 문구가 뜨기 전까지는 **다시 결제하지 않는다**(이미 처리됐을 수 있음). v2는 이때 주문이 "전송됨(sent)" 상태로 남고 5분 주기 점검이 마무리한다 | "확정되는 데 몇 초 걸립니다." |
 | **입장(NFC)** | 브라우저 게이트는 NFC·QR을 못 읽음(네이티브 스태프 앱 전용) → **처음부터 수동 승인(티켓 번호 검색)으로 진행** | — |
+| **권한 없는 스태프의 "요청"이 승인자 화면에 안 뜸** (v2 전환 시) | 요청은 서버에 기록되고 승인자(주최자) 화면에 **5초마다** 갱신되어 뜬다. 10초 기다린 뒤에도 없으면 새로고침. 그래도 없으면 **권한자가 티켓 번호로 직접 승인**(승인 1건이면 입장+자동 분배) | "승인 확인 중입니다." |
 | **분배가 공개 페이지에 안 뜸** | ① 인덱서 지연이면 탐색기 tx로 대체 ② 분배 자체가 누락이면 아래 **수동 release** 또는 **스케줄러 강제 실행** | "지금 분배를 확정합니다"(탐색기로 전환) |
 | **행사 제목이 '제목을 불러오지 못했어요'로 뜸 / 홈 목록 비어 보임** (원인: 메타데이터 게이트웨이 지연) | `curl -s -o /dev/null -w '%{http_code} %{time_total}' https://olive-high-octopus-713.mypinata.cloud/ipfs/bafkreidwm5mmjfpzfsqqlhcde4iawvzihl6y6ui7z6ixsyvoi2kqpsgw3a` 로 확인(200, <1 s 정상). 느리면 Pinata 대시보드 Gateways 상태 확인; 무대는 직접 URL(`/claim/<id>`, `/tickets/<id>`, `/settlement/<id>`)로 진행 — 결제·입장·정산은 게이트웨이와 무관 | 제목·목록만 늦을 뿐 돈의 흐름은 그대로. (제목은 전용 Pinata 게이트웨이 `https://olive-high-octopus-713.mypinata.cloud/ipfs/`로 읽음 — Vercel `VITE_IPFS_GATEWAY`(prod+preview), 백엔드 `functions/.env` `IPFS_GATEWAY` (Picnic 플랜은 게이트웨이 1개 포함 — 2개째는 월 $5 초과 과금이므로 추가 게이트웨이는 만들지 말 것); 공용 `gateway.pinata.cloud`는 5–7초·타임아웃, 전용은 ~0.3초) |
 | **화면 공유/미러링 실패** | 즉시 **백업 영상** 재생으로 전환 | "미리 녹화해 둔 실제 실행 영상입니다." |
 
 > **분배 누락 시 보조 조치(운영자 전용, 기술 용어 허용).** `settlementSweep` 콜러블은 **존재하지 않는다**
-> (백엔드가 내보내는 건 `purchaseTicket/refundOrder/relaySetPolicy` 등이고, sweep은 내부 예약 함수
+> (백엔드가 내보내는 건 `purchaseTicket/refundOrder` 등이고[v1은 `relaySetPolicy`도 있었음], sweep은 내부 예약 함수
 > `reconcilePending`, 5분 주기). 실제로 쓸 수 있는 두 가지:
 > 1. **수동 release(즉시).** 금고의 `release`는 누구나 호출 가능(permissionless). `.secrets/.env`의 키를
 >    셸 변수로만 불러 두고(**절대 출력 금지**):
 >    ```bash
->    cast send 0xA84FDb64C9DDc3B25eF8BDeA58561BDbE53ABD69 "release(uint256)" <tokenId> --rpc-url $R --private-key $DEPLOYER_PK
+>    # [v2 전환 시] 키는 v2 배포자(0x74f7…4eA2)용이 아니어도 무방 — release는 누구나 호출 가능
+>    cast send 0xDC3DDd274bb22a112ba8A120De471037aeE52925 "release(uint256)" <tokenId> --rpc-url $R --private-key $DEPLOYER_PK
+>    # [v1 유지 시] cast send 0xA84FDb64C9DDc3B25eF8BDeA58561BDbE53ABD69 "release(uint256)" <tokenId> --rpc-url $R --private-key $DEPLOYER_PK
 >    ```
 >    주문 기록(order)은 다음 sweep 때 스스로 맞춰진다.
 > 2. **스케줄러 강제 실행.**
 >    ```bash
+>    # [v2 전환 시] (job 이름은 `gcloud scheduler jobs list --location=us-east4`로 확인)
+>    gcloud scheduler jobs run firebase-schedule-reconcilePending-us-east4 --location=us-east4 --project=mon-ti
+>    # [v1 유지 시]
 >    gcloud scheduler jobs run firebase-schedule-reconcilePending-us-east1 --location=us-east1 --project=mon-ti
 >    ```
 >    sweep은 **최근 2분 안에 갱신된 주문은 건너뛰므로** 수동 승인 후 **2분 이상 지나서** 돌려야 의미가 있다.
@@ -308,12 +503,32 @@ cd /Users/moomi/Downloads/z03.Vibe_Coding/MONTI/MONTI-prod
 - 공개 정산 페이지의 **실시간 타일 / 분배 내역**(0으로 뜸 → 탐색기 tx로 대체)
 - [ ] 주최자 **등록된 게이트 목록 / "열기" 버튼** — 인덱서 동결 시 안 뜸(폴백 없음).
   **오늘 수정 중** → **확인 필요**: 당일 아침에 폴백 배포됐는지 체크(§3), 안 됐으면 백업 영상.
+  **v2 전환 시:** 게이트는 신청→승인 1번에 바로 열려 "열기" 버튼 자체가 없다(닫은 뒤의 "다시 열기"만 남음). 10-12 Run 1은
+  v2 데이터가 없는 v1 인덱서 상태에서 **신청 카드 표시 → 승인 → 등록·열림(4.73초)** 까지 통과했다(신청 목록은 서버에서 읽음).
+  등록이 끝난 뒤 단말기 목록이 인덱서 없이 보이는지는 Run 1 기록에 없음 — **미확인**, 무대 리허설에서 확인.
 
 **무대 우회(핵심):** 목록이 안 뜨면 **화면을 직접 주소로 연다** —
 행사 `/claim/<id>`(`/events/<id>`는 인덱서 없으면 안 뜸), 티켓/영수증 `/tickets/<tokenId>`(체인 폴백으로 뜸),
 공개 정산 `/settlement/<id>`.
 입장(**수동 승인**)은 관객 티켓 상세에 보이는 **티켓 번호로 검색**해서 처리한다.
 멘트: "장부는 체인에 이미 적혔고, 보기 화면(목록)만 잠깐 느립니다."
+
+### 알려진 한계 / 데모 중 하지 말 것 (v2 전환 시, 운영자용)
+
+- **환불한 티켓은 체인에서 무효화되지 않는다.** v2 금고의 `refund`는 돈만 돌려주고 티켓을 revoke하지 않는다(Run 1: 환불 후에도
+  `isRevoked=false`, 소유자 그대로). 계약은 입장 때 보관 상태를 보지 않으므로 막는 건 앱·백엔드 몫이다.
+  - **백엔드 가드 배포 후:** 게이트 입장(`relayCheckIn`)·수동 승인(`relayAction manualOverride`)·선물(`createOffer`)이 환불된 티켓을 거절하고,
+    오프라인 명단(`issueSnapshot`)에서도 빠진다(2중 방어). 배포 전이라면 이 세 경로 모두 환불 티켓을 통과시킨다
+    (입장시켜도 `release`는 AlreadySettled로 되돌려져 돈은 안 나가지만, 무료 입장이 된다). 계약 수준 수정(환불 → revoke)은 데모 후.
+  - 관객 화면은 환불 티켓에 "환불된 티켓이에요 · 입장할 수 없어요"를 띄우고 입장 버튼을 숨긴다. 다만 `/tickets/<id>/enter` 주소를 직접 열면 막는 장치가 없다(웹 가드는 별도 작업).
+  - **무대에서 하지 말 것:** 환불한 티켓으로 입장·수동 승인·선물을 시연하지 않는다. 환불 시연은 "환불됨" 화면까지만.
+- **오프라인 게이트 명단 창:** 단말기가 환불 **전에** 받아 둔 명단에는 그 티켓이 남아 있다 — 명단을 새로 받기(새로고침) 전까지 오프라인 확인에서 통과할 수 있다.
+  환불을 시연했다면 그 뒤 게이트 화면에서 명단을 한 번 새로 받는다.
+- **목록 화면은 v2 인덱서 필수:** 홈(둘러보기)·내 티켓 목록·주최자 대시보드는 체인 폴백이 없다 → K6 전에는 GO 불가(§3 GO 순서 0번).
+  무대는 지금처럼 직접 주소(`/claim/<id>`, `/tickets/<id>`, `/settlement/<id>`)로 진행한다.
+- **첫 공개는 오래 걸린다:** 콜드면 38초(예열 후에도 수 초 이상). 무대에서 공개하지 않는다 — 행사는 D-1에 미리 공개(§3 D-1 7번).
+- **화면에 기술 값이 보이는 곳(무대에서 열지 말 것):** 스태프 `/staff/setup` 수동 등록 칸(계정 주소·공개키 X/Y), 주최자 `/org/events/<id>/gates` 신청 카드(단말기 주소),
+  정산 규칙의 "수령 계정 정하기"(0x 주소), 티켓 상세의 32자리 티켓 번호(끝 4자리만 굵게). 숨김 작업은 별도 진행 중 — 배포 전이면 이 화면은 미러링하지 않는다.
 
 ---
 
@@ -324,7 +539,9 @@ cd /Users/moomi/Downloads/z03.Vibe_Coding/MONTI/MONTI-prod
    확정(입장=즉시 분배 체감) ② P-256 서명 가속기(폰 기기키 서명이 싸고 빠름) ③ 가스를 한도로
    과금하는 특성 — 이 교훈으로 비싼 페이마스터를 버리고 릴레이어 위임전송으로 단순화.
 2. **가스 비용은?** 티켓 1장 전체 ≈ 0.075 MON ≈ **₩3**(발급+입장+예치+분배). 무료 행사 100명 ≈
-   4.32 MON ≈ ₩173. 수수료가 가스를 ~650배 덮어 **비용은 제약이 아님**.
+   4.32 MON ≈ ₩173. 수수료가 가스를 ~650배 덮어 **비용은 제약이 아님**. (v1 실측 기준. **v2 전환 시** 주최자 쪽 tx가
+   6→3건, 유료 구매가 2→1건으로 줄었다. 10-12 v2 라이브 실측(102 gwei): 유료 티켓 1장(결제+입장 승인+분배) ≈ **0.096 MON**,
+   환불 1장 ≈ 0.065 MON, 유료 행사 공개+게이트 1개 ≈ 0.114 MON(첫 공개 때 주최자 등록 +0.007), 가입 1건 ≈ 0.021 MON — §7.)
 3. **보안은?** 서명은 **폰 StrongBox의 P-256 기기키**로만(키가 폰 밖으로 안 나감). 릴레이어는
    **가스만 대신 낼 뿐 발신자를 위조 못 함**(ERC-2771 신뢰 포워더 + 대상 allowlist). 릴레이어가
    모든 가스의 단일 지불처라 키·잔액 관리를 집중(향후 KMS 서명으로 강화).
@@ -348,6 +565,9 @@ cd /Users/moomi/Downloads/z03.Vibe_Coding/MONTI/MONTI-prod
 10. **이 데모는 진짜 온체인인가?** **카드 UI만 목업**이고, 예치·분배·환불 등 **돈의 이동은 Monad
     테스트넷에서 진짜 Circle 테스트 USDC로 실제 실행**된다. 핵심 4개 컨트랙트는 무변경, 금고 1개만
     추가했고 금고가 입장 사실(`usedAt`)을 **읽어** 분배하므로 **입장이 정산 때문에 실패할 일이 없다**.
+    **[v2 전환 시]** 컨트랙트 5개를 새 주소로 다시 배포했고(§0), 결제는 금고가 티켓 발급과 대금 보관을 **한 번에**
+    처리해 "둘 다 되거나 둘 다 안 되거나"가 체인 규칙으로 보장된다(유료 티켓을 돈 없이 발급할 길이 없음).
+    입장 경로는 여전히 금고를 부르지 않아 정산 때문에 입장이 실패하지 않는다.
 11. **입장 처리 후 분배가 얼마나 빨리 되나?** 입장이 확정되는 **즉시 약 1초 안에** 백엔드가 분배를
     바로 실행한다(인라인 릴리스 — 10-09 실측: 온체인 지연 ~1초, 관객 영수증은 ~4초 안에 "정산
     완료"로 바뀜). 혹시 그 즉시 실행이 누락돼도 **5분 주기 자동 정산(sweep)** 이 받쳐주므로 분배가
@@ -370,13 +590,13 @@ cd /Users/moomi/Downloads/z03.Vibe_Coding/MONTI/MONTI-prod
 
 | 시각(T-) | 작업 | 담당 |
 |---|---|---|
-| T-90 | 잔액 3종 재확인(USDC ≥ $30×(구매 예정+2)·릴레이어≥5·금고≥0.5) + 인덱서 lag<100 | 보조 |
+| T-90 | 잔액 3종 재확인(USDC ≥ $30×(구매 예정+2)·릴레이어≥5·금고≥0.5; **v2 전환 시 트레저리 MON ≥1 + USDC 허용량 최대값**) + 인덱서 lag<100 | 보조 |
 | T-75 | 사전 생성 행사 상태 확인(`/settlement/<id>` 렌더 + `eventStatus=1`) | 보조 |
-| T-60 | 관객·관리자 테스트 번호 로그인 리허설(/recover 안 걸리는지) | 대표 |
+| T-60 | 관객·관리자 테스트 번호 로그인 리허설(/recover 안 걸리는지; **v2 전환 시** 운영 도메인에서 새로 등록한 계정만 가능 — 무대 관객 …20은 아직 쓰지 말고 관리자·리허설 계정으로) | 대표 |
 | T-45 | 미러링 2분할·소리·네트워크(핫스팟 백업) 점검 | 둘 다 |
-| T-30 | **T-30 읽기 전용 점검**(§3 당일 아침 15번) + 백업 영상 파일 열어두기, 공개 페이지 탭 준비 | 보조 |
+| T-30 | **T-30 읽기 전용 점검**(§3 당일 아침 15번) + 백업 영상 파일 열어두기, 공개 페이지 탭 준비. **v2 전환 시** §3 "T-30 / T-10 예열": 최소 인스턴스 1 확인 + 예열 루프 2바퀴(전부 204, 2바퀴째 <0.6초) → 5분 주기 루프 시작 | 보조 |
 | T-15 | 폰 완충·알림 끄기(방해금지), 대본 최종 리딩 | 대표 |
-| T-10 | **워밍업 1회**(로그인 + 무료 받기 또는 수동 승인 1회 — 첫 호출이 3–8초 느림) | 대표 |
+| T-10 | **워밍업 1회**(로그인 + 무료 받기 또는 수동 승인 1회 — 첫 호출이 3–8초 느림). **v2 전환 시** 보조가 예열 루프 1바퀴 더(2바퀴째 <0.6초 확인) — 대표는 생략 가능 | 대표 / 보조 |
 | T-5 | 인덱서 lag 마지막 확인, 릴레이어 잔액 마지막 확인 | 보조 |
 | 0 | **발표 시작**(§1 스토리 → §2 라이브 시연) | 대표 |
 | 발표 중 | 라이브 장애 시 §4 즉시 대처, 안 되면 백업 영상 | 보조 |
@@ -392,7 +612,7 @@ cd /Users/moomi/Downloads/z03.Vibe_Coding/MONTI/MONTI-prod
 
 ---
 
-## 7. 기술 부록 — 2026-10-09 라이브 런(Run 5) · 2026-10-10 최종 리허설(Run 7) tx 해시·가스 실측
+## 7. 기술 부록 — 2026-10-09 라이브 런(Run 5) · 2026-10-10 최종 리허설(Run 7) tx 해시·가스 실측 (v1) · 2026-10-12 v2 forge 가스 + v2 Run 1 라이브 실측
 
 > 무대용이 아니라 **보조·심사 질의용** 기록이다(기술 용어는 여기서만). 모두 Monad testnet 10143,
 > RPC `https://testnet-rpc.monad.xyz`. 돈의 흐름 전체가 **행사 14번**에서 한 세션에 통과, 환불은
@@ -461,3 +681,102 @@ cd /Users/moomi/Downloads/z03.Vibe_Coding/MONTI/MONTI-prod
 | 환불(refund) | `0x124dec02b0fb95a68f3f992f0ed1e7584b0abae8fdb8679e02de9c8e081ebc35` | 화면 6.53초(새 확인 시트 포함) |
 
 - **Run 8 후 잔액:** 릴레이어 MON 8.143, 금고 MON 0.735, 금고 USDC $32.5 → 10-11 faucet 충전 후 **$72.5**.
+
+### v2 (10-12) — 트랜잭션 다이어트 rc1
+
+> 위 Run 5/7/8은 모두 **v1** 기록이다. 아래는 v2 rc1의 forge 단위 가스(상태 변경 호출 1건당 gas)와 배포 기록,
+> 그리고 테스트넷 라이브 실측(**v2 Run 1**, 맨 아래)이다. 구성 변경: 주최자 첫 판매까지 6→3건(`createOrganizer` 1회 · `publishEvent` 1건 ·
+> `registerGate` 게이트당), 유료 구매 2→1건(`purchase`, 트레저리 전송), 수동 승인 권한자 1건, 닉네임 0건(서버 기록).
+
+**배포 기록 (Monad testnet 10143, 시작 블록 70161104, 커밋 `130f425`, `Verify.s.sol` 19/19 OK):** Identity `0x1EDFE1BC…4B27` ·
+Organizers `0x18134b64…3dca` · Ticket `0x8544c531…9edC` · Forwarder `0xcE6DC304…ddbb` · SettlementVault `0xDC3DDd27…2925`
+(전체 주소는 §0). 새 배포자 `0x74f75f4D…4eA2`에 10 MON 이체(tx `0xf57fa8aa91f59534f4111502f3b5b763c3f74dda50a00049599f4ed80a27bef1`),
+트레저리에 3 MON 이체(tx `0xa142dd93bc75e7c8d530116df46d5e3acc49d8b2159b9c154712e24f12502926`, 트레저리 3.73 MON),
+트레저리 → v2 금고 USDC approve(max) tx `0xfbf5a4d52dcfa207ad8ec4412cef8f2a014d4c8dd2c5a4e49fd3e52c76d0f2bd`. 배포 9건에 약 1.7 MON 사용.
+
+**forge 가스 표 (gas, MON 환산은 실측 후):**
+
+| 단계 | forge gas | 누가 내나 | 메모 |
+|---|---|---|---|
+| 유료 행사 공개(`publishEvent`, 포워더 경유: 행사 생성 + 정산 규칙 + 공개) | **705k** | 릴레이어 | v1은 createEvent + setPolicy + publish 3건 |
+| 무료 행사 공개(포워더 경유) | **348k** | 릴레이어 | 정산 규칙 없음 |
+| 게이트 등록(`registerGate`, 열린 상태로 등록) | **210k** | 릴레이어 | v1은 registerGate + openGate 2건 |
+| 유료 구매(`purchase` = 발급 + 보관) — 정상 상태 | **213k** | 트레저리 | 같은 영수증에 발급·보관 이벤트 |
+| 유료 구매 — 첫 구매 | **300.5k** | 트레저리 | 첫 구매가 정상 상태보다 큼 |
+| 입장(`checkInFor`) | **110.5k** | 릴레이어 | |
+| 분배(`release`, 수취 4행) | **185k** | 릴레이어(인라인) | 수동 승인 확정 직후 같은 흐름에서 실행 |
+| 환불(`refund`) | **57k** | 트레저리 | |
+
+- 비교: v1의 유료 구매는 발급(mint) + 예치(deposit) 합계 약 411k였고, v2 첫 구매 300.5k는 그보다 작다(원장 기록 K1 시점 forge 비교).
+- 위 값은 forge 기준이다. **라이브 gasUsed는 전 항목에서 forge보다 크다**(공개 830.6k vs 705k, 첫 구매 482.3k vs 300.5k, 게이트 288.4k vs 210k,
+  분배 237.1k vs 185k, 환불 170.9k vs 57k) — MON 환산은 아래 라이브 표를 쓴다.
+- **라이브 기준 MON 환산(102 gwei):** 유료 행사 1개 주최자 쪽(공개 + 게이트 1) ≈ **0.114 MON**(첫 공개 때 주최자 등록 +0.007) ·
+  입장한 유료 티켓 1장(결제 + 수동 승인 + 분배) ≈ **0.096 MON** · 환불 티켓 1장(결제 + 환불) ≈ **0.065 MON** · 가입 1건 ≈ 0.021 MON.
+  **100명 유료 행사 ≈ 0.121 + 100 × 0.096 ≈ 9.7 MON**(가입 제외, 계산값; 가입까지 치면 +2.1 MON). 원화는 §1의 v1 환산 비율(₩40/MON 상당)로 티켓 1장 ≈ ₩4.
+
+### v2 Run 1 — 2026-10-12 라이브 실측 PASS (운영 도메인, 행사 1001, $10 등급)
+
+B안-early: 스테이징 DNS가 없어 운영 `monti.despell.io`에 v2 웹(배포 `monti-3guo3as49`, entry `index-CdXsRmiB.js`)을 잠시 올려
+하니스 V3(스모크)·V4(55 유료 본 구간)·V5(56 환불)를 돌리고 10:25에 v1(`monti-93g8r25jw`)로 되돌렸다. 01:04:44Z–01:11:03Z(10:04–10:11 KST),
+블록 70261661–70262916, **세 구간 모두 첫 시도 PASS, 재실행 없음.** 이 구간에 다른 v2 tx 없음(v2 주소 5개 전수 확인).
+인덱서는 v1(`d6a478c`) 그대로라 대시보드·공개 정산 실시간 타일·홈 목록은 비거나 v1 데이터(예상된 WARN).
+
+**흐름별 tx·가스·지연** (전부 status 1, gasPrice 102 gwei, gasLimit = gasUsed → 수수료 = gasUsed × 102 gwei).
+지연 열: **cold** = 이번 실측(함수 콜드 스타트 포함), **warm** = 예열 상태(실측이면 "실측", 아니면 콜드 스타트 시간을 뺀 **추정**).
+
+| 흐름 | tx 수 | gasUsed | 수수료(MON) | 누가 내나 | 지연 cold | 지연 warm |
+|---|---|---|---|---|---|---|
+| 가입(`Identity.register`) ×3 | 1씩 | 209,254 / 209,241 / 209,267 | 0.02134 (각) | attester | 시작하기→준비 끝 **~15초**(첫 가입) | **~3초**(실측, 2·3번째 가입) |
+| 주최자 등록(`createOrganizer`, 첫 공개 때 1회) | 1 | 68,196 | 0.006956 | **attester**(릴레이어 아님) | 공개 탭 후 ~4초에 확정(공개 흐름 안) | — |
+| 행사 공개(`publishEvent`, 포워더 경유) | 1 | 830,596 | 0.084721 | 릴레이어 | "네, 공개할게요"→완료 화면 **38.0초**(주최자 등록 포함, 콜드 5회 24.5초) | **≈ 9–14초(추정)** |
+| 결제 A(`Vault.purchase`, 첫 구매) | 1 | 482,309 | 0.049196 | 트레저리 | 결제하기→결제 완료 **7.36초**(purchaseTicket 콜드 4.28초) | — |
+| 결제 B(`Vault.purchase`) | 1 | 464,660 | 0.047395 | 트레저리 | — | **2.20초(실측)** |
+| 게이트 등록(`registerGate`, 열린 채 등록·`openGate` 없음) | 1 | 288,408 | 0.029418 | 릴레이어 | 등록→완료 **4.73초** | (relayAction은 이미 warm이었음) |
+| 수동 승인(`manualOverride`, 포워더 경유) | 1 | 221,879 | 0.022632 | 릴레이어 | 승인→들여보냈어요 **3.02초**(하니스 폴링 기준) | 서버 처리 **1.8–2.1초**(로그 실측) |
+| 인라인 분배(`Vault.release`, 백엔드) | 1 | 237,138 | 0.024188 | 릴레이어 | 승인과 **같은 초**에 확정; 영수증 "정산 완료" 승인 후 **~6–7초**(스크린샷 기준, 미검증) | — |
+| 환불 B(`Vault.refund`) | 1 | 170,920 | 0.017434 | 트레저리 | 환불받기→tx **6.77초**(확인 시트 포함, refundOrder 콜드 4.45초; 하니스 관측 "환불됨" 9.0초) | **≈ 2.3초 + 확인 시트(추정)** |
+
+- 결제 영수증 1건 안에 발급(ERC721 Transfer)·`Claimed`·USDC Transfer·`Deposited`가 함께 있다 — 발급만 되고 보관 안 된 상태가 없음.
+- 주최자 온체인 쓰기: `createOrganizer, publishEvent, registerGate, manualOverride`, `organizerTxCount = 3`(설계 목표 충족; 주최자 등록은 1회성).
+- 목표 대비: 결제 ≤5초 → cold **미달**(7.36) / warm 충족(2.20) · 수동 승인 ≤3초 → 3.02(하니스 폴링 탓, 서버 실측 충족) ·
+  정산 완료 ≤8초 → 충족 추정 · 환불됨 ≤6초 → **미달**(6.77–9.0). 원인 = 콜드 스타트 → §3 "T-30 / T-10 예열".
+
+**tx 해시:**
+
+| 단계 | tx 해시 | 블록 |
+|---|---|---|
+| 가입 …17(주최자) | `0x7fb295cd23bfc831adebdb8c4afb532c7b975c58f8d0cf2fa42b8b0267fa9ca4` | 70261974 |
+| 가입 …18(관객 A) | `0x67b3f716c36b72fe7c71cf58b5b7c917039105ae02113e92cb508adbeedf302f` | 70262268 |
+| 가입 …21(관객 B) | `0x4fa7f73e3e3710638f365322332f45721d75ace0f7c72f95f435f192083349ee` | 70262613 |
+| 주최자 등록(`createOrganizer`) | `0x4a6033b66f4749020d42f41f26c5995e9848c62472413a3879f7f59b177104d4` | 70262107 |
+| 행사 공개(`publishEvent`) | `0x5823a824f7a5d50cbd0c9c939beaef7660b0a1103de7c6387477051e3871d9ef` | 70262186 |
+| 결제 A(`purchase`) | `0x5999b516984e3c5f6c53e117145fc40333de5a3de03765957e2fc38f8082838e` | 70262346 |
+| 게이트 등록(`registerGate`) | `0x47475a94a01b0a15832e7ef960d963a5bf410582d2c80ac181f252c329a6cfb9` | 70262422 |
+| 수동 승인(`manualOverride`) | `0x60561fdcfd5d1e4c027bb21fd28ff7800e5524733283c1953baa60cad549d431` | 70262457 |
+| **인라인 분배(`release`)** | `0xbce7ed238daf2253bb8036fc134808662e8ddd30d876f63a5c44c6e22340b36e` | 70262459 |
+| 결제 B(`purchase`) | `0x825ed41e93ab2056e3658ab6d37808761d4df69c58b7750bd110173c36c54c1d` | 70262651 |
+| 환불 B(`refund`) | `0x9e1ad57b7f8a409ee45d0d467eb3647b172a0422ff572892d59bc7a03c3f37e3` | 70262686 |
+
+**행사·티켓:**
+- **행사 1001** "정산 데모 공연 v2"(v2 첫 행사 번호). 등급 VIP: 1000 cents($10), 수량 50, 발급 2, `eventStatus = 1`.
+- 정책 `getPolicy(1001)`: 플랫폼(트레저리) 500 bps `platform` · `0x1111` 6000 `artist` · `0x2222` 2000 `venue` · `0x3333` 1500 `planning`, frozen = true, version 1.
+- 분배(release) 정확히 일치: 트레저리 +0.50 · `0x1111` +6.00 · `0x2222` +2.00 · `0x3333` +1.50 USDC.
+- 게이트 **1**: `gateInfo(1)` = (행사 1001, 단말기 계정 `0xa88FF4423777c69408c71FeBb9b40FB21a473741`, open = true, revoked = false).
+- 티켓 A `79307390676778601931137494286337`(serial 1): 관객 A 소유, `usedAt = 1791767325`, 보관 상태 **2 Released**.
+- 티켓 B `79307390676778601931137494286338`(serial 2): 관객 B 소유, 보관 상태 **3 Refunded**, **`isRevoked = false`**(§4 "알려진 한계").
+
+**사용한 번호(새 가입):** …17 = 주최자+스태프(주최자 계정 `0x940328f4A3bC5A895Bc9E4fd133f52863c8BdD8D`) · …18 = 관객 A(`0x6496199F7B18f13640CEF78354cb1dB42c58E7be`) ·
+…21 = 관객 B(`0x3a41f56132Dd6e8ba26967D3aF45De59be4F0828`). …11은 스모크에서 기존 패스키 로그인만(tx 0). **미사용: …20(무대 관객 전용), …22–…27.**
+
+**Run 1 잔액·사용량 (cast):**
+
+| 계정 | 전 (01:04:44Z) | 후 (01:11:03Z) | 변화 |
+|---|---|---|---|
+| 릴레이어 `0xFA93…5fFd` MON | 5.921917 | **5.760959** | −0.160958 (공개 + 게이트 + 승인 + 분배, 정확히 일치) |
+| 트레저리 `0xAe6D…6Bb2` MON | 3.725756 | **3.611731** | −0.114025 (결제 2 + 환불 1) |
+| attester `0x6af8…C4Ed` MON | (직접 읽지 않음, 역산 1.533146) | **1.462158** | −0.070988 (가입 3 + 주최자 등록, 영수증 합) |
+| 트레저리 USDC | 72.50 | **63.00** | **−9.50** (−10 A, −10 B, +10 환불, +0.50 플랫폼 몫) |
+| 금고(v2 vault) USDC | 0 | 0 | 0 (A 분배 완료, B 환불, 보관 중 없음) |
+
+- **Run 1 1회 비용: 0.345970536 MON**(릴레이어 0.160958 + 트레저리 0.114025 + attester 0.070988) + **USDC $9.5**(관객 결제 $10 2건 중 1건 환불, 플랫폼 몫 $0.5는 트레저리로 돌아옴).
+- 다음 리허설·무대 전 기준: 릴레이어 5.76은 ≥5 기준에 근접 → 충전 권장. 트레저리 USDC $63은 "$30 × (구매 예정 + 2)" 공식(1건 $90)에 모자람.

@@ -32,8 +32,6 @@ contract Identity is IIdentity, AttesterRole, ERC2771Context {
     mapping(bytes32 => address) private _rotatedFrom;
     mapping(address => Device) private _devices;
     mapping(bytes32 => uint8) private _kycLevel;
-    mapping(bytes32 => address) private _nicknameOwner;
-    mapping(address => bytes32) private _nicknameOf;
     /// @dev ERC-2771 trusted forwarder, wired once. Zero until setForwarder → _msgSender()==msg.sender.
     address private _forwarder;
 
@@ -41,7 +39,6 @@ contract Identity is IIdentity, AttesterRole, ERC2771Context {
     event AccountRotated(bytes32 indexed personId, address indexed oldAccount, address indexed newAccount);
     event DeviceChanged(address indexed account, bytes32 x, bytes32 y);
     event DeviceLocked(address indexed account, bool locked);
-    event NicknameSet(address indexed account, bytes32 indexed nicknameHash, string nickname);
     event KycLevelSet(address indexed account, uint8 level);
     event RotationCancelled(bytes32 indexed personId, address indexed account);
 
@@ -53,8 +50,6 @@ contract Identity is IIdentity, AttesterRole, ERC2771Context {
     error NotRegistered();
     error NotAccountOwner();
     error CooldownActive();
-    error NicknameTaken();
-    error NicknameHashMismatch();
     error NoRotationToCancel();
     error ForwarderAlreadySet();
 
@@ -116,13 +111,6 @@ contract Identity is IIdentity, AttesterRole, ERC2771Context {
         _rotatedAt[personId] = uint64(block.timestamp);
         _rotatedFrom[personId] = oldAccount;
 
-        bytes32 nick = _nicknameOf[oldAccount];
-        if (nick != bytes32(0)) {
-            delete _nicknameOf[oldAccount];
-            _nicknameOf[newAccount] = nick;
-            _nicknameOwner[nick] = newAccount;
-        }
-
         emit AccountRotated(personId, oldAccount, newAccount);
 
         // 회전은 폰을 잃어버려서 하는 절차다(5.5). 잃어버린 폰이 Ticket.migrate 전까지 계속
@@ -152,9 +140,6 @@ contract Identity is IIdentity, AttesterRole, ERC2771Context {
     ///
     ///         migrate 성공 시 _rotatedFrom 을 비울 필요는 없다: migrate 는 창이 닫힌 뒤에만,
     ///         cancelRotation 은 창이 열린 동안에만 통하므로 두 경로는 상호 배타다.
-    ///
-    ///         닉네임은 '지금 그 계정이 들고 있는 핸들'을 되가져온다. 새 계정이 그사이 이름을
-    ///         바꿨다면 원래 핸들은 풀려 있으니 setNickname 을 한 번 더 누르면 된다.
     function cancelRotation() external {
         bytes32 personId = _personOf[_msgSender()];
         if (personId == bytes32(0)) revert NotRegistered();
@@ -167,13 +152,6 @@ contract Identity is IIdentity, AttesterRole, ERC2771Context {
         _accountOf[personId] = _msgSender();
         delete _personOf[current];
         delete _rotatedFrom[personId];
-
-        bytes32 nick = _nicknameOf[current];
-        if (nick != bytes32(0)) {
-            delete _nicknameOf[current];
-            _nicknameOf[_msgSender()] = nick;
-            _nicknameOwner[nick] = _msgSender();
-        }
 
         emit AccountRotated(personId, current, _msgSender());
         emit RotationCancelled(personId, _msgSender());
@@ -260,33 +238,5 @@ contract Identity is IIdentity, AttesterRole, ERC2771Context {
 
         _devices[account].locked = true;
         emit DeviceLocked(account, true);
-    }
-
-    /// @notice A unique handle so attendees can hand a ticket to "alice_01" instead of an address.
-    ///         Normalisation (lowercase, 3-20 chars of [a-z0-9_]) happens client-side; the chain only
-    ///         enforces that the hash matches the string and that the handle is free.
-    function setNickname(bytes32 nicknameHash, string calldata nickname) external {
-        if (!isMember(_msgSender())) revert NotRegistered();
-        if (nicknameHash != keccak256(bytes(nickname))) revert NicknameHashMismatch();
-
-        address holder = _nicknameOwner[nicknameHash];
-        if (holder == _msgSender()) return;
-        if (holder != address(0)) revert NicknameTaken();
-
-        bytes32 previous = _nicknameOf[_msgSender()];
-        if (previous != bytes32(0)) delete _nicknameOwner[previous];
-
-        _nicknameOwner[nicknameHash] = _msgSender();
-        _nicknameOf[_msgSender()] = nicknameHash;
-
-        emit NicknameSet(_msgSender(), nicknameHash, nickname);
-    }
-
-    function nicknameOwner(bytes32 nicknameHash) external view returns (address) {
-        return _nicknameOwner[nicknameHash];
-    }
-
-    function nicknameOf(address account) external view returns (bytes32) {
-        return _nicknameOf[account];
     }
 }

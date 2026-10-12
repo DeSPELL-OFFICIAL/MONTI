@@ -37,7 +37,7 @@ contract TicketCheckInTest is MontiTest {
         _memberWithDeviceKey(ALICE, 0xA1A1);
         orgId = _org();
         eventId = _freeEvent(orgId, 1, 1, true);
-        assertEq(eventId, P256Vectors.EVENT_ID, "vectors were generated for event 1");
+        assertEq(eventId, P256Vectors.EVENT_ID, "vectors were generated for event 1001");
 
         tokenId = _claimForFixture(ALICE, eventId, 0);
 

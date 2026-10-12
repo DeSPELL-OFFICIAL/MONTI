@@ -49,7 +49,7 @@ abstract contract CheckInGasBase is MontiTest {
         vm.stopPrank();
         vm.warp(P256Vectors.ISSUED_AT + 5);
 
-        assertEq(eventId, P256Vectors.EVENT_ID, "vectors were generated for event 1");
+        assertEq(eventId, P256Vectors.EVENT_ID, "vectors were generated for event 1001");
         assertEq(gateId, P256Vectors.GATE1_ID, "vectors were generated for gate 1");
 
         Ticket.GateCode memory code = Ticket.GateCode({

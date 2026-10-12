@@ -23,21 +23,33 @@ contract OrganizersGatesTest is Test {
     event GateClosed(uint256 indexed gateId);
     event GateRevoked(uint256 indexed gateId);
 
+    uint256 internal orgId;
+
     function setUp() public {
         orgs = new Organizers(address(0));
         ticket = new MockTicket();
         orgs.setTicket(address(ticket));
-        orgs.createOrganizer(OWNER);
-        ticket.setEventOrg(7, 1);
+        orgId = orgs.createOrganizer(OWNER);
+        ticket.setEventOrg(7, orgId);
         uint32 gateBit = orgs.PERM_MANAGE_GATES();
         vm.prank(OWNER);
-        orgs.setAdmin(1, GATEKEEPER, gateBit);
+        orgs.setAdmin(orgId, GATEKEEPER, gateBit);
         vm.warp(1_800_000_000);
     }
 
+    /// @dev v2 D7: organizer ids start at 1001 so v2 Firestore keys never collide with v1.
+    function test_firstOrgIdIs1001() public {
+        assertEq(orgId, 1001);
+        assertEq(orgs.createOrganizer(STRANGER), 1002);
+    }
+
+    /// @dev v2 D3: approval is opening. GateRegistered then GateOpened, in that order, and the gate is
+    ///      open straight away (gate ids are not offset — they key no Firestore document).
     function test_adminWithGateBitRegistersGate() public {
         vm.expectEmit(true, true, true, true);
         emit GateRegistered(1, 7, GATE_ACCOUNT, KX, KY);
+        vm.expectEmit(true, false, false, true);
+        emit GateOpened(1);
         vm.prank(GATEKEEPER);
         uint256 gateId = orgs.registerGate(7, GATE_ACCOUNT, KX, KY);
 
@@ -48,8 +60,9 @@ contract OrganizersGatesTest is Test {
         assertEq(account, GATE_ACCOUNT);
         assertEq(kx, KX);
         assertEq(ky, KY);
-        assertFalse(open, "gates start closed");
+        assertTrue(open, "v2: gates start open");
         assertFalse(revoked);
+        assertTrue(orgs.isOpenGate(7, GATE_ACCOUNT));
     }
 
     function test_unknownAccountHasGateIdZero() public view {
@@ -91,6 +104,12 @@ contract OrganizersGatesTest is Test {
 
     function test_openAndCloseFlipIsOpenGate() public {
         uint256 gateId = _registered();
+        assertTrue(orgs.isOpenGate(7, GATE_ACCOUNT), "open on register");
+
+        vm.expectEmit(true, false, false, false);
+        emit GateClosed(gateId);
+        vm.prank(GATEKEEPER);
+        orgs.closeGate(gateId);
         assertFalse(orgs.isOpenGate(7, GATE_ACCOUNT));
 
         vm.expectEmit(true, false, false, false);
@@ -98,12 +117,6 @@ contract OrganizersGatesTest is Test {
         vm.prank(GATEKEEPER);
         orgs.openGate(gateId);
         assertTrue(orgs.isOpenGate(7, GATE_ACCOUNT));
-
-        vm.expectEmit(true, false, false, false);
-        emit GateClosed(gateId);
-        vm.prank(GATEKEEPER);
-        orgs.closeGate(gateId);
-        assertFalse(orgs.isOpenGate(7, GATE_ACCOUNT));
     }
 
     function test_isOpenGateIsFalseForAnotherEvent() public {
@@ -189,7 +202,7 @@ contract OrganizersGatesTest is Test {
         uint256 second = _registerGate(GATE_ACCOUNT);
         assertGt(second, first, "a fresh gate id, not the old one");
         assertEq(orgs.gateOf(GATE_ACCOUNT), second);
-        assertFalse(orgs.isOpenGate(7, GATE_ACCOUNT), "a fresh gate starts closed");
+        assertTrue(orgs.isOpenGate(7, GATE_ACCOUNT), "a fresh gate starts open (v2 D3)");
     }
 
     function test_theOldGateIdStaysRevokedAfterReRegistration() public {

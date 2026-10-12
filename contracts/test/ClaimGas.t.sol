@@ -3,6 +3,7 @@ pragma solidity 0.8.31;
 
 import {MontiTest} from "./Base.t.sol";
 import {Ticket} from "../src/Ticket.sol";
+import {ITicket} from "../src/interfaces/ITicket.sol";
 import {P256Vectors} from "./utils/P256Vectors.sol";
 
 /// @notice 릴레이된 발급의 실행 가스를 실측한다(설계 §11-2, 스폰서/릴레이 한도 산정 근거). 서명은
@@ -23,7 +24,7 @@ contract ClaimGasTest is MontiTest {
     }
 
     function test_claimForGas() public {
-        (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, openEventId, 0);
+        (ITicket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, openEventId, 0);
         Ticket t = ticket;
 
         vm.prank(RELAYER);
@@ -36,7 +37,7 @@ contract ClaimGasTest is MontiTest {
     }
 
     function test_requestClaimForGas() public {
-        (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, approvalEventId, 0);
+        (ITicket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, approvalEventId, 0);
         Ticket t = ticket;
 
         vm.prank(RELAYER);
@@ -53,8 +54,6 @@ contract ClaimGasTest is MontiTest {
         m.approvalRequired = true;
         Ticket.Tier[] memory t = ticket.tiers(openEventId);
         vm.prank(ORG_OWNER);
-        apId = ticket.createEvent(m, t);
-        vm.prank(ORG_OWNER);
-        ticket.publishEvent(apId);
+        apId = ticket.publishEvent(m, t, _emptyPolicy());
     }
 }

@@ -2,26 +2,27 @@
 pragma solidity 0.8.31;
 
 import {ISettlementVault, ITicketReader} from "./interfaces/ISettlementVault.sol";
+import {ITicket} from "./interfaces/ITicket.sol";
 import {IOrganizers} from "./interfaces/IOrganizers.sol";
-import {IIdentity} from "./interfaces/IIdentity.sol";
-import {P256} from "solady/utils/P256.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {ReentrancyGuard} from "solady/utils/ReentrancyGuard.sol";
+import {SafeCastLib} from "solady/utils/SafeCastLib.sol";
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 
 /// @title SettlementVault
-/// @notice MONTI's programmable-settlement layer (design 2026-10-01, Q1–Q3). A single standalone
-///         contract — the core four (Ticket/Organizers/Identity/MontiForwarder) are **not changed**.
-///         Per event an organizer sets a frozen-on-first-sale split policy; a treasury/PG adapter
-///         deposits USDC per ticket into escrow; on real admission (`Ticket.usedAt(tokenId) != 0`) anyone
-///         releases that ticket's escrow, splitting it to the recipients by bps with a per-recipient pull
-///         fallback. No-shows settle after the event ends; deposits refund before release.
+/// @notice MONTI's programmable-settlement layer (design 2026-10-01; v2 design 2026-10-12 §3–§4).
+///         Ticket.publishEvent writes a paid event's split policy here in the same transaction, frozen
+///         from that moment (`setPolicyByTicket`). A paid ticket exists only through `purchase`: the vault
+///         mints it via `Ticket.mintPaid` (vault-only) and escrows the on-chain tier price in the same call,
+///         so "minted but not paid" is not a reachable state. On real admission (`Ticket.usedAt != 0`)
+///         anyone releases that ticket's escrow, splitting it to the recipients by bps with a per-recipient
+///         pull fallback. No-shows settle after the event ends; deposits refund before release.
 ///
-/// @dev    The vault only ever *reads* Ticket, so admission can never revert because of settlement
-///         (design §3, founder requirement). It is not a forwarder target, so `setPolicy` cannot use
-///         `_msgSender()`; instead the organizer's P-256 device key self-verifies over `setPolicyDigest`,
-///         the same pattern as `Ticket.claimFor` (design §3). Money paths are `nonReentrant` with
-///         checks-effects-interactions (status flipped before any transfer) and use solady SafeTransferLib
-///         for USDC's non-standard bool return.
+/// @dev    Admission paths never call the vault, so check-in can never revert because of settlement
+///         (founder requirement). The vault is not an ERC-2771 target: the organizer's authority reaches it
+///         as an argument from Ticket (`_msgSender()` there), and the vault re-checks PERM_MANAGE_SETTLEMENT
+///         itself. Money paths are `nonReentrant` with checks-effects-interactions (status flipped before
+///         any transfer) and use solady SafeTransferLib for USDC's non-standard bool return.
 contract SettlementVault is ISettlementVault, ReentrancyGuard {
     // --- constants ------------------------------------------------------------------------------
 
@@ -31,9 +32,11 @@ contract SettlementVault is ISettlementVault, ReentrancyGuard {
     ///         demo's "owner sets the policy" passes with no change there.
     uint32 public constant PERM_MANAGE_SETTLEMENT = 64;
 
-    /// @notice Purpose tag leading the policy preimage, splitting it from every other MONTI digest so a
-    ///         signature cannot be replayed onto another path (design §2/§3 style).
-    bytes32 public constant SETTLE_POLICY_TAG = keccak256("MONTI:SETTLE_POLICY:v1");
+    /// @notice Token base units per US cent. The on-chain tier price (`Tier.priceUsdCents`) is canonical;
+    ///         escrow = price × UNITS_PER_CENT. 1e4 is right only for a 6-decimal USD stable (Circle USDC),
+    ///         so the allowlist refuses any token whose decimals() is not 6.
+    uint256 public constant UNITS_PER_CENT = 1e4;
+    uint8 internal constant TOKEN_DECIMALS = 6;
 
     /// @notice The on-chain tag the platform (MONTI) recipient must carry; `platformBps` must equal its
     ///         bps, and it must be at least MIN_PLATFORM_BPS (5%), guaranteeing the business-model fee.
@@ -54,7 +57,6 @@ contract SettlementVault is ISettlementVault, ReentrancyGuard {
 
     ITicketReader public immutable ticket;
     IOrganizers public immutable organizers;
-    IIdentity public immutable identity;
 
     // --- state ----------------------------------------------------------------------------------
 
@@ -62,9 +64,8 @@ contract SettlementVault is ISettlementVault, ReentrancyGuard {
     bool public paused;
 
     mapping(uint256 => Escrow) public escrowOf; // tokenId => escrow
-    mapping(address => bool) public tokenAllowed; // USDC allowlist (room for a KRW stable later)
-    mapping(address => bool) public depositor; // deposit/adapter-refund allowlist (treasury/PG)
-    mapping(address => uint256) public policyNonce; // per-organizer replay counter
+    mapping(address => bool) public tokenAllowed; // USDC allowlist (6-decimal USD stables only)
+    mapping(address => bool) public depositor; // purchase/adapter-refund allowlist (treasury/PG)
     mapping(address => mapping(address => uint256)) public pendingWithdrawals; // recipient => token => owed
 
     mapping(uint256 => SplitPolicy) internal _policyOf; // eventId => policy (explicit getter: getPolicy)
@@ -86,53 +87,37 @@ contract SettlementVault is ISettlementVault, ReentrancyGuard {
         _;
     }
 
-    /// @param ticket_ live Ticket, organizers_ live Organizers, identity_ live Identity (all unchanged).
-    /// @param initialDepositor the treasury/PG adapter allowed to deposit (optional; 0 to skip).
-    /// @param initialToken a token to allowlist at deploy, e.g. Circle USDC (optional; 0 to skip).
-    constructor(address ticket_, address organizers_, address identity_, address initialDepositor, address initialToken) {
+    /// @param ticket_ live Ticket (the only `setPolicyByTicket` caller and the `mintPaid` callee).
+    /// @param organizers_ live Organizers (PERM_MANAGE_SETTLEMENT is re-checked here).
+    /// @param initialDepositor the treasury/PG adapter allowed to purchase (optional; 0 to skip).
+    /// @param initialToken a 6-decimal token to allowlist at deploy, e.g. Circle USDC (optional; 0 to skip).
+    constructor(address ticket_, address organizers_, address initialDepositor, address initialToken) {
         owner = msg.sender;
         ticket = ITicketReader(ticket_);
         organizers = IOrganizers(organizers_);
-        identity = IIdentity(identity_);
         if (initialDepositor != address(0)) {
             depositor[initialDepositor] = true;
             emit DepositorSet(initialDepositor, true);
         }
-        if (initialToken != address(0)) {
-            tokenAllowed[initialToken] = true;
-            emit TokenAllowed(initialToken, true);
-        }
+        if (initialToken != address(0)) _setTokenAllowed(initialToken, true);
     }
 
     // --- policy ---------------------------------------------------------------------------------
 
-    /// @notice Set (or replace, before the first deposit) an event's split policy. Permissionless to
-    ///         submit — the relayer carries it — but authorised by the organizer's P-256 device key over
-    ///         `setPolicyDigest`, plus `Organizers.hasPermission(eventOrg, organizer, PERM_MANAGE_SETTLEMENT)`.
-    ///         Frozen once the first deposit lands.
-    function setPolicy(uint256 eventId, SplitPolicy calldata policy, PolicyAuth calldata auth, bytes calldata deviceSig)
-        external
-        whenNotPaused
-    {
+    /// @notice Record a paid event's split, called by Ticket.publishEvent in the publishing transaction
+    ///         (v2 D2). `organizer` is Ticket's `_msgSender()` (the forwarded organizer); the vault checks
+    ///         its PERM_MANAGE_SETTLEMENT itself rather than trusting Ticket's PERM_CREATE_EVENT check.
+    ///         Set exactly once and frozen at once: publishing is the public promise, so there is no
+    ///         post-publish edit path (edits happen in the off-chain draft).
+    function setPolicyByTicket(uint256 eventId, SplitPolicy calldata policy, address organizer) external whenNotPaused {
+        if (msg.sender != address(ticket)) revert NotTicket();
+        // Ticket stored the event meta before calling, so eventOrg is the real organizer id here.
         uint256 orgId = ticket.eventOrg(eventId);
-        if (orgId == 0) revert UnknownEvent();
-        if (!organizers.hasPermission(orgId, auth.organizer, PERM_MANAGE_SETTLEMENT)) revert NotPolicyAuthorizer();
-        if (_policyOf[eventId].frozen) revert PolicyFrozen();
-        if (block.timestamp > auth.deadline) revert AuthExpired();
-        if (auth.nonce != policyNonce[auth.organizer]) revert BadNonce();
-
-        bytes32 policyHash = hashPolicy(policy);
-        bytes32 digest = setPolicyDigest(eventId, policyHash, auth.nonce, auth.deadline);
-        (bytes32 x, bytes32 y) = identity.activeDevice(auth.organizer);
-        if (deviceSig.length != 64) revert BadDeviceSignature();
-        (bytes32 r, bytes32 s) = abi.decode(deviceSig, (bytes32, bytes32));
-        if (!P256.verifySignature(digest, r, s, x, y)) revert BadDeviceSignature();
-
-        _validatePolicy(policy);
-        policyNonce[auth.organizer] += 1; // consume (effects before store)
-
+        if (!organizers.hasPermission(orgId, organizer, PERM_MANAGE_SETTLEMENT)) revert NotPolicyAuthorizer();
         SplitPolicy storage sp = _policyOf[eventId];
-        delete sp.recipients;
+        if (sp.version != 0) revert PolicyFrozen();
+        _validatePolicy(policy);
+
         uint256 n = policy.recipients.length;
         for (uint256 i; i < n; ++i) {
             sp.recipients.push(policy.recipients[i]);
@@ -140,28 +125,15 @@ contract SettlementVault is ISettlementVault, ReentrancyGuard {
         sp.platformBps = policy.platformBps;
         sp.reserveBps = policy.reserveBps;
         sp.noShowRefund = policy.noShowRefund;
-        sp.frozen = false;
-        sp.version += 1;
+        sp.frozen = true;
+        sp.version = 1;
 
-        emit PolicySet(eventId, auth.organizer, policyHash, sp.version);
+        emit PolicySet(eventId, organizer, hashPolicy(policy), 1);
     }
 
-    /// @notice keccak256 over the signed policy content. frozen/version are lifecycle state, not signed.
+    /// @notice keccak256 over the policy content. frozen/version are lifecycle state, not content.
     function hashPolicy(SplitPolicy calldata policy) public pure returns (bytes32) {
-        return keccak256(
-            abi.encode(policy.recipients, policy.platformBps, policy.reserveBps, policy.noShowRefund)
-        );
-    }
-
-    /// @notice The 32 bytes the organizer device key signs. chainid and address(this) are filled in here,
-    ///         not passed, so a cross-checking client proves something (design §3). Public so
-    ///         packages/shared and the web app can verify their own encoding against the contract.
-    function setPolicyDigest(uint256 eventId, bytes32 policyHash, uint256 nonce, uint64 deadline)
-        public
-        view
-        returns (bytes32)
-    {
-        return sha256(abi.encode(SETTLE_POLICY_TAG, block.chainid, address(this), eventId, policyHash, nonce, deadline));
+        return keccak256(abi.encode(policy.recipients, policy.platformBps, policy.reserveBps, policy.noShowRefund));
     }
 
     function getPolicy(uint256 eventId) external view returns (SplitPolicy memory) {
@@ -186,38 +158,36 @@ contract SettlementVault is ISettlementVault, ReentrancyGuard {
         if (policy.reserveBps >= BPS_DENOMINATOR) revert BadReserve();
     }
 
-    // --- deposit --------------------------------------------------------------------------------
+    // --- purchase -------------------------------------------------------------------------------
 
-    /// @notice An allowlisted adapter (treasury/PG) deposits a ticket's USDC into escrow and freezes the
-    ///         event policy on the first deposit. `token` must be allowlisted; the adapter must have
-    ///         approved the vault for `amount`.
-    function deposit(uint256 eventId, uint256 tokenId, address token, uint128 amount)
+    /// @notice Atomic paid purchase (v2 D1). An allowlisted adapter (treasury/PG) submits the attendee's
+    ///         device-signed ClaimAuth; the vault mints through `Ticket.mintPaid` (vault-only — it runs every
+    ///         claim check and the paid-tier rule) and escrows the on-chain tier price × UNITS_PER_CENT,
+    ///         pulled from the adapter, in the same call. Any failure (allowance, balance, sold out, limits,
+    ///         bad signature) reverts the whole purchase — the ticket and the nonce consumption included.
+    ///         One receipt carries Transfer(0→account) → Claimed → Deposited.
+    /// @dev    The escrow write follows the mint because the tokenId is only known after it. The mint can
+    ///         call back into a deployed receiver (`_safeMint`), but every vault money path is
+    ///         `nonReentrant`, so the callback cannot reach vault funds; the escrow slot for a fresh tokenId
+    ///         is necessarily empty, so there is nothing to double-write.
+    function purchase(ITicket.ClaimAuth calldata a, bytes calldata deviceSig, address token)
         external
         onlyDepositor
         whenNotPaused
         nonReentrant
+        returns (uint256 tokenId)
     {
         if (!tokenAllowed[token]) revert TokenNotAllowed();
-        if (amount == 0) revert ZeroAmount();
-        if (escrowOf[tokenId].status != ESC_NONE) revert AlreadyDeposited();
-        if (ticket.eventOf(tokenId) != eventId) revert EventMismatch();
-
-        SplitPolicy storage sp = _policyOf[eventId];
-        if (!sp.frozen) {
-            if (sp.recipients.length == 0) revert NoPolicy();
-            sp.frozen = true;
-        }
+        uint256 priceUsdCents;
+        (tokenId, priceUsdCents) = ticket.mintPaid(a, deviceSig);
+        uint128 amount = SafeCastLib.toUint128(priceUsdCents * UNITS_PER_CENT);
 
         escrowOf[tokenId] = Escrow({
-            token: token,
-            amount: amount,
-            payer: msg.sender,
-            depositedAt: uint64(block.timestamp),
-            status: ESC_HELD
+            token: token, amount: amount, payer: msg.sender, depositedAt: uint64(block.timestamp), status: ESC_HELD
         });
 
         SafeTransferLib.safeTransferFrom(token, msg.sender, address(this), amount);
-        emit Deposited(eventId, tokenId, token, amount, msg.sender);
+        emit Deposited(a.eventId, tokenId, token, amount, msg.sender);
     }
 
     // --- release --------------------------------------------------------------------------------
@@ -366,6 +336,13 @@ contract SettlementVault is ISettlementVault, ReentrancyGuard {
     // --- admin ----------------------------------------------------------------------------------
 
     function setTokenAllowed(address token, bool allowed) external onlyOwner {
+        _setTokenAllowed(token, allowed);
+    }
+
+    /// @dev Allowlisting checks decimals() == 6: UNITS_PER_CENT assumes it, and an 18-decimal token would
+    ///      silently escrow 10^-12 of the price. Removing a token needs no check.
+    function _setTokenAllowed(address token, bool allowed) internal {
+        if (allowed && IERC20Metadata(token).decimals() != TOKEN_DECIMALS) revert UnsupportedDecimals();
         tokenAllowed[token] = allowed;
         emit TokenAllowed(token, allowed);
     }

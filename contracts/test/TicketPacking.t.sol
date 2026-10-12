@@ -3,6 +3,7 @@ pragma solidity 0.8.31;
 
 import {MontiTest} from "./Base.t.sol";
 import {Ticket} from "../src/Ticket.sol";
+import {ITicket} from "../src/interfaces/ITicket.sol";
 import {P256Vectors} from "./utils/P256Vectors.sol";
 
 /// @notice 슬림 저장(설계 §12, 창업자 요구)의 두 패킹을 못박는다:
@@ -128,7 +129,7 @@ contract TicketPackingTest is MontiTest {
         for (uint256 i; i < 3; ++i) {
             _claimForFixture(ALICE, capped, 0);
         }
-        (Ticket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, capped, 0);
+        (ITicket.ClaimAuth memory a, bytes memory sig) = _signClaimAuth(ALICE, capped, 0);
         vm.expectRevert(Ticket.MaxPerWalletExceeded.selector);
         ticket.claimFor(a, sig);
     }
@@ -212,8 +213,6 @@ contract TicketPackingTest is MontiTest {
             name: "General", priceUsdCents: 0, supply: supply, minted: 0, maxPerWallet: uint16(supply), seated: false
         });
         vm.prank(ORG_OWNER);
-        id = ticket.createEvent(m, t);
-        vm.prank(ORG_OWNER);
-        ticket.publishEvent(id);
+        id = ticket.publishEvent(m, t, _emptyPolicy());
     }
 }
