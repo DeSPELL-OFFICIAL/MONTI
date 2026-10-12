@@ -115,12 +115,14 @@ test('56 · settlement step 5 — attendee B buys then refunds before admission'
     await confirmSheet.getByRole('button', { name: 'Refund', exact: true }).click();
     await page.waitForTimeout(400);
     await shot(page, 'refund-attendee-refunding');
-    const refundedLine = page.getByText('Refunded', { exact: true });
+    // The refunded receipt says "Refunded" in more than one place (status line, the disabled button);
+    // without .first() the strict locator throws inside isVisible() and the catch reads it as false.
+    const refundedLine = page.getByText('Refunded', { exact: true }).first();
     let refunded = false; const fd = Date.now() + 120_000;
     while (Date.now() < fd) { if (await refundedLine.isVisible().catch(() => false)) { refunded = true; break; } await page.waitForTimeout(2500); }
     diag.refunded = refunded; diag.refundObservedAt = new Date().toISOString();
     // The success line is recorded, not asserted: it lives only until the screen is left.
-    diag.refundDoneShown = await page.getByText('Refunded', { exact: true }).isVisible().catch(() => false);
+    diag.refundDoneShown = await refundedLine.isVisible().catch(() => false);
     diag.refundUiLatencyMs = Date.now() - refundClickedAtMs;
     diag.wire = { ...wire };
     console.log(`[56] refunded=${refunded} refundTxHash=${wire.refundTxHash ?? '(none)'} uiLatencyMs=${diag.refundUiLatencyMs}`);

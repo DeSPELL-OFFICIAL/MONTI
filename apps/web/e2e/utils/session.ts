@@ -2,7 +2,7 @@ import type { Browser, BrowserContext, Page } from '@playwright/test';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { attachAuthenticator, type CdpCredential, type VirtualAuthenticator } from '../fixtures/webauthn';
 import { PERSONA_OFFSET, type Persona } from '../fixtures/personas';
-import { login, signUp } from './signup';
+import { login, OPEN_MODE, signUp } from './signup';
 
 const STATE_DIR = 'e2e/.state';
 export const BASE_URL = process.env.E2E_BASE_URL ?? 'https://monti.despell.io';
@@ -102,7 +102,8 @@ function writeMeta(p: Persona, patch: PersonaMeta): void {
 /** New browser context for a persona, its passkey store restored and authenticator attached. */
 export async function openPersona(browser: Browser, persona: Persona): Promise<PersonaSession> {
   mkdirSync(STATE_DIR, { recursive: true });
-  const hasState = existsSync(statePath(persona));
+  // Open mode has no reusable personas: every context is a brand-new person, so no state is restored.
+  const hasState = !OPEN_MODE && existsSync(statePath(persona));
   const context = await browser.newContext({
     ...MOBILE,
     storageState: hasState ? statePath(persona) : undefined,
@@ -110,7 +111,7 @@ export async function openPersona(browser: Browser, persona: Persona): Promise<P
   await prepareContext(context);
   const page = await context.newPage();
   const auth = await attachAuthenticator(page);
-  if (existsSync(credsPath(persona))) {
+  if (!OPEN_MODE && existsSync(credsPath(persona))) {
     const creds = JSON.parse(readFileSync(credsPath(persona), 'utf8')) as CdpCredential[];
     await auth.importCredentials(creds);
   }
@@ -139,6 +140,8 @@ export async function ensureAccount(session: PersonaSession): Promise<void> {
   // Fresh: first-time signup, or — for a re-registered number whose on-chain identity outlived its
   // Firestore person — recovery. `signUp` branches on where Verify lands and tells us which it was.
   const { recovered } = await signUp(session.page, session.persona);
+  // Open-mode identities are throwaway; persisting them would shadow the phone personas' state files.
+  if (OPEN_MODE) return;
   session.recovered = recovered;
   if (recovered) writeMeta(session.persona, { recovered: true, recoveredAt: new Date().toISOString() });
   await persist(session);
