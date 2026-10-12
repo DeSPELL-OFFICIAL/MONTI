@@ -38,7 +38,7 @@ export default defineConfig({
     deviceScaleFactor: 3,
     isMobile: true,
     hasTouch: true,
-    locale: 'ko-KR',
+    locale: 'en-US',
     timezoneId: 'Asia/Seoul',
     // No UA spoof: an iPhone UA on a desktop Chromium is a mismatch that tanks the invisible
     // reCAPTCHA score and forces the image challenge. The app detects native through Capacitor,

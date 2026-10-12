@@ -25,12 +25,12 @@ const HOLDER: Persona = USERS[0]!; // persona-02
 
 /** Copy strings, verbatim from apps/web/src (organizer/copy.ts dashboard.art, art preset names). */
 const C = {
-  ticketsTitle: '내 티켓',
-  artTitle: '티켓 이미지',
-  artChange: '바꾸기',
-  artSaved: '저장했어요',
-  presetA: '오로라', // preset 'a'
-  presetB: '잉걸', // preset 'b'
+  ticketsTitle: 'My tickets',
+  artTitle: 'Ticket pictures',
+  artChange: 'Change',
+  artSaved: 'Saved',
+  presetA: 'Aurora', // preset 'a'
+  presetB: 'Ember', // preset 'b'
 } as const;
 
 interface OwnedRow {

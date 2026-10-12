@@ -3,24 +3,24 @@ import { OTP_CODE, type Persona } from '../fixtures/personas';
 import { timed } from '../fixtures/timings';
 import { shot } from './shots';
 
-/** Copy strings, verbatim from apps/web/src/shared/copy/ko.ts — the selectors are the words. */
+/** Copy strings, verbatim from apps/web/src/shared/copy/en.ts — the selectors are the words. */
 const C = {
-  phoneLabel: '휴대폰 번호를 입력해 주세요',
-  sendCode: '인증번호 받기',
-  codeLabel: '인증번호 6자리를 입력해 주세요',
-  verify: '확인',
-  registerTitle: '계정 만들기',
-  registerCta: '시작하기',
-  registerRetry: '다시 시도하기',
-  deviceSkip: '이대로 계속하기',
-  doneTitle: '준비가 끝났어요',
-  nameLabel: '어떻게 불러 드릴까요?',
-  doneCta: '시작하기',
-  alreadyTitle: '로그인', // /login lands here if the number is already registered
+  phoneLabel: 'Enter your phone number',
+  sendCode: 'Send code',
+  codeLabel: 'Enter the 6-digit code',
+  verify: 'Verify',
+  registerTitle: 'Create your account',
+  registerCta: 'Start',
+  registerRetry: 'Try again',
+  deviceSkip: 'Continue anyway',
+  doneTitle: 'You are all set',
+  nameLabel: 'What should we call you?',
+  doneCta: 'Get started',
+  alreadyTitle: 'Sign in', // /login lands here if the number is already registered
   // Recover.tsx (recover.* / common.retry) — a returning number on a fresh device lands here.
-  recoverTitle: '휴대폰으로 다시 설정하기',
-  recoverCta: '새로 설정하기',
-  recoverRetry: '다시 시도',
+  recoverTitle: 'Set up again on this phone',
+  recoverCta: 'Set up again',
+  recoverRetry: 'Try again',
 } as const;
 
 /** How long the one-tap register chain (passkey → device key → on-chain identity) may take. */
@@ -175,7 +175,7 @@ async function runRecover(page: Page): Promise<void> {
 export async function login(page: Page, persona: Persona): Promise<boolean> {
   return timed(persona.id, 'login', async () => {
     await page.goto('/login');
-    await page.getByRole('button', { name: '로그인', exact: true }).click();
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     // Success routes to 내 티켓; failure keeps us on /login with an error.
     try {
       await expect(page).toHaveURL(/\/tickets/, { timeout: 45_000 });

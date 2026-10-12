@@ -14,38 +14,38 @@ export const POSTER = resolve(HERE, '../assets/poster.jpg');
  * for a paid event, saved in the draft) → 공개하기 → confirm sheet → ONE publishEvent write.
  */
 const C = {
-  sceneTitle: '행사 만들기',
-  posterAdd: '포스터 올리기',
-  posterChange: '포스터 바꾸기',
-  crop: '이 사진으로 정하기',
-  resumeKeep: '이어서 작성하기',
-  quickStart: '빠른 시작',
-  quickFree: '무료 선착순',
-  quickApproval: '무료 관리자 승인',
-  quickPaid: '유료 일반',
-  title: '제목',
-  intro: '소개',
-  startsAt: '시작',
-  venue: '장소',
-  tierName: '티켓 종류 (예: 일반, VIP)',
-  supply: '수량',
-  amount: '금액',
-  next: '다음',
+  sceneTitle: 'Create an event',
+  posterAdd: 'Add a poster',
+  posterChange: 'Change the poster',
+  crop: 'Use this photo',
+  resumeKeep: 'Carry on',
+  quickStart: 'Quick start',
+  quickFree: 'Free, first come',
+  quickApproval: 'Free, organizer approves',
+  quickPaid: 'Paid, general admission',
+  title: 'Title',
+  intro: 'About this event',
+  startsAt: 'Starts',
+  venue: 'Where',
+  tierName: 'Ticket type (e.g. General, VIP)',
+  supply: 'Quantity',
+  amount: 'Amount',
+  next: 'Next',
   // publish screen
-  publishTitle: '공개하기',
-  publish: '공개하기',
-  confirm: '네, 공개할게요',
-  confirmHeading: '이대로 공개할까요?',
-  splitIntro: '티켓 값이 들어오면 누구에게 얼마씩 나눌지 정해요',
-  addRow: '수령인 추가',
-  orgName: '주최자 이름',
-  checkLater: '나중에 확인',
+  publishTitle: 'Publish',
+  publish: 'Publish',
+  confirm: 'Yes, publish it',
+  confirmHeading: 'Publish it as it is?',
+  splitIntro: 'Decide who gets how much of each ticket sale',
+  addRow: 'Add recipient',
+  orgName: 'Organizer name',
+  checkLater: 'Check later',
 } as const;
 
 export interface TierSpec {
-  kind: '무료' | '유료';
+  kind: 'Free' | 'Paid';
   /** Free tiers only: 선착순 (auto) or 관리자 승인 (approval, flag-gated). */
-  mode?: '선착순' | '관리자 승인';
+  mode?: 'first-come' | 'approval';
   name?: string;
   supply?: number;
   /** Paid only: whole US dollars (the chain stores amount × 100 as `priceUsdCents`). */
@@ -144,9 +144,9 @@ export async function createDraftAndPublish(page: Page, spec: EventSpec): Promis
 
     const t0 = spec.tiers[0]!;
     const quick = page.getByRole('group', { name: C.quickStart });
-    if (t0.kind === '유료') {
+    if (t0.kind === 'Paid') {
       await press(quick.getByRole('button', { name: C.quickPaid, exact: true }));
-    } else if (t0.mode === '관리자 승인') {
+    } else if (t0.mode === 'approval') {
       const chip = quick.getByRole('button', { name: C.quickApproval, exact: true });
       if (!(await chip.isEnabled())) {
         throw new Error('APPROVAL_MODE_DISABLED: VITE_APPROVAL_MODES is off in this build');
@@ -158,7 +158,7 @@ export async function createDraftAndPublish(page: Page, spec: EventSpec): Promis
     const card = page.locator('.tier-card').first();
     if (t0.name) await fieldInput(card, C.tierName).fill(t0.name, { force: true });
     if (t0.supply !== undefined) await fieldInput(card, C.supply).fill(String(t0.supply), { force: true });
-    if (t0.kind === '유료') await fieldInput(card, C.amount).fill(String(t0.price ?? 30), { force: true });
+    if (t0.kind === 'Paid') await fieldInput(card, C.amount).fill(String(t0.price ?? 30), { force: true });
 
     await shot(page, 'org-create-form-filled');
     const next = page.getByRole('button', { name: C.next, exact: true });
@@ -169,7 +169,7 @@ export async function createDraftAndPublish(page: Page, spec: EventSpec): Promis
     await expect(page.getByRole('heading', { name: C.publishTitle, level: 1 })).toBeVisible({ timeout: 30_000 });
     await shot(page, 'org-publish-screen');
 
-    if (spec.tiers.some((tier) => tier.kind === '유료')) await fillSplit(page, spec.split ?? []);
+    if (spec.tiers.some((tier) => tier.kind === 'Paid')) await fillSplit(page, spec.split ?? []);
 
     const org = fieldInput(page, C.orgName);
     if (await org.isVisible().catch(() => false)) await org.fill(spec.orgName, { force: true });

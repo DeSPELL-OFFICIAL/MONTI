@@ -14,7 +14,7 @@ import { getEvent } from '../utils/scenario-state';
  * Personas are indices into USERS (0 = persona-02). Default checks one reused requester (02) and one
  * fresh requester (06). Override with E2E_VERIFY_PERSONAS="0,4,5".
  */
-const APPROVAL_TITLE = '관리자 승인 테스트 행사';
+const APPROVAL_TITLE = 'Approval-only test event';
 
 test('verify: approved requesters see 승인 or hold the minted ticket (read-only)', async ({ browser }: { browser: Browser }) => {
   const appr = getEvent('approval');

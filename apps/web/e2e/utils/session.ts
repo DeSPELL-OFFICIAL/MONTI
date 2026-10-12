@@ -9,7 +9,7 @@ export const BASE_URL = process.env.E2E_BASE_URL ?? 'https://monti.despell.io';
 
 /**
  * Manually-created contexts do not inherit the project's `use`, so every persona context is
- * given the same phone-sized, ko-KR, Seoul-time profile the config's default context has.
+ * given the same phone-sized, en-US, Seoul-time profile the config's default context has.
  */
 const MOBILE = {
   baseURL: BASE_URL,
@@ -17,7 +17,7 @@ const MOBILE = {
   deviceScaleFactor: 3,
   isMobile: true,
   hasTouch: true,
-  locale: 'ko-KR',
+  locale: 'en-US',
   timezoneId: 'Asia/Seoul',
 } as const;
 
@@ -68,7 +68,7 @@ async function prepareContext(context: BrowserContext): Promise<void> {
   await context.addInitScript(() => {
     try {
       Object.defineProperty(navigator, 'webdriver', { get: () => false });
-      Object.defineProperty(navigator, 'languages', { get: () => ['ko-KR', 'ko', 'en-US', 'en'] });
+      Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
       // A plausible chrome runtime object; its absence is a known automation tell.
       const w = window as unknown as { chrome?: unknown };
       if (!w.chrome) w.chrome = { runtime: {} };

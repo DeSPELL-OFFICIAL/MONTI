@@ -49,7 +49,7 @@ describe('selectPersonas', () => {
     const { admin, users } = selectPersonas();
     expect(admin.id).toBe('persona-01');
     expect(admin.role).toBe('admin');
-    expect(admin.displayName).toBe('관리자 몬티');
+    expect(admin.displayName).toBe('Monti Admin');
     expect(users).toHaveLength(PERSONA_COUNT - 1);
     expect(ids(users)).toEqual([
       'persona-02', 'persona-03', 'persona-04', 'persona-05', 'persona-06',
