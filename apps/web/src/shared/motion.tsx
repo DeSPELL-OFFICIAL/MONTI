@@ -5,6 +5,7 @@ import {
   LazyMotion,
   MotionConfig,
   m,
+  useIsPresent,
   useReducedMotion,
   type HTMLMotionProps,
   type Variants,
@@ -109,4 +110,4 @@ export const Pressable = forwardRef<HTMLButtonElement, PressableProps>(
   },
 );
 
-export { AnimatePresence, MotionConfig, m, useReducedMotion };
+export { AnimatePresence, MotionConfig, m, useIsPresent, useReducedMotion };

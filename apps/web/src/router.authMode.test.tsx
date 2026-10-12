@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { RouterProvider, createMemoryRouter } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -23,10 +23,13 @@ vi.mock('./shared/deviceHealth', async (orig) => ({
   useDeviceHealth: () => deviceHealth(),
 }));
 
+// The claim screen itself is not under test here, only where the router leaves the visitor.
+vi.mock('./attendee/claim/Claim', () => ({ Claim: () => <h1>claim screen</h1> }));
+
 const { routes } = await import('./router');
 const { queryClient } = await import('./shared/query');
 const { setSession } = await import('./shared/session');
-const { resetRegistration } = await import('./shared/registration');
+const { resetRegistration, markRegistered } = await import('./shared/registration');
 
 function routerAt(path: string) {
   const router = createMemoryRouter(routes, { initialEntries: [path] });
@@ -90,6 +93,23 @@ describe('routing with VITE_AUTH_MODE=open', () => {
     routerAt('/recover');
     expect(await screen.findByRole('heading', { name: startEn.recoverTitle })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: startEn.recoverCta })).toBeInTheDocument();
+  });
+
+  it('keeps a shared link\'s destination once the session turns signedIn on /start', async () => {
+    setSession({ status: 'anonymous' });
+    const router = routerAt('/claim/1001');
+    await screen.findByRole('heading', { name: startEn.title });
+    expect(router.state.location.pathname).toBe('/start');
+    expect(returnToOf(router)).toBe('/claim/1001');
+
+    // What Get started ends with: registration known done, then the hydrator reads the claims.
+    markRegistered();
+    act(() => setSession({ status: 'signedIn', account: `0x${'25'.repeat(20)}`, personId: 'open-link' }));
+
+    expect(await screen.findByRole('heading', { name: 'claim screen' })).toBeInTheDocument();
+    // The exiting /start screen must not redirect again once its slide-out is over.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(router.state.location.pathname).toBe('/claim/1001');
   });
 
   it('lets a returning visitor whose persisted session has the claims straight in', async () => {

@@ -1,11 +1,18 @@
-import type { ReactNode } from 'react';
-import { Navigate, Outlet, type RouteObject, useLocation, useOutlet } from 'react-router-dom';
+import { useContext, useRef, type ReactNode } from 'react';
+import {
+  Navigate,
+  Outlet,
+  type RouteObject,
+  UNSAFE_LocationContext as LocationContext,
+  useLocation,
+  useOutlet,
+} from 'react-router-dom';
 import { BottomTabs } from './shared/ui';
 import { useRegistration } from './shared/registration';
 import { useDeviceHealth } from './shared/deviceHealth';
 import { useSession } from './shared/session';
 import { Spinner } from './shared/ui';
-import { AnimatePresence, m, useReducedMotion } from './shared/motion';
+import { AnimatePresence, m, useIsPresent, useReducedMotion } from './shared/motion';
 import { TAB_PATHS } from './shared/tabRoots';
 import { authMode } from './shared/config';
 
@@ -22,6 +29,22 @@ import { authMode } from './shared/config';
  * with the content under it (and, being outside the transformed element, keeps its fixed
  * position anchored to the viewport).
  */
+/**
+ * A screen sliding out is still mounted, and without this it would keep reading the LIVE location
+ * — the one the router has already moved on to. Every location-driven effect in it then re-runs
+ * against the new URL: `/start` lost its `?returnTo=` and navigated to `/` right after sending the
+ * visitor to their shared link, and the guards redirected the screen being entered to itself.
+ * While present the screen sees the live location; once exiting it keeps the last one it saw, the
+ * same "frozen router" an exiting route gets in any animated-routes setup.
+ */
+function FreezeLocationWhenExiting({ children }: { children: ReactNode }) {
+  const present = useIsPresent();
+  const live = useContext(LocationContext);
+  const seen = useRef(live);
+  if (present) seen.current = live;
+  return <LocationContext.Provider value={seen.current}>{children}</LocationContext.Provider>;
+}
+
 function TabShell() {
   const location = useLocation();
   const outlet = useOutlet();
@@ -41,7 +64,7 @@ function TabShell() {
             exit={{ opacity: 0, x: -24 }}
             transition={{ duration: 0.24, ease: [0.22, 0.61, 0.36, 1] }}
           >
-            {outlet}
+            <FreezeLocationWhenExiting>{outlet}</FreezeLocationWhenExiting>
           </m.div>
         </AnimatePresence>
       )}
@@ -55,11 +78,8 @@ export function RequireSession() {
   const location = useLocation();
   if (session.status === 'loading') return <Spinner />;
   if (session.status === 'anonymous') {
-    // The route transition keeps this (exiting) screen mounted for its slide-out, and it then reads
-    // the new location: without this it would bounce `/login` to itself and nest the target.
     // Open mode has no sign-in screen: the one-tap start is where an identity comes from.
     const entry = authMode() === 'open' ? '/start' : '/login';
-    if (location.pathname === entry) return null;
     // Where they were going rides along, so a claim link opened signed out comes back to the
     // claim after sign-in or signup rather than landing on 내 티켓.
     const returnTo = encodeURIComponent(`${location.pathname}${location.search}`);
@@ -82,10 +102,6 @@ function FinishSignupFirst() {
   const location = useLocation();
   if (registration === 'pending') {
     const finishAt = authMode() === 'open' ? '/start' : '/signup/register';
-    // Same as RequireSession above: the exiting screen stays mounted for its slide-out and reads
-    // the new location, so without this it would redirect the finish screen to itself and nest
-    // the target inside its own returnTo.
-    if (location.pathname === finishAt) return null;
     const returnTo = encodeURIComponent(`${location.pathname}${location.search}`);
     return <Navigate to={`${finishAt}?returnTo=${returnTo}`} replace />;
   }
