@@ -162,6 +162,23 @@ export const BANNED_ATTENDEE_WORDS: readonly string[] = [
   'transaction',
   'blockchain',
   'monad',
+  'wallets',
+  'tokens',
+  'transactions',
+  'minted',
+  'minting',
+  'crypto',
+  'coin',
+  'coins',
+  'web3',
+  'on-chain',
+  'onchain',
+  'signature',
+  'hash',
+  'usdc',
+  'private key',
+  'public key',
+  'seed phrase',
 ];
 
 /** 이벤트 채팅 한 메시지 상한. Firestore 규칙과 서버가 같은 값을 쓴다. */

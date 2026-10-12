@@ -137,7 +137,7 @@ export async function admissionsDuplicate(
   params: AdmissionsDuplicateParams,
 ): Promise<{ deny: DenyCode } | undefined> {
   try {
-    const snapshot = await getDoc(doc(getDb(), 'admissions', params.eventId, 'tokens', params.tokenId));
+    const snapshot = await getDoc(doc(getDb(), 'admissions', params.eventId, 'tokens', params.tokenId)); // copy-lint-ignore: Firestore path, not copy
     const data = snapshot.data() as { status?: string; passedAt?: unknown } | undefined;
     if (!data) return undefined;
     if (data.status === 'confirmed') return { deny: 'ALREADY_USED' };
