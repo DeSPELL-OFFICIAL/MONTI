@@ -102,6 +102,8 @@ export function EventDetail() {
   const { kycLevel } = useKycLevel();
   // 상세에 받기 흡수(plan B1): 티켓 받기를 누르면 라우트 홉 없이 이 화면 위 인라인 시트가 열린다.
   const [claiming, setClaiming] = useState(false);
+  // The ticket type the sheet opens on: the first unless a type row was tapped.
+  const [claimTier, setClaimTier] = useState(0);
   // 내가 이미 이 행사 티켓을 들고 있는지 — 이른 리턴 앞에서 읽어야 바가 그 티켓으로 돌려보낼 수 있다
   // (visual R1-5). enabled 가드가 걸려 있어 로그아웃 상태에서는 요청이 나가지 않는다.
   const { data: myTickets } = useMyTickets();
@@ -246,12 +248,38 @@ export function EventDetail() {
           {tiers.map((tier) => {
             const left = Number(tier.supply) - Number(tier.minted);
             const cents = priceOf(tier.idx);
-            return (
-              <li key={tier.id}>
+            const row = (
+              <>
                 <span>{cents === undefined ? tier.name : `${tier.name} · ${formatUsdCents(cents)}`}</span>
                 <span className="muted">
                   {left > 0 ? fmt(copy.discover.remaining, { count: left }) : copy.discover.soldOut}
                 </span>
+              </>
+            );
+            // A type with tickets left is a way in: it opens the same claim the bar does, with this
+            // type already chosen. Someone already holding a ticket here is sent to it by the bar,
+            // so their rows stay plain, as do sold-out types and a cancelled event.
+            const tappable = left > 0 && !held && event.status !== CANCELLED;
+            return (
+              <li key={tier.id}>
+                {!tappable ? (
+                  row
+                ) : signedIn ? (
+                  <button
+                    type="button"
+                    className="tier-list__pick"
+                    onClick={() => {
+                      setClaimTier(tier.idx);
+                      setClaiming(true);
+                    }}
+                  >
+                    {row}
+                  </button>
+                ) : (
+                  <Link to={`/claim/${event.id}?tier=${tier.idx}`} className="tier-list__pick">
+                    {row}
+                  </Link>
+                )}
               </li>
             );
           })}
@@ -266,6 +294,7 @@ export function EventDetail() {
           <ClaimFlow
             key="claim"
             eventId={event.id}
+            initialTier={claimTier}
             present={{ kind: 'sheet', onClose: () => setClaiming(false) }}
           />
         ) : null}
@@ -288,7 +317,14 @@ export function EventDetail() {
             </Link>
           ) : signedIn ? (
             // 로그인한 사람은 이 자리에서 시트로 받는다 — 한 탭, 라우트 홉 없음(plan B1·여정 A).
-            <Button onClick={() => setClaiming(true)}>{getLabel}</Button>
+            <Button
+              onClick={() => {
+                setClaimTier(tiers[0]?.idx ?? 0);
+                setClaiming(true);
+              }}
+            >
+              {getLabel}
+            </Button>
           ) : (
             // 로그인 전에는 /claim 라우트로 보내 로그인을 먼저 마치게 하고, 그 뒤 라우트가 이어받는다.
             <Link to={`/claim/${event.id}`} className="btn btn--primary btn--link">

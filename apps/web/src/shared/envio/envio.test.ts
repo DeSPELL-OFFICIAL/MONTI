@@ -108,6 +108,18 @@ describe('fetchEventMetadata', () => {
     expect(metadata.category).toBe(0);
   });
 
+  it('shares one gateway read between callers asking at once, and retries after a failure', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('nope', { status: 504 }));
+    await expect(fetchEventMetadata('cid-x')).rejects.toThrow('IPFS_504');
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({ name: 'Demo Night' }));
+    const [list, detail] = await Promise.all([fetchEventMetadata('cid-x'), fetchEventMetadata('cid-x')]);
+    expect(list.title).toBe('Demo Night');
+    expect(detail).toBe(list);
+    // One failed read, then exactly one more for both callers together.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('accepts a document that names the title `title` rather than `name`', () => {
     expect(normalizeMetadata({ title: '재즈 나이트', venue: '한남', category: 2, region: 'KR-11' })).toEqual({
       title: '재즈 나이트',

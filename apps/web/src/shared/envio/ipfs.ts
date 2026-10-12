@@ -45,8 +45,13 @@ const IPFS_SCHEME = 'ipfs://';
  */
 const FETCH_TIMEOUT_MS = 12_000;
 
-/** One document per CID per session: the list and the detail screen read the same rows. */
-const cache = new Map<string, EventMetadata>();
+/**
+ * One document per CID per session: the list and the detail screen read the same rows. The read
+ * itself is memoised, not just its answer, so two screens asking at once (the organiser list
+ * prefetching while the event screen opens) share one gateway round trip. A failed read is
+ * dropped from the memo so the next caller tries again.
+ */
+const cache = new Map<string, Promise<EventMetadata>>();
 
 /** Turns a bare CID or an `ipfs://` URI into a URL the browser can load; passes http(s) through. */
 export function gatewayUrl(cidOrUri: string): string {
@@ -101,14 +106,17 @@ export function normalizeMetadata(raw: unknown): EventMetadata {
  * one: the caller decides whether a missing title hides the event (it never does) or falls back
  * to a placeholder.
  */
-export async function fetchEventMetadata(cid: string): Promise<EventMetadata> {
+export function fetchEventMetadata(cid: string): Promise<EventMetadata> {
   const cached = cache.get(cid);
   if (cached) return cached;
-  const response = await fetch(gatewayUrl(cid), { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-  if (!response.ok) throw new Error(`IPFS_${response.status}`);
-  const metadata = normalizeMetadata(await response.json());
-  cache.set(cid, metadata);
-  return metadata;
+  const read = (async () => {
+    const response = await fetch(gatewayUrl(cid), { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    if (!response.ok) throw new Error(`IPFS_${response.status}`);
+    return normalizeMetadata(await response.json());
+  })();
+  cache.set(cid, read);
+  read.catch(() => cache.delete(cid));
+  return read;
 }
 
 /** Only for tests: the cache is a session-long memo with no invalidation in the app. */

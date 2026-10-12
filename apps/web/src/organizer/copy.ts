@@ -25,7 +25,7 @@ const ko = {
     events: '내 행사',
     eventsEmpty: '아직 만든 행사가 없어요. 아래 만들기로 시작해 보세요',
     eventsFailed: '내 행사를 가져오지 못했어요. 잠시 뒤 다시 시도해 주세요',
-    // 목록은 체인 줄만 읽는다. 제목은 IPFS에 있고, 느린 게이트웨이가 목록을 붙잡으면 안 된다.
+    // 제목은 IPFS에 있어 줄보다 늦게 온다. 그동안(또는 끝내 못 받으면) 번호로 보인다.
     eventFallback: '행사 #{{id}}',
     status: { Draft: '작성 중', Published: '공개됨', Cancelled: '취소됨' },
 
@@ -216,6 +216,8 @@ const ko = {
     kycNo: '안 함',
     checkedIn: '입장함',
     notCheckedIn: '아직',
+    // 닉네임이 없는 참석자. 뒤에 티켓 번호 앞뒤 네 자리가 붙는다.
+    guest: '게스트',
     gates: '입구 단말기',
     requests: '신청 관리',
     notIndexed: '없는 행사 번호이거나 아직 색인 전이에요',
@@ -586,8 +588,8 @@ const en: typeof ko = {
     events: 'My events',
     eventsEmpty: 'No events yet. Start one with Create below',
     eventsFailed: 'Could not load your events. Please try again in a moment',
-    // The list reads the indexed rows only. Titles live on IPFS, and a slow gateway must not
-    // hold up rows that are already in hand.
+    // Titles live on IPFS and arrive after the rows; until then (or if the gateway never
+    // answers) a row goes by its number.
     eventFallback: 'Event #{{id}}',
     status: { Draft: 'Draft', Published: 'Published', Cancelled: 'Cancelled' },
 
@@ -774,6 +776,8 @@ const en: typeof ko = {
     kycNo: 'Not done',
     checkedIn: 'Checked in',
     notCheckedIn: 'Not yet',
+    // An attendee with no nickname; the ticket's short number follows it.
+    guest: 'Guest',
     gates: 'Gate devices',
     requests: 'Requests',
     notIndexed: 'No event has that number, or it has not been indexed yet',

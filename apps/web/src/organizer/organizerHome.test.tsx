@@ -23,6 +23,14 @@ vi.mock('react-router-dom', async (orig) => ({
   useNavigate: () => navigate,
 }));
 
+// Each event's name is read from its pinned document. By default the read never answers, so every
+// row stays under its number placeholder; the test about names hands back a document.
+const fetchEventMetadata = vi.fn((_cid: string): Promise<{ title: string }> => new Promise(() => undefined));
+vi.mock('../shared/envio/ipfs', async (orig) => ({
+  ...(await orig<typeof import('../shared/envio/ipfs')>()),
+  fetchEventMetadata,
+}));
+
 const { OrganizerRoutes } = await import('./Layout');
 const { organizerCopy } = await import('./copy');
 const { setSession } = await import('../shared/session');
@@ -192,6 +200,22 @@ describe('organiser home', () => {
     expect(screen.getByRole('link', { name: 'Event #11' })).toHaveAttribute('href', '/org/events/11');
     expect(screen.getByText(copy.status.Draft)).toBeInTheDocument();
     expect(screen.getByText(formatEventDate(EVENT_A.startsAt, 'en'))).toBeInTheDocument();
+  });
+
+  it('swaps the number placeholder for the event name once its document answers', async () => {
+    let answer: (value: { title: string }) => void = () => undefined;
+    fetchEventMetadata.mockImplementationOnce(() => new Promise((resolve) => { answer = resolve; }));
+    withEvents([EVENT_A]);
+    open();
+    // In hand at once, by number: the gateway never holds a row up.
+    expect(screen.getByRole('link', { name: 'Event #11' })).toHaveAttribute('href', '/org/events/11');
+    expect(fetchEventMetadata).toHaveBeenCalledWith('cid-a');
+    answer({ title: 'Monad Metropolis Demo Night' });
+    expect(await screen.findByRole('link', { name: 'Monad Metropolis Demo Night' })).toHaveAttribute(
+      'href',
+      '/org/events/11',
+    );
+    expect(screen.queryByRole('link', { name: 'Event #11' })).toBeNull();
   });
 
   it('shows a state the indexer invents exactly as it came', () => {
