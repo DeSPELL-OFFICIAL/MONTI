@@ -1,26 +1,25 @@
 import { expect, type Page } from '@playwright/test';
-import { en, ko } from '../../src/attendee/start/copy';
+import { en } from '../../src/attendee/start/copy';
 
 /**
  * Open mode (`VITE_AUTH_MODE=open`) helpers. The start screen's strings come from the screen's own
- * copy module, so a wording change cannot leave this helper asserting on a stale sentence. Both
- * languages are accepted: the browser locale is ko-KR, while the deployed build may pin English.
+ * copy module, so a wording change cannot leave this helper asserting on a stale sentence. The app
+ * is English-only.
  */
-function either(a: string, b: string): RegExp {
-  const esc = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`^(${esc(a)}|${esc(b)})$`);
+function exact(text: string): RegExp {
+  return new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
 }
 
 export const OPEN = {
-  startTitle: either(en.title, ko.title),
-  startCta: either(en.cta, ko.cta),
-  // The shared-copy labels the claim and ticket screens use, en first (claim.cta, claim.done,
-  // tickets.title in shared/copy). Held here, not imported, so this file does not drag the app's
-  // i18n runtime into Playwright.
-  claimCta: either('Get a ticket', '티켓 받기'),
-  claimDone: either("You got your ticket · It's in My Tickets", '티켓을 받았어요 · 내 티켓에 있어요'),
-  claimAlready: /You already have|이미 받았어요/,
-  ticketsTitle: either('My tickets', '내 티켓'),
+  startTitle: exact(en.title),
+  startCta: exact(en.cta),
+  // The shared-copy labels the claim and ticket screens use (claim.cta, claim.done, tickets.title in
+  // shared/copy/en.ts). Held here, not imported, so this file does not drag the app's i18n runtime
+  // into Playwright.
+  claimCta: exact('Get a ticket'),
+  claimDone: exact("You got your ticket · It's in My tickets"),
+  claimAlready: /You already have/,
+  ticketsTitle: exact('My tickets'),
 } as const;
 
 /** Allowed slack for the one-tap start: ~15 s normally, plus cold starts and a busy attester. */

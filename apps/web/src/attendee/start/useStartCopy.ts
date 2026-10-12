@@ -1,7 +1,6 @@
-import { useLocale } from '../../shared/i18n';
-import { en, ko, type StartCopy } from './copy';
+import { en, type StartCopy } from './copy';
 
-/** The open-mode screens' strings in the current language. */
+/** The open-mode screens' strings. The app is English-only (`LOCALE` in `shared/i18n.ts`). */
 export function useStartCopy(): StartCopy {
-  return useLocale() === 'en' ? en : ko;
+  return en;
 }

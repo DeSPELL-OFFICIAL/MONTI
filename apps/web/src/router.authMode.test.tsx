@@ -2,7 +2,8 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { RouterProvider, createMemoryRouter } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ko as startKo } from './attendee/start/copy';
+import { en as startEn } from './attendee/start/copy';
+import { en } from './shared/copy';
 
 vi.mock('./organizer/useMyOrgs', () => ({
   useMyOrgs: () => ({ orgs: [], canCreateEvent: false, isLoading: false, isError: false, error: null, refetch: () => undefined }),
@@ -60,7 +61,7 @@ describe('routing with VITE_AUTH_MODE=open', () => {
   it('sends a signed-out visitor on a guarded route to /start, carrying returnTo', async () => {
     setSession({ status: 'anonymous' });
     const router = routerAt('/claim/7?x=1');
-    expect(await screen.findByRole('heading', { name: startKo.title })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: startEn.title })).toBeInTheDocument();
     expect(router.state.location.pathname).toBe('/start');
     expect(returnToOf(router)).toBe('/claim/7?x=1');
   });
@@ -69,7 +70,7 @@ describe('routing with VITE_AUTH_MODE=open', () => {
     setSession({ status: 'anonymous' });
     for (const path of ['/login', '/signup/phone', '/signup/verify', '/signup/register', '/signup/passkey']) {
       const router = routerAt(`${path}?returnTo=%2Fclaim%2F3`);
-      await screen.findByRole('heading', { name: startKo.title });
+      await screen.findByRole('heading', { name: startEn.title });
       expect(router.state.location.pathname, path).toBe('/start');
       expect(returnToOf(router), path).toBe('/claim/3');
       cleanup();
@@ -87,14 +88,14 @@ describe('routing with VITE_AUTH_MODE=open', () => {
   it('offers a fresh start instead of an SMS check on /recover', async () => {
     setSession({ status: 'signedIn', account: `0x${'22'.repeat(20)}`, personId: 'open-recover' });
     routerAt('/recover');
-    expect(await screen.findByRole('heading', { name: startKo.recoverTitle })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: startKo.recoverCta })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: startEn.recoverTitle })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: startEn.recoverCta })).toBeInTheDocument();
   });
 
   it('lets a returning visitor whose persisted session has the claims straight in', async () => {
     setSession({ status: 'signedIn', account: `0x${'23'.repeat(20)}`, personId: 'open-back' });
     const router = routerAt('/tickets');
-    await screen.findByRole('link', { name: '내 티켓' });
+    await screen.findByRole('link', { name: en.tabs.tickets });
     expect(router.state.location.pathname).toBe('/tickets');
   });
 });
@@ -103,7 +104,7 @@ describe('routing with VITE_AUTH_MODE unset (phone mode)', () => {
   it('keeps the guarded-route redirect on /login', async () => {
     setSession({ status: 'anonymous' });
     const router = routerAt('/claim/7');
-    await screen.findByRole('heading', { name: '로그인' });
+    await screen.findByRole('heading', { name: en.login.title });
     expect(router.state.location.pathname).toBe('/login');
     expect(returnToOf(router)).toBe('/claim/7');
   });
@@ -130,7 +131,7 @@ describe('routing with VITE_AUTH_MODE unset (phone mode)', () => {
     vi.stubEnv('VITE_AUTH_MODE', 'phone');
     setSession({ status: 'anonymous' });
     const router = routerAt('/tickets');
-    await screen.findByRole('heading', { name: '로그인' });
+    await screen.findByRole('heading', { name: en.login.title });
     expect(router.state.location.pathname).toBe('/login');
   });
 });

@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ko as copy } from './copy';
+import { en as copy } from './copy';
 
 const resetDeviceKey = vi.fn(async () => undefined);
 vi.mock('../../shared/deviceKey', () => ({ resetDeviceKey, ATTENDEE_KEY_ALIAS: 'monti-attendee' }));

@@ -2,7 +2,7 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ko as copy } from './copy';
+import { en as copy } from './copy';
 
 const PERSON_ID = `0x${'aa'.repeat(32)}`;
 const ACCOUNT = `0x${'ab'.repeat(20)}`;
