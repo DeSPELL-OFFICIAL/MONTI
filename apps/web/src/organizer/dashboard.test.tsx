@@ -67,7 +67,7 @@ const PUBLIC_EVENT = {
   status: 'Published', requireKyc: false,
 };
 const TIERS = [
-  { id: '5-0', eventId: '5', idx: 0, name: '일반', priceUsdCents: '0', supply: '100', minted: '40', maxPerWallet: '2', seated: false },
+  { id: '5-0', eventId: '5', idx: 0, name: 'General', priceUsdCents: '0', supply: '100', minted: '40', maxPerWallet: '2', seated: false },
 ];
 
 // The resolved shape is widened so a test can also stand in a `ClaimRequest` array — the same mock
@@ -77,8 +77,8 @@ vi.mock('../shared/envio/client', () => ({ gql }));
 
 const { organizerCopy } = await import('./copy');
 const { Dashboard } = await import('./Dashboard');
-const dash = organizerCopy.ko.dashboard;
-const life = organizerCopy.ko.lifecycle;
+const dash = organizerCopy.en.dashboard;
+const life = organizerCopy.en.lifecycle;
 
 function open() {
   render(
@@ -130,7 +130,7 @@ describe('cancelling (publishing happens on the draft, never here)', () => {
     open();
     await screen.findByText(dash.attendees);
     expect(screen.queryByRole('link', { name: /고치기/ })).not.toBeInTheDocument();
-    expect(screen.getAllByRole('button').map((button) => button.textContent)).not.toContain('공개하기');
+    expect(screen.getAllByRole('button').map((button) => button.textContent)).not.toContain('Publish');
   });
 
   /** Ruling 3: after sub-plan 01b a cancelled event blocks hand-overs — say so beforehand. */
@@ -210,7 +210,7 @@ describe('an event the indexer has no row for', () => {
   it('offers the ticket pictures, named by the event the indexer and the document agree on', async () => {
     open();
     expect(await screen.findByRole('heading', { name: dash.art.title })).toBeInTheDocument();
-    expect(await screen.findByRole('img', { name: /재즈 나이트 · 일반/ })).toBeInTheDocument();
+    expect(await screen.findByRole('img', { name: /재즈 나이트 · General/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: dash.art.change })).toBeInTheDocument();
     expect(loadEventArt).toHaveBeenCalledWith('5');
     expect(fetchEventMetadata).toHaveBeenCalledWith('bafy');
@@ -226,7 +226,7 @@ describe('the 신청 관리 link', () => {
       ClaimRequest: [{ requestId: '1' }, { requestId: '2' }],
     });
     open();
-    const link = await screen.findByRole('link', { name: /신청 관리/ });
+    const link = await screen.findByRole('link', { name: /Requests/ });
     expect(link).toHaveAttribute('href', '/org/events/5/requests');
     expect(link.textContent).toContain('2');
   });
@@ -234,6 +234,6 @@ describe('the 신청 관리 link', () => {
   it('is absent on an ordinary event', async () => {
     open();
     await screen.findByRole('heading', { name: dash.art.title });
-    expect(screen.queryByRole('link', { name: /신청 관리/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Requests/ })).not.toBeInTheDocument();
   });
 });

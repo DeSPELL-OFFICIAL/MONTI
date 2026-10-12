@@ -31,7 +31,7 @@ vi.mock('react-router-dom', async (orig) => ({
 const { PendingCreateBanner } = await import('./PendingCreateBanner');
 const { organizerCopy } = await import('./copy');
 const { emptyEventDraft, emptyEventDraftTier } = await import('./useEventDraft');
-const copy = organizerCopy.ko.home;
+const copy = organizerCopy.en.home;
 
 const RELAY_ID = 'relay-abc';
 

@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { decodeFunctionData } from 'viem';
 import { identityAbi, ticketAbi } from '../../shared/chain/abis';
 import { DEVICE_COOLDOWN_SECONDS, MIGRATE_DELAY_SECONDS } from '@monti/shared';
-import { ko } from '../../shared/copy/index';
+import { en } from '../../shared/copy/index';
 
 const ACCOUNT = `0x${'ab'.repeat(20)}` as const;
 /** The account a rotation pushed aside, when that account is not this phone. */
@@ -102,12 +102,6 @@ vi.mock('../../shared/api/firestore', () => ({
 const gql = vi.fn();
 vi.mock('../../shared/envio/client', () => ({ gql }));
 
-const setLocale = vi.fn(async () => undefined);
-vi.mock('../../shared/i18n', async (orig) => ({
-  ...(await orig<typeof import('../../shared/i18n')>()),
-  setLocale,
-}));
-
 vi.mock('../../shared/config', () => ({
   getConfig: () => ({ explorerUrl: 'https://explorer.test' }),
 }));
@@ -160,43 +154,43 @@ describe('DeviceLock', () => {
   it('reads the lock state from the chain rather than remembering it', async () => {
     isLocked.mockResolvedValue(true);
     wrap(<DeviceLock />);
-    expect(await screen.findByText(ko.me.locked)).toBeInTheDocument();
-    expect(await screen.findByText(ko.me.unlockGuide)).toBeInTheDocument();
+    expect(await screen.findByText(en.me.locked)).toBeInTheDocument();
+    expect(await screen.findByText(en.me.unlockGuide)).toBeInTheDocument();
   });
 
   it('locks on demand', async () => {
     wrap(<DeviceLock />);
-    await userEvent.click(await screen.findByRole('button', { name: ko.me.lockCta }));
+    await userEvent.click(await screen.findByRole('button', { name: en.me.lockCta }));
     expect(lockDevice).toHaveBeenCalled();
-    expect(await screen.findByText(ko.me.locked)).toBeInTheDocument();
+    expect(await screen.findByText(en.me.locked)).toBeInTheDocument();
   });
 
   it('treats alreadyLocked as locked, not as a failure', async () => {
     lockDevice.mockResolvedValue({ alreadyLocked: true } as never);
     wrap(<DeviceLock />);
-    await userEvent.click(await screen.findByRole('button', { name: ko.me.lockCta }));
-    expect(await screen.findByText(ko.me.locked)).toBeInTheDocument();
-    expect(screen.queryByText(ko.me.lockFailed)).not.toBeInTheDocument();
+    await userEvent.click(await screen.findByRole('button', { name: en.me.lockCta }));
+    expect(await screen.findByText(en.me.locked)).toBeInTheDocument();
+    expect(screen.queryByText(en.me.lockFailed)).not.toBeInTheDocument();
   });
 
   it('says so when the lock did not go through', async () => {
     lockDevice.mockRejectedValueOnce(new Error('nope'));
     wrap(<DeviceLock />);
-    await userEvent.click(await screen.findByRole('button', { name: ko.me.lockCta }));
-    expect(await screen.findByText(ko.me.lockFailed)).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole('button', { name: en.me.lockCta }));
+    expect(await screen.findByText(en.me.lockFailed)).toBeInTheDocument();
   });
 });
 
 describe('NewDevice', () => {
   it('counts the wait from the chain, not from anything stored here', async () => {
     wrap(<NewDevice />);
-    expect(await screen.findByText(fmt(ko.me.newDeviceWait, { days: 5 }))).toBeInTheDocument();
+    expect(await screen.findByText(fmt(en.me.newDeviceWait, { days: 5 }))).toBeInTheDocument();
     expect(deviceUpdatedAt).toHaveBeenCalledWith(ACCOUNT);
   });
 
   it('spells out the undo window, the quarantine and the automatic move', async () => {
     wrap(<NewDevice />);
-    for (const sentence of [ko.me.recoveryUndo, ko.me.recoveryQuarantine, ko.me.recoveryMigrate]) {
+    for (const sentence of [en.me.recoveryUndo, en.me.recoveryQuarantine, en.me.recoveryMigrate]) {
       const rendered = fmt(sentence, { hours: UNDO_HOURS });
       expect(await screen.findByText(rendered)).toBeInTheDocument();
       // The window is read, never typed: the rendered sentence carries the contract's number,
@@ -213,51 +207,51 @@ describe('NewDevice', () => {
     rotationUndoWindow.mockRejectedValue(new Error('offline'));
     wrap(<NewDevice />);
     const hours = MIGRATE_DELAY_SECONDS / 3_600;
-    expect(await screen.findByText(fmt(ko.me.recoveryUndo, { hours }))).toBeInTheDocument();
+    expect(await screen.findByText(fmt(en.me.recoveryUndo, { hours }))).toBeInTheDocument();
   });
 
   it('asks the server when the change is allowed, and says what to do next', async () => {
     deviceUpdatedAt.mockResolvedValue(BigInt(NOW() - 8 * DAY));
     wrap(<NewDevice />);
-    await userEvent.click(await screen.findByRole('button', { name: ko.me.newDeviceCta }));
+    await userEvent.click(await screen.findByRole('button', { name: en.me.newDeviceCta }));
     // `sms` needs a phone re-auth session this app cannot open, so it is not offered at all.
     expect(startDeviceChange).toHaveBeenCalledWith({ method: 'kyc' });
-    expect(await screen.findByText(ko.me.newDeviceReady)).toBeInTheDocument();
+    expect(await screen.findByText(en.me.newDeviceReady)).toBeInTheDocument();
     // Nothing switched here and nothing can: the screen has to hand the person on.
-    expect(await screen.findByText(ko.me.newDeviceNext)).toBeInTheDocument();
+    expect(await screen.findByText(en.me.newDeviceNext)).toBeInTheDocument();
   });
 
   it('offers no method to pick, because only one of them can answer', async () => {
     wrap(<NewDevice />);
-    await screen.findByRole('button', { name: ko.me.newDeviceCta });
+    await screen.findByRole('button', { name: en.me.newDeviceCta });
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
   });
 
   it('sends the unverified to the one screen that exists, and promises nothing else', async () => {
     startDeviceChange.mockRejectedValueOnce({ code: 'failed-precondition', message: 'KYC_REQUIRED' } as never);
     wrap(<NewDevice />);
-    await userEvent.click(await screen.findByRole('button', { name: ko.me.newDeviceCta }));
-    expect(await screen.findByText(ko.me.newDeviceNeedsKyc)).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: ko.kyc.cta }));
+    await userEvent.click(await screen.findByRole('button', { name: en.me.newDeviceCta }));
+    expect(await screen.findByText(en.me.newDeviceNeedsKyc)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: en.kyc.cta }));
     expect(navigate).toHaveBeenCalledWith('/me/verify?returnTo=/me');
   });
 
   it('does not tell anybody to re-verify a number on a screen that does not exist', async () => {
     startDeviceChange.mockRejectedValueOnce({ code: 'failed-precondition', message: 'PHONE_REAUTH_REQUIRED' } as never);
     wrap(<NewDevice />);
-    await userEvent.click(await screen.findByRole('button', { name: ko.me.newDeviceCta }));
-    expect(await screen.findByText(ko.me.newDeviceNeedsPhone)).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole('button', { name: en.me.newDeviceCta }));
+    expect(await screen.findByText(en.me.newDeviceNeedsPhone)).toBeInTheDocument();
     // No route serves a phone re-authentication, so this refusal gets no button at all.
-    expect(screen.queryByRole('button', { name: ko.kyc.cta })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: en.kyc.cta })).not.toBeInTheDocument();
     expect(navigate).not.toHaveBeenCalled();
   });
 
   it('says the tickets are fetched on the new phone, not that they arrive by themselves', async () => {
     wrap(<NewDevice />);
-    const sentence = fmt(ko.me.recoveryMigrate, { hours: UNDO_HOURS });
+    const sentence = fmt(en.me.recoveryMigrate, { hours: UNDO_HOURS });
     expect(await screen.findByText(sentence)).toBeInTheDocument();
     // `Ticket.migrate` is a call the NEW account has to send; nothing moves on its own.
-    expect(sentence).toContain('티켓 가져오기');
+    expect(sentence).toContain('Move my tickets');
   });
 
   it('offers neither recovery button to somebody no rotation ever touched', async () => {
@@ -265,30 +259,30 @@ describe('NewDevice', () => {
     // flag would put both buttons in front of everybody who ever signed up.
     rotatedAt.mockResolvedValue(BigInt(NOW() - 3_600));
     wrap(<NewDevice />);
-    await screen.findByRole('button', { name: ko.me.newDeviceCta });
-    expect(screen.queryByRole('button', { name: ko.me.undoCta })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: ko.me.migrateCta })).not.toBeInTheDocument();
+    await screen.findByRole('button', { name: en.me.newDeviceCta });
+    expect(screen.queryByRole('button', { name: en.me.undoCta })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: en.me.migrateCta })).not.toBeInTheDocument();
   });
 
   it('lets the account a rotation pushed aside take the move back, without gas of its own', async () => {
     rotatedFrom.mockResolvedValue(ACCOUNT);
     rotatedAt.mockResolvedValue(BigInt(NOW() - 3_600));
     wrap(<NewDevice />);
-    await userEvent.click(await screen.findByRole('button', { name: ko.me.undoCta }));
+    await userEvent.click(await screen.findByRole('button', { name: en.me.undoCta }));
     // Relayed on the platform's budget: the pushed-aside account holds nothing, and the relayer
     // pays, so nothing here names an organisation.
     expect(sendAction).toHaveBeenCalledWith('cancelRotation', 'identity', expect.any(String));
     expect(decodeFunctionData({ abi: identityAbi, data: sendAction.mock.calls[0]![2] }).functionName).toBe(
       'cancelRotation',
     );
-    expect(await screen.findByText(ko.me.undoDone)).toBeInTheDocument();
+    expect(await screen.findByText(en.me.undoDone)).toBeInTheDocument();
   });
 
   it('warns that undoing leaves this phone locked, because cancelRotation does not clear it', async () => {
     rotatedFrom.mockResolvedValue(ACCOUNT);
     rotatedAt.mockResolvedValue(BigInt(NOW() - 3_600));
     wrap(<NewDevice />);
-    expect(await screen.findByText(ko.me.undoBody)).toBeInTheDocument();
+    expect(await screen.findByText(en.me.undoBody)).toBeInTheDocument();
   });
 
   it('says the window has closed when the contract refuses the undo', async () => {
@@ -296,20 +290,20 @@ describe('NewDevice', () => {
     rotatedAt.mockResolvedValue(BigInt(NOW() - 3_600));
     sendAction.mockRejectedValueOnce(reverted('NoRotationToCancel'));
     wrap(<NewDevice />);
-    await userEvent.click(await screen.findByRole('button', { name: ko.me.undoCta }));
-    expect(await screen.findByText(ko.me.undoGone)).toBeInTheDocument();
-    expect(screen.queryByText(ko.me.undoFailed)).not.toBeInTheDocument();
+    await userEvent.click(await screen.findByRole('button', { name: en.me.undoCta }));
+    expect(await screen.findByText(en.me.undoGone)).toBeInTheDocument();
+    expect(screen.queryByText(en.me.undoFailed)).not.toBeInTheDocument();
   });
 
   it('takes the undo away once the window has closed, and offers nothing in its place', async () => {
     rotatedFrom.mockResolvedValue(ACCOUNT);
     rotatedAt.mockResolvedValue(BigInt(NOW() - 2 * DAY));
     wrap(<NewDevice />);
-    await screen.findByRole('button', { name: ko.me.newDeviceCta });
-    expect(screen.queryByRole('button', { name: ko.me.undoCta })).not.toBeInTheDocument();
+    await screen.findByRole('button', { name: en.me.newDeviceCta });
+    expect(screen.queryByRole('button', { name: en.me.undoCta })).not.toBeInTheDocument();
     // `Ticket.migrate` refuses anybody but the account the rotation moved TO
     // (`NotRotatedAccount`), so this phone never gets that button either.
-    expect(screen.queryByRole('button', { name: ko.me.migrateCta })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: en.me.migrateCta })).not.toBeInTheDocument();
     expect(loadMyTickets).not.toHaveBeenCalled();
   });
 
@@ -323,7 +317,7 @@ describe('NewDevice', () => {
       { tokenId: '8', state: 'entered' },
     ]);
     wrap(<NewDevice />);
-    await userEvent.click(await screen.findByRole('button', { name: ko.me.migrateCta }));
+    await userEvent.click(await screen.findByRole('button', { name: en.me.migrateCta }));
     // Read for the pushed-aside account, not for the signed-in one: until `migrate` runs, the
     // index still shows the old account holding them.
     expect(loadMyTickets).toHaveBeenCalledWith(OTHER.toLowerCase());
@@ -334,7 +328,7 @@ describe('NewDevice', () => {
       functionName: 'migrate',
       args: [7n],
     });
-    expect(await screen.findByText(fmt(ko.me.migrateDone, { count: 1 }))).toBeInTheDocument();
+    expect(await screen.findByText(fmt(en.me.migrateDone, { count: 1 }))).toBeInTheDocument();
   });
 
   it('says the wait is still running when the timelock refuses the move', async () => {
@@ -343,9 +337,9 @@ describe('NewDevice', () => {
     loadMyTickets.mockResolvedValue([{ tokenId: '7', state: 'before' }]);
     sendAction.mockRejectedValueOnce(reverted('RotationPending'));
     wrap(<NewDevice />);
-    await userEvent.click(await screen.findByRole('button', { name: ko.me.migrateCta }));
-    expect(await screen.findByText(fmt(ko.me.migrateWait, { hours: UNDO_HOURS }))).toBeInTheDocument();
-    expect(screen.queryByText(ko.me.migrateFailed)).not.toBeInTheDocument();
+    await userEvent.click(await screen.findByRole('button', { name: en.me.migrateCta }));
+    expect(await screen.findByText(fmt(en.me.migrateWait, { hours: UNDO_HOURS }))).toBeInTheDocument();
+    expect(screen.queryByText(en.me.migrateFailed)).not.toBeInTheDocument();
   });
 });
 
@@ -353,14 +347,14 @@ describe('KycStatus', () => {
   it('offers the verification screen only while it is unverified', async () => {
     getSignupStatus.mockResolvedValue({ status: 'pending', kycLevel: 0 });
     wrap(<KycStatus />);
-    await userEvent.click(await screen.findByRole('button', { name: ko.kyc.cta }));
+    await userEvent.click(await screen.findByRole('button', { name: en.kyc.cta }));
     expect(navigate).toHaveBeenCalledWith('/me/verify?returnTo=/me');
   });
 
   it('shows the verified state with nothing left to do', async () => {
     wrap(<KycStatus />);
-    expect(await screen.findByText(ko.kyc.mineVerified)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: ko.kyc.cta })).not.toBeInTheDocument();
+    expect(await screen.findByText(en.kyc.mineVerified)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: en.kyc.cta })).not.toBeInTheDocument();
   });
 });
 
@@ -376,7 +370,7 @@ describe('the display name', () => {
    * the prefill then appends itself to — which is the bug the `typed` guard exists to stop.
    */
   async function nameBox(prefill = '김태완'): Promise<HTMLElement> {
-    const box = await screen.findByLabelText(ko.me.displayName);
+    const box = await screen.findByLabelText(en.me.displayName);
     await waitFor(() => expect(box).toHaveValue(prefill));
     return box;
   }
@@ -387,9 +381,9 @@ describe('the display name', () => {
 
   it('starts filled in with the name already stored', async () => {
     wrap(<Profile />);
-    await waitFor(() => expect(screen.getByLabelText(ko.me.displayName)).toHaveValue('김태완'));
+    await waitFor(() => expect(screen.getByLabelText(en.me.displayName)).toHaveValue('김태완'));
     // One concise line saying what the name is for — the long nickname disambiguation was cut.
-    expect(screen.getByText(ko.me.displayNameHelp)).toBeInTheDocument();
+    expect(screen.getByText(en.me.displayNameHelp)).toBeInTheDocument();
   });
 
   it('sends the one field the rule admits, and nothing else', async () => {
@@ -397,13 +391,13 @@ describe('the display name', () => {
     const box = await nameBox();
     await userEvent.clear(box);
     await userEvent.type(box, '김민지');
-    await userEvent.click(within(nameSection(box)).getByRole('button', { name: ko.common.save }));
+    await userEvent.click(within(nameSection(box)).getByRole('button', { name: en.common.save }));
 
     // Exactly `{ displayName }`: `changedOnly` in firestore.rules refuses a patch that carries
     // anything the list does not name, and a refusal is not a message anybody can act on.
     await waitFor(() => expect(saveUserProfile).toHaveBeenCalledWith({ displayName: '김민지' }));
     expect(saveUserProfile).toHaveBeenCalledTimes(1);
-    expect(await screen.findByText(ko.me.displayNameSaved)).toBeInTheDocument();
+    expect(await screen.findByText(en.me.displayNameSaved)).toBeInTheDocument();
   });
 
   it('stops at the length the rule stops at', async () => {
@@ -422,9 +416,9 @@ describe('the display name', () => {
     const box = await nameBox();
     await userEvent.clear(box);
     await userEvent.type(box, '김민지');
-    await userEvent.click(within(nameSection(box)).getByRole('button', { name: ko.common.save }));
+    await userEvent.click(within(nameSection(box)).getByRole('button', { name: en.common.save }));
 
-    expect(await screen.findByText(ko.me.displayNameFailed)).toBeInTheDocument();
+    expect(await screen.findByText(en.me.displayNameFailed)).toBeInTheDocument();
     // The only copy of what somebody just wrote is not thrown away to tell them it failed.
     expect(box).toHaveValue('김민지');
   });
@@ -434,27 +428,26 @@ describe('the display name', () => {
     const box = await nameBox();
     await userEvent.clear(box);
     await userEvent.type(box, '김민지');
-    await userEvent.click(within(nameSection(box)).getByRole('button', { name: ko.common.save }));
+    await userEvent.click(within(nameSection(box)).getByRole('button', { name: en.common.save }));
     await waitFor(() => expect(saveUserProfile).toHaveBeenCalledWith({ displayName: '김민지' }));
 
     // 별명 is unique across everybody and saved by its own call; this one touches neither.
     expect(sendAction).not.toHaveBeenCalled();
     expect(setNickname).not.toHaveBeenCalled();
-    expect(screen.getByLabelText(ko.me.nickname)).toHaveValue('');
+    expect(screen.getByLabelText(en.me.nickname)).toHaveValue('');
   });
 });
 
 describe('Profile', () => {
-  it('stores the chosen language on the device and on the profile', async () => {
+  it('offers no language picker — the app is English-only', async () => {
     wrap(<Profile />);
-    await userEvent.selectOptions(await screen.findByLabelText(ko.me.language), 'en');
-    expect(setLocale).toHaveBeenCalledWith('en');
-    await waitFor(() => expect(saveUserProfile).toHaveBeenCalledWith({ locale: 'en' }));
+    expect(await screen.findByRole('link', { name: en.me.publicRecord })).toBeInTheDocument();
+    expect(screen.queryByRole('combobox')).toBeNull();
   });
 
   it('links the public record at this account', async () => {
     wrap(<Profile />);
-    expect(await screen.findByRole('link', { name: ko.me.publicRecord })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: en.me.publicRecord })).toHaveAttribute(
       'href', `https://explorer.test/address/${ACCOUNT}`,
     );
   });
@@ -466,61 +459,61 @@ describe('Profile', () => {
    */
   it('offers the support address in the footer, as something to tap', async () => {
     wrap(<Profile />);
-    const link = await screen.findByRole('link', { name: ko.common.contactEmail });
-    expect(link).toHaveAttribute('href', `mailto:${ko.common.contactEmail}`);
-    expect(screen.getByText(ko.common.contactHelp, { exact: false })).toBeInTheDocument();
+    const link = await screen.findByRole('link', { name: en.common.contactEmail });
+    expect(link).toHaveAttribute('href', `mailto:${en.common.contactEmail}`);
+    expect(screen.getByText(en.common.contactHelp, { exact: false })).toBeInTheDocument();
   });
 
   it('states the three facts before it deletes anything', async () => {
     wrap(<Profile />);
-    await userEvent.click(await screen.findByRole('button', { name: ko.me.deleteCta }));
+    await userEvent.click(await screen.findByRole('button', { name: en.me.deleteCta }));
     // Signing in stops now, the personal details go in seven days, the public record stays.
-    expect(screen.getByText(ko.me.deleteSignOut)).toBeInTheDocument();
-    expect(screen.getByText(ko.me.deleteErase)).toBeInTheDocument();
-    expect(screen.getByText(ko.me.deleteRetained)).toBeInTheDocument();
+    expect(screen.getByText(en.me.deleteSignOut)).toBeInTheDocument();
+    expect(screen.getByText(en.me.deleteErase)).toBeInTheDocument();
+    expect(screen.getByText(en.me.deleteRetained)).toBeInTheDocument();
     // Asking is not requesting: nothing has been sent while the dialog is up.
     expect(requestAccountDeletion).not.toHaveBeenCalled();
   });
 
   it('requests the deletion once, shows the date and signs the person out', async () => {
     wrap(<Profile />);
-    await userEvent.click(await screen.findByRole('button', { name: ko.me.deleteCta }));
-    await userEvent.click(screen.getByRole('button', { name: ko.me.deleteConfirmCta }));
+    await userEvent.click(await screen.findByRole('button', { name: en.me.deleteCta }));
+    await userEvent.click(screen.getByRole('button', { name: en.me.deleteConfirmCta }));
 
     await waitFor(() => expect(requestAccountDeletion).toHaveBeenCalledTimes(1));
-    const date = new Date(SCHEDULED_FOR * 1_000).toLocaleDateString('ko');
-    expect(await screen.findByText(fmt(ko.me.deleteScheduled, { date }))).toBeInTheDocument();
+    const date = new Date(SCHEDULED_FOR * 1_000).toLocaleDateString('en');
+    expect(await screen.findByText(fmt(en.me.deleteScheduled, { date }))).toBeInTheDocument();
     // The server already revoked this session; leaving the app looking signed in would only
     // hand back opaque refusals on the next tap.
     await waitFor(() => expect(signOut).toHaveBeenCalledWith(AUTH));
     // Nothing left to press: the account is on its way out.
-    expect(screen.queryByRole('button', { name: ko.me.deleteCta })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: en.me.deleteCta })).not.toBeInTheDocument();
   });
 
   it('does nothing at all when the person backs out', async () => {
     wrap(<Profile />);
-    await userEvent.click(await screen.findByRole('button', { name: ko.me.deleteCta }));
-    await userEvent.click(screen.getByRole('button', { name: ko.common.cancel }));
+    await userEvent.click(await screen.findByRole('button', { name: en.me.deleteCta }));
+    await userEvent.click(screen.getByRole('button', { name: en.common.cancel }));
 
     expect(requestAccountDeletion).not.toHaveBeenCalled();
     expect(signOut).not.toHaveBeenCalled();
-    expect(screen.queryByText(ko.me.deleteSignOut)).not.toBeInTheDocument();
+    expect(screen.queryByText(en.me.deleteSignOut)).not.toBeInTheDocument();
     // The way back in is still there.
-    expect(screen.getByRole('button', { name: ko.me.deleteCta })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: en.me.deleteCta })).toBeInTheDocument();
   });
 
   it('confirms as a top-layer modal and closes on Escape without deleting (T-SIMP-13)', async () => {
     wrap(<Profile />);
-    await userEvent.click(await screen.findByRole('button', { name: ko.me.deleteCta }));
+    await userEvent.click(await screen.findByRole('button', { name: en.me.deleteCta }));
     // The confirm is a real modal now (showModal / open fallback in jsdom), not a bare dialog.
     const dialog = document.querySelector('dialog');
     expect(dialog).toHaveClass('confirm-modal');
     // Escape fires the dialog's cancel event; it closes through the same path 취소 uses.
     fireEvent(dialog as HTMLDialogElement, new Event('cancel', { cancelable: true }));
 
-    await waitFor(() => expect(screen.queryByText(ko.me.deleteSignOut)).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText(en.me.deleteSignOut)).not.toBeInTheDocument());
     expect(requestAccountDeletion).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: ko.me.deleteCta })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: en.me.deleteCta })).toBeInTheDocument();
   });
 
   /**
@@ -535,19 +528,19 @@ describe('Profile', () => {
     });
     loadOrgName.mockResolvedValue('재즈 컴퍼니');
     wrap(<Profile />);
-    await userEvent.click(await screen.findByRole('button', { name: ko.me.organizerOpen }));
+    await userEvent.click(await screen.findByRole('button', { name: en.me.organizerOpen }));
     // Manage, not make: the profile never drops anybody straight into creating, even an owner.
     expect(navigate).toHaveBeenCalledWith('/org');
-    expect(screen.queryByText(ko.me.organizerHint)).not.toBeInTheDocument();
+    expect(screen.queryByText(en.me.organizerHint)).not.toBeInTheDocument();
   });
 
   it('offers to make one, and says what for, when there is no organisation', async () => {
     wrap(<Profile />);
-    await userEvent.click(await screen.findByRole('button', { name: ko.me.organizerBecome }));
+    await userEvent.click(await screen.findByRole('button', { name: en.me.organizerBecome }));
     // The creation scene, not a screen about organisations: it asks for the organiser name
     // inline and makes the organisation inside 만들기 (plan section B-4).
     expect(navigate).toHaveBeenCalledWith('/org/new');
-    expect(screen.getByText(ko.me.organizerHint)).toBeInTheDocument();
+    expect(screen.getByText(en.me.organizerHint)).toBeInTheDocument();
   });
 
   it('says nothing at all while the indexer is still answering', async () => {
@@ -556,21 +549,21 @@ describe('Profile', () => {
     // the worse of the two guesses.
     gql.mockImplementation(() => new Promise(() => undefined));
     wrap(<Profile />);
-    expect(await screen.findByRole('heading', { name: ko.me.organizer })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: ko.me.organizerBecome })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: ko.me.organizerOpen })).not.toBeInTheDocument();
-    expect(screen.queryByText(ko.me.organizerHint)).not.toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: en.me.organizer })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: en.me.organizerBecome })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: en.me.organizerOpen })).not.toBeInTheDocument();
+    expect(screen.queryByText(en.me.organizerHint)).not.toBeInTheDocument();
   });
 
   it('keeps the person signed in when the request did not go through', async () => {
     requestAccountDeletion.mockRejectedValueOnce(new Error('unavailable') as never);
     wrap(<Profile />);
-    await userEvent.click(await screen.findByRole('button', { name: ko.me.deleteCta }));
-    await userEvent.click(screen.getByRole('button', { name: ko.me.deleteConfirmCta }));
+    await userEvent.click(await screen.findByRole('button', { name: en.me.deleteCta }));
+    await userEvent.click(screen.getByRole('button', { name: en.me.deleteConfirmCta }));
 
-    expect(await screen.findByText(ko.me.deleteFailed)).toBeInTheDocument();
+    expect(await screen.findByText(en.me.deleteFailed)).toBeInTheDocument();
     expect(signOut).not.toHaveBeenCalled();
     // The dialog is still up, so a second try is one tap away.
-    expect(screen.getByRole('button', { name: ko.me.deleteConfirmCta })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: en.me.deleteConfirmCta })).toBeInTheDocument();
   });
 });

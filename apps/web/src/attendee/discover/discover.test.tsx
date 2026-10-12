@@ -52,7 +52,7 @@ const { EventDetail } = await import('./EventDetail');
 const { DEFAULT_FILTERS, METADATA_CONCURRENCY, listableItems, loadFilters, mapWithPool, saveFilters } =
   await import('./useEvents');
 const { THEME_CODES, themeLabels } = await import('../../shared/eventThemes');
-const { ko } = await import('../../shared/copy/index');
+const { en } = await import('../../shared/copy/index');
 
 const NOW_SECONDS = Math.floor(Date.now() / 1000);
 const IN_TWO_DAYS = String(NOW_SECONDS + 2 * 86_400);
@@ -76,7 +76,7 @@ const META_A = { title: '재즈 나이트', description: '한남동의 밤', ima
 const META_B = { title: '개발자 모임', description: '', image: '', venue: '해운대', category: 1, region: 'KR-26', ...PUBLIC };
 
 const TIERS = [
-  { id: '1-0', eventId: '1', idx: 0, name: '일반', priceUsdCents: '0', supply: '100', minted: '40', maxPerWallet: '2', seated: false },
+  { id: '1-0', eventId: '1', idx: 0, name: 'General', priceUsdCents: '0', supply: '100', minted: '40', maxPerWallet: '2', seated: false },
 ];
 
 /**
@@ -144,7 +144,7 @@ const ORG_NO_PERMISSION = { ...ORG, role: 'manager', bits: 0, canCreateEvent: fa
 const ME = `0x${'ab'.repeat(20)}` as const;
 
 async function tapCreate(): Promise<void> {
-  await userEvent.click(await screen.findByRole('button', { name: '행사 만들기' }));
+  await userEvent.click(await screen.findByRole('button', { name: 'Create an event' }));
 }
 
 function renderDetail(eventId = '1') {
@@ -199,34 +199,34 @@ describe('Discover', () => {
     renderDiscover();
     expect(await screen.findByText('재즈 나이트')).toBeInTheDocument();
     expect(screen.getByText('개발자 모임')).toBeInTheDocument();
-    expect(screen.getAllByText('본인인증 필수')).toHaveLength(1);
+    expect(screen.getAllByText('Verification required')).toHaveLength(1);
     expect(screen.getByRole('link', { name: /재즈 나이트/ })).toHaveAttribute('href', '/events/1');
   });
 
   it('filters the loaded page by the title search box', async () => {
     renderDiscover();
     expect(await screen.findByText('재즈 나이트')).toBeInTheDocument();
-    await userEvent.type(screen.getByPlaceholderText('행사 이름 검색'), '개발자');
+    await userEvent.type(screen.getByPlaceholderText('Search events'), '개발자');
     expect(screen.queryByText('재즈 나이트')).toBeNull();
     expect(screen.getByText('개발자 모임')).toBeInTheDocument();
-    expect(screen.queryByText('본인인증 필수')).toBeNull();
+    expect(screen.queryByText('Verification required')).toBeNull();
   });
 
   it('narrows by date, region and theme', async () => {
     renderDiscover();
     expect(await screen.findByText('재즈 나이트')).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: '이번 주' }));
+    await userEvent.click(screen.getByRole('button', { name: 'This week' }));
     expect(screen.queryByText('개발자 모임')).toBeNull();
     expect(screen.getByText('재즈 나이트')).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: '전체' }));
-    await userEvent.selectOptions(screen.getByLabelText('지역'), 'KR-26');
+    await userEvent.click(screen.getByRole('button', { name: 'All' }));
+    await userEvent.selectOptions(screen.getByLabelText('Region'), 'KR-26');
     expect(screen.queryByText('재즈 나이트')).toBeNull();
     expect(screen.getByText('개발자 모임')).toBeInTheDocument();
 
-    await userEvent.selectOptions(screen.getByLabelText('지역'), '');
-    await userEvent.selectOptions(screen.getByLabelText('테마'), '0');
+    await userEvent.selectOptions(screen.getByLabelText('Region'), '');
+    await userEvent.selectOptions(screen.getByLabelText('Theme'), '0');
     expect(screen.getByText('재즈 나이트')).toBeInTheDocument();
     expect(screen.queryByText('개발자 모임')).toBeNull();
   });
@@ -239,11 +239,11 @@ describe('Discover', () => {
   it('offers every theme an organiser can pick, plus 전체', async () => {
     renderDiscover();
     expect(await screen.findByText('재즈 나이트')).toBeInTheDocument();
-    const theme = screen.getByLabelText('테마') as HTMLSelectElement;
+    const theme = screen.getByLabelText('Theme') as HTMLSelectElement;
     expect([...theme.options].map((option) => option.value))
       .toEqual(['all', ...THEME_CODES.map(String)]);
     expect([...theme.options].map((option) => option.textContent))
-      .toEqual(['전체', ...THEME_CODES.map((code) => themeLabels(ko)[code])]);
+      .toEqual(['All', ...THEME_CODES.map((code) => themeLabels(en)[code])]);
   });
 
   /**
@@ -267,7 +267,7 @@ describe('Discover', () => {
   it('remembers the last filter across mounts', async () => {
     const first = renderDiscover();
     expect(await screen.findByText('재즈 나이트')).toBeInTheDocument();
-    await userEvent.selectOptions(screen.getByLabelText('지역'), 'KR-26');
+    await userEvent.selectOptions(screen.getByLabelText('Region'), 'KR-26');
     first.unmount();
 
     renderDiscover();
@@ -281,7 +281,7 @@ describe('Discover', () => {
     );
     renderDiscover();
     expect(await screen.findByText('재즈 나이트')).toBeInTheDocument();
-    expect(screen.queryByText('제목을 불러오지 못했어요')).toBeNull();
+    expect(screen.queryByText('Title unavailable')).toBeNull();
   });
 
   // A slow or down gateway fails every document at once. Hiding untitled cards then would empty
@@ -289,9 +289,9 @@ describe('Discover', () => {
   it('keeps every card under the placeholder when no title arrives at all', async () => {
     fetchEventMetadata.mockRejectedValue(new Error('IPFS_TIMEOUT'));
     renderDiscover();
-    const links = await screen.findAllByRole('link', { name: '제목을 불러오지 못했어요' });
+    const links = await screen.findAllByRole('link', { name: 'Title unavailable' });
     expect(links.length).toBeGreaterThan(0);
-    expect(screen.queryByText('조건에 맞는 행사가 없어요.')).toBeNull();
+    expect(screen.queryByText('No events match your filters.')).toBeNull();
   });
 
   /**
@@ -302,21 +302,21 @@ describe('Discover', () => {
   it('says the page did not arrive when the request never got there', async () => {
     gql.mockRejectedValue(indexerFailure('network', 'REQUEST_FAILED'));
     renderDiscover();
-    expect(await screen.findByRole('alert')).toHaveTextContent('정보를 가져오지 못했어요. 잠시 뒤 다시 시도해 주세요.');
-    expect(screen.getByRole('button', { name: '다시 시도' })).toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent('We could not load that. Please try again in a moment.');
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   });
 
   it('says the information is not available right now when the indexer answers badly', async () => {
     gql.mockRejectedValue(indexerFailure('http', 'HTTP_500'));
     renderDiscover();
-    expect(await screen.findByRole('alert')).toHaveTextContent('지금 정보를 가져올 수 없어요. 잠시 뒤 다시 시도해 주세요.');
-    expect(screen.getByRole('button', { name: '다시 시도' })).toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent('That information is not available right now. Please try again in a moment.');
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   });
 
   it('keeps the general line for a failure that is nobody\u2019s named cause', async () => {
     gql.mockRejectedValue(new Error('boom'));
     renderDiscover();
-    expect(await screen.findByRole('alert')).toHaveTextContent('문제가 생겼어요. 잠시 뒤 다시 시도해 주세요.');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Something went wrong. Please try again in a moment.');
   });
 });
 
@@ -337,10 +337,10 @@ describe('Discover · loading and empty states', () => {
     setSession({ status: 'signedIn', account: ME });
     myOrgs({ orgs: [], canCreateEvent: false });
     const seen = renderDiscoverTracked();
-    expect(await screen.findByText('첫 행사를 만들어 보세요')).toBeInTheDocument();
+    expect(await screen.findByText('Create your first event')).toBeInTheDocument();
     // The empty-state CTA and the FAB both read 만들기; press the one in the empty state.
     const cta = within(document.querySelector('.empty-state') as HTMLElement)
-      .getByRole('button', { name: '행사 만들기' });
+      .getByRole('button', { name: 'Create an event' });
     await userEvent.click(cta);
     expect(seen.at(-1)).toBe('/org/new');
   });
@@ -348,17 +348,17 @@ describe('Discover · loading and empty states', () => {
   it('reassures a signed-out visitor that events are on the way, with no button', async () => {
     gql.mockResolvedValue({ Event: [] });
     renderDiscover();
-    expect(await screen.findByText('곧 행사가 올라와요')).toBeInTheDocument();
-    expect(screen.queryByText('첫 행사를 만들어 보세요')).toBeNull();
+    expect(await screen.findByText('Events are coming soon')).toBeInTheDocument();
+    expect(screen.queryByText('Create your first event')).toBeNull();
     expect(document.querySelector('.empty-state')).toBeNull();
   });
 
   it('offers to clear the filters when they hide every event, apart from having none at all', async () => {
     renderDiscover();
     expect(await screen.findByText('재즈 나이트')).toBeInTheDocument();
-    await userEvent.type(screen.getByPlaceholderText('행사 이름 검색'), '없는행사');
-    expect(screen.getByText('조건에 맞는 행사가 없어요.')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: '필터 지우기' }));
+    await userEvent.type(screen.getByPlaceholderText('Search events'), '없는행사');
+    expect(screen.getByText('No events match your filters.')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
     expect(await screen.findByText('재즈 나이트')).toBeInTheDocument();
   });
 
@@ -366,11 +366,11 @@ describe('Discover · loading and empty states', () => {
     gql.mockRejectedValue(indexerFailure('http', 'HTTP_500'));
     renderDiscover();
     const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('지금 정보를 가져올 수 없어요. 잠시 뒤 다시 시도해 주세요.');
-    expect(screen.getByRole('button', { name: '다시 시도' })).toBeInTheDocument();
+    expect(alert).toHaveTextContent('That information is not available right now. Please try again in a moment.');
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
     // A down indexer is not "no events": neither empty-state line appears.
-    expect(screen.queryByText('곧 행사가 올라와요')).toBeNull();
-    expect(screen.queryByText('첫 행사를 만들어 보세요')).toBeNull();
+    expect(screen.queryByText('Events are coming soon')).toBeNull();
+    expect(screen.queryByText('Create your first event')).toBeNull();
   });
 });
 
@@ -385,7 +385,7 @@ describe('Discover · 만들기', () => {
     // The beforeEach state is 'loading': a tap here must not read an unresolved session and send a
     // signed-in organiser to /signup/phone.
     const seen = renderDiscoverTracked();
-    expect(await screen.findByRole('button', { name: '행사 만들기' })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'Create an event' })).toBeDisabled();
     await tapCreate();
     expect(seen.at(-1)).toBe('/');
   });
@@ -393,7 +393,7 @@ describe('Discover · 만들기', () => {
   it('shows the button to a visitor who is not signed in, rather than hiding the way in', async () => {
     setSession({ status: 'anonymous' });
     renderDiscoverTracked();
-    const fab = await screen.findByRole('button', { name: '행사 만들기' });
+    const fab = await screen.findByRole('button', { name: 'Create an event' });
     expect(fab).toBeEnabled();
     // Portaled out of the screen (and so out of the route transform) so it never rides the slide (R1).
     expect(fab.closest('.screen')).toBeNull();
@@ -548,10 +548,10 @@ describe('EventDetail', () => {
     renderDetail();
     expect(await screen.findByRole('heading', { name: '재즈 나이트' })).toBeInTheDocument();
     expect(screen.getByText('한남동의 밤')).toBeInTheDocument();
-    expect(screen.getByText('일반')).toBeInTheDocument();
-    expect(screen.getByText('60자리 남음')).toBeInTheDocument();
-    expect(screen.getByText('본인인증 필수')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '티켓 받기' })).toHaveAttribute('href', '/claim/1');
+    expect(screen.getByText('General')).toBeInTheDocument();
+    expect(screen.getByText('60 left')).toBeInTheDocument();
+    expect(screen.getByText('Verification required')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Get a ticket' })).toHaveAttribute('href', '/claim/1');
   });
 
   it('asks the indexer for the numeric event id', async () => {
@@ -564,15 +564,15 @@ describe('EventDetail', () => {
   it('replaces the call to action when the event was called off', async () => {
     gql.mockResolvedValue({ Event: [{ ...EVENT_ONE, status: 'Cancelled' }], Tier: TIERS });
     renderDetail();
-    expect(await screen.findByText('취소된 행사예요.')).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: '티켓 받기' })).toBeNull();
+    expect(await screen.findByText('This event was cancelled.')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Get a ticket' })).toBeNull();
   });
 
   it('hides the share button where the phone has no share sheet', async () => {
     gql.mockResolvedValue({ Event: [EVENT_ONE], Tier: TIERS });
     renderDetail();
     await screen.findByRole('heading', { name: '재즈 나이트' });
-    expect(screen.queryByRole('button', { name: '공유' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Share' })).toBeNull();
   });
 
   it('swallows the rejection a dismissed share sheet throws', async () => {
@@ -584,7 +584,7 @@ describe('EventDetail', () => {
       gql.mockResolvedValue({ Event: [EVENT_ONE], Tier: TIERS });
       renderDetail();
       await screen.findByRole('heading', { name: '재즈 나이트' });
-      await userEvent.click(screen.getByRole('button', { name: '공유' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Share' }));
       expect(share).toHaveBeenCalledWith({ url: window.location.href });
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     } finally {
@@ -595,8 +595,8 @@ describe('EventDetail', () => {
   it('shows an error state when the event cannot be read', async () => {
     gql.mockRejectedValue(indexerFailure('graphql', 'QUERY_FAILED'));
     renderDetail();
-    expect(await screen.findByRole('alert')).toHaveTextContent('지금 정보를 가져올 수 없어요. 잠시 뒤 다시 시도해 주세요.');
-    expect(screen.getByRole('button', { name: '다시 시도' })).toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent('That information is not available right now. Please try again in a moment.');
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   });
 
   /**
@@ -606,7 +606,7 @@ describe('EventDetail', () => {
   it('keeps the general line for an event id the indexer does not know', async () => {
     gql.mockResolvedValue({ Event: [], Tier: [] });
     renderDetail('404');
-    expect(await screen.findByRole('alert')).toHaveTextContent('문제가 생겼어요. 잠시 뒤 다시 시도해 주세요.');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Something went wrong. Please try again in a moment.');
   });
 });
 
@@ -630,10 +630,10 @@ describe('EventDetail · 받기 시트 (B1)', () => {
     claimIndexer();
     setSession({ status: 'signedIn', account: ME });
     const seen = renderDetailTracked();
-    await userEvent.click(await screen.findByRole('button', { name: '티켓 받기' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Get a ticket' }));
     // The claim runs on this same screen: a dialog with the engine's own claim button in it.
-    const sheet = await screen.findByRole('dialog', { name: '티켓 받기' });
-    expect(within(sheet).getByRole('button', { name: '티켓 받기' })).toBeInTheDocument();
+    const sheet = await screen.findByRole('dialog', { name: 'Get a ticket' });
+    expect(within(sheet).getByRole('button', { name: 'Get a ticket' })).toBeInTheDocument();
     // The address never left the event page — the tap opened a sheet, it did not navigate.
     expect(seen).not.toContain('/claim/1');
     expect(seen.at(-1)).toBe('/events/1');
@@ -643,9 +643,9 @@ describe('EventDetail · 받기 시트 (B1)', () => {
     claimIndexer();
     setSession({ status: 'signedIn', account: ME });
     renderDetail();
-    await userEvent.click(await screen.findByRole('button', { name: '티켓 받기' }));
-    const sheet = await screen.findByRole('dialog', { name: '티켓 받기' });
-    expect(within(sheet).getByText('무료예요')).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole('button', { name: 'Get a ticket' }));
+    const sheet = await screen.findByRole('dialog', { name: 'Get a ticket' });
+    expect(within(sheet).getByText("It's free")).toBeInTheDocument();
   });
 
   it('keeps the /claim route as the entry for a visitor who is not signed in yet', async () => {
@@ -655,8 +655,8 @@ describe('EventDetail · 받기 시트 (B1)', () => {
     await screen.findByRole('heading', { name: '재즈 나이트' });
     // No inline sheet before sign-in: the link sends them to /claim, where the session guard and
     // then the surviving route take over (deep-link / resume path, plan B1).
-    expect(screen.getByRole('link', { name: '티켓 받기' })).toHaveAttribute('href', '/claim/1');
-    expect(screen.queryByRole('button', { name: '티켓 받기' })).toBeNull();
+    expect(screen.getByRole('link', { name: 'Get a ticket' })).toHaveAttribute('href', '/claim/1');
+    expect(screen.queryByRole('button', { name: 'Get a ticket' })).toBeNull();
   });
 });
 
@@ -680,10 +680,10 @@ describe('Discover · a hidden start time', () => {
     await screen.findByRole('link', { name: '재즈 나이트' });
 
     const at = new Date(Number(EVENT_ONE.startsAt) * 1000);
-    expect(screen.getByText(at.toLocaleDateString('ko', { dateStyle: 'medium' }))).toBeInTheDocument();
+    expect(screen.getByText(at.toLocaleDateString('en', { dateStyle: 'medium' }))).toBeInTheDocument();
     // Not merely a different string: no card carries a clock at all.
     expect(screen.queryByText(/\d{1,2}:\d{2}/)).toBeNull();
-    expect(screen.queryByText(at.toLocaleString('ko', { dateStyle: 'medium', timeStyle: 'short' }))).toBeNull();
+    expect(screen.queryByText(at.toLocaleString('en', { dateStyle: 'medium', timeStyle: 'short' }))).toBeNull();
   });
 
   it('still prints the full time for an event that hid nothing', async () => {
@@ -692,7 +692,7 @@ describe('Discover · a hidden start time', () => {
     renderDiscover();
     await screen.findByRole('link', { name: '재즈 나이트' });
     const at = new Date(Number(EVENT_ONE.startsAt) * 1000);
-    expect(screen.getByText(at.toLocaleString('ko', { dateStyle: 'medium', timeStyle: 'short' })))
+    expect(screen.getByText(at.toLocaleString('en', { dateStyle: 'medium', timeStyle: 'short' })))
       .toBeInTheDocument();
   });
 });
@@ -703,9 +703,9 @@ describe('EventDetail · a venue left blank', () => {
     fetchEventMetadata.mockResolvedValue({ ...META_A, venue: '' });
     renderDetail();
     await screen.findByRole('heading', { name: '재즈 나이트' });
-    // 장소는 선택이다: 빈 공개 장소는 지역과 함께 "장소 미정"으로 읽히고, 지도 링크는 없다.
-    expect(await screen.findByText(/서울 · 장소 미정/)).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: /지도로 보기/ })).toBeNull();
+    // 장소는 선택이다: 빈 공개 장소는 지역과 함께 'Venue TBD'으로 읽히고, 지도 링크는 없다.
+    expect(await screen.findByText(/Seoul · Venue TBD/)).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Open in maps/ })).toBeNull();
   });
 });
 
@@ -725,17 +725,17 @@ describe('EventDetail · what only ticket holders see', () => {
     setSession({ status: 'signedIn', account: ME });
     renderDetail();
     await screen.findByRole('heading', { name: '재즈 나이트' });
-    expect(await screen.findByText(/서울 · 장소는 티켓을 받으면 공개돼요/)).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: /지도로 보기/ })).toBeNull();
+    expect(await screen.findByText(/Seoul · The venue is shown once you have a ticket/)).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Open in maps/ })).toBeNull();
   });
 
   it('shows the day and says the time comes with the ticket', async () => {
     hiddenEvent();
     setSession({ status: 'signedIn', account: ME });
     renderDetail();
-    expect(await screen.findByText(/시작 시각은 티켓을 받으면 공개돼요/)).toBeInTheDocument();
+    expect(await screen.findByText(/The start time is shown once you have a ticket/)).toBeInTheDocument();
     // The day itself stays public: an event nobody can date is one nobody can plan around.
-    const day = new Date(Number(EVENT_ONE.startsAt) * 1000).toLocaleDateString('ko', { dateStyle: 'medium' });
+    const day = new Date(Number(EVENT_ONE.startsAt) * 1000).toLocaleDateString('en', { dateStyle: 'medium' });
     expect(screen.getByText(new RegExp(day.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))).toBeInTheDocument();
   });
 
@@ -745,19 +745,19 @@ describe('EventDetail · what only ticket holders see', () => {
     setSession({ status: 'signedIn', account: ME });
     renderDetail();
 
-    expect(await screen.findByRole('link', { name: /서울 용산구 한남동 12 · 지도로 보기/ }))
+    expect(await screen.findByRole('link', { name: /서울 용산구 한남동 12 · Open in maps/ }))
       .toHaveAttribute('href', expect.stringContaining('maps.google.com'));
     expect(getEventPrivate).toHaveBeenCalledWith({ eventId: '1' });
-    expect(screen.queryByText(/장소는 티켓을 받으면 공개돼요/)).toBeNull();
-    expect(screen.queryByText(/시작 시각은 티켓을 받으면 공개돼요/)).toBeNull();
+    expect(screen.queryByText(/The venue is shown once you have a ticket/)).toBeNull();
+    expect(screen.queryByText(/The start time is shown once you have a ticket/)).toBeNull();
     // Two badges, because both halves were hidden and both are now this person's alone.
-    expect(screen.getAllByText('나만 보여요')).toHaveLength(2);
+    expect(screen.getAllByText('Only you can see this')).toHaveLength(2);
   });
 
   it('never asks at all when nobody is signed in', async () => {
     hiddenEvent();
     renderDetail();
-    expect(await screen.findByText(/장소는 티켓을 받으면 공개돼요/)).toBeInTheDocument();
+    expect(await screen.findByText(/The venue is shown once you have a ticket/)).toBeInTheDocument();
     expect(getEventPrivate).not.toHaveBeenCalled();
   });
 
@@ -768,15 +768,15 @@ describe('EventDetail · what only ticket holders see', () => {
     renderDetail();
     // The tiers and the call to action are already there; only the venue line is waiting. For a
     // signed-in visitor the claim is the inline-sheet opener (a button), not the /claim link (B1).
-    expect(await screen.findByRole('button', { name: '티켓 받기' })).toBeInTheDocument();
-    expect(screen.getByText(/서울 · 확인하고 있어요/)).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Get a ticket' })).toBeInTheDocument();
+    expect(screen.getByText(/Seoul · Checking/)).toBeInTheDocument();
   });
 
   it('asks nothing for an event whose organiser hid neither half', async () => {
     gql.mockResolvedValue({ Event: [EVENT_ONE], Tier: TIERS });
     setSession({ status: 'signedIn', account: ME });
     renderDetail();
-    expect(await screen.findByRole('link', { name: /한남 · 지도로 보기/ })).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: /한남 · Open in maps/ })).toBeInTheDocument();
     expect(getEventPrivate).not.toHaveBeenCalled();
   });
 
@@ -791,7 +791,7 @@ describe('EventDetail · what only ticket holders see', () => {
 
 /** T-EV-W11 · plan section B-2: two on a card, all of them on the detail screen, no filter. */
 describe('Discover · tags on a card', () => {
-  const FIVE = ['재즈', '라이브', '한남동', '심야', '무료'];
+  const FIVE = ['재즈', '라이브', '한남동', '심야', 'Free'];
 
   it('shows the first two and counts the rest into one chip', async () => {
     gql.mockResolvedValue({ Event: [EVENT_ONE] });
@@ -848,7 +848,7 @@ describe('EventDetail · the sticky primary (visual R1-5)', () => {
         return {
           CheckIn: [], Ticket: [HELD],
           Event: [{ id: '1', status: 'Published', startsAt: IN_TWO_DAYS, imageCid: 'cid-a' }],
-          Tier: [{ eventId: '1', idx: 0, name: '일반' }],
+          Tier: [{ eventId: '1', idx: 0, name: 'General' }],
         };
       }
       return { Event: [EVENT_ONE], Tier: TIERS };
@@ -859,11 +859,11 @@ describe('EventDetail · the sticky primary (visual R1-5)', () => {
     heldIndexer();
     setSession({ status: 'signedIn', account: ME });
     renderDetail();
-    const link = await screen.findByRole('link', { name: '내 티켓 보기' });
+    const link = await screen.findByRole('link', { name: 'View my ticket' });
     expect(link).toHaveAttribute('href', '/tickets/42');
     expect(link.closest('.sticky-bar')).not.toBeNull();
     // A holder is not offered the claim at all.
-    expect(screen.queryByRole('button', { name: '티켓 받기' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Get a ticket' })).toBeNull();
   });
 
   it('shows each kind with its price and puts the price on the button of a paid event', async () => {
@@ -873,9 +873,9 @@ describe('EventDetail · the sticky primary (visual R1-5)', () => {
     try {
       gql.mockResolvedValue({ Event: [EVENT_ONE], Tier: TIERS });
       renderDetail();
-      expect(await screen.findByText('일반 · $30.00')).toBeInTheDocument();
-      expect(screen.getByText('60자리 남음')).toBeInTheDocument();
-      expect(screen.getByRole('link', { name: '결제하고 받기 $30.00' })).toHaveAttribute('href', '/claim/1');
+      expect(await screen.findByText('General · $30')).toBeInTheDocument();
+      expect(screen.getByText('60 left')).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Buy for $30' })).toHaveAttribute('href', '/claim/1');
     } finally {
       vi.unstubAllEnvs();
     }
@@ -885,7 +885,7 @@ describe('EventDetail · the sticky primary (visual R1-5)', () => {
     gql.mockResolvedValue({ Event: [{ ...EVENT_ONE, approvalRequired: true }], Tier: TIERS });
     setSession({ status: 'anonymous' });
     renderDetail();
-    const link = await screen.findByRole('link', { name: '신청하기' });
+    const link = await screen.findByRole('link', { name: 'Request a ticket' });
     expect(link).toHaveAttribute('href', '/claim/1');
     expect(link.closest('.sticky-bar')).not.toBeNull();
   });
@@ -894,7 +894,7 @@ describe('EventDetail · the sticky primary (visual R1-5)', () => {
     gql.mockResolvedValue({ Event: [EVENT_ONE], Tier: TIERS });
     setSession({ status: 'anonymous' });
     renderDetail();
-    const link = await screen.findByRole('link', { name: '티켓 받기' });
+    const link = await screen.findByRole('link', { name: 'Get a ticket' });
     expect(link).toHaveAttribute('href', '/claim/1');
     expect(link.closest('.sticky-bar')).not.toBeNull();
   });

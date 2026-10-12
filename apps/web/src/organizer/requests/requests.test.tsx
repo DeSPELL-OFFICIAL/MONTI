@@ -87,21 +87,21 @@ describe('Requests · gating', () => {
     orgsState.orgs = [bystander()];
     requests.rows = [req('1')];
     renderRequests();
-    expect(await screen.findByText('이 행사의 신청을 처리할 권한이 없어요')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '전체 승인' })).not.toBeInTheDocument();
+    expect(await screen.findByText('You may not handle requests for this event')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Approve all' })).not.toBeInTheDocument();
     expect(sendAction).not.toHaveBeenCalled();
   });
 
   it('refuses when the event belongs to an organisation this person does not act for', async () => {
     orgsState.orgs = [approver('7')]; // approver, but for a different org than the event's 9
     renderRequests();
-    expect(await screen.findByText('이 행사의 신청을 처리할 권한이 없어요')).toBeInTheDocument();
+    expect(await screen.findByText('You may not handle requests for this event')).toBeInTheDocument();
   });
 
   it('lets an approver see the pending list and its actions', async () => {
     requests.rows = [req('1'), req('2')];
     renderRequests();
-    expect(await screen.findByRole('button', { name: '전체 승인' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Approve all' })).toBeInTheDocument();
     expect(screen.getAllByRole('checkbox')).toHaveLength(2);
   });
 });
@@ -126,9 +126,9 @@ describe('Requests · actions', () => {
   it('approves only the selected requests, by id', async () => {
     requests.rows = [req('3'), req('4')];
     renderRequests();
-    await screen.findByRole('button', { name: '선택 승인' });
+    await screen.findByRole('button', { name: 'Approve selected' });
     await userEvent.click(screen.getAllByRole('checkbox')[0]!);
-    await userEvent.click(screen.getByRole('button', { name: '선택 승인' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Approve selected' }));
     await waitFor(() => expect(sendAction).toHaveBeenCalled());
     expect(sendAction).toHaveBeenCalledWith('approveClaims', 'ticket', data('approveClaims', [5n, [3n]]));
   });
@@ -137,7 +137,7 @@ describe('Requests · actions', () => {
     requests.rows = [req('3')];
     renderRequests();
     await userEvent.click((await screen.findAllByRole('checkbox'))[0]!);
-    await userEvent.click(screen.getByRole('button', { name: '거절' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Reject' }));
     await waitFor(() =>
       expect(sendAction).toHaveBeenCalledWith('rejectClaims', 'ticket', data('rejectClaims', [5n, [3n]])),
     );
@@ -146,7 +146,7 @@ describe('Requests · actions', () => {
   it('chunks a big 전체 승인 into ops of at most twenty ids', async () => {
     requests.rows = Array.from({ length: 25 }, (_, index) => req(String(index + 1)));
     renderRequests();
-    await userEvent.click(await screen.findByRole('button', { name: '전체 승인' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Approve all' }));
     await waitFor(() => expect(sendAction).toHaveBeenCalledTimes(2));
     expect(sendAction.mock.calls[0]![0]).toBe('approveClaims');
     const firstIds = argsOf(0)[1] as bigint[];
@@ -180,7 +180,7 @@ describe('Requests · re-polling the pending list', () => {
     renderRequests();
     await flush();
     // The hint the plan asks for, and the one request the indexer holds so far.
-    expect(screen.getByText('새 신청 확인 중')).toBeInTheDocument();
+    expect(screen.getByText('Checking for new requests')).toBeInTheDocument();
     expect(screen.queryAllByRole('checkbox')).toHaveLength(1);
 
     // A second request lands in the indexer; the open screen surfaces it on its own poll — no reload.
@@ -202,7 +202,7 @@ describe('Requests · re-polling the pending list', () => {
 
     // Approve 민수's request (the first row).
     fireEvent.click(screen.getAllByRole('checkbox')[0]!);
-    fireEvent.click(screen.getByRole('button', { name: '선택 승인' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Approve selected' }));
     await flush();
     expect(sendAction).toHaveBeenCalledWith('approveClaims', 'ticket', data('approveClaims', [5n, [3n]]));
     // Hidden the moment it is sent.

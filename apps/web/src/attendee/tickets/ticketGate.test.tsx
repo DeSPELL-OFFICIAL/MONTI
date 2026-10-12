@@ -65,8 +65,8 @@ describe('TicketGate on /tickets/:id/enter', () => {
     orderStatus = 'refunded';
     open();
     expect(screen.queryByText(STEP)).not.toBeInTheDocument();
-    expect(screen.getByText('환불된 티켓이에요 · 입장할 수 없어요')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '티켓으로 돌아가기' }));
+    expect(screen.getByText("Refunded ticket · it can't be used to enter")).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Back to the ticket' }));
     expect(screen.getByText('the ticket')).toBeInTheDocument();
   });
 
@@ -76,13 +76,13 @@ describe('TicketGate on /tickets/:id/enter', () => {
     orderStatus = 'released';
     open();
     expect(screen.queryByText(STEP)).not.toBeInTheDocument();
-    expect(screen.getByText('입장 완료')).toBeInTheDocument();
+    expect(screen.getByText('Checked in')).toBeInTheDocument();
   });
 
   it.each([
-    ['entered', '입장 완료'],
-    ['cancelled', '취소됨'],
-    ['transferred', '친구에게 줌'],
+    ['entered', 'Checked in'],
+    ['cancelled', 'Cancelled'],
+    ['transferred', 'Given away'],
   ] as const)('keeps a %s ticket out of the step', (state, sentence) => {
     detail.mockReturnValue(ticket(state));
     open();
@@ -110,7 +110,7 @@ describe('TicketGate on /tickets/:id/transfer', () => {
     orderStatus = 'refunded';
     open('transfer');
     expect(screen.queryByText(STEP)).not.toBeInTheDocument();
-    expect(screen.getByText('환불된 티켓이에요 · 입장할 수 없어요')).toBeInTheDocument();
+    expect(screen.getByText("Refunded ticket · it can't be used to enter")).toBeInTheDocument();
   });
 
   it('lets a ticket waiting at the door be handed over', () => {

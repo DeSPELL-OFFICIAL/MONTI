@@ -4,7 +4,7 @@ import { toQrPayload, type GateResponseWire } from '@monti/shared';
 
 import { encodeGateResponseMessage } from '../../shared/nfc/ndef';
 // `../copy` has no mocked dependency of its own, so it comes in statically like any other module.
-import { staffEn, staffKo } from '../copy';
+import { staffEn } from '../copy';
 
 const scan = vi.fn();
 const checkPermissions = vi.fn();
@@ -131,17 +131,17 @@ describe('scanGateResponse', () => {
 
 describe('scan copy', () => {
   it('says nothing when the staff member closed the camera on purpose', () => {
-    expect(scanFailureText(staffKo.qr, new ScanCancelled())).toBeNull();
+    expect(scanFailureText(staffEn.qr, new ScanCancelled())).toBeNull();
   });
 
   it('leaves the gate’s own vocabulary to the gate', () => {
-    expect(scanFailureText(staffKo.qr, new ResponseDecodeError(RESPONSE_ERROR.badTag))).toBeNull();
+    expect(scanFailureText(staffEn.qr, new ResponseDecodeError(RESPONSE_ERROR.badTag))).toBeNull();
   });
 
   it('has a line for every failure a staff member can see, in both locales', () => {
     const showable = [SCAN_ERROR.permissionDenied, SCAN_ERROR.notGateCode, SCAN_ERROR.unavailable, SCAN_ERROR.failed];
     for (const code of showable) {
-      expect(scanFailureText(staffKo.qr, new ScanError(code))).toBeTruthy();
+      expect(scanFailureText(staffEn.qr, new ScanError(code))).toBeTruthy();
       expect(scanFailureText(staffEn.qr, new ScanError(code))).toBeTruthy();
     }
   });

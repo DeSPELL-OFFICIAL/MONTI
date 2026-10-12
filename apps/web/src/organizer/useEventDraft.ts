@@ -44,7 +44,7 @@ const DEFAULT_REGION = 'KR-11';
  */
 const DEFAULT_DESIGN = 'a';
 
-const CURRENCIES: readonly EventDraftCurrency[] = ['free', 'USDC'];
+const CURRENCIES: readonly EventDraftCurrency[] = ['free', 'USDC']; // copy-lint-ignore: currency code, never shown
 
 /** What the draft rule caps `splitJson` at (`capped('splitJson', 4000)`). */
 export const MAX_SPLIT_JSON_CHARS = 4_000;
@@ -55,7 +55,7 @@ export const MAX_SPLIT_JSON_CHARS = 4_000;
  * opened is the founder's "왜 또 적어야 하지" (plan section B-3). `일반` is what almost every
  * event's first kind is called anyway, and it is one tap to change.
  */
-const DEFAULT_TIER_NAME = '일반';
+const DEFAULT_TIER_NAME = 'General';
 
 export const emptyEventDraftTier: EventDraftTier = {
   name: DEFAULT_TIER_NAME, supply: 100, maxPerWallet: 1,

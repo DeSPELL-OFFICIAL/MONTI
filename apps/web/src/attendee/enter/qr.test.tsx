@@ -1,7 +1,7 @@
 import { act, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CODE_WINDOW_SECONDS, type GateCodeWire, type GateResponseWire, type Hex } from '@monti/shared';
-import { ko } from '../../shared/copy/index';
+import { en } from '../../shared/copy/index';
 
 const buildGateResponse = vi.fn<() => Promise<GateResponseWire>>();
 vi.mock('./buildResponse', async (orig) => ({
@@ -48,7 +48,7 @@ describe('<Qr />', () => {
     const payload = toDataURL.mock.calls[0]?.[0] as string;
     expect(payload.startsWith('MONTI1:')).toBe(true);
     expect(qrToGateResponse(payload)).toEqual(WIRE);
-    expect(screen.getByRole('img', { name: ko.enter.qrTitle })).toHaveAttribute('src', 'data:image/png;base64,QQ==');
+    expect(screen.getByRole('img', { name: en.enter.qrTitle })).toHaveAttribute('src', 'data:image/png;base64,QQ==');
   });
 
   it('reuses the answer the tap already built instead of signing again', async () => {
@@ -82,7 +82,7 @@ describe('<Qr />', () => {
     await act(async () => {
       render(<Qr tokenId="7" gateCode={GATE_CODE} wire={null} onExpire={() => undefined} />);
     });
-    expect(screen.getByText(ko.enter.deviceMismatch)).toBeInTheDocument();
+    expect(screen.getByText(en.enter.deviceMismatch)).toBeInTheDocument();
     expect(screen.queryByRole('img')).not.toBeInTheDocument();
   });
 
@@ -91,6 +91,6 @@ describe('<Qr />', () => {
     await act(async () => {
       render(<Qr tokenId="7" gateCode={GATE_CODE} wire={null} onExpire={() => undefined} />);
     });
-    expect(screen.getByText(ko.enter.signFailed)).toBeInTheDocument();
+    expect(screen.getByText(en.enter.signFailed)).toBeInTheDocument();
   });
 });

@@ -30,7 +30,7 @@ async function type(value: string) {
   cleanup();
   render(<Nickname />);
   await userEvent.type(screen.getByRole('textbox'), value);
-  await userEvent.click(screen.getByRole('button', { name: '저장' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Save' }));
 }
 
 describe('Nickname', () => {
@@ -44,13 +44,13 @@ describe('Nickname', () => {
 
   it('says what is wrong with the letters without asking the server', async () => {
     await type('ab');
-    expect(await screen.findByText('영문 소문자, 숫자, 밑줄만 3~20자로 써 주세요.')).toBeInTheDocument();
+    expect(await screen.findByText('Use 3-20 lowercase letters, digits or underscore.')).toBeInTheDocument();
     expect(setNickname).not.toHaveBeenCalled();
   });
 
   it('saves the normalised name through setNickname and remembers it for this device', async () => {
     await type('Alex_01');
-    expect(await screen.findByText('별명을 저장했어요')).toBeInTheDocument();
+    expect(await screen.findByText('Nickname saved')).toBeInTheDocument();
     expect(setNickname).toHaveBeenCalledWith({ nickname: 'alex_01' });
     // The name the server stored is the one this device shows from now on.
     expect(rememberNickname).toHaveBeenCalledWith(MINE, 'alex_01');
@@ -59,20 +59,20 @@ describe('Nickname', () => {
   it('names the rule the server refused on', async () => {
     setNickname.mockRejectedValueOnce(refused('NICKNAME_TAKEN'));
     await type('alex_01');
-    expect(await screen.findByText('이미 쓰는 별명이에요.')).toBeInTheDocument();
+    expect(await screen.findByText('That nickname is taken.')).toBeInTheDocument();
 
     setNickname.mockRejectedValueOnce(refused('NICKNAME_INVALID'));
     await type('alex_02');
-    expect(await screen.findByText('영문 소문자, 숫자, 밑줄만 3~20자로 써 주세요.')).toBeInTheDocument();
+    expect(await screen.findByText('Use 3-20 lowercase letters, digits or underscore.')).toBeInTheDocument();
 
     setNickname.mockRejectedValueOnce(refused('NO_PERSON'));
     await type('alex_03');
-    expect(await screen.findByText('가입을 먼저 마쳐 주세요.')).toBeInTheDocument();
+    expect(await screen.findByText('Please finish signing up first.')).toBeInTheDocument();
   });
 
   it('falls back to the generic sentence for anything else', async () => {
     setNickname.mockRejectedValueOnce(new Error('offline'));
     await type('alex_01');
-    expect(await screen.findByText('문제가 생겼어요. 잠시 뒤 다시 시도해 주세요.')).toBeInTheDocument();
+    expect(await screen.findByText('Something went wrong. Please try again in a moment.')).toBeInTheDocument();
   });
 });

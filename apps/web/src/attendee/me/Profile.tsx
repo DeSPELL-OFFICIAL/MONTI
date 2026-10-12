@@ -2,8 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
 import { Alert, Button, Card, ContactLink, Field, Screen, Spinner } from '../../shared/ui';
-import { fmt, setLocale, useCopy, useLocale } from '../../shared/i18n';
-import type { Locale } from '../../shared/copy/index';
+import { fmt, useCopy, useLocale } from '../../shared/i18n';
 import { api } from '../../shared/api/functions';
 import { getFirebaseAuth } from '../../shared/api/firebase';
 import { MAX_DISPLAY_NAME_CHARS, saveUserProfile } from '../../shared/api/firestore';
@@ -241,28 +240,14 @@ function DeleteAccount() {
 
 export function Profile() {
   const copy = useCopy();
-  const locale = useLocale();
   const session = useSession();
   const explorerBase = getConfig().explorerUrl;
-
-  async function chooseLocale(next: Locale): Promise<void> {
-    await setLocale(next);
-    // The stored copy is a convenience for the server's own messages; failing to save it must
-    // not undo the language the person just picked on this device.
-    await saveUserProfile({ locale: next }).catch(() => undefined);
-  }
 
   return (
     <Screen title={copy.me.title}>
       <KycStatus />
       <DisplayName />
       <Nickname />
-      <Field label={copy.me.language}>
-        <select value={locale} onChange={(event) => void chooseLocale(event.target.value as Locale)}>
-          <option value="ko">{copy.me.languageKo}</option>
-          <option value="en">{copy.me.languageEn}</option>
-        </select>
-      </Field>
       <DeviceLock />
       <NewDevice />
       <p>

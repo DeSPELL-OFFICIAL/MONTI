@@ -47,10 +47,10 @@ describe('sendAction', () => {
     relayAction
       .mockRejectedValueOnce(badNonceError('12'))
       .mockResolvedValueOnce({ relayId: 'r1', status: 'confirmed', result: { eventId: '1001' } });
-    await sendAction('publishEvent', 'ticket', DATA, undefined, { reasons: ['밴드', 'MONTI 플랫폼'] });
+    await sendAction('publishEvent', 'ticket', DATA, undefined, { reasons: ['밴드', 'MONTI platform'] });
     expect(relayAction).toHaveBeenCalledTimes(2);
     for (const [body] of relayAction.mock.calls) {
-      expect(body).toEqual({ req: BUILT.req, deviceSig: BUILT.deviceSig, kind: BUILT.kind, reasons: ['밴드', 'MONTI 플랫폼'] });
+      expect(body).toEqual({ req: BUILT.req, deviceSig: BUILT.deviceSig, kind: BUILT.kind, reasons: ['밴드', 'MONTI platform'] });
     }
   });
 

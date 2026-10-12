@@ -53,14 +53,14 @@ describe('router', () => {
   it('shows the bottom tabs on an attendee tab route', async () => {
     setSession({ status: 'signedIn', account: `0x${'11'.repeat(20)}`, personId: 'p1' });
     renderAt('/tickets');
-    expect(await screen.findByRole('link', { name: '내 티켓' })).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: 'Tickets' })).toBeInTheDocument();
   });
 
   it('hides the bottom tabs during signup', async () => {
     setSession({ status: 'anonymous' });
     renderAt('/signup/phone');
     expect(await screen.findByRole('main')).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: '내 티켓' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Tickets' })).toBeNull();
   });
 
   /**
@@ -71,15 +71,15 @@ describe('router', () => {
   it('hides the bottom tabs on the organiser home', async () => {
     setSession({ status: 'signedIn', account: `0x${'44'.repeat(20)}`, personId: 'p4' });
     renderAt('/org');
-    expect(await screen.findByRole('heading', { name: '주최자' })).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: '내 티켓' })).toBeNull();
-    expect(screen.getByRole('link', { name: '탐색으로' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Organizer' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Tickets' })).toBeNull();
+    expect(screen.getByRole('link', { name: 'Back to explore' })).toBeInTheDocument();
   });
 
   it('redirects a protected route to /login when signed out', async () => {
     setSession({ status: 'anonymous' });
     const router = routerAt('/me?tab=1');
-    expect(await screen.findByRole('heading', { name: '로그인' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
     // Where they were going rides along, so sign-in (or signup) can put them back there.
     expect(router.state.location.pathname).toBe('/login');
     expect(new URLSearchParams(router.state.location.search).get('returnTo')).toBe('/me?tab=1');
@@ -90,7 +90,7 @@ describe('router', () => {
     bootSession();
     expect(getSession().status).toBe('anonymous');
     renderAt('/tickets');
-    expect(await screen.findByRole('heading', { name: '로그인' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
   });
 
   /**

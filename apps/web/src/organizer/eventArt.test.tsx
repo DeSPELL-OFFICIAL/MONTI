@@ -28,11 +28,11 @@ vi.mock('../shared/config', async (orig) => ({
 
 const { EventArt } = await import('./EventArt');
 const { organizerCopy } = await import('./copy');
-const { ko: sharedCopy } = await import('../shared/copy/index');
-const copy = organizerCopy.ko.dashboard.art;
-const tierCopy = organizerCopy.ko.scene.tiers;
+const { en: sharedCopy } = await import('../shared/copy/index');
+const copy = organizerCopy.en.dashboard.art;
+const tierCopy = organizerCopy.en.scene.tiers;
 
-const TIERS = [{ name: '일반' }, { name: '학생' }];
+const TIERS = [{ name: 'General' }, { name: '학생' }];
 
 function open(tiers = TIERS): void {
   render(<EventArt eventId="5" tiers={tiers} title="재즈 나이트" />);
@@ -60,7 +60,7 @@ describe('the ticket pictures of an event that already exists', () => {
     open();
     await waitFor(() => expect(loadEventArt).toHaveBeenCalledWith('5'));
     // Both pictures name the event and the kind, which is what an attendee will be handed.
-    expect(await screen.findByRole('img', { name: /재즈 나이트 · 일반/ })).toBeInTheDocument();
+    expect(await screen.findByRole('img', { name: /재즈 나이트 · General/ })).toBeInTheDocument();
     expect(screen.getByRole('img', { name: /재즈 나이트 · 학생/ })).toBeInTheDocument();
     // The picker is closed until 바꾸기 is pressed.
     expect(screen.queryByRole('radio', { name: tierCopy.artNames.c })).toBeNull();
@@ -73,7 +73,7 @@ describe('the ticket pictures of an event that already exists', () => {
     open();
     await waitFor(() => expect(loadEventArt).toHaveBeenCalled());
 
-    await user.click(within(card('일반')).getByRole('button', { name: copy.change }));
+    await user.click(within(card('General')).getByRole('button', { name: copy.change }));
     await user.click(await screen.findByRole('radio', { name: tierCopy.artNames.c }));
 
     await waitFor(() =>
@@ -129,7 +129,7 @@ describe('the ticket pictures of an event that already exists', () => {
     open();
     await waitFor(() => expect(loadEventArt).toHaveBeenCalled());
 
-    await user.click(within(card('일반')).getByRole('button', { name: copy.change }));
+    await user.click(within(card('General')).getByRole('button', { name: copy.change }));
     await user.click(await screen.findByRole('radio', { name: tierCopy.artNames.b }));
 
     expect(await screen.findByText(copy.notAllowed)).toBeInTheDocument();

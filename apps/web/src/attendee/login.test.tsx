@@ -69,7 +69,7 @@ beforeEach(() => {
 describe('passkey-only sign-in', () => {
   it('signs the server challenge and exchanges the verified assertion for a session', async () => {
     renderScreen();
-    await userEvent.click(screen.getByRole('button', { name: '로그인' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));
 
     await waitFor(() => expect(signInWithCustomToken).toHaveBeenCalled());
     expect(loginChallenge).toHaveBeenCalledWith({ purpose: 'login' });
@@ -82,20 +82,20 @@ describe('passkey-only sign-in', () => {
 
   it('goes back to where a guarded route bounced the person from', async () => {
     renderScreen('/login?returnTo=%2Fclaim%2F12');
-    await userEvent.click(screen.getByRole('button', { name: '로그인' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));
     await waitFor(() => expect(navigate).toHaveBeenCalledWith('/claim/12'));
   });
 
   it('ignores a return target that would leave the app', async () => {
     renderScreen('/login?returnTo=%2F%2Fevil.example');
-    await userEvent.click(screen.getByRole('button', { name: '로그인' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));
     await waitFor(() => expect(navigate).toHaveBeenCalledWith('/tickets'));
   });
 
   it('offers somebody new the phone signup, carrying the return target into signup', async () => {
     sessionStorage.clear();
     renderScreen('/login?returnTo=%2Fclaim%2F12');
-    await userEvent.click(screen.getByRole('button', { name: '처음이에요 · 휴대폰 번호로 시작하기' }));
+    await userEvent.click(screen.getByRole('button', { name: 'New here? Start with your phone number' }));
     expect(navigate).toHaveBeenCalledWith('/signup/phone');
     expect(JSON.parse(sessionStorage.getItem('monti.signup') ?? '{}')).toMatchObject({ next: '/claim/12' });
   });
@@ -103,9 +103,9 @@ describe('passkey-only sign-in', () => {
   it('shows the failure sentence when the server rejects the assertion', async () => {
     loginVerify.mockRejectedValueOnce(callableError('permission-denied', 'ASSERTION_REJECTED'));
     renderScreen();
-    await userEvent.click(screen.getByRole('button', { name: '로그인' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('로그인하지 못했어요. 다시 시도해 주세요.');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not sign in. Please try again.');
     expect(signInWithCustomToken).not.toHaveBeenCalled();
     expect(navigate).not.toHaveBeenCalled();
   });
@@ -115,9 +115,9 @@ describe('passkey-only sign-in', () => {
       Object.assign(new Error('failed'), { cause: Object.assign(new Error('x'), { name: 'NotAllowedError' }) }),
     );
     renderScreen();
-    await userEvent.click(screen.getByRole('button', { name: '로그인' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('로그인을 취소했어요.');
+    expect(await screen.findByRole('alert')).toHaveTextContent('You cancelled sign-in.');
   });
 
   it('tells a phone with no passkey to sign up first', async () => {
@@ -125,20 +125,20 @@ describe('passkey-only sign-in', () => {
     // generic failure line, which is why getPasskeyAccount throws a named error.
     signPasskeyAssertion.mockRejectedValueOnce(new NoPasskeyOnDevice());
     renderScreen();
-    await userEvent.click(screen.getByRole('button', { name: '로그인' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      '이 휴대폰에는 설정된 잠금이 없어요. 먼저 가입해 주세요.',
+      'No lock is set up on this phone. Please sign up first.',
     );
   });
 
   it('does not offer a retry for an account that can never sign in again', async () => {
     loginVerify.mockRejectedValueOnce(callableError('failed-precondition', 'BAD_SIGNUP_STATE'));
     renderScreen();
-    await userEvent.click(screen.getByRole('button', { name: '로그인' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      '이 계정으로는 들어갈 수 없어요. 고객센터에 문의해 주세요.',
+      'This account cannot sign in. Please contact support.',
     );
     // A settled answer is never retried behind the person's back.
     expect(loginChallenge).toHaveBeenCalledTimes(1);
@@ -152,7 +152,7 @@ describe('cold-start auto-retry', () => {
     try {
       loginChallenge.mockRejectedValueOnce(callableError('deadline-exceeded', 'UNKNOWN'));
       renderScreen();
-      fireEvent.click(screen.getByRole('button', { name: '로그인' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
       await act(async () => {
         await vi.runAllTimersAsync();
       });
@@ -172,14 +172,14 @@ describe('cold-start auto-retry', () => {
     try {
       loginChallenge.mockRejectedValue(callableError('unavailable', 'UNKNOWN'));
       renderScreen();
-      fireEvent.click(screen.getByRole('button', { name: '로그인' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
       await act(async () => {
         await vi.runAllTimersAsync();
       });
 
       expect(loginChallenge).toHaveBeenCalledTimes(2);
-      expect(screen.getByRole('alert')).toHaveTextContent('로그인하지 못했어요. 다시 시도해 주세요.');
-      expect(screen.getByRole('button', { name: '다시 시도' })).toBeInTheDocument();
+      expect(screen.getByRole('alert')).toHaveTextContent('Could not sign in. Please try again.');
+      expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
       expect(navigate).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
@@ -193,14 +193,14 @@ describe('cold-start auto-retry', () => {
         Object.assign(new Error('failed'), { cause: Object.assign(new Error('x'), { name: 'NotAllowedError' }) }),
       );
       renderScreen();
-      fireEvent.click(screen.getByRole('button', { name: '로그인' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
       await act(async () => {
         await vi.runAllTimersAsync();
       });
 
       expect(signPasskeyAssertion).toHaveBeenCalledTimes(1);
       expect(loginChallenge).toHaveBeenCalledTimes(1);
-      expect(screen.getByRole('alert')).toHaveTextContent('로그인을 취소했어요.');
+      expect(screen.getByRole('alert')).toHaveTextContent('You cancelled sign-in.');
     } finally {
       vi.useRealTimers();
     }

@@ -11,14 +11,14 @@ import {
 
 describe('settlement amount formatting', () => {
   it('renders 6-dp USDC base units as two-decimal dollars', () => {
-    expect(usdFromBaseUnits('30000000')).toBe('$30.00');
+    expect(usdFromBaseUnits('30000000')).toBe('$30');
     expect(usdFromBaseUnits('21500000')).toBe('$21.50');
-    expect(usdFromBaseUnits(0n)).toBe('$0.00');
-    expect(usdFromBaseUnits('')).toBe('$0.00');
+    expect(usdFromBaseUnits(0n)).toBe('$0');
+    expect(usdFromBaseUnits('')).toBe('$0');
   });
 
   it('renders stored cents as dollars', () => {
-    expect(usdFromCents(3000)).toBe('$30.00');
+    expect(usdFromCents(3000)).toBe('$30');
     expect(usdFromCents(450)).toBe('$4.50');
   });
 
@@ -37,7 +37,7 @@ describe('settlement amount formatting', () => {
 describe('payout reason mapping', () => {
   const recipients = [
     { account: `0x${'aa'.repeat(20)}`, bps: 7000, reason: '공연팀', tag: '아티스트' },
-    { account: `0x${'bb'.repeat(20)}`, bps: 2000, reason: '', tag: '장소' },
+    { account: `0x${'bb'.repeat(20)}`, bps: 2000, reason: '', tag: 'Where' },
   ];
 
   it('matches the on-chain reasonHash back to the human reason', () => {
@@ -48,11 +48,11 @@ describe('payout reason mapping', () => {
 
   it('falls back to the recipient tag by address when there is no reason hash', () => {
     const lookup = buildReasonLookup(recipients);
-    expect(reasonForPayout({ recipient: `0x${'BB'.repeat(20)}`, reasonHash: '0xdead' }, lookup, 1)).toBe('장소');
+    expect(reasonForPayout({ recipient: `0x${'BB'.repeat(20)}`, reasonHash: '0xdead' }, lookup, 1)).toBe('Where');
   });
 
   it('falls back to a numbered placeholder when nothing matches', () => {
     const lookup = buildReasonLookup(recipients);
-    expect(reasonForPayout({ recipient: '0xunknown', reasonHash: '0xdead' }, lookup, 4)).toBe('수령인 5');
+    expect(reasonForPayout({ recipient: '0xunknown', reasonHash: '0xdead' }, lookup, 4)).toBe('Recipient 5');
   });
 });

@@ -345,7 +345,7 @@ export const staffEn: typeof staffKo = {
     snapshotFresh: 'Just now',
     snapshotAge: '{{minutes}} min ago',
     snapshotNone: 'Not yet',
-    entriesLabel: 'Entries',
+    entriesLabel: 'Checked in',
     entriesCount: '{{count}}',
   },
 
@@ -393,7 +393,7 @@ export const staffEn: typeof staffKo = {
   },
 
   deny: {
-    ALREADY_USED: 'Already entered',
+    ALREADY_USED: 'Already checked in',
     WRONG_EVENT: 'Wrong event',
     REVOKED: 'Ticket revoked',
     EXPIRED_CODE: 'That code has expired. Tap again',

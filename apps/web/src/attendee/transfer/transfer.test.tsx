@@ -40,7 +40,7 @@ const { CallableError } = await import('../../shared/api/functions');
 const { ticketAbi } = await import('../../shared/chain/abis');
 const { matchByName, revertRuleByName } = await import('./useTransfer');
 const { acceptFailure } = await import('./offers');
-const { ko } = await import('../../shared/copy/index');
+const { en } = await import('../../shared/copy/index');
 
 /** A relay refusal that names the contract error, the way `sendAction` rejects on a failed doc. */
 const reverted = (code: string) => new CallableError('failed-precondition', code, { code });
@@ -48,7 +48,7 @@ const reverted = (code: string) => new CallableError('failed-precondition', code
 const dropped = () => new Error('relay listener dropped');
 
 const NOW = Math.floor(Date.now() / 1000);
-const TIER = { name: '일반', priceUsdCents: 0n, supply: 100, minted: 1, maxPerWallet: 2, seated: false };
+const TIER = { name: 'General', priceUsdCents: 0n, supply: 100, minted: 1, maxPerWallet: 2, seated: false };
 
 function Address() {
   const location = useLocation();
@@ -102,23 +102,23 @@ afterEach(() => {
 async function find(label: string, value: string) {
   await userEvent.click(screen.getByRole('tab', { name: label }));
   await userEvent.type(screen.getByRole('textbox'), value);
-  await userEvent.click(screen.getByRole('button', { name: '찾기' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Find' }));
 }
 
 describe('TransferRecipient', () => {
   it('finds a member by nickname and carries the name to the confirm screen', async () => {
     resolveRecipient.mockResolvedValue({ member: true, account: YOU, nickname: 'bob' });
     renderFlow('/tickets/1/transfer');
-    await find('별명', 'Bob');
+    await find('Nickname', 'Bob');
     expect(resolveRecipient).toHaveBeenCalledWith({ type: 'nickname', value: 'Bob' });
-    expect(await screen.findByRole('heading', { name: '이 분에게 줄까요?' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Give the ticket to this person?' })).toBeInTheDocument();
     expect(screen.getByText('bob')).toBeInTheDocument();
   });
 
   it('finds a member by account address', async () => {
     resolveRecipient.mockResolvedValue({ member: true, account: YOU });
     renderFlow('/tickets/1/transfer');
-    await find('주소', YOU);
+    await find('Address', YOU);
     expect(resolveRecipient).toHaveBeenCalledWith({ type: 'address', value: YOU });
     expect(await screen.findByText(YOU)).toBeInTheDocument();
   });
@@ -126,44 +126,44 @@ describe('TransferRecipient', () => {
   it('sends the phone number in E.164 and confirms a member', async () => {
     resolveRecipient.mockResolvedValue({ member: true, account: YOU, commitment: `0x${'cc'.repeat(32)}` });
     renderFlow('/tickets/1/transfer');
-    await find('전화번호', '01012345678');
+    await find('Phone', '01012345678');
     expect(resolveRecipient).toHaveBeenCalledWith({ type: 'phone', value: '+821012345678' });
-    expect(await screen.findByRole('heading', { name: '이 분에게 줄까요?' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Give the ticket to this person?' })).toBeInTheDocument();
   });
 
   it('hands a number that belongs to nobody over to the invite path', async () => {
     resolveRecipient.mockResolvedValue({ member: false, commitment: `0x${'cc'.repeat(32)}` });
     renderFlow('/tickets/1/transfer');
-    await find('전화번호', '01012345678');
-    expect(await screen.findByRole('heading', { name: '아직 가입하지 않은 번호예요' })).toBeInTheDocument();
+    await find('Phone', '01012345678');
+    expect(await screen.findByRole('heading', { name: 'This number has not signed up yet' })).toBeInTheDocument();
     expect(screen.getByTestId('address')).toHaveTextContent('/tickets/1/transfer');
   });
 
   it('says so when the nickname belongs to nobody', async () => {
     resolveRecipient.mockRejectedValue(new CallableError('not-found', 'NICKNAME_UNKNOWN'));
     renderFlow('/tickets/1/transfer');
-    await find('별명', 'ghost');
-    expect(await screen.findByText('찾을 수 없어요.')).toBeInTheDocument();
+    await find('Nickname', 'ghost');
+    expect(await screen.findByText('Not found.')).toBeInTheDocument();
   });
 
   it('turns the server refusals into their own sentences', async () => {
     resolveRecipient.mockRejectedValue(new CallableError('failed-precondition', 'NOT_A_MEMBER'));
     const view = renderFlow('/tickets/1/transfer');
-    await find('주소', YOU);
-    expect(await screen.findByText('받는 분이 아직 가입하지 않았어요.')).toBeInTheDocument();
+    await find('Address', YOU);
+    expect(await screen.findByText('They have not signed up yet.')).toBeInTheDocument();
     view.unmount();
 
     resolveRecipient.mockRejectedValue(new CallableError('invalid-argument', 'SELF_TRANSFER'));
     renderFlow('/tickets/1/transfer');
-    await find('별명', 'me');
-    expect(await screen.findByText('본인에게는 줄 수 없어요.')).toBeInTheDocument();
+    await find('Nickname', 'me');
+    expect(await screen.findByText('You cannot give it to yourself.')).toBeInTheDocument();
   });
 });
 
 describe('TransferConfirm', () => {
   it('runs the pre-check and sends one relayed handover', async () => {
     renderFlow(CONFIRM);
-    await userEvent.click(screen.getByRole('button', { name: '친구에게 주기' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Give to a friend' }));
     const [kind, target, data] = sendAction.mock.calls[0]!;
     expect([kind, target]).toEqual(['safeTransferFrom', 'ticket']);
     const decoded = decodeFunctionData({ abi: ticketAbi, data });
@@ -176,8 +176,8 @@ describe('TransferConfirm', () => {
   it('blocks on a failing pre-check instead of spending an operation', async () => {
     identity.isMember.mockResolvedValue(false);
     renderFlow(CONFIRM);
-    await userEvent.click(screen.getByRole('button', { name: '친구에게 주기' }));
-    expect(await screen.findByText('받는 분이 아직 가입하지 않았어요.')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Give to a friend' }));
+    expect(await screen.findByText('They have not signed up yet.')).toBeInTheDocument();
     expect(sendAction).not.toHaveBeenCalled();
   });
 
@@ -188,18 +188,18 @@ describe('TransferConfirm', () => {
     });
     identity.kycLevelOf.mockResolvedValue(0);
     renderFlow(CONFIRM);
-    await userEvent.click(screen.getByRole('button', { name: '친구에게 주기' }));
-    expect(await screen.findByText('받는 사람이 본인인증을 하지 않았어요.')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Give to a friend' }));
+    expect(await screen.findByText('That person has not verified their identity.')).toBeInTheDocument();
     expect(sendAction).not.toHaveBeenCalled();
   });
 
   it('reads an unknown outcome as still confirming, not as a failure', async () => {
     sendAction.mockRejectedValueOnce(dropped());
     renderFlow(CONFIRM);
-    const cta = screen.getByRole('button', { name: '친구에게 주기' });
+    const cta = screen.getByRole('button', { name: 'Give to a friend' });
     await userEvent.click(cta);
-    expect(await screen.findByText('아직 확인 중이에요. 잠시 뒤 내 티켓에서 확인해 주세요.')).toBeInTheDocument();
-    expect(screen.queryByText('친구에게 주지 못했어요. 잠시 뒤 다시 시도해 주세요.')).not.toBeInTheDocument();
+    expect(await screen.findByText('Still confirming. Please check My tickets in a moment.')).toBeInTheDocument();
+    expect(screen.queryByText('Could not give the ticket away. Please try again in a moment.')).not.toBeInTheDocument();
     expect(cta).toBeDisabled();
     await userEvent.click(cta);
     expect(sendAction).toHaveBeenCalledTimes(1);
@@ -208,14 +208,14 @@ describe('TransferConfirm', () => {
   it('shows the failure sentence when the handover reverts', async () => {
     sendAction.mockRejectedValueOnce(reverted('SomethingUnmapped'));
     renderFlow(CONFIRM);
-    await userEvent.click(screen.getByRole('button', { name: '친구에게 주기' }));
-    expect(await screen.findByText('친구에게 주지 못했어요. 잠시 뒤 다시 시도해 주세요.')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Give to a friend' }));
+    expect(await screen.findByText('Could not give the ticket away. Please try again in a moment.')).toBeInTheDocument();
   });
 
   it('offers the way back when the screen is opened without a recipient', async () => {
     renderFlow('/tickets/1/transfer/confirm');
     // Its own sentence: nothing was searched for here, so "not found" would not be true.
-    expect(await screen.findByText('받는 분을 먼저 골라 주세요.')).toBeInTheDocument();
+    expect(await screen.findByText('Choose who gets the ticket first.')).toBeInTheDocument();
     expect(sendAction).not.toHaveBeenCalled();
   });
 });
@@ -227,17 +227,17 @@ describe('TransferConfirm', () => {
  * read back from the ABI, so this pins the selectors independently.
  */
 const REVERT_SENTENCES: ReadonlyArray<readonly [string, string]> = [
-  ['TicketRevoked', '취소된 티켓이라 친구에게 줄 수 없어요.'],
-  ['TransfersDisabled', '이 행사는 친구에게 줄 수 없어요.'],
-  ['AlreadyCheckedIn', '이미 입장한 티켓이에요.'],
-  ['TransferCutoffPassed', '친구에게 줄 수 있는 시간이 지났어요.'],
-  ['NotMember', '받는 분이 아직 가입하지 않았어요.'],
-  ['KycRequired', '받는 사람이 본인인증을 하지 않았어요.'],
-  ['TransferLimitReached', '이 티켓은 더 이상 친구에게 줄 수 없어요.'],
-  ['MaxPerWalletExceeded', '받는 분이 이 행사 티켓을 이미 최대 수만큼 갖고 있어요.'],
+  ['TicketRevoked', 'This ticket was voided, so it cannot be given away.'],
+  ['TransfersDisabled', 'This event does not allow giving tickets away.'],
+  ['AlreadyCheckedIn', 'This ticket has already been used.'],
+  ['TransferCutoffPassed', 'The time to give it away has passed.'],
+  ['NotMember', 'They have not signed up yet.'],
+  ['KycRequired', 'That person has not verified their identity.'],
+  ['TransferLimitReached', 'This ticket cannot be given away again.'],
+  ['MaxPerWalletExceeded', 'They already hold the maximum number of tickets for this event.'],
 ];
 
-const GENERIC = '친구에게 주지 못했어요. 잠시 뒤 다시 시도해 주세요.';
+const GENERIC = 'Could not give the ticket away. Please try again in a moment.';
 
 describe('mapping a revert by name', () => {
   it('matches a screen table entry by the contract error name the relayer reported', () => {
@@ -258,7 +258,7 @@ describe('a handover the contract refuses', () => {
     it(`says which rule ${name} is`, async () => {
       sendAction.mockRejectedValueOnce(reverted(name));
       renderFlow(CONFIRM);
-      await userEvent.click(screen.getByRole('button', { name: '친구에게 주기' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Give to a friend' }));
       expect(await screen.findByText(sentence)).toBeInTheDocument();
       expect(screen.queryByText(GENERIC)).not.toBeInTheDocument();
     });
@@ -267,15 +267,15 @@ describe('a handover the contract refuses', () => {
   it('keeps the generic sentence for a code nothing here knows', async () => {
     sendAction.mockRejectedValueOnce(reverted('SomethingUnmapped'));
     renderFlow(CONFIRM);
-    await userEvent.click(screen.getByRole('button', { name: '친구에게 주기' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Give to a friend' }));
     expect(await screen.findByText(GENERIC)).toBeInTheDocument();
   });
 
   it('still reads an unknown outcome as confirming, never as a refusal', async () => {
     sendAction.mockRejectedValueOnce(dropped());
     renderFlow(CONFIRM);
-    await userEvent.click(screen.getByRole('button', { name: '친구에게 주기' }));
-    expect(await screen.findByText('아직 확인 중이에요. 잠시 뒤 내 티켓에서 확인해 주세요.')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Give to a friend' }));
+    expect(await screen.findByText('Still confirming. Please check My tickets in a moment.')).toBeInTheDocument();
     expect(screen.queryByText(GENERIC)).not.toBeInTheDocument();
   });
 
@@ -287,8 +287,8 @@ describe('a handover the contract refuses', () => {
   it('names the move the recipient just made when the quarantine refuses a handover', async () => {
     sendAction.mockRejectedValueOnce(reverted('RotationPending'));
     renderFlow(CONFIRM);
-    await userEvent.click(screen.getByRole('button', { name: '친구에게 주기' }));
-    expect(await screen.findByText(ko.transfer.alertRecipientMoved)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Give to a friend' }));
+    expect(await screen.findByText(en.transfer.alertRecipientMoved)).toBeInTheDocument();
     expect(screen.queryByText(GENERIC)).not.toBeInTheDocument();
   });
 
@@ -298,9 +298,9 @@ describe('a handover the contract refuses', () => {
     // which is worse than saying less. The recipient's lock is caught before the send anyway.
     sendAction.mockRejectedValueOnce(reverted('DeviceLocked'));
     renderFlow(CONFIRM);
-    await userEvent.click(screen.getByRole('button', { name: '친구에게 주기' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Give to a friend' }));
     expect(await screen.findByText(GENERIC)).toBeInTheDocument();
-    expect(screen.queryByText(ko.transfer.alertLocked)).not.toBeInTheDocument();
+    expect(screen.queryByText(en.transfer.alertLocked)).not.toBeInTheDocument();
   });
 });
 
@@ -312,17 +312,17 @@ describe('a handover the contract refuses', () => {
  */
 describe('an offer the contract refuses to hand over', () => {
   const ACCEPT_SENTENCES: ReadonlyArray<readonly [string, string]> = [
-    ['RotationPending', ko.transfer.offerRotationPending],
-    ['DeviceLocked', ko.transfer.offerDeviceLocked],
+    ['RotationPending', en.transfer.offerRotationPending],
+    ['DeviceLocked', en.transfer.offerDeviceLocked],
   ];
 
   for (const [name, sentence] of ACCEPT_SENTENCES) {
     it(`reads ${name} in the receiver's own voice`, () => {
-      expect(acceptFailure(ko, reverted(name))).toBe(sentence);
+      expect(acceptFailure(en, reverted(name))).toBe(sentence);
     });
   }
 
   it('keeps the generic sentence for a refusal nobody here knows', () => {
-    expect(acceptFailure(ko, reverted('SomethingUnmapped'))).toBe(ko.transfer.acceptFailed);
+    expect(acceptFailure(en, reverted('SomethingUnmapped'))).toBe(en.transfer.acceptFailed);
   });
 });

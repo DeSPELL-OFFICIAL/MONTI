@@ -17,7 +17,7 @@ const BAND = `0x${'a1'.repeat(20)}` as const;
 const PLATFORM = `0x${'cc'.repeat(20)}` as const;
 const recipients = [
   { account: BAND, bps: 9_500, reason: '밴드', tag: 'band' },
-  { account: PLATFORM, bps: 500, reason: 'MONTI 플랫폼', tag: 'platform' },
+  { account: PLATFORM, bps: 500, reason: 'MONTI platform', tag: 'platform' },
 ];
 
 function decode(data: `0x${string}`) {
@@ -44,11 +44,11 @@ describe('encodePublishCall (v2: one Ticket.publishEvent)', () => {
     expect(decode(call.data).args[2]).toEqual({
       recipients: [
         { account: getAddress(BAND), bps: 9_500, reasonHash: reasonHash('밴드'), tag: tagToBytes32('band') },
-        { account: getAddress(PLATFORM), bps: 500, reasonHash: reasonHash('MONTI 플랫폼'), tag: tagToBytes32('platform') },
+        { account: getAddress(PLATFORM), bps: 500, reasonHash: reasonHash('MONTI platform'), tag: tagToBytes32('platform') },
       ],
       platformBps: 500, reserveBps: 0, noShowRefund: false, frozen: false, version: 0,
     });
-    expect(call.reasons).toEqual(['밴드', 'MONTI 플랫폼']);
+    expect(call.reasons).toEqual(['밴드', 'MONTI platform']);
   });
 
   it('sends an empty policy and no reasons for a free event', () => {

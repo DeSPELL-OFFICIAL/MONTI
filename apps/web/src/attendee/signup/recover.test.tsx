@@ -2,7 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ko } from '../../shared/copy/index';
+import { en } from '../../shared/copy/index';
 
 const PERSON_ID = `0x${'aa'.repeat(32)}`;
 const ACCOUNT = `0x${'ab'.repeat(20)}`;
@@ -81,7 +81,7 @@ function renderScreen() {
 
 /** The one primary button, before an error reworded it to 다시 시도. */
 function start(): HTMLElement {
-  return screen.getByRole('button', { name: ko.recover.cta });
+  return screen.getByRole('button', { name: en.recover.cta });
 }
 
 /** A callable rejection: an uppercase reason in `message`, the gRPC status in `code`, and the
@@ -142,8 +142,8 @@ describe('lost-passkey recovery', () => {
     await userEvent.click(start());
 
     const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('최근에 설정을 바꿔서 아직 다시 설정할 수 없어요.');
-    expect(alert).toHaveTextContent(new Date(allowedAt * 1_000).toLocaleDateString('ko'));
+    expect(alert).toHaveTextContent('You changed your setup recently, so you cannot set up again yet.');
+    expect(alert).toHaveTextContent(new Date(allowedAt * 1_000).toLocaleDateString('en'));
     expect(signInWithCustomToken).not.toHaveBeenCalled();
     expect(navigate).not.toHaveBeenCalledWith('/tickets');
   });
@@ -153,7 +153,7 @@ describe('lost-passkey recovery', () => {
     renderScreen();
     await userEvent.click(start());
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(ko.recover.rateLimit);
+    expect(await screen.findByRole('alert')).toHaveTextContent(en.recover.rateLimit);
     expect(navigate).not.toHaveBeenCalledWith('/tickets');
   });
 
@@ -162,7 +162,7 @@ describe('lost-passkey recovery', () => {
     renderScreen();
     await userEvent.click(start());
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(ko.recover.deviceUnavailable);
+    expect(await screen.findByRole('alert')).toHaveTextContent(en.recover.deviceUnavailable);
     expect(recoverAccess).not.toHaveBeenCalled();
     expect(navigate).not.toHaveBeenCalledWith('/tickets');
   });

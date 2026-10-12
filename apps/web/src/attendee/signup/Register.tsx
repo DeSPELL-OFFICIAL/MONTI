@@ -117,7 +117,7 @@ const REGISTER_RETRY_DELAYS_MS = [3_000, 6_000, 10_000];
  * to `shared/copy`: this one screen is the only place a retry is waited out, and the copy files
  * are outside this change's scope.
  */
-const REGISTER_BUSY_LINE = '잠시 붐벼요 · 다시 시도 중…';
+const REGISTER_BUSY_LINE = "It's busy right now · retrying…";
 
 /** A momentary "the attester is busy", worth waiting out — not a refusal that retrying would loop on. */
 function isAttesterBusy(failure: unknown): boolean {

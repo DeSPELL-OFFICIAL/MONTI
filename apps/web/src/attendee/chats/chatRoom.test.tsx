@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ko } from '../../shared/copy/index';
+import { en } from '../../shared/copy/index';
 
 /** Every Firestore/callable entry point this screen touches, in the order it touched them. */
 const calls: string[] = [];
@@ -94,11 +94,11 @@ describe('ChatRoom', () => {
   it('pins the notice, shows the closed banner and disables sending', async () => {
     room = { closed: true, endsAt: 0 };
     render(<ChatRoom />);
-    expect(await screen.findByText(`${ko.chats.notice} · 공지입니다`)).toBeInTheDocument();
-    expect(screen.getByText(ko.chats.closed)).toBeInTheDocument();
-    expect(screen.getByPlaceholderText(ko.chats.placeholder)).toBeDisabled();
-    expect(screen.getByRole('button', { name: ko.chats.send })).toBeDisabled();
-    expect(screen.getByPlaceholderText(ko.chats.placeholder)).toHaveAttribute('maxlength', '500');
+    expect(await screen.findByText(`${en.chats.notice} · 공지입니다`)).toBeInTheDocument();
+    expect(screen.getByText(en.chats.closed)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(en.chats.placeholder)).toBeDisabled();
+    expect(screen.getByRole('button', { name: en.chats.send })).toBeDisabled();
+    expect(screen.getByPlaceholderText(en.chats.placeholder)).toHaveAttribute('maxlength', '500');
   });
 
   it('shows the closed state and never subscribes when the join says the chat is closed', async () => {
@@ -107,7 +107,7 @@ describe('ChatRoom', () => {
       throw new CallableError('failed-precondition', 'CHAT_CLOSED');
     });
     render(<ChatRoom />);
-    expect(await screen.findByText(ko.chats.closed)).toBeInTheDocument();
+    expect(await screen.findByText(en.chats.closed)).toBeInTheDocument();
     expect(calls).toEqual(['joinEventChat']);
   });
 
@@ -117,7 +117,7 @@ describe('ChatRoom', () => {
       throw new CallableError('failed-precondition', 'EVENT_ENDED');
     });
     render(<ChatRoom />);
-    expect(await screen.findByText(ko.chats.closed)).toBeInTheDocument();
+    expect(await screen.findByText(en.chats.closed)).toBeInTheDocument();
   });
 
   it('says a ticket is needed when the join is refused', async () => {
@@ -125,8 +125,8 @@ describe('ChatRoom', () => {
       throw new CallableError('permission-denied', 'NO_TICKET_FOR_EVENT');
     });
     render(<ChatRoom />);
-    expect(await screen.findByText(ko.chats.noTicket)).toBeInTheDocument();
-    expect(screen.getByPlaceholderText(ko.chats.placeholder)).toBeDisabled();
+    expect(await screen.findByText(en.chats.noTicket)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(en.chats.placeholder)).toBeDisabled();
   });
 
   it('says a draft event has no room, instead of telling them to try again', async () => {
@@ -134,8 +134,8 @@ describe('ChatRoom', () => {
       throw new CallableError('failed-precondition', 'EVENT_NOT_PUBLISHED');
     });
     render(<ChatRoom />);
-    expect(await screen.findByText(ko.chats.unavailable)).toBeInTheDocument();
-    expect(screen.queryByText(ko.chats.joinFailed)).not.toBeInTheDocument();
+    expect(await screen.findByText(en.chats.unavailable)).toBeInTheDocument();
+    expect(screen.queryByText(en.chats.joinFailed)).not.toBeInTheDocument();
   });
 
   it('carries nothing from a refused room into the next one', async () => {
@@ -143,13 +143,13 @@ describe('ChatRoom', () => {
       throw new CallableError('permission-denied', 'NO_TICKET_FOR_EVENT');
     });
     const { rerender } = render(<ChatRoom />);
-    expect(await screen.findByText(ko.chats.noTicket)).toBeInTheDocument();
+    expect(await screen.findByText(en.chats.noTicket)).toBeInTheDocument();
 
     routeEventId = '6';
     rerender(<ChatRoom />);
     expect(await screen.findByText('안녕하세요')).toBeInTheDocument();
-    expect(screen.queryByText(ko.chats.noTicket)).not.toBeInTheDocument();
-    expect(screen.getByPlaceholderText(ko.chats.placeholder)).toBeEnabled();
+    expect(screen.queryByText(en.chats.noTicket)).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText(en.chats.placeholder)).toBeEnabled();
     expect(joinEventChat).toHaveBeenLastCalledWith({ eventId: '6' });
   });
 
@@ -167,7 +167,7 @@ describe('ChatRoom', () => {
       throw new CallableError('internal', 'UNKNOWN');
     });
     render(<ChatRoom />);
-    expect(await screen.findByText(ko.chats.joinFailed)).toBeInTheDocument();
+    expect(await screen.findByText(en.chats.joinFailed)).toBeInTheDocument();
   });
 
   it('reads a permission-denied subscription as not being a member yet, without crashing', async () => {
@@ -175,7 +175,7 @@ describe('ChatRoom', () => {
       code: 'permission-denied',
     });
     render(<ChatRoom />);
-    expect(await screen.findByText(ko.chats.noTicket)).toBeInTheDocument();
+    expect(await screen.findByText(en.chats.noTicket)).toBeInTheDocument();
   });
 
   it('shows the sender nickname and never the uid', async () => {
@@ -187,33 +187,33 @@ describe('ChatRoom', () => {
   it('calls an unknown sender by a name, never by an identifier', async () => {
     messageRows = [{ id: 'm3', uid: 'u9', text: '처음 왔어요', createdAt: 3, reported: 0 }];
     render(<ChatRoom />);
-    expect(await screen.findByText(ko.chats.someone)).toBeInTheDocument();
+    expect(await screen.findByText(en.chats.someone)).toBeInTheDocument();
     expect(screen.queryByText('u9')).not.toBeInTheDocument();
   });
 
   it('marks a message reported the moment the report is sent', async () => {
     render(<ChatRoom />);
-    await userEvent.click(await screen.findByRole('button', { name: ko.chats.report }));
+    await userEvent.click(await screen.findByRole('button', { name: en.chats.report }));
     expect(reportMessage).toHaveBeenCalledWith({ eventId: '5', msgId: 'm2' });
-    expect(await screen.findByText(ko.chats.reported)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: ko.chats.report })).not.toBeInTheDocument();
+    expect(await screen.findByText(en.chats.reported)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: en.chats.report })).not.toBeInTheDocument();
   });
 
   it('says so when the send did not go through, and gives the words back', async () => {
     sendChatMessage.mockRejectedValue(new Error('offline'));
     render(<ChatRoom />);
-    const box = await screen.findByPlaceholderText(ko.chats.placeholder);
+    const box = await screen.findByPlaceholderText(en.chats.placeholder);
     await userEvent.type(box, '안녕');
-    await userEvent.click(screen.getByRole('button', { name: ko.chats.send }));
-    expect(await screen.findByText(ko.chats.sendFailed)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: en.chats.send }));
+    expect(await screen.findByText(en.chats.sendFailed)).toBeInTheDocument();
     expect(box).toHaveValue('안녕');
   });
 
   it('sends the trimmed draft and clears the box', async () => {
     render(<ChatRoom />);
-    const box = await screen.findByPlaceholderText(ko.chats.placeholder);
+    const box = await screen.findByPlaceholderText(en.chats.placeholder);
     await userEvent.type(box, '  안녕  ');
-    await userEvent.click(screen.getByRole('button', { name: ko.chats.send }));
+    await userEvent.click(screen.getByRole('button', { name: en.chats.send }));
     await waitFor(() => expect(sendChatMessage).toHaveBeenCalledWith('5', '안녕'));
     expect(box).toHaveValue('');
   });

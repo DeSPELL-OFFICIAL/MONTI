@@ -99,12 +99,12 @@ describe('claim page, indexer lagging', () => {
     renderClaim();
     // The enabled claim button only appears once the chain event + held balance have resolved — an
     // error screen or a permanent 확인 중 would fail this find.
-    await userEvent.click(await screen.findByRole('button', { name: '티켓 받기' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Get a ticket' }));
     await waitFor(() => expect(relayClaim).toHaveBeenCalled());
     expect(relayClaim.mock.calls[0]?.[0]).toMatchObject({ mode: 'claim' });
     // The relayer confirmed, so the claim settles to 완료 and the button is gone — waiting on that
     // flushes the settle so no state update lands outside act after the test.
-    await waitFor(() => expect(screen.queryByRole('button', { name: '티켓 받기' })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Get a ticket' })).toBeNull());
   });
 
   it('prefers the indexer event over the chain when the indexer has the row', async () => {
@@ -119,8 +119,8 @@ describe('claim page, indexer lagging', () => {
   it('pre-blocks a claim from the chain balance when the wallet already holds its allotment', async () => {
     chainBalance.value = 2n; // held 2 >= maxPerWallet 2
     renderClaim();
-    expect(await screen.findByText('이미 받았어요 · 내 티켓에서 확인하세요')).toBeInTheDocument();
-    expect(await screen.findByRole('button', { name: '티켓 받기' })).toBeDisabled();
+    expect(await screen.findByText('You already have your tickets for this event. Check My tickets.')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Get a ticket' })).toBeDisabled();
     expect(relayClaim).not.toHaveBeenCalled();
   });
 });

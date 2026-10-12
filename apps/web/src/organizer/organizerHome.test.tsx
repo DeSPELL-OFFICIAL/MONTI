@@ -27,7 +27,7 @@ const { OrganizerRoutes } = await import('./Layout');
 const { organizerCopy } = await import('./copy');
 const { setSession } = await import('../shared/session');
 const { formatEventDate } = await import('../attendee/discover/useEvents');
-const copy = organizerCopy.ko.home;
+const copy = organizerCopy.en.home;
 
 interface Org {
   orgId: string;
@@ -143,14 +143,14 @@ describe('organiser home', () => {
     withEvents([EVENT_A, EVENT_B]);
     const seen = open();
 
-    expect(screen.getByRole('link', { name: '행사 #11' })).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: '행사 #22' })).toBeNull();
+    expect(screen.getByRole('link', { name: 'Event #11' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Event #22' })).toBeNull();
 
     await user.selectOptions(screen.getByLabelText(copy.org), ORG_B.orgId);
 
     expect(seen.at(-1)).toBe(`/org?org=${ORG_B.orgId}`);
-    expect(screen.getByRole('link', { name: '행사 #22' })).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: '행사 #11' })).toBeNull();
+    expect(screen.getByRole('link', { name: 'Event #22' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Event #11' })).toBeNull();
   });
 
   it('starts on the organisation the address names', () => {
@@ -158,7 +158,7 @@ describe('organiser home', () => {
     withEvents([EVENT_A, EVENT_B]);
     open(`/org?org=${ORG_B.orgId}`);
     expect(screen.getByLabelText(copy.org)).toHaveValue(ORG_B.orgId);
-    expect(screen.getByRole('link', { name: '행사 #22' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Event #22' })).toBeInTheDocument();
   });
 
   it('sends somebody who organises for nobody to the create-an-organiser screen', () => {
@@ -189,9 +189,9 @@ describe('organiser home', () => {
   it('lists an event with its number, its start and the indexer word for its state', () => {
     withEvents([EVENT_A]);
     open();
-    expect(screen.getByRole('link', { name: '행사 #11' })).toHaveAttribute('href', '/org/events/11');
+    expect(screen.getByRole('link', { name: 'Event #11' })).toHaveAttribute('href', '/org/events/11');
     expect(screen.getByText(copy.status.Draft)).toBeInTheDocument();
-    expect(screen.getByText(formatEventDate(EVENT_A.startsAt, 'ko'))).toBeInTheDocument();
+    expect(screen.getByText(formatEventDate(EVENT_A.startsAt, 'en'))).toBeInTheDocument();
   });
 
   it('shows a state the indexer invents exactly as it came', () => {
@@ -249,9 +249,9 @@ describe('organiser home', () => {
   it('opens the creation scene at `/org/new`, which is the only creation screen there is', () => {
     withOrgs([ORG_A]);
     open('/org/new?org=3');
-    expect(screen.getByRole('heading', { name: organizerCopy.ko.scene.title, level: 1 }))
+    expect(screen.getByRole('heading', { name: organizerCopy.en.scene.title, level: 1 }))
       .toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: organizerCopy.ko.scene.poster, level: 2 }))
+    expect(screen.getByRole('heading', { name: organizerCopy.en.scene.poster, level: 2 }))
       .toBeInTheDocument();
     // T-EV-W10 deleted the six-step wizard; nothing answers at its old address any more.
     expect(screen.queryByText(/1단계/)).toBeNull();
@@ -268,11 +268,11 @@ describe('organiser home', () => {
     withOrgs([ORG_A]);
     const seen = open('/org/new/d-42/tickets');
     expect(seen.at(-1)).toBe('/org/new/d-42');
-    expect(screen.getByRole('heading', { name: organizerCopy.ko.scene.title, level: 1 }))
+    expect(screen.getByRole('heading', { name: organizerCopy.en.scene.title, level: 1 }))
       .toBeInTheDocument();
     // The kinds are a section of that one scroll now, so there is no second screen to land on.
-    expect(screen.getByLabelText(organizerCopy.ko.scene.tiers.supply)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: organizerCopy.ko.scene.tiers.next })).toBeInTheDocument();
+    expect(screen.getByLabelText(organizerCopy.en.scene.tiers.supply)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: organizerCopy.en.scene.tiers.next })).toBeInTheDocument();
   });
 
   /** v2: the draft's publish screen is a route of its own, against the real route table. */
@@ -280,14 +280,14 @@ describe('organiser home', () => {
     withOrgs([ORG_A]);
     const seen = open('/org/new/d-42/publish');
     expect(seen.at(-1)).toBe('/org/new/d-42/publish');
-    expect(screen.getByRole('heading', { name: organizerCopy.ko.scene.publishScreen.title, level: 1 }))
+    expect(screen.getByRole('heading', { name: organizerCopy.en.scene.publishScreen.title, level: 1 }))
       .toBeInTheDocument();
   });
 
   it('has no edit route for a published event any more', () => {
     withOrgs([ORG_A]);
     open('/org/events/7/edit');
-    expect(screen.queryByRole('heading', { name: organizerCopy.ko.scene.title, level: 1 })).toBeNull();
+    expect(screen.queryByRole('heading', { name: organizerCopy.en.scene.title, level: 1 })).toBeNull();
   });
 
   it('refuses the floating action to somebody who may not create events, and says why', () => {

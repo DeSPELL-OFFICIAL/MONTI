@@ -61,7 +61,7 @@ function renderInbox() {
   );
 }
 
-const accept = async () => userEvent.click((await screen.findAllByRole('button', { name: '받기' }))[0]!);
+const accept = async () => userEvent.click((await screen.findAllByRole('button', { name: 'Accept' }))[0]!);
 
 beforeEach(() => {
   setSession({ status: 'signedIn', account: ME });
@@ -85,7 +85,7 @@ describe('Inbox', () => {
   it('says so when nothing is waiting', async () => {
     pendingOffers.mockResolvedValue([]);
     renderInbox();
-    expect(await screen.findByText('친구가 보낸 티켓이 없어요.')).toBeInTheDocument();
+    expect(await screen.findByText('No tickets from friends yet.')).toBeInTheDocument();
   });
 
   it('names the event, because its reader has never seen it', async () => {
@@ -100,7 +100,7 @@ describe('Inbox', () => {
     renderInbox();
     // A document nobody can load is not a reason to hide an invite.
     expect(await screen.findByText('#1')).toBeInTheDocument();
-    expect(await screen.findByRole('button', { name: '받기' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Accept' })).toBeInTheDocument();
   });
 
   it('keeps every row answering for itself', async () => {
@@ -111,17 +111,17 @@ describe('Inbox', () => {
     sendAction.mockRejectedValueOnce(reverted('OfferExpired'));
     renderInbox();
     const rows = await screen.findAllByRole('listitem');
-    const expired = '초대가 만료됐어요. 다시 보내 달라고 해 주세요.';
+    const expired = 'The invite expired. Ask them to send a new one.';
 
-    await userEvent.click(within(rows[0]!).getByRole('button', { name: '받기' }));
+    await userEvent.click(within(rows[0]!).getByRole('button', { name: 'Accept' }));
     expect(await within(rows[0]!).findByText(expired)).toBeInTheDocument();
     // One refusal says nothing about the row next to it, and does not disable its button.
     expect(within(rows[1]!).queryByText(expired)).toBeNull();
-    expect(within(rows[1]!).getByRole('button', { name: '받기' })).toBeEnabled();
+    expect(within(rows[1]!).getByRole('button', { name: 'Accept' })).toBeEnabled();
 
-    await userEvent.click(within(rows[1]!).getByRole('button', { name: '받기' }));
-    expect(await within(rows[1]!).findByText('티켓을 받았어요')).toBeInTheDocument();
-    expect(within(rows[0]!).queryByText('티켓을 받았어요')).toBeNull();
+    await userEvent.click(within(rows[1]!).getByRole('button', { name: 'Accept' }));
+    expect(await within(rows[1]!).findByText('Ticket received')).toBeInTheDocument();
+    expect(within(rows[0]!).queryByText('Ticket received')).toBeNull();
   });
 
   it('lists what is waiting and takes one', async () => {
@@ -130,22 +130,22 @@ describe('Inbox', () => {
       { tokenId: '7', attesterSig: SIG, inviteId: 'i2' },
     ]);
     renderInbox();
-    expect(await screen.findByText('2장이 기다리고 있어요')).toBeInTheDocument();
+    expect(await screen.findByText('2 waiting for you')).toBeInTheDocument();
 
     await accept();
     const [kind, target, data] = sendAction.mock.calls[0]!;
     expect([kind, target]).toEqual(['acceptOffer', 'ticket']);
     expect(decodeFunctionData({ abi: ticketAbi, data })).toEqual({ functionName: 'acceptOffer', args: [1n, SIG] });
-    expect(await screen.findByText('티켓을 받았어요')).toBeInTheDocument();
+    expect(await screen.findByText('Ticket received')).toBeInTheDocument();
   });
 
   it('sends an unverified attendee to verify instead of offering the button', async () => {
     ticket.eventMeta.mockResolvedValue({ orgId: 9n, requireKyc: true });
     renderInbox();
 
-    expect(await screen.findByText('본인인증 후 받을 수 있어요')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '받기' })).toBeNull();
-    await userEvent.click(screen.getByRole('button', { name: '본인인증 하기' }));
+    expect(await screen.findByText('Verify your identity to accept')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Verify my identity' }));
     expect(await screen.findByText('본인인증 화면')).toBeInTheDocument();
     expect(sendAction).not.toHaveBeenCalled();
   });
@@ -164,19 +164,19 @@ describe('Inbox', () => {
     sendAction.mockRejectedValueOnce(dropped());
     renderInbox();
     await accept();
-    expect(await screen.findByText('아직 확인 중이에요. 잠시 뒤 내 티켓에서 확인해 주세요.')).toBeInTheDocument();
-    expect(screen.queryByText('티켓을 받지 못했어요. 잠시 뒤 다시 시도해 주세요.')).toBeNull();
+    expect(await screen.findByText('Still confirming. Please check My tickets in a moment.')).toBeInTheDocument();
+    expect(screen.queryByText('Could not accept the ticket. Please try again in a moment.')).toBeNull();
   });
 });
 
 /** `acceptOffer` has its own refusals on top of the eight `_update` shares with a handover. */
 const ACCEPT_REVERTS: ReadonlyArray<readonly [string, string]> = [
-  ['NoOffer', '이 초대는 더 이상 남아 있지 않아요.'],
-  ['OfferExpired', '초대가 만료됐어요. 다시 보내 달라고 해 주세요.'],
-  ['BadAttesterSig', '이 초대는 다른 분에게 온 거예요.'],
-  ['KycRequired', '본인인증 후 받을 수 있어요'],
-  ['NotMember', '가입을 먼저 마쳐 주세요.'],
-  ['MaxPerWalletExceeded', '이 행사 티켓을 이미 최대 수만큼 갖고 있어요.'],
+  ['NoOffer', 'This invite is no longer there.'],
+  ['OfferExpired', 'The invite expired. Ask them to send a new one.'],
+  ['BadAttesterSig', 'This invite was sent to someone else.'],
+  ['KycRequired', 'Verify your identity to accept'],
+  ['NotMember', 'Please finish signing up first.'],
+  ['MaxPerWalletExceeded', 'You already hold the maximum number of tickets for this event.'],
 ];
 
 describe('an accept the contract refuses', () => {
@@ -193,7 +193,7 @@ describe('an accept the contract refuses', () => {
     sendAction.mockRejectedValueOnce(reverted('SomethingUnmapped'));
     renderInbox();
     await accept();
-    expect(await screen.findByText('티켓을 받지 못했어요. 잠시 뒤 다시 시도해 주세요.')).toBeInTheDocument();
+    expect(await screen.findByText('Could not accept the ticket. Please try again in a moment.')).toBeInTheDocument();
   });
 });
 

@@ -6,12 +6,12 @@
  * them already says this is the test environment.
  */
 
-/** `3000` → `"$30.00"`. Negative or non-integer input is clamped to a safe `"$0.00"`. */
+/** `3000` → `"$30"`, `3050` → `"$30.50"`. Negative or non-finite input is clamped to `"$0"`. */
 export function formatUsdCents(cents: number): string {
-  if (!Number.isFinite(cents) || cents < 0) return '$0.00';
+  if (!Number.isFinite(cents) || cents < 0) return '$0';
   const whole = Math.floor(cents / 100);
   const frac = Math.round(cents % 100);
-  return `$${whole}.${frac.toString().padStart(2, '0')}`;
+  return frac === 0 ? `$${whole}` : `$${whole}.${frac.toString().padStart(2, '0')}`;
 }
 
 /** A whole-dollar input (`"30"`) → integer cents (`3000`). Blank or invalid → `null`. */
