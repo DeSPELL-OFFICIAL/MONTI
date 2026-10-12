@@ -103,7 +103,13 @@ case "${1:-}" in
     echo "== indexer check"; curl -s -m 15 -X POST -H 'content-type: application/json' --data '{"query":"{ chain_metadata { chain_id is_hyper_sync latest_processed_block } }"}' "$ENVIO_V2_URL"; echo
     echo "== PATCH production env -> v2"; for k in $KEYS; do patch_env "$k" "$(v2_value "$k")"; done
     echo "== verify"; verify_env v2
-    echo "== deploy v2/web --prod"; ( cd "$WEB" && git log --oneline -1 && fnm exec --using=22 vercel --prod --scope "$SLUG" --yes 2>&1 | sed 's/\x1b\[[0-9;]*[A-Za-z]//g' | grep -E 'Production|Aliased|Error' )
+    echo "== deploy v2/web --prod"; ( cd "$WEB" && git log --oneline -1 )
+    DEPLOY_URL=$( cd "$WEB" && fnm exec --using=22 vercel --prod --scope "$SLUG" --yes 2>/dev/null | tail -1 )
+    echo "  deployment: $DEPLOY_URL"
+    # After a `vercel rollback`, new production deployments are NOT assigned to the custom domain
+    # automatically (observed 2026-10-12: deploy aliased only monti-despells-projects.vercel.app).
+    # `vercel promote` pins the domain to this deployment.
+    echo "== promote to monti.despell.io"; ( cd "$WEB" && fnm exec --using=22 vercel promote "$DEPLOY_URL" --scope "$SLUG" --yes 2>&1 | sed 's/\x1b\[[0-9;]*[A-Za-z]//g' | grep -E 'Success|Error' )
     sleep 8; echo "== live bundle"; bundle
     echo "== schedulers v1 pause / v2 resume"; sched pause us-east1; sched resume us-east4
     ;;
