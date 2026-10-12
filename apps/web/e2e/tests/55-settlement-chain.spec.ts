@@ -207,8 +207,18 @@ test('55 · v2 settlement chain — publish 1 · purchase 1 · gate 1 · overrid
     }
     diag.receiptReleased = released;
     await shot(aPage, 'attendee-receipt-settled');
-    await aPage.goto(`/settlement/${eventId}`);
-    await aPage.waitForTimeout(5000);
+    // The public page reads the indexer, which trails the chain by >8 s: the "Paid out after check-in"
+    // tile shows $0 right after release. Reload until it carries the ticket, and record the lag.
+    const paidOutTile = new RegExp(`Paid out after check-in\\s*\\$${PRICE}\\s*1 ticket`);
+    const settleAt = Date.now();
+    let paidOutShown = false;
+    while (Date.now() - settleAt < 120_000) {
+      await aPage.goto(`/settlement/${eventId}`);
+      await aPage.waitForTimeout(4000);
+      if (paidOutTile.test(await aPage.locator('body').innerText().catch(() => ''))) { paidOutShown = true; break; }
+    }
+    diag.settlementPaidOutShown = paidOutShown;
+    diag.settlementPaidOutLagMs = Date.now() - settleAt;
     await shot(aPage, 'public-settlement-page');
     await page.goto(`/org/events/${eventId}`);
     await page.waitForTimeout(4000);

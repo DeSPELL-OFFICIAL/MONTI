@@ -167,7 +167,8 @@ export async function admitByOverride(page: Page, tokenId: string, pin: string):
       await openBtn.click();
       const search = page.getByLabel(S.search);
       await expect(search).toBeVisible({ timeout: 10_000 });
-      await search.fill(tokenId);
+      // Open mode (the stage script): staff type the last 4 digits printed on the ticket, as at the door.
+      await search.fill(process.env.E2E_AUTH_MODE === 'open' ? tokenId.slice(-4) : tokenId);
       const match = page.locator('.gate-dialog__matches li button').first();
       const found = await match.waitFor({ state: 'visible', timeout: 20_000 }).then(() => true).catch(() => false);
       if (!found) {
