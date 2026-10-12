@@ -111,7 +111,7 @@ export function Team({ orgId: fixedOrgId }: { orgId?: string } = {}) {
   // Owner or not is a chain question and the answer decides what this screen offers. An
   // organisation number that is not one yet (`ownerOf` is the zero address) is simply not mine.
   //
-  // The account asked about is `getStaffAccount()`, which is the signed-in passkey account —
+  // The account asked about is `getStaffAccount()`, which is the signed-in session account —
   // the same one the session carries. That equality is the invariant this screen depends on;
   // reading it here rather than from the session store keeps the screen testable on its own.
   useEffect(() => {
