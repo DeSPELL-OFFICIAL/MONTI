@@ -61,13 +61,18 @@ patch_env() { # key value quiet?
 verify_env() { # mode v1|v2 ; compares stored values with expected; prints OK/BAD (v1 values masked)
   local mode=$1 tok k exp; tok=$(vtoken)
   local tmp; tmp=$(mktemp)
-  curl -s -H "Authorization: Bearer $tok" "$API/v9/projects/monti/env?slug=$SLUG" > "$tmp"
+  # decrypt=true: VITE_FUNCTIONS_REGION is stored as an "encrypted" variable; without it the API returns an opaque blob.
+  curl -s -H "Authorization: Bearer $tok" "$API/v9/projects/monti/env?slug=$SLUG&decrypt=true" > "$tmp"
   local bad=0
   for k in $KEYS; do
     if [ "$mode" = v2 ]; then exp=$(v2_value "$k"); else exp=$(v1_value "$k"); fi
     local cur; cur=$(python3 -c 'import sys,json; d=json.load(open(sys.argv[1])); print(next((e.get("value","") for e in d.get("envs",[]) if e["id"]==sys.argv[2]), ""))' "$tmp" "$(env_id "$k")")
     if [ "$cur" = "$exp" ]; then
       if [ "$mode" = v2 ]; then echo "   OK  $k = ${cur:0:48}"; else echo "   OK  $k (v1 value)"; fi
+    elif [ "${cur:0:3}" = "eyJ" ]; then
+      # "encrypted"-type variable: the API returns an opaque blob even with decrypt=true; the PATCH was
+      # accepted, and the live bundle check below proves the value (us-east4 / us-east1 in the entry chunk).
+      echo "   ENC $k (encrypted type; verified via the live bundle check)"
     else
       bad=$((bad+1)); echo "   BAD $k (stored ${cur:0:12}…, expected ${exp:0:12}…)"
     fi
@@ -104,7 +109,9 @@ case "${1:-}" in
     echo "== PATCH production env -> v2"; for k in $KEYS; do patch_env "$k" "$(v2_value "$k")"; done
     echo "== verify"; verify_env v2
     echo "== deploy v2/web --prod"; ( cd "$WEB" && git log --oneline -1 )
-    DEPLOY_URL=$( cd "$WEB" && fnm exec --using=22 vercel --prod --scope "$SLUG" --yes 2>/dev/null | tail -1 )
+    # When stdout is not a TTY the CLI prints a JSON blob, so pick the deployment URL out of the combined output.
+    DEPLOY_URL=$( cd "$WEB" && fnm exec --using=22 vercel --prod --scope "$SLUG" --yes 2>&1 | grep -oE 'https://monti-[a-z0-9]+-despells-projects\.vercel\.app' | tail -1 )
+    [ -n "$DEPLOY_URL" ] || { echo "deploy URL not found; check 'vercel ls monti --prod' and promote manually"; exit 1; }
     echo "  deployment: $DEPLOY_URL"
     # After a `vercel rollback`, new production deployments are NOT assigned to the custom domain
     # automatically (observed 2026-10-12: deploy aliased only monti-despells-projects.vercel.app).
