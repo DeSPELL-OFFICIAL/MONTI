@@ -24,6 +24,7 @@ const TICKET = getAddress(`0x${'ce'.repeat(20)}`);
 const ORGANIZERS = getAddress(`0x${'02'.repeat(20)}`);
 const IDENTITY = getAddress(`0x${'1d'.repeat(20)}`);
 const FORWARDER = getAddress(`0x${'f0'.repeat(20)}`);
+const VAULT = getAddress(`0x${'5a'.repeat(20)}`);
 const OTHER = getAddress(`0x${'22'.repeat(20)}`);
 const RELAYER = `0x${'fa'.repeat(20)}` as Hex;
 const TX_HASH = `0x${'ab'.repeat(32)}` as Hex;
@@ -34,12 +35,15 @@ const GATE_ID = 9n;
 
 // 체인 읽기의 가짜 응답. 각 테스트가 beforeEach 뒤에 필요한 값만 덮어쓴다.
 let chainNonce = 0n;
+/** 금고 escrowOf.status — 0 None · 1 Held · 2 Released · 3 Refunded. */
+let escrowStatus = 0;
 
 const fake = createFakeFirestore();
 
 const readContract = vi.fn(async ({ functionName }: { functionName: string }) => {
   if (functionName === 'nonces') return chainNonce;
   if (functionName === 'eventOrg') return ORG_ID;
+  if (functionName === 'escrowOf') return [VAULT, 0n, VAULT, 0n, escrowStatus];
   throw new Error(`UNEXPECTED_READ:${functionName}`);
 });
 const estimateContractGas = vi.fn(async () => 215_000n);
@@ -60,7 +64,7 @@ vi.mock('../src/lib/db.js', () => ({
 
 vi.mock('../src/lib/chain.js', () => ({
   publicClient: () => ({ readContract, estimateContractGas, waitForTransactionReceipt }),
-  deployment: () => ({ ticket: TICKET, organizers: ORGANIZERS, identity: IDENTITY, forwarder: FORWARDER }),
+  deployment: () => ({ ticket: TICKET, organizers: ORGANIZERS, identity: IDENTITY, forwarder: FORWARDER, settlementVault: VAULT }),
 }));
 
 vi.mock('../src/lib/relayer.js', () => ({
@@ -104,6 +108,7 @@ const RELAY_ID = `${ACCOUNT}:0`;
 beforeEach(() => {
   fake.docs.clear();
   chainNonce = 0n;
+  escrowStatus = 0;
   readContract.mockClear();
   estimateContractGas.mockClear();
   waitForTransactionReceipt.mockClear();
@@ -324,6 +329,57 @@ describe('relayAction — settlement release on manualOverride confirm (design �
     waitForTransactionReceipt.mockResolvedValueOnce({ status: 'success', logs: [], blockNumber: 100n });
     await action(req('publishEvent', PUBLISH) as never);
     expect(onCheckInConfirmed).not.toHaveBeenCalled();
+  });
+});
+
+describe('relayAction — refunded ticket guard (escrowGuard)', () => {
+  const TOKEN_ID = (EVENT_ID << 96n) | 123n;
+  const COMMITMENT = `0x${'c0'.repeat(32)}` as Hex;
+  const CALLS: ReadonlyArray<readonly [string, Hex]> = [
+    ['manualOverride', encodeFunctionData({ abi: ticketAbi, functionName: 'manualOverride', args: [TOKEN_ID, GATE_ID, 3] })],
+    ['createOffer', encodeFunctionData({ abi: ticketAbi, functionName: 'createOffer', args: [TOKEN_ID, COMMITMENT, 9_999_999_999n] })],
+    ['acceptOffer', encodeFunctionData({ abi: ticketAbi, functionName: 'acceptOffer', args: [TOKEN_ID, '0x1234'] })],
+    [
+      'safeTransferFrom',
+      encodeFunctionData({ abi: ticketAbi, functionName: 'safeTransferFrom', args: [ACCOUNT, OTHER, TOKEN_ID] }),
+    ],
+  ];
+
+  function req(kind: string, data: string) {
+    return { data: { kind, req: { from: ACCOUNT, to: TICKET, nonce: '0', deadline: futureDeadline(), data }, deviceSig: DEVICE_SIG }, auth };
+  }
+
+  it.each(CALLS)('refuses %s on a refunded ticket with TicketRevoked before simulating', async (kind, data) => {
+    escrowStatus = 3;
+    await expect(action(req(kind, data) as never)).rejects.toMatchObject({
+      code: 'failed-precondition',
+      message: 'TicketRevoked',
+      details: { code: 'TicketRevoked', reason: 'TICKET_REFUNDED' },
+    });
+    expect(readContract).toHaveBeenCalledWith(expect.objectContaining({ address: VAULT, functionName: 'escrowOf', args: [TOKEN_ID] }));
+    expect(estimateContractGas).not.toHaveBeenCalled();
+    expect(sendRelayed).not.toHaveBeenCalled();
+    expect(fake.docs.has(`relays/${RELAY_ID}`)).toBe(false);
+    expect(onCheckInConfirmed).not.toHaveBeenCalled();
+  });
+
+  it.each(CALLS)('relays %s unchanged when the ticket was never escrowed (free tier)', async (kind, data) => {
+    escrowStatus = 0;
+    const res = (await action(req(kind, data) as never)) as { status: string };
+    expect(res.status).toBe('confirmed');
+    expect(sendRelayed).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([1, 2])('relays manualOverride unchanged when escrow status is %i (held / released)', async (status) => {
+    escrowStatus = status;
+    const res = (await action(req('manualOverride', CALLS[0]![1]) as never)) as { status: string };
+    expect(res.status).toBe('confirmed');
+    expect(sendRelayed).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not read escrow for an unguarded kind (publishEvent)', async () => {
+    await action(req('publishEvent', PUBLISH_FREE) as never);
+    expect(readContract).not.toHaveBeenCalledWith(expect.objectContaining({ functionName: 'escrowOf' }));
   });
 });
 

@@ -20,6 +20,7 @@ import { RELAYS, USERS, db } from '../lib/db.js';
 import { getRelayerAccount, sendRelayed } from '../lib/relayer.js';
 import { actionFor, type ActionEntry, type ActionTarget } from '../lib/actionAllowlist.js';
 import { recordUsage } from '../lib/usage.js';
+import { REFUNDED_ACTION_CODE, isRefunded } from '../lib/escrowGuard.js';
 import { decodePublish, postConfirm, type ActionResult } from '../lib/postConfirm.js';
 
 /**
@@ -315,6 +316,34 @@ async function onConfirmed(
   );
 }
 
+/**
+ * 환불된 티켓 방어선(escrowGuard). 금고 refund 뒤에도 티켓은 소유자에게 남고 revoke 되지 않으므로,
+ * 입장(수동 입장)·양도(오퍼 생성/수락·직접 전송) kind 는 대상 tokenId 의 escrow 를 한 번 읽어
+ * Refunded 면 시뮬 전에 거절한다. 값 = calldata 에서 tokenId 가 있는 인자 위치.
+ */
+const REFUND_GUARDED: Record<string, number> = {
+  manualOverride: 0,
+  createOffer: 0,
+  acceptOffer: 0,
+  safeTransferFrom: 2,
+};
+
+async function assertNotRefunded(kind: string, target: ActionTarget, data: Hex): Promise<void> {
+  const index = REFUND_GUARDED[kind];
+  if (index === undefined) return;
+  let tokenId: bigint;
+  try {
+    const decoded = decodeFunctionData({ abi: targetAbi(target), data });
+    tokenId = (decoded.args ?? [])[index] as bigint;
+  } catch {
+    return; // 디코드 못 하는 calldata 는 아래 시뮬이 revert 로 거른다.
+  }
+  if (typeof tokenId !== 'bigint') return;
+  if (await isRefunded(tokenId)) {
+    throw new HttpsError('failed-precondition', REFUNDED_ACTION_CODE, { code: REFUNDED_ACTION_CODE, reason: 'TICKET_REFUNDED' });
+  }
+}
+
 // ─────────────────────────────────────── relayAction
 
 export const relayAction = onCall({ secrets: [RELAYER_PK] }, async (request): Promise<RelayActionResult> => {
@@ -387,6 +416,7 @@ export const relayAction = onCall({ secrets: [RELAYER_PK] }, async (request): Pr
     // status === 'failed' → 같은 nonce 로 재시도 허용(아래로 진행).
   }
 
+  await assertNotRefunded(kind, entry.target, data);
   await assertUnderPendingLimit(personId);
 
   // ForwardRequest 는 서버가 정한 from/to 로 짓는다(본문의 from/to 는 이미 검증/무시).

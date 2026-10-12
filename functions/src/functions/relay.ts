@@ -12,6 +12,7 @@ import { RELAYER_PK } from '../config.js';
 import { resolveCallerAccount } from '../lib/auth.js';
 import { deployment, publicClient } from '../lib/chain.js';
 import { CLAIM_CODES, assertUnderPendingLimit, mapRevert, precheckClaim } from '../lib/claimPrecheck.js';
+import { REFUNDED_CHECKIN_CODE, isRefunded } from '../lib/escrowGuard.js';
 import { ADMISSIONS, ADMISSION_TOKENS, RELAYS, USERS, db } from '../lib/db.js';
 import { getRelayerAccount, sendRelayed } from '../lib/relayer.js';
 import { checkInRelayId, claimRelayId, type RelayKind } from '../lib/relayTypes.js';
@@ -354,10 +355,17 @@ export const relayCheckIn = onCall({ secrets: [RELAYER_PK] }, async (request): P
   }
 
   // 이미 입장(usedAt != 0)이면 성공으로 돌려준다 — 게이트의 재탭/교차 게이트는 오류가 아니다.
-  const used = Number(
-    await pc.readContract({ address: contracts.ticket, abi: ticketAbi, functionName: 'usedAt', args: [tokenId] }),
-  );
+  // 환불된 티켓(금고 escrow Refunded)은 체인이 입장을 막지 않으므로 여기서 거절한다 — 통과시키면
+  // usedAt 이 찍히고 뒤따르는 release 는 AlreadySettled 로 실패해 무료 입장이 된다. 두 view 를 함께 읽는다.
+  const [usedRaw, refunded] = await Promise.all([
+    pc.readContract({ address: contracts.ticket, abi: ticketAbi, functionName: 'usedAt', args: [tokenId] }),
+    isRefunded(tokenId),
+  ]);
+  const used = Number(usedRaw);
   if (used !== 0) return { relayId, status: 'confirmed', usedAt: used };
+  if (refunded) {
+    throw new HttpsError('failed-precondition', REFUNDED_CHECKIN_CODE, { code: REFUNDED_CHECKIN_CODE, reason: 'TICKET_REFUNDED' });
+  }
 
   // 가스 쓰기 전 시뮬 + 가스 추정. revert 면 미전송·대기 테이블 미기록(설계 §5).
   const functionName = late ? 'checkInForLate' : 'checkInFor';

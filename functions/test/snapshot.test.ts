@@ -87,12 +87,21 @@ async function defaultReadContract({ functionName, args }: ReadArgs) {
 
 const readContract = vi.fn(defaultReadContract);
 
+const VAULT = '0x4444444444444444444444444444444444444444';
+/** 금고에서 환불(escrow status 3)된 tokenId. 나머지는 status 0(무료·escrow 없음). */
+const refundedIds = new Set<string>();
+type MulticallArgs = { contracts: { address: string; functionName: string; args: readonly [bigint] }[] };
+const multicall = vi.fn(async ({ contracts }: MulticallArgs) =>
+  contracts.map(({ args }) => [VAULT, 0n, VAULT, 0n, refundedIds.has(args[0].toString()) ? 3 : 0]),
+);
+
 vi.mock('../src/lib/chain.js', () => ({
-  publicClient: () => ({ readContract }),
+  publicClient: () => ({ readContract, multicall }),
   deployment: () => ({
     identity: '0x1111111111111111111111111111111111111111',
     organizers: '0x2222222222222222222222222222222222222222',
     ticket: '0x3333333333333333333333333333333333333333',
+    settlementVault: VAULT,
   }),
 }));
 
@@ -224,6 +233,8 @@ beforeEach(() => {
   decryptField.mockImplementation(async (envelope: string, aad?: string) => `plain:${envelope}:${aad}`);
   readContract.mockClear();
   readContract.mockImplementation(defaultReadContract);
+  refundedIds.clear();
+  multicall.mockClear();
   firestoreWrites.mockClear();
   logInfo.mockClear();
   logWarn.mockClear();
@@ -380,6 +391,44 @@ describe('issueSnapshot', () => {
     await expect(callIssue({ gateAccount: GATE })).rejects.toThrow('BAD_EVENT_ID');
     await expect(callIssue({ eventId: '11' })).rejects.toThrow('BAD_GATE_ACCOUNT');
     expect(requireStaffForGate).not.toHaveBeenCalled();
+  });
+
+  it('drops refunded tickets (vault escrow Refunded) like revoked ones, without opening their photos', async () => {
+    envioQuery.mockImplementation(envioAnswers([rowsOf(3)]) as never);
+    refundedIds.add('2');
+    const snapshot = await callIssue();
+    expect(snapshot.tickets.map((t) => t.tokenId)).toEqual(['1', '3']);
+    // 한 쪽 = Multicall3 한 번. 거르기 전 모든 행의 escrowOf 를 묻는다.
+    expect(multicall).toHaveBeenCalledTimes(1);
+    const { contracts } = multicall.mock.calls[0]![0];
+    expect(contracts.map((c) => [c.address, c.functionName, c.args[0]])).toEqual([
+      [VAULT, 'escrowOf', 1n],
+      [VAULT, 'escrowOf', 2n],
+      [VAULT, 'escrowOf', 3n],
+    ]);
+    expect(multicall.mock.calls[0]![0]).toMatchObject({
+      allowFailure: false,
+      batchSize: 0,
+      multicallAddress: '0xcA11bde05977b3631167028862bE2a173976CA11',
+    });
+    expect(decryptField).toHaveBeenCalledTimes(2);
+    expect(auditRecord()).toMatchObject({ tickets: 2, photos: 2, outcome: 'ok' });
+  });
+
+  it('keeps free-tier and paid-but-not-refunded tickets', async () => {
+    envioQuery.mockImplementation(envioAnswers([rowsOf(2)]) as never);
+    const snapshot = await callIssue();
+    expect(snapshot.tickets.map((t) => t.tokenId)).toEqual(['1', '2']);
+  });
+
+  it('keeps paging past a page whose last row was refunded', async () => {
+    envioQuery.mockImplementation(envioAnswers([rowsOf(SNAPSHOT_MAX_TICKETS), []]) as never);
+    refundedIds.add(String(SNAPSHOT_MAX_TICKETS));
+    const snapshot = await callIssue();
+    expect(snapshot.tickets).toHaveLength(SNAPSHOT_MAX_TICKETS - 1);
+    // 커서는 거르기 전 마지막 행이다 — 두 번째 쪽을 그 id 뒤에서 묻는다.
+    expect(envioCalls('Ticket(')).toHaveLength(2);
+    expect(envioCalls('Ticket(')[1]![1]).toMatchObject({ cursor: String(SNAPSHOT_MAX_TICKETS) });
   });
 
   it('reads every page of tickets so a big event is not silently truncated', async () => {

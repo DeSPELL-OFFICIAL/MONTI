@@ -17,6 +17,7 @@ import { requireStaffForGate, resolveCallerAccount } from '../lib/auth.js';
 import { deployment, publicClient } from '../lib/chain.js';
 import { PERSONS, db } from '../lib/db.js';
 import { envioPageOnce } from '../lib/envio.js';
+import { refundedAmong } from '../lib/escrowGuard.js';
 import { nicknamesByAccount } from '../lib/nicknames.js';
 import { decryptField, piiAad } from '../lib/kms.js';
 import { PORTRAIT_MAX_BASE64_BYTES } from '../lib/portrait.js';
@@ -278,7 +279,13 @@ export const issueSnapshot = onCall(
           throw new HttpsError('failed-precondition', 'SNAPSHOT_TOO_LARGE');
         }
 
-        const unknown = [...new Set(rows.map((row) => row.owner.toLowerCase()))].filter(
+        // 환불된 티켓은 revoke 된 티켓처럼 게이트 목록에서 뺀다 — 금고 refund 는 티켓을 그대로 두므로
+        // 인덱서의 `revoked` 필터로는 안 걸린다. 쪽마다 escrowOf 를 Multicall3 한 번으로 읽는다(체인이 진실).
+        // 다음 쪽 커서는 거르기 전 마지막 행이어야 하므로 `rows` 는 그대로 두고 `kept` 만 푼다.
+        const refunded = await refundedAmong(rows.map((row) => BigInt(row.id)));
+        const kept = refunded.size === 0 ? rows : rows.filter((row) => !refunded.has(BigInt(row.id).toString()));
+
+        const unknown = [...new Set(kept.map((row) => row.owner.toLowerCase()))].filter(
           (account) => !nicknames.has(account),
         );
         if (unknown.length > 0) {
@@ -289,7 +296,7 @@ export const issueSnapshot = onCall(
           }
         }
 
-        for (const row of rows) {
+        for (const row of kept) {
           const account = getAddress(row.owner);
           const [device, photo] = await Promise.all([
             deviceOf(account),
