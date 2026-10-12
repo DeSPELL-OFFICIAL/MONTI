@@ -114,7 +114,9 @@ case "${1:-}" in
     echo "== schedulers v1 pause / v2 resume"; sched pause us-east1; sched resume us-east4
     ;;
   rollback)
-    echo "== alias back to v1 deployment"; ( cd "$WEB" && fnm exec --using=22 vercel rollback "$V1_DEPLOY" --scope "$SLUG" --yes 2>&1 | sed 's/\x1b\[[0-9;]*[A-Za-z]//g' | grep -E 'Success|Error' )
+    # `vercel rollback` is limited to the immediately previous production deployment on the Hobby plan
+    # (402 "upgrade to pro" observed 2026-10-12); `vercel promote` of the pinned v1 deployment works on any plan.
+    echo "== promote the v1 deployment back onto the domain"; ( cd "$WEB" && fnm exec --using=22 vercel promote "$V1_DEPLOY" --scope "$SLUG" --yes 2>&1 | sed 's/\x1b\[[0-9;]*[A-Za-z]//g' | grep -E 'Success|Error' )
     echo "== PATCH production env -> v1 (from .secrets backup, values not printed)"; for k in $KEYS; do patch_env "$k" "$(v1_value "$k")" quiet; done
     echo "== verify"; verify_env v1
     sleep 5; echo "== live bundle"; bundle
