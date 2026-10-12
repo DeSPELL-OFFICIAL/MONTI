@@ -8,8 +8,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { OVERRIDE_REASONS } from '@monti/shared';
 
-import { fmt, setLocale } from '../../shared/i18n';
-import { staffEn, staffKo } from '../copy';
+import { fmt } from '../../shared/i18n';
+import { staffEn } from '../copy';
 import { TAP_REFUSAL, type SettledTap } from '../gate/machine';
 import {
   DENY_CODES,
@@ -115,12 +115,12 @@ describe('StaffShell', () => {
     renderShell();
     expect(screen.getByRole('heading', { level: 1, name: GATE_NAME })).toBeInTheDocument();
     expect(screen.getByText(EVENT_TITLE)).toBeInTheDocument();
-    expect(screen.getByText(`${staffKo.shell.staffLabel} ${STAFF_NAME}`)).toBeInTheDocument();
+    expect(screen.getByText(`${staffEn.shell.staffLabel} ${STAFF_NAME}`)).toBeInTheDocument();
   });
 
   it('omits the staff line when nobody is named', () => {
     renderShell({ staffName: undefined });
-    expect(screen.queryByText(new RegExp(staffKo.shell.staffLabel))).not.toBeInTheDocument();
+    expect(screen.queryByText(new RegExp(staffEn.shell.staffLabel))).not.toBeInTheDocument();
   });
 
   it('never shows a block number in the header', () => {
@@ -130,35 +130,35 @@ describe('StaffShell', () => {
 
   it('says offline ahead of anything the list claims', () => {
     renderShell({ online: false, finalized: true });
-    expect(screen.getByText(staffKo.shell.stageOffline)).toBeInTheDocument();
-    expect(screen.queryByText(staffKo.shell.stageSettled)).not.toBeInTheDocument();
+    expect(screen.getByText(staffEn.shell.stageOffline)).toBeInTheDocument();
+    expect(screen.queryByText(staffEn.shell.stageSettled)).not.toBeInTheDocument();
   });
 
   it('separates a settled entry from one still being recorded', () => {
     renderShell({ finalized: true });
-    expect(screen.getByText(staffKo.shell.stageSettled)).toBeInTheDocument();
+    expect(screen.getByText(staffEn.shell.stageSettled)).toBeInTheDocument();
     cleanup();
     renderShell({ finalized: false });
-    expect(screen.getByText(staffKo.shell.stageRecording)).toBeInTheDocument();
+    expect(screen.getByText(staffEn.shell.stageRecording)).toBeInTheDocument();
   });
 
   it('reads the list age as fresh under a minute and in minutes after that', () => {
     renderShell({ snapshotAgeMs: 59_999 });
-    expect(screen.getByText(staffKo.shell.snapshotFresh)).toBeInTheDocument();
+    expect(screen.getByText(staffEn.shell.snapshotFresh)).toBeInTheDocument();
     cleanup();
     renderShell({ snapshotAgeMs: 3 * 60_000 + 1000 });
-    expect(screen.getByText(fmt(staffKo.shell.snapshotAge, { minutes: 3 }))).toBeInTheDocument();
+    expect(screen.getByText(fmt(staffEn.shell.snapshotAge, { minutes: 3 }))).toBeInTheDocument();
   });
 
   it('says the list has not arrived yet instead of "Infinity분 전"', () => {
     renderShell({ snapshotAgeMs: Number.POSITIVE_INFINITY });
-    expect(screen.getByText('아직 못 받음')).toBeInTheDocument();
+    expect(screen.getByText('Not yet')).toBeInTheDocument();
     expect(screen.queryByText(/Infinity/)).not.toBeInTheDocument();
   });
 
   it('counts the people already through this door', () => {
     renderShell({ entriesCount: 3 });
-    expect(screen.getByText(fmt(staffKo.shell.entriesCount, { count: 3 }))).toBeInTheDocument();
+    expect(screen.getByText(fmt(staffEn.shell.entriesCount, { count: 3 }))).toBeInTheDocument();
   });
 
   it('puts its children in a polite, atomic live region', () => {
@@ -178,25 +178,25 @@ describe('StaffShell', () => {
 describe('TapPrompt', () => {
   it.each([true, false])('asks for the next tap while rotating=%s', (rotating) => {
     render(<TapPrompt rotating={rotating} />);
-    expect(screen.getByText(staffKo.ready.tap)).toBeInTheDocument();
-    expect(screen.getByText(staffKo.ready.hint)).toBeInTheDocument();
+    expect(screen.getByText(staffEn.ready.tap)).toBeInTheDocument();
+    expect(screen.getByText(staffEn.ready.hint)).toBeInTheDocument();
   });
 });
 
 describe('ReceivedCard', () => {
   it.each([
-    ['ok', staffKo.received.precheckOk],
-    ['unknown', staffKo.received.precheckUnknown],
-    ['fail', staffKo.received.precheckFail],
+    ['ok', staffEn.received.precheckOk],
+    ['unknown', staffEn.received.precheckUnknown],
+    ['fail', staffEn.received.precheckFail],
   ] as const)('reads the list result %s', (precheck, sentence) => {
     render(<ReceivedCard tokenIdMasked="••42" precheck={precheck} />);
-    expect(screen.getByText(staffKo.received.title)).toBeInTheDocument();
+    expect(screen.getByText(staffEn.received.title)).toBeInTheDocument();
     expect(screen.getByText(sentence)).toBeInTheDocument();
   });
 
   it('shows the masked ticket number it was handed', () => {
     render(<ReceivedCard tokenIdMasked="••42" precheck="ok" />);
-    expect(screen.getByText(staffKo.received.ticketLabel)).toBeInTheDocument();
+    expect(screen.getByText(staffEn.received.ticketLabel)).toBeInTheDocument();
     expect(screen.getByText('••42')).toBeInTheDocument();
   });
 });
@@ -204,14 +204,14 @@ describe('ReceivedCard', () => {
 describe('ConfirmingCard', () => {
   it('says only that it is confirming before the five-second mark', () => {
     render(<ConfirmingCard checking waitHint={false} />);
-    expect(screen.getByText(staffKo.confirming.title)).toBeInTheDocument();
-    expect(screen.queryByText(staffKo.confirming.wait)).not.toBeInTheDocument();
+    expect(screen.getByText(staffEn.confirming.title)).toBeInTheDocument();
+    expect(screen.queryByText(staffEn.confirming.wait)).not.toBeInTheDocument();
   });
 
   it('adds the wait line at the five-second mark', () => {
     render(<ConfirmingCard checking waitHint />);
-    expect(screen.getByText(staffKo.confirming.title)).toBeInTheDocument();
-    expect(screen.getByText(staffKo.confirming.wait)).toBeInTheDocument();
+    expect(screen.getByText(staffEn.confirming.title)).toBeInTheDocument();
+    expect(screen.getByText(staffEn.confirming.wait)).toBeInTheDocument();
   });
 
   it('never tells the attendee to tap again', () => {
@@ -223,13 +223,13 @@ describe('ConfirmingCard', () => {
 describe('AdmitCard', () => {
   it('shows the attendee photo when the event carries one', () => {
     render(<AdmitCard displayName={ATTENDEE} photoJpegB64="QUJD" finalized={false} />);
-    const photo = screen.getByRole('img', { name: fmt(staffKo.admit.photoAlt, { name: ATTENDEE }) });
+    const photo = screen.getByRole('img', { name: fmt(staffEn.admit.photoAlt, { name: ATTENDEE }) });
     expect(photo).toHaveAttribute('src', 'data:image/jpeg;base64,QUJD');
   });
 
   it('draws an initial instead when there is no photo', () => {
     render(<AdmitCard displayName={ATTENDEE} photoJpegB64="" finalized={false} />);
-    const avatar = screen.getByRole('img', { name: fmt(staffKo.admit.avatarAlt, { name: ATTENDEE }) });
+    const avatar = screen.getByRole('img', { name: fmt(staffEn.admit.avatarAlt, { name: ATTENDEE }) });
     expect(avatar).toHaveTextContent('박');
     expect(document.querySelector('img')).toBeNull();
   });
@@ -244,35 +244,35 @@ describe('AdmitCard', () => {
         finalized={false}
       />,
     );
-    expect(screen.getByText(staffKo.admit.title)).toBeInTheDocument();
+    expect(screen.getByText(staffEn.admit.title)).toBeInTheDocument();
     expect(screen.getByText(ATTENDEE)).toBeInTheDocument();
     expect(screen.getByText('VIP · A12')).toBeInTheDocument();
-    expect(screen.getByText(staffKo.admit.entryLabel)).toBeInTheDocument();
-    expect(screen.getByText(fmt(staffKo.admit.entryValue, { count: 41 }))).toBeInTheDocument();
+    expect(screen.getByText(staffEn.admit.entryLabel)).toBeInTheDocument();
+    expect(screen.getByText(fmt(staffEn.admit.entryValue, { count: 41 }))).toBeInTheDocument();
     expect(screen.queryByText(/블록/)).not.toBeInTheDocument();
   });
 
   it('distinguishes a settled entry from one still being recorded', () => {
     render(<AdmitCard displayName={ATTENDEE} finalized />);
-    expect(screen.getByText(staffKo.admit.settled)).toBeInTheDocument();
+    expect(screen.getByText(staffEn.admit.settled)).toBeInTheDocument();
     cleanup();
     render(<AdmitCard displayName={ATTENDEE} finalized={false} />);
-    expect(screen.getByText(staffKo.admit.recording)).toBeInTheDocument();
+    expect(screen.getByText(staffEn.admit.recording)).toBeInTheDocument();
   });
 
   it('warns only when the phone changed in the last day', () => {
     render(<AdmitCard displayName={ATTENDEE} finalized deviceChangedRecently />);
-    expect(screen.getByText(staffKo.admit.deviceChanged)).toBeInTheDocument();
+    expect(screen.getByText(staffEn.admit.deviceChanged)).toBeInTheDocument();
     cleanup();
     render(<AdmitCard displayName={ATTENDEE} finalized />);
-    expect(screen.queryByText(staffKo.admit.deviceChanged)).not.toBeInTheDocument();
+    expect(screen.queryByText(staffEn.admit.deviceChanged)).not.toBeInTheDocument();
   });
 
   it('clears to the next attendee once', async () => {
     const onDone = vi.fn();
     const user = userEvent.setup();
     render(<AdmitCard displayName={ATTENDEE} finalized onDone={onDone} />);
-    await user.click(screen.getByRole('button', { name: staffKo.done }));
+    await user.click(screen.getByRole('button', { name: staffEn.done }));
     expect(onDone).toHaveBeenCalledTimes(1);
   });
 
@@ -285,20 +285,20 @@ describe('AdmitCard', () => {
 describe('OfflineAdmitCard', () => {
   it('cannot be read as an online admit', () => {
     render(<OfflineAdmitCard displayName={ATTENDEE} queuedCount={2} />);
-    expect(screen.getByText(staffKo.offlineAdmit.title)).toBeInTheDocument();
-    expect(screen.queryByText(staffKo.admit.title)).not.toBeInTheDocument();
-    expect(screen.queryByText(staffKo.admit.settled)).not.toBeInTheDocument();
+    expect(screen.getByText(staffEn.offlineAdmit.title)).toBeInTheDocument();
+    expect(screen.queryByText(staffEn.admit.title)).not.toBeInTheDocument();
+    expect(screen.queryByText(staffEn.admit.settled)).not.toBeInTheDocument();
   });
 
   it('says how many entries are still waiting to be sent', () => {
     render(<OfflineAdmitCard displayName={ATTENDEE} queuedCount={2} />);
-    expect(screen.getByText(staffKo.offlineAdmit.note)).toBeInTheDocument();
-    expect(screen.getByText(fmt(staffKo.queue.pending, { count: 2 }))).toBeInTheDocument();
+    expect(screen.getByText(staffEn.offlineAdmit.note)).toBeInTheDocument();
+    expect(screen.getByText(fmt(staffEn.queue.pending, { count: 2 }))).toBeInTheDocument();
   });
 
   it('draws the same photo or initial the online card does', () => {
     render(<OfflineAdmitCard displayName={ATTENDEE} photoJpegB64="QUJD" queuedCount={0} />);
-    expect(screen.getByRole('img', { name: fmt(staffKo.admit.photoAlt, { name: ATTENDEE }) })).toHaveAttribute(
+    expect(screen.getByRole('img', { name: fmt(staffEn.admit.photoAlt, { name: ATTENDEE }) })).toHaveAttribute(
       'src',
       'data:image/jpeg;base64,QUJD',
     );
@@ -308,7 +308,7 @@ describe('OfflineAdmitCard', () => {
     const onDone = vi.fn();
     const user = userEvent.setup();
     render(<OfflineAdmitCard displayName={ATTENDEE} queuedCount={1} onDone={onDone} />);
-    await user.click(screen.getByRole('button', { name: staffKo.done }));
+    await user.click(screen.getByRole('button', { name: staffEn.done }));
     expect(onDone).toHaveBeenCalledTimes(1);
   });
 });
@@ -317,13 +317,13 @@ describe('DenyCard', () => {
   it('interrupts the screen reader and names the refusal', () => {
     render(<DenyCard code="ALREADY_USED" />);
     const alert = screen.getByRole('alert');
-    expect(within(alert).getByText(staffKo.denyTitle)).toBeInTheDocument();
-    expect(within(alert).getByText(staffKo.deny.ALREADY_USED)).toBeInTheDocument();
+    expect(within(alert).getByText(staffEn.denyTitle)).toBeInTheDocument();
+    expect(within(alert).getByText(staffEn.deny.ALREADY_USED)).toBeInTheDocument();
   });
 
   it('reads a second code as its own sentence', () => {
     render(<DenyCard code="GATE_MISMATCH" />);
-    expect(screen.getByText(staffKo.deny.GATE_MISMATCH)).toBeInTheDocument();
+    expect(screen.getByText(staffEn.deny.GATE_MISMATCH)).toBeInTheDocument();
   });
 
   it('adds the detail line only when the caller has one', () => {
@@ -338,31 +338,29 @@ describe('DenyCard', () => {
     const onDone = vi.fn();
     const user = userEvent.setup();
     render(<DenyCard code="NO_TICKET" onDone={onDone} />);
-    await user.click(screen.getByRole('button', { name: staffKo.done }));
+    await user.click(screen.getByRole('button', { name: staffEn.done }));
     expect(onDone).toHaveBeenCalledTimes(1);
   });
 
   it.each([...DENY_CODES])('has a sentence for %s', (code) => {
     render(<DenyCard code={code} />);
-    expect(staffKo.deny[code].length).toBeGreaterThan(0);
-    expect(screen.getByText(staffKo.deny[code])).toBeInTheDocument();
+    expect(staffEn.deny[code].length).toBeGreaterThan(0);
+    expect(screen.getByText(staffEn.deny[code])).toBeInTheDocument();
   });
 
-  it('carries every §13 code in both locales, and says something different in each', () => {
+  it('carries every §13 code in the English table', () => {
     const sorted = [...DENY_CODES].sort();
-    expect(Object.keys(staffKo.deny).sort()).toEqual(sorted);
     expect(Object.keys(staffEn.deny).sort()).toEqual(sorted);
     for (const code of DENY_CODES) {
       expect(staffEn.deny[code].length).toBeGreaterThan(0);
-      expect(staffEn.deny[code]).not.toBe(staffKo.deny[code]);
     }
   });
 });
 
 describe('RefusedToast', () => {
   it.each([
-    [TAP_REFUSAL.confirming, staffKo.refusal.confirming],
-    [TAP_REFUSAL.showingVerdict, staffKo.refusal.showingVerdict],
+    [TAP_REFUSAL.confirming, staffEn.refusal.confirming],
+    [TAP_REFUSAL.showingVerdict, staffEn.refusal.showingVerdict],
   ] as const)('explains the gate refusal %s', (refusal, sentence) => {
     render(<RefusedToast refusal={refusal} />);
     expect(within(screen.getByRole('status')).getByText(sentence)).toBeInTheDocument();
@@ -371,7 +369,7 @@ describe('RefusedToast', () => {
   it('is never an alert — the gate is busy, the attendee is not refused', () => {
     render(<RefusedToast refusal={TAP_REFUSAL.confirming} />);
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-    expect(screen.queryByText(staffKo.denyTitle)).not.toBeInTheDocument();
+    expect(screen.queryByText(staffEn.denyTitle)).not.toBeInTheDocument();
   });
 });
 
@@ -385,25 +383,25 @@ describe('LastTapChip', () => {
 
   it('says so when nothing has happened yet', () => {
     render(<LastTapChip />);
-    expect(screen.getByText(staffKo.lastTap.none)).toBeInTheDocument();
+    expect(screen.getByText(staffEn.lastTap.none)).toBeInTheDocument();
   });
 
   it('keeps the previous admit and who it was', () => {
     render(<LastTapChip lastTap={settled({ ticket: ticket() })} />);
-    expect(screen.getByText(staffKo.lastTap.label)).toBeInTheDocument();
-    expect(screen.getByText(staffKo.lastTap.admit)).toBeInTheDocument();
+    expect(screen.getByText(staffEn.lastTap.label)).toBeInTheDocument();
+    expect(screen.getByText(staffEn.lastTap.admit)).toBeInTheDocument();
     expect(screen.getByText(ATTENDEE)).toBeInTheDocument();
   });
 
   it('keeps the previous refusal and why', () => {
     render(<LastTapChip lastTap={settled({ state: 'deny', deny: 'ALREADY_USED', finalized: false })} />);
-    expect(screen.getByText(staffKo.lastTap.deny)).toBeInTheDocument();
-    expect(screen.getByText(staffKo.deny.ALREADY_USED)).toBeInTheDocument();
+    expect(screen.getByText(staffEn.lastTap.deny)).toBeInTheDocument();
+    expect(screen.getByText(staffEn.deny.ALREADY_USED)).toBeInTheDocument();
   });
 
   it('marks an offline admit as its own thing', () => {
     render(<LastTapChip lastTap={settled({ state: 'offlineAdmit', finalized: false })} />);
-    expect(screen.getByText(staffKo.lastTap.offlineAdmit)).toBeInTheDocument();
+    expect(screen.getByText(staffEn.lastTap.offlineAdmit)).toBeInTheDocument();
   });
 
   /**
@@ -428,11 +426,11 @@ describe('LastTapChip', () => {
         })}
       />,
     );
-    expect(screen.getByText(staffKo.lastTap.override)).toBeInTheDocument();
-    expect(screen.getByText(staffKo.override.reason2)).toBeInTheDocument();
-    expect(screen.getByText(staffKo.override.roleManager)).toBeInTheDocument();
+    expect(screen.getByText(staffEn.lastTap.override)).toBeInTheDocument();
+    expect(screen.getByText(staffEn.override.reason2)).toBeInTheDocument();
+    expect(screen.getByText(staffEn.override.roleManager)).toBeInTheDocument();
     // The approver is this staff member: said as 나, never as a 0x address.
-    expect(screen.getByText('나 (매니저)')).toBeInTheDocument();
+    expect(screen.getByText('Me (manager)')).toBeInTheDocument();
     expect(screen.queryByText(/0x/)).not.toBeInTheDocument();
     // The name comes off the outcome when there is no tap to carry a ticket.
     expect(screen.getByText('박관객')).toBeInTheDocument();
@@ -449,8 +447,8 @@ describe('LastTapChip', () => {
         }}
       />,
     );
-    expect(screen.getByText(staffKo.lastTap.override)).toBeInTheDocument();
-    expect(screen.getByText(staffKo.override.roleNone)).toBeInTheDocument();
+    expect(screen.getByText(staffEn.lastTap.override)).toBeInTheDocument();
+    expect(screen.getByText(staffEn.override.roleNone)).toBeInTheDocument();
   });
 });
 
@@ -462,15 +460,15 @@ describe('OfflineBadge', () => {
 
   it('says what is lost and how stale the list is', () => {
     render(<OfflineBadge online={false} snapshotAgeMs={3 * 60_000} queuedCount={4} />);
-    expect(screen.getByText(staffKo.shell.stageOffline)).toBeInTheDocument();
-    expect(screen.getByText(fmt(staffKo.shell.snapshotAge, { minutes: 3 }))).toBeInTheDocument();
-    expect(screen.getByText(fmt(staffKo.queue.pending, { count: 4 }))).toBeInTheDocument();
+    expect(screen.getByText(staffEn.shell.stageOffline)).toBeInTheDocument();
+    expect(screen.getByText(fmt(staffEn.shell.snapshotAge, { minutes: 3 }))).toBeInTheDocument();
+    expect(screen.getByText(fmt(staffEn.queue.pending, { count: 4 }))).toBeInTheDocument();
   });
 
   it('leaves the count out when there is nothing queued', () => {
     render(<OfflineBadge online={false} snapshotAgeMs={0} queuedCount={0} />);
-    expect(screen.getByText(staffKo.shell.snapshotFresh)).toBeInTheDocument();
-    expect(screen.queryByText(fmt(staffKo.queue.pending, { count: 0 }))).not.toBeInTheDocument();
+    expect(screen.getByText(staffEn.shell.snapshotFresh)).toBeInTheDocument();
+    expect(screen.queryByText(fmt(staffEn.queue.pending, { count: 0 }))).not.toBeInTheDocument();
   });
 });
 
@@ -482,33 +480,33 @@ describe('QueueBanner', () => {
 
   it('counts what is waiting and what has stopped', () => {
     render(<QueueBanner pendingCount={3} parkedCount={2} />);
-    expect(screen.getByText(fmt(staffKo.queue.pending, { count: 3 }))).toBeInTheDocument();
-    expect(screen.getByText(fmt(staffKo.queue.parked, { count: 2 }))).toBeInTheDocument();
-    expect(screen.getByText(staffKo.queue.sending)).toBeInTheDocument();
+    expect(screen.getByText(fmt(staffEn.queue.pending, { count: 3 }))).toBeInTheDocument();
+    expect(screen.getByText(fmt(staffEn.queue.parked, { count: 2 }))).toBeInTheDocument();
+    expect(screen.getByText(staffEn.queue.sending)).toBeInTheDocument();
   });
 
   it('hands a passed deadline to the organizer instead of promising a retry', () => {
     render(<QueueBanner pendingCount={0} parkedCount={2} lastError={LATE_WINDOW_ELAPSED} />);
-    expect(screen.getByText(staffKo.queue.lateWindowElapsed)).toBeInTheDocument();
-    expect(screen.queryByText(staffKo.queue.sending)).not.toBeInTheDocument();
+    expect(screen.getByText(staffEn.queue.lateWindowElapsed)).toBeInTheDocument();
+    expect(screen.queryByText(staffEn.queue.sending)).not.toBeInTheDocument();
   });
 
   it('says a device that cannot send late entries cannot send them', () => {
     render(<QueueBanner pendingCount={2} parkedCount={0} lastError={DRY_RUN_MARK} />);
-    expect(screen.getByText(staffKo.queue.lateUnavailable)).toBeInTheDocument();
+    expect(screen.getByText(staffEn.queue.lateUnavailable)).toBeInTheDocument();
   });
 
   it('sends a row that was re-sent to its limit to a person, not back to the connection', () => {
     render(<QueueBanner pendingCount={0} parkedCount={1} lastError={RESEND_EXHAUSTED} />);
-    expect(screen.getByText(staffKo.queue.reasonResendExhausted)).toBeInTheDocument();
-    expect(screen.queryByText(staffKo.queue.sending)).not.toBeInTheDocument();
+    expect(screen.getByText(staffEn.queue.reasonResendExhausted)).toBeInTheDocument();
+    expect(screen.queryByText(staffEn.queue.sending)).not.toBeInTheDocument();
   });
 
   it('stays quiet about a send failure that will simply be retried', () => {
     render(<QueueBanner pendingCount={1} parkedCount={0} lastError="HTTP 503" />);
-    expect(screen.queryByText(staffKo.queue.lateWindowElapsed)).not.toBeInTheDocument();
-    expect(screen.queryByText(staffKo.queue.lateUnavailable)).not.toBeInTheDocument();
-    expect(screen.getByText(staffKo.queue.sending)).toBeInTheDocument();
+    expect(screen.queryByText(staffEn.queue.lateWindowElapsed)).not.toBeInTheDocument();
+    expect(screen.queryByText(staffEn.queue.lateUnavailable)).not.toBeInTheDocument();
+    expect(screen.getByText(staffEn.queue.sending)).toBeInTheDocument();
   });
 
   // The marks the banner reads live in `staff/types.ts`, not in `queue/opQueue.ts`: importing a
@@ -525,28 +523,28 @@ describe('OverrideDialog', () => {
 
   it('is a modal dialog with a name', () => {
     render(<OverrideDialog canApprove onSubmit={noop} onCancel={noop} />);
-    const dialog = screen.getByRole('dialog', { name: staffKo.override.title });
+    const dialog = screen.getByRole('dialog', { name: staffEn.override.title });
     expect(dialog).toHaveAttribute('aria-modal', 'true');
   });
 
   it('asks to approve when this staff member may, and to escalate when they may not', () => {
     render(<OverrideDialog canApprove onSubmit={noop} onCancel={noop} />);
-    expect(screen.getByRole('button', { name: staffKo.override.approve })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: staffEn.override.approve })).toBeInTheDocument();
     cleanup();
     render(<OverrideDialog canApprove={false} onSubmit={noop} onCancel={noop} />);
-    expect(screen.getByRole('button', { name: staffKo.override.request })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: staffKo.override.approve })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: staffEn.override.request })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: staffEn.override.approve })).not.toBeInTheDocument();
   });
 
   it('lists the four §-approved reasons', () => {
     render(<OverrideDialog canApprove onSubmit={noop} onCancel={noop} />);
-    const select = screen.getByLabelText(staffKo.override.reasonLabel);
+    const select = screen.getByLabelText(staffEn.override.reasonLabel);
     expect(within(select).getAllByRole('option')).toHaveLength(4);
     for (const label of [
-      staffKo.override.reason1,
-      staffKo.override.reason2,
-      staffKo.override.reason3,
-      staffKo.override.reason4,
+      staffEn.override.reason1,
+      staffEn.override.reason2,
+      staffEn.override.reason3,
+      staffEn.override.reason4,
     ]) {
       expect(within(select).getByRole('option', { name: label })).toBeInTheDocument();
     }
@@ -556,9 +554,9 @@ describe('OverrideDialog', () => {
     const onSubmit = vi.fn();
     const user = userEvent.setup();
     render(<OverrideDialog canApprove={false} onSubmit={onSubmit} onCancel={noop} />);
-    await user.type(screen.getByLabelText(staffKo.override.pin), '1234');
-    await user.selectOptions(screen.getByLabelText(staffKo.override.reasonLabel), '2');
-    await user.click(screen.getByRole('button', { name: staffKo.override.request }));
+    await user.type(screen.getByLabelText(staffEn.override.pin), '1234');
+    await user.selectOptions(screen.getByLabelText(staffEn.override.reasonLabel), '2');
+    await user.click(screen.getByRole('button', { name: staffEn.override.request }));
     // No ticket was picked and none was handed in, so the wiring falls back to the tap on screen.
     expect(onSubmit).toHaveBeenCalledWith('1234', 2, undefined, {});
   });
@@ -567,15 +565,15 @@ describe('OverrideDialog', () => {
     const onSubmit = vi.fn();
     const user = userEvent.setup();
     render(<OverrideDialog canApprove={false} ticket={ticket({ tokenId: '1042' })} onSubmit={onSubmit} onCancel={noop} />);
-    await user.type(screen.getByLabelText(staffKo.override.pin), '1234');
-    await user.type(screen.getByLabelText(staffKo.override.noteLabel), '휴대폰 화면이 깨졌어요');
-    await user.click(screen.getByRole('button', { name: staffKo.override.request }));
+    await user.type(screen.getByLabelText(staffEn.override.pin), '1234');
+    await user.type(screen.getByLabelText(staffEn.override.noteLabel), '휴대폰 화면이 깨졌어요');
+    await user.click(screen.getByRole('button', { name: staffEn.override.request }));
     expect(onSubmit).toHaveBeenCalledWith('1234', 1, '1042', { note: '휴대폰 화면이 깨졌어요' });
   });
 
   it('offers no note field to an approver — approving needs no note', () => {
     render(<OverrideDialog canApprove onSubmit={noop} onCancel={noop} />);
-    expect(screen.queryByLabelText(staffKo.override.noteLabel)).toBeNull();
+    expect(screen.queryByLabelText(staffEn.override.noteLabel)).toBeNull();
   });
 
   it('shows an approver the open requests, and picking one fills the person, reason and gate', async () => {
@@ -589,17 +587,17 @@ describe('OverrideDialog', () => {
         onCancel={noop}
       />,
     );
-    expect(screen.getByRole('heading', { name: staffKo.override.requestsTitle })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: staffEn.override.requestsTitle })).toBeInTheDocument();
     expect(screen.getByText('배터리 없음')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: `박관객 ••1042 · ${staffKo.override.reason2}` }));
+    await user.click(screen.getByRole('button', { name: `박관객 ••1042 · ${staffEn.override.reason2}` }));
 
     // The person and the reason come from the request; the list steps aside once one is chosen.
     expect(screen.getByText('박관객 ••1042')).toBeInTheDocument();
-    expect((screen.getByLabelText(staffKo.override.reasonLabel) as HTMLSelectElement).value).toBe('2');
-    expect(screen.queryByRole('heading', { name: staffKo.override.requestsTitle })).toBeNull();
+    expect((screen.getByLabelText(staffEn.override.reasonLabel) as HTMLSelectElement).value).toBe('2');
+    expect(screen.queryByRole('heading', { name: staffEn.override.requestsTitle })).toBeNull();
 
-    await user.type(screen.getByLabelText(staffKo.override.pin), '4821');
-    await user.click(screen.getByRole('button', { name: staffKo.override.approve }));
+    await user.type(screen.getByLabelText(staffEn.override.pin), '4821');
+    await user.click(screen.getByRole('button', { name: staffEn.override.approve }));
     // Approved at the gate the requester stands at.
     expect(onSubmit).toHaveBeenCalledWith('4821', 2, '1042', { gateId: '9' });
   });
@@ -613,7 +611,7 @@ describe('OverrideDialog', () => {
         onCancel={noop}
       />,
     );
-    expect(screen.queryByRole('heading', { name: staffKo.override.requestsTitle })).toBeNull();
+    expect(screen.queryByRole('heading', { name: staffEn.override.requestsTitle })).toBeNull();
   });
 
   it('backs out without submitting', async () => {
@@ -621,7 +619,7 @@ describe('OverrideDialog', () => {
     const onCancel = vi.fn();
     const user = userEvent.setup();
     render(<OverrideDialog canApprove onSubmit={onSubmit} onCancel={onCancel} />);
-    await user.click(screen.getByRole('button', { name: staffKo.override.cancel }));
+    await user.click(screen.getByRole('button', { name: staffEn.override.cancel }));
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(onSubmit).not.toHaveBeenCalled();
   });
@@ -632,7 +630,7 @@ describe('OverrideDialog', () => {
    */
   it('lists exactly the reason codes @monti/shared declares, in that order', () => {
     render(<OverrideDialog canApprove onSubmit={noop} onCancel={noop} />);
-    const select = screen.getByLabelText(staffKo.override.reasonLabel);
+    const select = screen.getByLabelText(staffEn.override.reasonLabel);
     expect(within(select).getAllByRole('option').map((option) => option.getAttribute('value'))).toEqual(
       OVERRIDE_REASONS.map(String),
     );
@@ -647,9 +645,9 @@ describe('OverrideDialog', () => {
     render(
       <OverrideDialog canApprove outcome={{ status: 'sending', reason: 1 }} onSubmit={noop} onCancel={noop} />,
     );
-    expect(screen.getByRole('status')).toHaveTextContent(staffKo.override.sending);
-    expect(screen.getByLabelText(staffKo.override.pin)).toBeDisabled();
-    expect(screen.getByRole('button', { name: staffKo.override.approve })).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent(staffEn.override.sending);
+    expect(screen.getByLabelText(staffEn.override.pin)).toBeDisabled();
+    expect(screen.getByRole('button', { name: staffEn.override.approve })).toBeDisabled();
   });
 
   /**
@@ -673,13 +671,13 @@ describe('OverrideDialog', () => {
       />,
     );
     const status = screen.getByRole('status');
-    expect(status).toHaveTextContent(staffKo.override.requested);
-    expect(status).toHaveTextContent(staffKo.override.roleNone);
-    expect(status).toHaveTextContent(staffKo.override.reason2);
-    expect(status).toHaveTextContent(staffKo.override.approverMe);
+    expect(status).toHaveTextContent(staffEn.override.requested);
+    expect(status).toHaveTextContent(staffEn.override.roleNone);
+    expect(status).toHaveTextContent(staffEn.override.reason2);
+    expect(status).toHaveTextContent(staffEn.override.approverMe);
     expect(status).not.toHaveTextContent(/0x/);
-    expect(screen.queryByRole('button', { name: staffKo.override.request })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: staffKo.done })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: staffEn.override.request })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: staffEn.done })).toBeInTheDocument();
   });
 
   it('names the approver role the chain will record on a manual approval', () => {
@@ -697,9 +695,9 @@ describe('OverrideDialog', () => {
         onCancel={noop}
       />,
     );
-    expect(screen.getByRole('status')).toHaveTextContent(staffKo.override.roleApprover);
-    expect(screen.getByRole('status')).toHaveTextContent(staffKo.override.approved);
-    expect(screen.getByRole('status')).toHaveTextContent('나 (주최자)');
+    expect(screen.getByRole('status')).toHaveTextContent(staffEn.override.roleApprover);
+    expect(screen.getByRole('status')).toHaveTextContent(staffEn.override.approved);
+    expect(screen.getByRole('status')).toHaveTextContent('Me (organizer)');
   });
 
   /**
@@ -718,14 +716,14 @@ describe('OverrideDialog', () => {
     const user = userEvent.setup();
     render(<OverrideDialog canApprove onSearch={onSearch} onSubmit={onSubmit} onCancel={noop} />);
 
-    expect(screen.getByText(staffKo.override.searchHint)).toBeInTheDocument();
-    await user.type(screen.getByLabelText(staffKo.override.searchLabel), '박관');
+    expect(screen.getByText(staffEn.override.searchHint)).toBeInTheDocument();
+    await user.type(screen.getByLabelText(staffEn.override.searchLabel), '박관');
     expect(onSearch).toHaveBeenLastCalledWith('박관');
 
     await user.click(screen.getByRole('button', { name: /박관객/ }));
     expect(screen.getByText(/박관객/)).toBeInTheDocument();
-    await user.type(screen.getByLabelText(staffKo.override.pin), '4821');
-    await user.click(screen.getByRole('button', { name: staffKo.override.approve }));
+    await user.type(screen.getByLabelText(staffEn.override.pin), '4821');
+    await user.click(screen.getByRole('button', { name: staffEn.override.approve }));
     expect(onSubmit).toHaveBeenCalledWith('4821', 1, '1042', {});
   });
 
@@ -734,16 +732,16 @@ describe('OverrideDialog', () => {
     const nameless = ticket({ tokenId: '1234567890123456789012345675555', displayName: '' });
     const user = userEvent.setup();
     render(<OverrideDialog canApprove onSearch={() => [named, nameless]} onSubmit={noop} onCancel={noop} />);
-    await user.type(screen.getByLabelText(staffKo.override.searchLabel), '12345');
+    await user.type(screen.getByLabelText(staffEn.override.searchLabel), '12345');
     expect(screen.getByRole('button', { name: '박관객 ••8901' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '게스트 ••5555' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Guest ••5555' })).toBeInTheDocument();
   });
 
   it('says so when the guest list has nobody by that name', async () => {
     const user = userEvent.setup();
     render(<OverrideDialog canApprove onSearch={() => []} onSubmit={noop} onCancel={noop} />);
-    await user.type(screen.getByLabelText(staffKo.override.searchLabel), '없는사람');
-    expect(screen.getByText(staffKo.override.searchEmpty)).toBeInTheDocument();
+    await user.type(screen.getByLabelText(staffEn.override.searchLabel), '없는사람');
+    expect(screen.getByText(staffEn.override.searchEmpty)).toBeInTheDocument();
   });
 
   it('starts on the tap already on screen, and lets a staff member change it', async () => {
@@ -751,15 +749,15 @@ describe('OverrideDialog', () => {
     render(
       <OverrideDialog canApprove ticket={ticket()} onSearch={() => []} onSubmit={noop} onCancel={noop} />,
     );
-    expect(screen.queryByLabelText(staffKo.override.searchLabel)).toBeNull();
-    await user.click(screen.getByRole('button', { name: staffKo.override.searchAgain }));
-    expect(screen.getByLabelText(staffKo.override.searchLabel)).toBeInTheDocument();
+    expect(screen.queryByLabelText(staffEn.override.searchLabel)).toBeNull();
+    await user.click(screen.getByRole('button', { name: staffEn.override.searchAgain }));
+    expect(screen.getByLabelText(staffEn.override.searchLabel)).toBeInTheDocument();
   });
 
   /** A queue is watching. Nobody edits a failed PIN in front of it. */
   it('clears the PIN field after a wrong try', () => {
     const view = render(<OverrideDialog canApprove ticket={ticket()} onSubmit={noop} onCancel={noop} />);
-    const field = screen.getByLabelText(staffKo.override.pin) as HTMLInputElement;
+    const field = screen.getByLabelText(staffEn.override.pin) as HTMLInputElement;
     fireEvent.change(field, { target: { value: '9999' } });
     expect(field.value).toBe('9999');
 
@@ -772,7 +770,7 @@ describe('OverrideDialog', () => {
         onCancel={noop}
       />,
     );
-    expect((screen.getByLabelText(staffKo.override.pin) as HTMLInputElement).value).toBe('');
+    expect((screen.getByLabelText(staffEn.override.pin) as HTMLInputElement).value).toBe('');
   });
 
   it('keeps the button after a failure, and shows the sentence it was given', async () => {
@@ -787,21 +785,21 @@ describe('OverrideDialog', () => {
       />,
     );
     expect(screen.getByRole('status')).toHaveTextContent('틀렸어요');
-    await user.click(screen.getByRole('button', { name: staffKo.override.approve }));
+    await user.click(screen.getByRole('button', { name: staffEn.override.approve }));
     expect(onSubmit).toHaveBeenCalledTimes(1);
   });
 });
 
 describe('GateConsole', () => {
   const CASES: ReadonlyArray<readonly [GateState, string]> = [
-    ['idle', staffKo.ready.tap],
-    ['ready', staffKo.ready.tap],
-    ['received', staffKo.received.title],
-    ['confirming', staffKo.confirming.title],
-    ['admit', staffKo.admit.title],
-    ['offlineAdmit', staffKo.offlineAdmit.title],
-    ['deny', staffKo.denyTitle],
-    ['override', staffKo.override.title],
+    ['idle', staffEn.ready.tap],
+    ['ready', staffEn.ready.tap],
+    ['received', staffEn.received.title],
+    ['confirming', staffEn.confirming.title],
+    ['admit', staffEn.admit.title],
+    ['offlineAdmit', staffEn.offlineAdmit.title],
+    ['deny', staffEn.denyTitle],
+    ['override', staffEn.override.title],
   ];
 
   it('has a card for every gate state', () => {
@@ -820,21 +818,21 @@ describe('GateConsole', () => {
 
   it('reads the list result from what the snapshot already said', () => {
     renderConsole({ state: 'received', ticket: ticket() });
-    expect(screen.getByText(staffKo.received.precheckOk)).toBeInTheDocument();
+    expect(screen.getByText(staffEn.received.precheckOk)).toBeInTheDocument();
     cleanup();
     renderConsole({ state: 'received' });
-    expect(screen.getByText(staffKo.received.precheckUnknown)).toBeInTheDocument();
+    expect(screen.getByText(staffEn.received.precheckUnknown)).toBeInTheDocument();
     cleanup();
     renderConsole({ state: 'received', ticket: ticket(), deny: 'ALREADY_USED' });
-    expect(screen.getByText(staffKo.received.precheckFail)).toBeInTheDocument();
+    expect(screen.getByText(staffEn.received.precheckFail)).toBeInTheDocument();
   });
 
   it('passes the two §7.3 clocks through to the confirming card', () => {
     renderConsole({ state: 'confirming', checking: true, waitHint: false });
-    expect(screen.queryByText(staffKo.confirming.wait)).not.toBeInTheDocument();
+    expect(screen.queryByText(staffEn.confirming.wait)).not.toBeInTheDocument();
     cleanup();
     renderConsole({ state: 'confirming', checking: true, waitHint: true });
-    expect(screen.getByText(staffKo.confirming.wait)).toBeInTheDocument();
+    expect(screen.getByText(staffEn.confirming.wait)).toBeInTheDocument();
   });
 
   /**
@@ -847,14 +845,14 @@ describe('GateConsole', () => {
    */
   it('never invents a refusal the gate was not given', () => {
     renderConsole({ state: 'deny', denyDetail: '0xbeef' });
-    expect(screen.queryByText(staffKo.deny.UNKNOWN_REVERT)).not.toBeInTheDocument();
-    expect(screen.queryByText(staffKo.denyTitle)).not.toBeInTheDocument();
+    expect(screen.queryByText(staffEn.deny.UNKNOWN_REVERT)).not.toBeInTheDocument();
+    expect(screen.queryByText(staffEn.denyTitle)).not.toBeInTheDocument();
     expect(screen.queryByText('0xbeef')).not.toBeInTheDocument();
   });
 
   it('still reads an unreadable reason the gate really was given', () => {
     renderConsole({ state: 'deny', deny: 'UNKNOWN_REVERT', denyDetail: '0xbeef' });
-    expect(screen.getByText(staffKo.deny.UNKNOWN_REVERT)).toBeInTheDocument();
+    expect(screen.getByText(staffEn.deny.UNKNOWN_REVERT)).toBeInTheDocument();
     expect(screen.getByText('0xbeef')).toBeInTheDocument();
   });
 
@@ -867,7 +865,7 @@ describe('GateConsole', () => {
   it('keeps the refusal out of the verdict’s live region', () => {
     renderConsole({ state: 'confirming', checking: true }, { refusal: TAP_REFUSAL.confirming });
     const toast = screen.getByRole('status');
-    expect(toast).toHaveTextContent(staffKo.refusal.confirming);
+    expect(toast).toHaveTextContent(staffEn.refusal.confirming);
     expect(verdict()).not.toContainElement(toast);
   });
 
@@ -889,8 +887,8 @@ describe('GateConsole', () => {
       { state: 'admit', ticket: ticket() },
       { entriesCount: 7, deviceChangedRecently: true },
     );
-    expect(screen.getByText(fmt(staffKo.admit.entryValue, { count: 7 }))).toBeInTheDocument();
-    expect(screen.getByText(staffKo.admit.deviceChanged)).toBeInTheDocument();
+    expect(screen.getByText(fmt(staffEn.admit.entryValue, { count: 7 }))).toBeInTheDocument();
+    expect(screen.getByText(staffEn.admit.deviceChanged)).toBeInTheDocument();
   });
 
   // The card and the banner both say `queue.pending` — one sentence, one key — and both are on
@@ -898,14 +896,14 @@ describe('GateConsole', () => {
   it('counts the queued entries on the offline card', () => {
     renderConsole({ state: 'offlineAdmit', ticket: ticket(), pendingCount: 3, online: false });
     expect(
-      within(verdict()).getByText(fmt(staffKo.queue.pending, { count: 3 })),
+      within(verdict()).getByText(fmt(staffEn.queue.pending, { count: 3 })),
     ).toBeInTheDocument();
   });
 
   it('shows the refusal above the card without replacing it', () => {
     renderConsole({ state: 'confirming', checking: true }, { refusal: TAP_REFUSAL.confirming });
-    expect(screen.getByRole('status')).toHaveTextContent(staffKo.refusal.confirming);
-    expect(screen.getByText(staffKo.confirming.title)).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent(staffEn.refusal.confirming);
+    expect(screen.getByText(staffEn.confirming.title)).toBeInTheDocument();
   });
 
   it('hides the refusal when the machine took the tap', () => {
@@ -915,21 +913,21 @@ describe('GateConsole', () => {
 
   it('raises the offline badge beside the header line when the connection drops', () => {
     renderConsole({ online: false, snapshotAgeMs: 0 });
-    expect(screen.getAllByText(staffKo.shell.stageOffline)).toHaveLength(2);
+    expect(screen.getAllByText(staffEn.shell.stageOffline)).toHaveLength(2);
     cleanup();
     renderConsole({ online: true });
-    expect(screen.queryByText(staffKo.shell.stageOffline)).not.toBeInTheDocument();
+    expect(screen.queryByText(staffEn.shell.stageOffline)).not.toBeInTheDocument();
   });
 
   it('carries the queue trouble into the banner slot', () => {
     renderConsole({ pendingCount: 2 }, { parkedCount: 1, queueError: LATE_WINDOW_ELAPSED });
-    expect(screen.getByText(staffKo.queue.lateWindowElapsed)).toBeInTheDocument();
-    expect(screen.getByText(fmt(staffKo.queue.parked, { count: 1 }))).toBeInTheDocument();
+    expect(screen.getByText(staffEn.queue.lateWindowElapsed)).toBeInTheDocument();
+    expect(screen.getByText(fmt(staffEn.queue.parked, { count: 1 }))).toBeInTheDocument();
   });
 
   it('keeps the previous tap in the footer', () => {
     renderConsole({}, { lastTap: { tap: { tokenId: 1n, nonce: '0xab' }, state: 'admit', ticket: ticket(), finalized: true } });
-    expect(screen.getByText(staffKo.lastTap.label)).toBeInTheDocument();
+    expect(screen.getByText(staffEn.lastTap.label)).toBeInTheDocument();
     expect(screen.getByText(ATTENDEE)).toBeInTheDocument();
   });
 
@@ -937,7 +935,7 @@ describe('GateConsole', () => {
     const onDone = vi.fn();
     const user = userEvent.setup();
     renderConsole({ state: 'admit', ticket: ticket() }, { onDone });
-    await user.click(screen.getByRole('button', { name: staffKo.done }));
+    await user.click(screen.getByRole('button', { name: staffEn.done }));
     expect(onDone).toHaveBeenCalledTimes(1);
   });
 
@@ -946,8 +944,8 @@ describe('GateConsole', () => {
       { state: 'override', override: { status: 'requested', reason: 3, role: 'none' } },
       { canApprove: false },
     );
-    expect(screen.getByRole('status')).toHaveTextContent(staffKo.override.requested);
-    expect(screen.getByRole('status')).toHaveTextContent(staffKo.override.reason3);
+    expect(screen.getByRole('status')).toHaveTextContent(staffEn.override.requested);
+    expect(screen.getByRole('status')).toHaveTextContent(staffEn.override.reason3);
   });
 
   it('wires the override dialog to the caller', async () => {
@@ -955,28 +953,18 @@ describe('GateConsole', () => {
     const onOverrideCancel = vi.fn();
     const user = userEvent.setup();
     renderConsole({ state: 'override' }, { canApprove: true, onOverrideSubmit, onOverrideCancel });
-    await user.type(screen.getByLabelText(staffKo.override.pin), '99');
-    await user.click(screen.getByRole('button', { name: staffKo.override.approve }));
+    await user.type(screen.getByLabelText(staffEn.override.pin), '99');
+    await user.click(screen.getByRole('button', { name: staffEn.override.approve }));
     expect(onOverrideSubmit).toHaveBeenCalledWith('99', 1, undefined, {});
-    await user.click(screen.getByRole('button', { name: staffKo.override.cancel }));
+    await user.click(screen.getByRole('button', { name: staffEn.override.cancel }));
     expect(onOverrideCancel).toHaveBeenCalledTimes(1);
   });
 });
 
 describe('locale', () => {
-  it('reaches the English table when the device is set to English', async () => {
-    try {
-      await act(async () => {
-        await setLocale('en');
-      });
-      render(<DenyCard code="ALREADY_USED" />);
-      expect(screen.getByText(staffEn.deny.ALREADY_USED)).toBeInTheDocument();
-      expect(screen.getByText(staffEn.denyTitle)).toBeInTheDocument();
-    } finally {
-      cleanup();
-      await act(async () => {
-        await setLocale('ko');
-      });
-    }
+  it('always reads the English table', () => {
+    render(<DenyCard code="ALREADY_USED" />);
+    expect(screen.getByText(staffEn.deny.ALREADY_USED)).toBeInTheDocument();
+    expect(screen.getByText(staffEn.denyTitle)).toBeInTheDocument();
   });
 });

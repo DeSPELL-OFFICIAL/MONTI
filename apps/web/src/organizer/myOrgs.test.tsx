@@ -96,8 +96,8 @@ describe('useMyOrgs', () => {
     const { result } = renderMyOrgs();
 
     await waitFor(() => expect(result.current.orgs).toHaveLength(2));
-    expect(result.current.orgs.map((org) => org.name)).toEqual(['몬티 라이브', '팀 #4']);
-    expect(organizerCopy.ko.home.orgFallback).toBe('팀 #{{id}}');
+    expect(result.current.orgs.map((org) => org.name)).toEqual(['몬티 라이브', 'Team #4']);
+    expect(organizerCopy.en.home.orgFallback).toBe('Team #{{id}}');
   });
 
   it('offers event creation to an owner and to an admin holding the createEvent bit', async () => {

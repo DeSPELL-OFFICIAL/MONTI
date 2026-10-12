@@ -51,8 +51,8 @@ vi.mock('../shared/api/functions', async (orig) => ({
 const { CallableError } = await import('../shared/api/functions');
 const { organizerCopy } = await import('./copy');
 const { Team } = await import('./Team');
-const copy = organizerCopy.ko.team;
-const life = organizerCopy.ko.lifecycle;
+const copy = organizerCopy.en.team;
+const life = organizerCopy.en.lifecycle;
 const data = (functionName: 'setAdmin' | 'setManager', args: readonly unknown[]) =>
   encodeFunctionData({ abi: organizersAbi, functionName, args });
 

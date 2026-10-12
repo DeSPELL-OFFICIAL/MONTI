@@ -21,7 +21,7 @@ vi.mock('./useGateRegistration', async (importOriginal) => ({
 }));
 
 const { GateSetupScreen, PHONE_SIGN_IN_PATH, STAFF_SETUP_PATH } = await import('./GateSetupScreen');
-const { staffSetupKo } = await import('../copy');
+const { staffSetupEn } = await import('../copy');
 const EVENT_ID = '1001';
 
 function registration(overrides: Partial<GateRegistration> = {}): GateRegistration {
@@ -83,31 +83,31 @@ describe('gate setup screen', () => {
     // `revokeGate` does not free it.
     expect(useGateRegistration).toHaveBeenCalledWith({ eventId: undefined });
     // Nothing is pre-seeded (v2 events start at 1001), so the field starts empty and apply waits.
-    expect(screen.getByLabelText(staffSetupKo.eventLabel)).toHaveValue('');
-    expect(screen.getByRole('button', { name: staffSetupKo.eventApply })).toBeDisabled();
-    expect(screen.getByText(staffSetupKo.notRequested)).toBeInTheDocument();
+    expect(screen.getByLabelText(staffSetupEn.eventLabel)).toHaveValue('');
+    expect(screen.getByRole('button', { name: staffSetupEn.eventApply })).toBeDisabled();
+    expect(screen.getByText(staffSetupEn.notRequested)).toBeInTheDocument();
   });
 
   it('applies for the typed event on one press', async () => {
     const user = userEvent.setup();
     await renderSetup();
 
-    await user.type(screen.getByLabelText(staffSetupKo.eventLabel), EVENT_ID);
-    await user.click(screen.getByRole('button', { name: staffSetupKo.eventApply }));
+    await user.type(screen.getByLabelText(staffSetupEn.eventLabel), EVENT_ID);
+    await user.click(screen.getByRole('button', { name: staffSetupEn.eventApply }));
     expect(useGateRegistration).toHaveBeenCalledWith({ eventId: EVENT_ID });
   });
 
   it('applies for a different event only once the staff member confirms it', async () => {
     const user = userEvent.setup();
     await renderSetup();
-    const field = screen.getByLabelText(staffSetupKo.eventLabel);
+    const field = screen.getByLabelText(staffSetupEn.eventLabel);
 
     await user.type(field, '42');
     // Typing alone must not submit: every keystroke would otherwise be its own application.
     expect(useGateRegistration).not.toHaveBeenCalledWith({ eventId: '4' });
     expect(useGateRegistration).not.toHaveBeenCalledWith({ eventId: '42' });
 
-    await user.click(screen.getByRole('button', { name: staffSetupKo.eventApply }));
+    await user.click(screen.getByRole('button', { name: staffSetupEn.eventApply }));
     expect(useGateRegistration).toHaveBeenCalledWith({ eventId: '42' });
   });
 
@@ -116,18 +116,18 @@ describe('gate setup screen', () => {
       registration({ status: 'creating', address: undefined, payload: undefined, submitted: false }),
     );
     await renderSetup();
-    expect(screen.getByText(staffSetupKo.creating)).toBeInTheDocument();
-    expect(screen.queryByText(staffSetupKo.fallbackTitle)).toBeNull();
+    expect(screen.getByText(staffSetupEn.creating)).toBeInTheDocument();
+    expect(screen.queryByText(staffSetupEn.fallbackTitle)).toBeNull();
   });
 
   it('says the request is in, and how long it has been in, while it waits', async () => {
     const user = userEvent.setup();
     await renderSetup();
-    await user.type(screen.getByLabelText(staffSetupKo.eventLabel), EVENT_ID);
-    await user.click(screen.getByRole('button', { name: staffSetupKo.eventApply }));
+    await user.type(screen.getByLabelText(staffSetupEn.eventLabel), EVENT_ID);
+    await user.click(screen.getByRole('button', { name: staffSetupEn.eventApply }));
 
-    expect(screen.getByText(staffSetupKo.submitted)).toBeInTheDocument();
-    expect(screen.getByText(/초째 기다리는 중$/)).toBeInTheDocument();
+    expect(screen.getByText(staffSetupEn.submitted)).toBeInTheDocument();
+    expect(screen.getByText(/^Waiting for \d+s$/)).toBeInTheDocument();
   });
 
   it('shows the fallback values the organizer would type in, and a way to try again', async () => {
@@ -136,28 +136,28 @@ describe('gate setup screen', () => {
 
     // Up front only a short name; the long values sit under a closed 상세, each with a copy button.
     expect(screen.getByText('cf83…edb1')).toBeInTheDocument();
-    const details = screen.getByText(staffSetupKo.detailsLabel).closest('details');
+    const details = screen.getByText(staffSetupEn.detailsLabel).closest('details');
     expect(details).not.toBeNull();
     expect(details).not.toHaveAttribute('open');
     for (const value of [ADDRESS, KX, KY]) expect(details).toContainElement(screen.getByText(value));
-    expect(screen.getAllByRole('button', { name: staffSetupKo.copyValue })).toHaveLength(3);
-    expect(screen.queryByText(/공개키/)).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: staffSetupEn.copyValue })).toHaveLength(3);
+    expect(screen.queryByText(/public key/i)).not.toBeInTheDocument();
     // The QR is drawn from the same payload; it is asynchronous, so it is awaited.
-    expect(await screen.findByRole('img', { name: staffSetupKo.qrAlt })).toBeInTheDocument();
+    expect(await screen.findByRole('img', { name: staffSetupEn.qrAlt })).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: staffSetupKo.resubmit }));
+    await user.click(screen.getByRole('button', { name: staffSetupEn.resubmit }));
     expect(resubmit).toHaveBeenCalledTimes(1);
   });
 
   it('gives every typed failure its own sentence', async () => {
     for (const [error, line] of [
-      ['KEY_UNAVAILABLE', staffSetupKo.errKeyUnavailable],
-      ['AUTH_REQUIRED', staffSetupKo.errAuthRequired],
-      ['NOT_YOUR_GATE', staffSetupKo.errNotYourGate],
-      ['TOO_MANY_PENDING', staffSetupKo.errTooManyPending],
-      ['UNKNOWN_EVENT', staffSetupKo.errUnknownEvent],
-      ['SUBMIT_REJECTED', staffSetupKo.errSubmitRejected],
-      ['CHAIN_UNREACHABLE', staffSetupKo.errChainUnreachable],
+      ['KEY_UNAVAILABLE', staffSetupEn.errKeyUnavailable],
+      ['AUTH_REQUIRED', staffSetupEn.errAuthRequired],
+      ['NOT_YOUR_GATE', staffSetupEn.errNotYourGate],
+      ['TOO_MANY_PENDING', staffSetupEn.errTooManyPending],
+      ['UNKNOWN_EVENT', staffSetupEn.errUnknownEvent],
+      ['SUBMIT_REJECTED', staffSetupEn.errSubmitRejected],
+      ['CHAIN_UNREACHABLE', staffSetupEn.errChainUnreachable],
     ] as const) {
       useGateRegistration.mockReturnValue(registration({ error, submitted: false }));
       const view = await renderSetup();
@@ -171,7 +171,7 @@ describe('gate setup screen', () => {
     useGateRegistration.mockReturnValue(registration({ error: 'AUTH_REQUIRED', submitted: false }));
     await renderSetup();
 
-    await user.click(screen.getByRole('button', { name: staffSetupKo.signIn }));
+    await user.click(screen.getByRole('button', { name: staffSetupEn.signIn }));
     // The attendee phone step, which is the only sign-in this app ships, plus the target that
     // brings the staff member back to the gate instead of into the attendee app. It travels as
     // `?returnTo=`, the one spelling of that rule this codebase has.
@@ -181,7 +181,7 @@ describe('gate setup screen', () => {
   it('offers no sign-in button for a failure signing in would not fix', async () => {
     useGateRegistration.mockReturnValue(registration({ error: 'TOO_MANY_PENDING', submitted: false }));
     await renderSetup();
-    expect(screen.queryByRole('button', { name: staffSetupKo.signIn })).toBeNull();
+    expect(screen.queryByRole('button', { name: staffSetupEn.signIn })).toBeNull();
   });
 
   it('hands off the gate, event and organizer ids once the chain says it is registered', async () => {
@@ -191,12 +191,12 @@ describe('gate setup screen', () => {
     );
     await renderSetup();
 
-    expect(await screen.findByRole('heading', { name: staffSetupKo.registeredTitle })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: staffSetupEn.registeredTitle })).toBeInTheDocument();
     expect(screen.getByText('7')).toBeInTheDocument();
     expect(screen.getByText('42')).toBeInTheDocument();
     expect(screen.getByText('5')).toBeInTheDocument();
-    expect(screen.queryByText(staffSetupKo.notOpen)).toBeNull();
-    expect(await screen.findByRole('button', { name: staffSetupKo.openGate })).toBeInTheDocument();
+    expect(screen.queryByText(staffSetupEn.notOpen)).toBeNull();
+    expect(await screen.findByRole('button', { name: staffSetupEn.openGate })).toBeInTheDocument();
   });
 
   /**
@@ -210,16 +210,16 @@ describe('gate setup screen', () => {
     );
     await renderSetup();
 
-    expect(await screen.findByText(staffSetupKo.pinRequired)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: staffSetupKo.openGate })).toBeNull();
+    expect(await screen.findByText(staffSetupEn.pinRequired)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: staffSetupEn.openGate })).toBeNull();
 
     const user = userEvent.setup();
-    await user.type(screen.getByLabelText(staffSetupKo.pinLabel), '4821');
-    await user.type(screen.getByLabelText(staffSetupKo.pinConfirmLabel), '4821');
-    await user.click(screen.getByRole('button', { name: staffSetupKo.pinSave }));
+    await user.type(screen.getByLabelText(staffSetupEn.pinLabel), '4821');
+    await user.type(screen.getByLabelText(staffSetupEn.pinConfirmLabel), '4821');
+    await user.click(screen.getByRole('button', { name: staffSetupEn.pinSave }));
 
-    expect(await screen.findByRole('button', { name: staffSetupKo.openGate })).toBeInTheDocument();
-    expect(screen.queryByText(staffSetupKo.pinRequired)).toBeNull();
+    expect(await screen.findByRole('button', { name: staffSetupEn.openGate })).toBeInTheDocument();
+    expect(screen.queryByText(staffSetupEn.pinRequired)).toBeNull();
   });
 
   it('warns when the registered gate has not been opened yet', async () => {
@@ -227,7 +227,7 @@ describe('gate setup screen', () => {
       registration({ status: 'registered', gateId: 7n, eventId: 42n, orgId: 5n, open: false }),
     );
     await renderSetup();
-    expect(screen.getByText(staffSetupKo.notOpen)).toBeInTheDocument();
+    expect(screen.getByText(staffSetupEn.notOpen)).toBeInTheDocument();
   });
 
   it('keeps a revoked gate off the entry screen and says why', async () => {
@@ -235,21 +235,21 @@ describe('gate setup screen', () => {
       registration({ status: 'registered', gateId: 7n, eventId: 42n, orgId: 5n, open: true, revoked: true }),
     );
     await renderSetup();
-    expect(screen.getByText(staffSetupKo.revoked)).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: staffSetupKo.registeredTitle })).toBeNull();
+    expect(screen.getByText(staffSetupEn.revoked)).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: staffSetupEn.registeredTitle })).toBeNull();
   });
 });
 
 describe('staff setup copy', () => {
   it('says everything in both locales', async () => {
     const { staffSetupEn } = await import('../copy');
-    expect(Object.keys(staffSetupEn).sort()).toEqual(Object.keys(staffSetupKo).sort());
+    expect(Object.keys(staffSetupEn).sort()).toEqual(Object.keys(staffSetupEn).sort());
     for (const value of Object.values(staffSetupEn)) expect(value.length).toBeGreaterThan(0);
   });
 
   it('keeps the interpolation placeholder in both', async () => {
     const { staffSetupEn } = await import('../copy');
-    expect(staffSetupKo.elapsed).toContain('{{seconds}}');
+    expect(staffSetupEn.elapsed).toContain('{{seconds}}');
     expect(staffSetupEn.elapsed).toContain('{{seconds}}');
   });
 });

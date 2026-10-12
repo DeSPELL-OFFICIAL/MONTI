@@ -1,9 +1,9 @@
 import { fireEvent, render, screen, act } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OpProgress } from './OpProgress';
-import { ko } from '../copy/index';
+import { en } from '../copy/index';
 
-const op = ko.op;
+const op = en.op;
 
 /** The label of whichever step `Steps` is marking as current. */
 function currentStep(): string | null {
@@ -37,9 +37,9 @@ describe('OpProgress', () => {
     expect(screen.getByText(op.typical)).toBeInTheDocument();
     act(() => vi.advanceTimersByTime(1_000));
     expect(screen.getByText(elapsed(1))).toBeInTheDocument();
-    expect(screen.queryByText(ko.signup.registerSlow)).toBeNull();
+    expect(screen.queryByText(en.signup.registerSlow)).toBeNull();
     act(() => vi.advanceTimersByTime(9_000));
-    expect(screen.getByText(ko.signup.registerSlow)).toBeInTheDocument();
+    expect(screen.getByText(en.signup.registerSlow)).toBeInTheDocument();
   });
 
   it('keeps the per-second elapsed count out of the live region (expert-4 D4)', () => {
@@ -65,9 +65,9 @@ describe('OpProgress', () => {
     act(() => vi.advanceTimersByTime(1_000));
     expect(screen.getByText(op.timeout)).toBeInTheDocument();
     // The reassuring line and the counter give way to the timeout, and there is no bare spinner.
-    expect(screen.queryByText(ko.signup.registerSlow)).toBeNull();
+    expect(screen.queryByText(en.signup.registerSlow)).toBeNull();
     expect(screen.queryByRole('progressbar')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: ko.common.retry }));
+    fireEvent.click(screen.getByRole('button', { name: en.common.retry }));
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
@@ -75,7 +75,7 @@ describe('OpProgress', () => {
     render(<OpProgress phase="saving" />);
     act(() => vi.advanceTimersByTime(45_000));
     expect(screen.getByText(op.timeout)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: ko.common.retry })).toBeNull();
+    expect(screen.queryByRole('button', { name: en.common.retry })).toBeNull();
   });
 
   it('offers a second choice and its own line at the cap when the caller passes them', () => {
@@ -86,7 +86,7 @@ describe('OpProgress', () => {
         phase="confirming"
         onRetry={onRetry}
         onLater={onLater}
-        laterLabel="나중에 확인"
+        laterLabel='Check later'
         timeoutMessage="아직 확인 중이에요"
       />,
     );
@@ -94,9 +94,9 @@ describe('OpProgress', () => {
     // The caller's own line replaces the generic timeout line.
     expect(screen.getByText('아직 확인 중이에요')).toBeInTheDocument();
     expect(screen.queryByText(op.timeout)).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: '나중에 확인' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Check later' }));
     expect(onLater).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole('button', { name: ko.common.retry }));
+    fireEvent.click(screen.getByRole('button', { name: en.common.retry }));
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
 

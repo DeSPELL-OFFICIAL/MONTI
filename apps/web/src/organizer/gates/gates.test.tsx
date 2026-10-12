@@ -40,8 +40,8 @@ vi.mock('../../shared/envio/client', () => ({ gql }));
 
 const { organizerCopy } = await import('../copy');
 const { Gates } = await import('./Gates');
-const copy = organizerCopy.ko.gates;
-const life = organizerCopy.ko.lifecycle;
+const copy = organizerCopy.en.gates;
+const life = organizerCopy.en.lifecycle;
 const data = (functionName: 'registerGate' | 'openGate' | 'closeGate' | 'revokeGate', args: readonly unknown[]) =>
   encodeFunctionData({ abi: organizersAbi, functionName, args });
 
@@ -119,8 +119,8 @@ describe('the pending-gate queue', () => {
 
   it('shows a queued terminal by a short name, with the full value only under 상세', async () => {
     open();
-    const label = await screen.findByText(/^단말기 ·/);
-    expect(label).toHaveTextContent('단말기 · dddd…dddd');
+    const label = await screen.findByText(/^Gate device ·/);
+    expect(label).toHaveTextContent('Gate device · dddd…dddd');
     expect(label).not.toHaveTextContent(GATE);
     expect(label).toHaveAttribute('data-gate-account', GATE);
     const details = label.parentElement?.querySelector('details');
@@ -242,8 +242,8 @@ describe('the registered list', () => {
       Gate: [{ id: '7', eventId: '5', account: GATE, kx: KX, ky: KY, isOpen: false, revoked: false }],
     });
     open();
-    const label = await screen.findByText(/^단말기 7 ·/);
-    expect(label).toHaveTextContent('단말기 7 · dddd…dddd');
+    const label = await screen.findByText(/^Gate 7 ·/);
+    expect(label).toHaveTextContent('Gate 7 · dddd…dddd');
     expect(label).not.toHaveTextContent(GATE);
     // The full address is kept, but only under a closed 상세 with a copy button.
     const details = label.parentElement?.querySelector('details');

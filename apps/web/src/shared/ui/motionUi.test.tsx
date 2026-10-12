@@ -81,12 +81,12 @@ describe('Toast', () => {
     render(
       <MotionProvider>
         <AnimatePresence>
-          <Toast key="t" text="저장했어요" dismiss="닫기" onDone={() => undefined} />
+          <Toast key="t" text='Saved' dismiss='Close' onDone={() => undefined} />
         </AnimatePresence>
       </MotionProvider>,
     );
-    expect(screen.getByRole('status')).toHaveTextContent('저장했어요');
-    expect(screen.getByRole('button', { name: '닫기' })).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Saved');
+    expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
   });
 
   it('calls onDone by itself after TOAST_MS', () => {
@@ -95,7 +95,7 @@ describe('Toast', () => {
     render(
       <MotionProvider>
         <AnimatePresence>
-          <Toast key="t" text="저장했어요" dismiss="닫기" onDone={onDone} />
+          <Toast key="t" text='Saved' dismiss='Close' onDone={onDone} />
         </AnimatePresence>
       </MotionProvider>,
     );
@@ -109,11 +109,11 @@ describe('Toast', () => {
     render(
       <MotionProvider>
         <AnimatePresence>
-          <Toast key="t" text="저장했어요" dismiss="닫기" onDone={onDone} />
+          <Toast key="t" text='Saved' dismiss='Close' onDone={onDone} />
         </AnimatePresence>
       </MotionProvider>,
     );
-    fireEvent.click(screen.getByRole('button', { name: '닫기' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(onDone).toHaveBeenCalledTimes(1);
   });
 
@@ -122,7 +122,7 @@ describe('Toast', () => {
       return (
         <MotionProvider>
           <AnimatePresence>
-            {show ? <Toast key="t" text="저장했어요" dismiss="닫기" onDone={() => undefined} /> : null}
+            {show ? <Toast key="t" text='Saved' dismiss='Close' onDone={() => undefined} /> : null}
           </AnimatePresence>
         </MotionProvider>
       );

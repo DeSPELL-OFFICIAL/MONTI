@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ko } from '../../shared/copy/index';
+import { en } from '../../shared/copy/index';
 
 const PERSON_ID = `0x${'aa'.repeat(32)}`;
 const ACCOUNT = `0x${'ab'.repeat(20)}`;
@@ -10,7 +10,7 @@ const DEVICE_X = `0x${'11'.repeat(32)}`;
 const DEVICE_Y = `0x${'22'.repeat(32)}`;
 const CHALLENGE = 'Kioqoyoqkioqoyoqkioqoyoqkioqoyoqkioqoyoq123';
 /** The stepper line while the run waits out a busy attester — inlined in Register.tsx, matched here. */
-const BUSY_LINE = '잠시 붐벼요 · 다시 시도 중…';
+const BUSY_LINE = "It's busy right now · retrying…";
 
 const loginChallenge = vi.fn(async () => ({ challenge: CHALLENGE, expiresAt: 0 }));
 const registerPasskey = vi.fn(async () => ({ ok: true as const, account: ACCOUNT, credentialId: 'cred' }));
@@ -88,7 +88,7 @@ function renderScreen(element: React.ReactElement, at = '/signup/register') {
 
 /** The one button this screen has, whatever it says on it. */
 function start(): HTMLElement {
-  return screen.getByRole('button', { name: ko.signup.registerCta });
+  return screen.getByRole('button', { name: en.signup.registerCta });
 }
 
 /** A callable rejection: an uppercase reason in `message`, the gRPC status in `code`. */
@@ -117,8 +117,8 @@ describe('register · one screen, one tap', () => {
   it('shows the three steps in order, with the first one in hand', () => {
     renderScreen(<Register />);
     const steps = screen.getAllByRole('listitem').map((item) => item.textContent);
-    expect(steps).toEqual([ko.signup.stepPasskey, ko.signup.stepDevice, ko.signup.stepDone]);
-    expect(screen.getByText(ko.signup.stepPasskey).closest('li')).toHaveAttribute('aria-current', 'step');
+    expect(steps).toEqual([en.signup.stepPasskey, en.signup.stepDevice, en.signup.stepDone]);
+    expect(screen.getByText(en.signup.stepPasskey).closest('li')).toHaveAttribute('aria-current', 'step');
   });
 
   it('makes the passkey and registers this phone off a single tap', async () => {
@@ -210,13 +210,13 @@ describe('register · one screen, one tap', () => {
 
     // Nothing to hand the authenticator yet, so it is not asked.
     expect(createPasskey).not.toHaveBeenCalled();
-    expect(screen.getByText(ko.signup.challengeWaiting)).toBeInTheDocument();
+    expect(screen.getByText(en.signup.challengeWaiting)).toBeInTheDocument();
 
     landTheChallenge();
     // Nobody presses anything a second time: the run that was already going carries on.
     await waitFor(() => expect(createPasskey).toHaveBeenCalledWith('MONTI', CHALLENGE));
     await waitFor(() => expect(navigate).toHaveBeenCalledWith('/signup/done'));
-    expect(screen.queryByText(ko.signup.challengeWaiting)).toBeNull();
+    expect(screen.queryByText(en.signup.challengeWaiting)).toBeNull();
     // One round trip, joined — not one on arrival and a second one from the tap.
     expect(loginChallenge).toHaveBeenCalledTimes(1);
   });
@@ -244,8 +244,8 @@ describe('register · one screen, one tap', () => {
     await userEvent.click(start());
 
     await waitFor(() =>
-      expect(screen.getByText(ko.signup.stepDevice).closest('li')).toHaveAttribute('aria-current', 'step'));
-    expect(screen.getByText(ko.signup.deviceWorking)).toBeInTheDocument();
+      expect(screen.getByText(en.signup.stepDevice).closest('li')).toHaveAttribute('aria-current', 'step'));
+    expect(screen.getByText(en.signup.deviceWorking)).toBeInTheDocument();
     letDeviceKeyGo();
     await waitFor(() => expect(navigate).toHaveBeenCalledWith('/signup/done'));
   });
@@ -266,10 +266,10 @@ describe('register · one screen, one tap', () => {
     expect(ensureDeviceKey).toHaveBeenCalled();
 
     await act(async () => { vi.advanceTimersByTime(9_000); });
-    expect(screen.queryByText(ko.signup.registerSlow)).toBeNull();
+    expect(screen.queryByText(en.signup.registerSlow)).toBeNull();
 
     await act(async () => { vi.advanceTimersByTime(1_500); });
-    expect(screen.getByText(ko.signup.registerSlow)).toBeInTheDocument();
+    expect(screen.getByText(en.signup.registerSlow)).toBeInTheDocument();
   });
 
   it('says the ceremony was cancelled and never calls the server', async () => {
@@ -279,12 +279,12 @@ describe('register · one screen, one tap', () => {
     renderScreen(<Register />);
     await userEvent.click(start());
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('잠금 설정을 취소했어요. 다시 시도해 주세요.');
+    expect(await screen.findByRole('alert')).toHaveTextContent('You cancelled the lock setup. Please try again.');
     expect(registerPasskey).not.toHaveBeenCalled();
     expect(ensureDeviceKey).not.toHaveBeenCalled();
     expect(navigate).not.toHaveBeenCalled();
     // The button now offers the run again rather than pretending nothing happened.
-    expect(screen.getByRole('button', { name: ko.signup.registerRetry })).toBeEnabled();
+    expect(screen.getByRole('button', { name: en.signup.registerRetry })).toBeEnabled();
   });
 
   it('sends an account that already has a passkey to sign-in instead of failing', async () => {
@@ -295,7 +295,7 @@ describe('register · one screen, one tap', () => {
     await waitFor(() =>
       expect(navigate).toHaveBeenCalledWith('/login', {
         replace: true,
-        state: { notice: '이미 가입된 번호예요. 로그인해 주세요.' },
+        state: { notice: 'This number already has an account. Please sign in.' },
       }),
     );
   });
@@ -305,7 +305,7 @@ describe('register · one screen, one tap', () => {
     renderScreen(<Register />);
     await userEvent.click(start());
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('가입을 처음부터 다시 해 주세요.');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Please start sign-up again from the beginning.');
     expect(createPasskey).not.toHaveBeenCalled();
     expect(ensureDeviceKey).not.toHaveBeenCalled();
   });
@@ -317,7 +317,7 @@ describe('register · the phone half', () => {
   /** An account already carries the first step, so the tap starts at the second one. */
   it('skips the passkey when the account is already there', async () => {
     renderScreen(<Register />);
-    expect(screen.getByText(ko.signup.stepDevice).closest('li')).toHaveAttribute('aria-current', 'step');
+    expect(screen.getByText(en.signup.stepDevice).closest('li')).toHaveAttribute('aria-current', 'step');
 
     await userEvent.click(start());
     await waitFor(() => expect(registerIdentity).toHaveBeenCalled());
@@ -365,19 +365,19 @@ describe('register · the phone half', () => {
       }),
     );
     // The skip button belongs to a browser that cannot make a key at all, not to every browser.
-    expect(screen.queryByRole('button', { name: '이대로 계속하기' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Continue anyway' })).toBeNull();
     expect(navigate).toHaveBeenCalledWith('/signup/done');
   });
 
   it('tells a browser that the gate is an app thing, and says nothing of the sort on a phone', async () => {
     getPlatform.mockReturnValue('web');
     const { unmount } = renderScreen(<Register />);
-    expect(screen.getByText(ko.signup.deviceWebNote)).toBeInTheDocument();
+    expect(screen.getByText(en.signup.deviceWebNote)).toBeInTheDocument();
 
     unmount();
     getPlatform.mockReturnValue('android');
     renderScreen(<Register />);
-    expect(screen.queryByText(ko.signup.deviceWebNote)).toBeNull();
+    expect(screen.queryByText(en.signup.deviceWebNote)).toBeNull();
   });
 
   it('waits out a busy attester on its own and finishes without a second tap', async () => {
@@ -423,11 +423,11 @@ describe('register · the phone half', () => {
 
     // Four attempts in all (one plus three retries); only now is the busy message allowed out.
     expect(registerIdentity).toHaveBeenCalledTimes(4);
-    expect(screen.getByRole('alert')).toHaveTextContent(ko.signup.deviceBusy);
+    expect(screen.getByRole('alert')).toHaveTextContent(en.signup.deviceBusy);
     expect(navigate).not.toHaveBeenCalled();
 
     // The next attempt succeeds, so one manual tap finishes signup.
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: ko.signup.registerRetry })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.signup.registerRetry })); });
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     expect(navigate).toHaveBeenCalledWith('/signup/done');
   });
@@ -439,10 +439,10 @@ describe('register · the phone half', () => {
 
     // The same sentence the entry screen shows, read from the copy rather than repeated here:
     // a phone that cannot sign cannot produce the code either, so there is nothing to offer.
-    expect(await screen.findByRole('status')).toHaveTextContent(ko.enter.deviceUnavailable);
+    expect(await screen.findByRole('status')).toHaveTextContent(en.enter.deviceUnavailable);
     expect(registerIdentity).not.toHaveBeenCalled();
     // Retrying cannot help, so the only button left finishes signup without a hardware key.
-    await userEvent.click(screen.getByRole('button', { name: '이대로 계속하기' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Continue anyway' }));
     expect(navigate).toHaveBeenCalledWith('/signup/done');
     // Nothing was registered, so nothing may claim a session either.
     expect(getSession().status).toBe('anonymous');
@@ -462,7 +462,7 @@ describe('register · the phone half', () => {
 
     it('registers with the identity from the session and goes back where the person was headed', async () => {
       renderScreen(<Register />, '/signup/register?returnTo=%2Fme%2Fverify');
-      expect(screen.getByRole('status')).toHaveTextContent(ko.signup.finishPending);
+      expect(screen.getByRole('status')).toHaveTextContent(en.signup.finishPending);
 
       await userEvent.click(start());
 
@@ -490,7 +490,7 @@ describe('register · the phone half', () => {
     it('says nothing about finishing when this is an ordinary last step', async () => {
       seedSignup({ personId: PERSON_ID, account: ACCOUNT });
       renderScreen(<Register />);
-      expect(screen.queryByText(ko.signup.finishPending)).toBeNull();
+      expect(screen.queryByText(en.signup.finishPending)).toBeNull();
     });
   });
 });
@@ -500,7 +500,7 @@ describe('done screen', () => {
 
   it('drops the leftover signup state and goes home', async () => {
     renderScreen(<Done />);
-    await userEvent.click(screen.getByRole('button', { name: ko.signup.doneCta }));
+    await userEvent.click(screen.getByRole('button', { name: en.signup.doneCta }));
 
     expect(sessionStorage.getItem('monti.signup')).toBeNull();
     expect(navigate).toHaveBeenCalledWith('/');
@@ -509,7 +509,7 @@ describe('done screen', () => {
   it('returns to the claim link that sent this person into signup', async () => {
     seedSignup({ personId: PERSON_ID, account: ACCOUNT, next: '/claim/12' });
     renderScreen(<Done />);
-    await userEvent.click(screen.getByRole('button', { name: ko.signup.doneCta }));
+    await userEvent.click(screen.getByRole('button', { name: en.signup.doneCta }));
 
     await waitFor(() => expect(navigate).toHaveBeenCalledWith('/claim/12'));
     expect(sessionStorage.getItem('monti.signup')).toBeNull();
@@ -519,7 +519,7 @@ describe('done screen', () => {
   it('saves the name this person gave before going on', async () => {
     renderScreen(<Done />);
     await userEvent.type(screen.getByRole('textbox'), '  김태완  ');
-    await userEvent.click(screen.getByRole('button', { name: ko.signup.doneCta }));
+    await userEvent.click(screen.getByRole('button', { name: en.signup.doneCta }));
 
     await waitFor(() => expect(saveUserProfile).toHaveBeenCalledWith({ displayName: '김태완' }));
     expect(navigate).toHaveBeenCalledWith('/');
@@ -538,7 +538,7 @@ describe('done screen', () => {
     expect(MAX_DISPLAY_NAME_CHARS).toBe(24);
 
     await userEvent.type(box, 'ㄱ'.repeat(30));
-    await userEvent.click(screen.getByRole('button', { name: ko.signup.doneCta }));
+    await userEvent.click(screen.getByRole('button', { name: en.signup.doneCta }));
     await waitFor(() => expect(saveUserProfile).toHaveBeenCalled());
     const sent = saveUserProfile.mock.calls[0]?.[0]?.displayName ?? '';
     expect([...sent]).toHaveLength(24);
@@ -546,7 +546,7 @@ describe('done screen', () => {
 
   it('writes nothing at all when the name is left blank, and still finishes', async () => {
     renderScreen(<Done />);
-    await userEvent.click(screen.getByRole('button', { name: ko.signup.doneCta }));
+    await userEvent.click(screen.getByRole('button', { name: en.signup.doneCta }));
 
     await waitFor(() => expect(navigate).toHaveBeenCalledWith('/'));
     expect(saveUserProfile).not.toHaveBeenCalled();
@@ -557,7 +557,7 @@ describe('done screen', () => {
     saveUserProfile.mockRejectedValueOnce(new Error('permission-denied'));
     renderScreen(<Done />);
     await userEvent.type(screen.getByRole('textbox'), '김태완');
-    await userEvent.click(screen.getByRole('button', { name: ko.signup.doneCta }));
+    await userEvent.click(screen.getByRole('button', { name: en.signup.doneCta }));
 
     await waitFor(() => expect(navigate).toHaveBeenCalledWith('/'));
   });

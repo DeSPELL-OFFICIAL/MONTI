@@ -32,7 +32,7 @@ vi.mock('../../shared/config', async (orig) => ({
 
 const { Created } = await import('./Created');
 const { organizerCopy } = await import('../copy');
-const copy = organizerCopy.ko.scene.done;
+const copy = organizerCopy.en.scene.done;
 const LINK = `${window.location.origin}/events/12`;
 
 function open(state: unknown = { posterCid: 'bafkposter', title: '재즈 나이트', followUpFailed: false }): void {
@@ -68,7 +68,7 @@ describe('the done screen — public on arrival', () => {
     expect(await screen.findByAltText(copy.qr)).toHaveAttribute('src', 'data:image/png;base64,QQ==');
     expect(screen.getByText(copy.nowPublic)).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: copy.title, level: 1 })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /공개/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Publish/ })).toBeNull();
   });
 
   it('shows the two-step header with both steps done', () => {

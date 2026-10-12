@@ -4,14 +4,14 @@ import { organizerCopy } from '../copy';
 import { platformRow, type RecipientRow } from './settlementModel';
 import { SplitEditor } from './SplitEditor';
 
-const copy = organizerCopy.ko.settlement;
+const copy = organizerCopy.en.settlement;
 const PLATFORM = `0x${'cc'.repeat(20)}`;
 const BAND: RecipientRow = { id: 'b', name: '밴드', account: `0x${'a1'.repeat(20)}`, bps: 9_500, tag: 'band' };
 
 describe('SplitEditor', () => {
   it('locks the MONTI platform row: its name is read-only and it cannot be removed', () => {
     render(<SplitEditor rows={[platformRow(PLATFORM)]} onChange={vi.fn()} exampleCents={3_000} />);
-    expect(screen.getByDisplayValue('MONTI 플랫폼')).toHaveAttribute('readonly');
+    expect(screen.getByDisplayValue('MONTI platform')).toHaveAttribute('readonly');
     expect(screen.getByText(copy.platformNote)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: copy.removeRow })).toBeNull();
   });
@@ -20,12 +20,12 @@ describe('SplitEditor', () => {
     const { rerender } = render(<SplitEditor rows={[platformRow(PLATFORM)]} onChange={vi.fn()} exampleCents={2_000} />);
     expect(screen.getByText(`${copy.sumLabel}: 5%`)).toBeInTheDocument();
     expect(screen.getByText(copy.errors.badSum)).toBeInTheDocument();
-    expect(screen.getByText('예시 · $20.00 티켓이면')).toBeInTheDocument();
+    expect(screen.getByText('Example · a $20 ticket')).toBeInTheDocument();
 
     rerender(<SplitEditor rows={[BAND, platformRow(PLATFORM)]} onChange={vi.fn()} exampleCents={2_000} />);
     expect(screen.getByText(`${copy.sumLabel}: 100%`)).toBeInTheDocument();
     expect(screen.queryByText(copy.errors.badSum)).toBeNull();
-    expect(screen.getByText('밴드 · $19.00')).toBeInTheDocument();
+    expect(screen.getByText('밴드 · $19')).toBeInTheDocument();
   });
 
   it('hands every edit back as whole rows: add, change a share, remove', () => {

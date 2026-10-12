@@ -3,7 +3,7 @@ import { MemoryRouter } from 'react-router-dom';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { encodeGateResponse, type GateCodeWire, type GateResponseWire, type Hex } from '@monti/shared';
-import { ko } from '../../shared/copy/index';
+import { en } from '../../shared/copy/index';
 import { fmt } from '../../shared/i18n';
 
 // Partial mocks throughout: the real `DeviceKeyUnavailable`, `NfcError` and `NFC_ERROR` stay,
@@ -103,7 +103,7 @@ beforeEach(() => {
 async function tapEnter() {
   const user = userEvent.setup();
   render(<MemoryRouter><Enter /></MemoryRouter>);
-  await user.click(screen.getByRole('button', { name: ko.enter.cta }));
+  await user.click(screen.getByRole('button', { name: en.enter.cta }));
 }
 
 describe('<Enter /> arming', () => {
@@ -123,8 +123,8 @@ describe('<Enter /> arming', () => {
     verifyGate.mockReturnValue(new Promise(() => undefined));
     await tapEnter();
     expect(screen.getByRole('timer')).toHaveTextContent('60');
-    expect(screen.getByText(fmt(ko.enter.armed, { seconds: 60 }))).toBeInTheDocument();
-    expect(screen.getByText(ko.enter.verifying)).toBeInTheDocument();
+    expect(screen.getByText(fmt(en.enter.armed, { seconds: 60 }))).toBeInTheDocument();
+    expect(screen.getByText(en.enter.verifying)).toBeInTheDocument();
   });
 
   it('explains, rather than offering a code, when this phone has no hardware key', async () => {
@@ -132,15 +132,15 @@ describe('<Enter /> arming', () => {
     await tapEnter();
     expect(readThenWrite).not.toHaveBeenCalled();
     // The code carries a device signature, so a phone that cannot sign has nothing to show.
-    expect(screen.queryByText(ko.enter.qrTitle)).not.toBeInTheDocument();
-    expect(screen.getByRole('alert')).toHaveTextContent(ko.enter.deviceUnavailable);
+    expect(screen.queryByText(en.enter.qrTitle)).not.toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(en.enter.deviceUnavailable);
   });
 
   it('reports any other arming failure instead of opening a session', async () => {
     armDeviceKey.mockRejectedValue(new Error('biometry failed'));
     await tapEnter();
     expect(readThenWrite).not.toHaveBeenCalled();
-    expect(screen.getByRole('alert')).toHaveTextContent(ko.enter.armFailed);
+    expect(screen.getByRole('alert')).toHaveTextContent(en.enter.armFailed);
   });
 
   it('explains that a phone with no NFC cannot enter, after arming', async () => {
@@ -148,8 +148,8 @@ describe('<Enter /> arming', () => {
     await tapEnter();
     expect(armDeviceKey).toHaveBeenCalledTimes(1);
     expect(readThenWrite).not.toHaveBeenCalled();
-    expect(screen.queryByText(ko.enter.qrTitle)).not.toBeInTheDocument();
-    expect(screen.getByRole('alert')).toHaveTextContent(ko.enter.deviceUnavailable);
+    expect(screen.queryByText(en.enter.qrTitle)).not.toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(en.enter.deviceUnavailable);
   });
 
   it('keeps the armed sentence and the timer on the same second', async () => {
@@ -157,7 +157,7 @@ describe('<Enter /> arming', () => {
     verifyGate.mockReturnValue(new Promise(() => undefined));
     render(<MemoryRouter><Enter /></MemoryRouter>);
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: ko.enter.cta }));
+      fireEvent.click(screen.getByRole('button', { name: en.enter.cta }));
     });
     for (let second = 0; second < 3; second += 1) {
       await act(async () => {
@@ -166,7 +166,7 @@ describe('<Enter /> arming', () => {
     }
     const left = Number(screen.getByRole('timer').textContent);
     expect(left).toBeLessThan(ARM_WINDOW_SECONDS);
-    expect(screen.getByText(fmt(ko.enter.armed, { seconds: left }))).toBeInTheDocument();
+    expect(screen.getByText(fmt(en.enter.armed, { seconds: left }))).toBeInTheDocument();
   });
 
   it('does not re-arm on its own when the window runs out', async () => {
@@ -175,7 +175,7 @@ describe('<Enter /> arming', () => {
     verifyGate.mockReturnValue(new Promise(() => undefined));
     render(<MemoryRouter><Enter /></MemoryRouter>);
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: ko.enter.cta }));
+      fireEvent.click(screen.getByRole('button', { name: en.enter.cta }));
     });
     expect(screen.getByRole('timer')).toBeInTheDocument();
 
@@ -188,8 +188,8 @@ describe('<Enter /> arming', () => {
     }
 
     expect(screen.queryByRole('timer')).not.toBeInTheDocument();
-    expect(screen.getByText(ko.enter.expired)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: ko.enter.cta })).toBeInTheDocument();
+    expect(screen.getByText(en.enter.expired)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: en.enter.cta })).toBeInTheDocument();
     expect(armDeviceKey).toHaveBeenCalledTimes(1);
   });
 });
@@ -205,7 +205,7 @@ describe('<Enter /> one session', () => {
     expect(encodeGateResponse(written as GateResponseWire).byteLength).toBeGreaterThan(0);
     // The waiting screen is <Result />, which is now watching the chain and the push for the
     // answer; this machine has nothing left to decide.
-    expect(screen.getByText(ko.enter.resultWaiting)).toBeInTheDocument();
+    expect(screen.getByText(en.enter.resultWaiting)).toBeInTheDocument();
     expect(screen.queryByTestId('entry-result')).not.toBeInTheDocument();
   });
 
@@ -225,7 +225,7 @@ describe('<Enter /> one session', () => {
     });
     render(<MemoryRouter><Enter /></MemoryRouter>);
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: ko.enter.cta }));
+      fireEvent.click(screen.getByRole('button', { name: en.enter.cta }));
     });
     const options = readThenWrite.mock.calls[0]?.[1] as { signal: AbortSignal };
     expect(options.signal.aborted).toBe(false);
@@ -252,14 +252,14 @@ describe('<Enter /> one session', () => {
     });
     render(<MemoryRouter><Enter /></MemoryRouter>);
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: ko.enter.cta }));
+      fireEvent.click(screen.getByRole('button', { name: en.enter.cta }));
     });
     for (let second = 0; second <= ARM_WINDOW_SECONDS; second += 1) {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(1_000);
       });
     }
-    expect(screen.getByText(ko.enter.expired)).toBeInTheDocument();
+    expect(screen.getByText(en.enter.expired)).toBeInTheDocument();
 
     await act(async () => {
       land();
@@ -267,16 +267,16 @@ describe('<Enter /> one session', () => {
     expect(verifyGate).not.toHaveBeenCalled();
     expect(signWithDeviceKey).not.toHaveBeenCalled();
     expect(written).toBeNull();
-    expect(screen.getByRole('button', { name: ko.enter.cta })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: en.enter.cta })).toBeInTheDocument();
   });
 });
 
 describe('<Enter /> tap endings', () => {
   const endings: Array<[string, string]> = [
-    [NFC_ERROR.cancelled, ko.enter.tapCancelled],
-    [NFC_ERROR.timeout, ko.enter.tapTimeout],
-    [NFC_ERROR.noGateRecord, ko.enter.tapFailed],
-    [NFC_ERROR.readFailed, ko.enter.tapFailed],
+    [NFC_ERROR.cancelled, en.enter.tapCancelled],
+    [NFC_ERROR.timeout, en.enter.tapTimeout],
+    [NFC_ERROR.noGateRecord, en.enter.tapFailed],
+    [NFC_ERROR.readFailed, en.enter.tapFailed],
   ];
 
   for (const [code, sentence] of endings) {
@@ -285,21 +285,21 @@ describe('<Enter /> tap endings', () => {
       await tapEnter();
       expect(screen.getByRole('alert')).toHaveTextContent(sentence);
       expect(verifyGate).not.toHaveBeenCalled();
-      expect(screen.getByRole('button', { name: ko.common.retry })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: en.common.retry })).toBeInTheDocument();
     });
   }
 
   it('says so plainly when the reader turns out to be unsupported', async () => {
     readThenWrite.mockRejectedValue(new NfcError(NFC_ERROR.unavailable));
     await tapEnter();
-    expect(screen.getByRole('alert')).toHaveTextContent(ko.enter.deviceUnavailable);
-    expect(screen.queryByText(ko.enter.qrTitle)).not.toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(en.enter.deviceUnavailable);
+    expect(screen.queryByText(en.enter.qrTitle)).not.toBeInTheDocument();
   });
 
   it('falls back to a failed read for a rejection that is not an NfcError', async () => {
     readThenWrite.mockRejectedValue(new Error('BAD_GATE_CODE'));
     await tapEnter();
-    expect(screen.getByRole('alert')).toHaveTextContent(ko.enter.tapFailed);
+    expect(screen.getByRole('alert')).toHaveTextContent(en.enter.tapFailed);
   });
 
   it('offers the code, with the reason, when the session dies after the read', async () => {
@@ -310,8 +310,8 @@ describe('<Enter /> tap endings', () => {
       throw new NfcError(NFC_ERROR.timeout);
     });
     await tapEnter();
-    expect(screen.getByText(ko.enter.qrTitle)).toBeInTheDocument();
-    expect(screen.getByText(ko.enter.tapTimeout)).toBeInTheDocument();
+    expect(screen.getByText(en.enter.qrTitle)).toBeInTheDocument();
+    expect(screen.getByText(en.enter.tapTimeout)).toBeInTheDocument();
   });
 
   it('shows that code without signing a second time', async () => {
@@ -321,7 +321,7 @@ describe('<Enter /> tap endings', () => {
       throw new NfcError(NFC_ERROR.readFailed);
     });
     await tapEnter();
-    expect(screen.getByText(ko.enter.qrTitle)).toBeInTheDocument();
+    expect(screen.getByText(en.enter.qrTitle)).toBeInTheDocument();
     // <Qr /> was handed the wire the tap built; a second signature would cost a second window.
     expect(signWithDeviceKey).toHaveBeenCalledTimes(1);
   });
@@ -329,11 +329,11 @@ describe('<Enter /> tap endings', () => {
 
 describe('<Enter /> gate verification', () => {
   const refusals: Array<[string, string]> = [
-    ['codeExpired', ko.enter.codeExpired],
-    ['unknownGate', ko.enter.unknownGate],
-    ['gateClosed', ko.enter.gateClosed],
-    ['wrongEvent', ko.enter.wrongEvent],
-    ['badSignature', ko.enter.badSignature],
+    ['codeExpired', en.enter.codeExpired],
+    ['unknownGate', en.enter.unknownGate],
+    ['gateClosed', en.enter.gateClosed],
+    ['wrongEvent', en.enter.wrongEvent],
+    ['badSignature', en.enter.badSignature],
   ];
 
   for (const [reason, sentence] of refusals) {
@@ -351,9 +351,9 @@ describe('<Enter /> gate verification', () => {
     const user = userEvent.setup();
     verifyGate.mockResolvedValue({ ok: false, reason: 'unknownGate' });
     render(<MemoryRouter><Enter /></MemoryRouter>);
-    await user.click(screen.getByRole('button', { name: ko.enter.cta }));
-    await user.click(screen.getByRole('button', { name: ko.common.retry }));
-    expect(screen.getByRole('button', { name: ko.enter.cta })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: en.enter.cta }));
+    await user.click(screen.getByRole('button', { name: en.common.retry }));
+    expect(screen.getByRole('button', { name: en.enter.cta })).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });
@@ -365,8 +365,8 @@ describe('<Result /> exits', () => {
     vi.useFakeTimers();
     render(<MemoryRouter><Result tokenId="7" /></MemoryRouter>);
     await act(async () => { await vi.advanceTimersByTimeAsync(WAITING_DEADLINE_MS + 1); });
-    expect(screen.getByText(ko.enter.notConfirmed)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: ko.enter.toTickets })).toHaveAttribute('href', '/tickets');
+    expect(screen.getByText(en.enter.notConfirmed)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: en.enter.toTickets })).toHaveAttribute('href', '/tickets');
     vi.useRealTimers();
   });
 });

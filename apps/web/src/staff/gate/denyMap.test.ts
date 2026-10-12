@@ -45,12 +45,12 @@ describe('revert to DENY mapping (spec §13)', () => {
   it('EventNotPublished is a TX_FAILED with its own detail, not its own screen', () => {
     const result = mapRevertToDenyCode(revert('EventNotPublished()'));
     expect(result.code).toBe('TX_FAILED');
-    expect(result.detail).toContain('공개');
+    expect(result.detail).toContain('published');
     expect(result.detail).not.toBe(DENY_LABELS.TX_FAILED);
   });
 
   it('gives GateMismatch a sentence about the terminal, not about the ticket', () => {
-    expect(mapRevertToDenyCode(revert('GateMismatch()')).detail).toContain('단말기');
+    expect(mapRevertToDenyCode(revert('GateMismatch()')).detail).toContain('gate device');
   });
 });
 
@@ -78,7 +78,7 @@ describe('a reason this build cannot read', () => {
    */
   it('never turns the TIMEOUT sentinel into a reason-shaped refusal', () => {
     expect(mapRevertToDenyCode('TIMEOUT').code).toBe('TX_FAILED');
-    expect(mapRevertToDenyCode('TIMEOUT').detail).toBe('원인 미상');
+    expect(mapRevertToDenyCode('TIMEOUT').detail).toBe('Unknown cause');
   });
 
   it('never invents an admit — every path out of here is a DENY', () => {
@@ -123,8 +123,8 @@ describe('the map is pinned to the generated ABI and covers every screen', () =>
   it.each([['NotMember()'], ['Unauthorized()']])('%s is a TX_FAILED about the terminal', (signature) => {
     const result = mapRevertToDenyCode(revert(signature));
     expect(result.code).toBe('TX_FAILED');
-    expect(result.detail).toContain('단말기');
-    expect(result.detail).toContain('주최자');
+    expect(result.detail).toContain('gate device');
+    expect(result.detail).toContain('organizer');
     expect(result.detail).not.toBe(DENY_LABELS.TX_FAILED);
   });
 

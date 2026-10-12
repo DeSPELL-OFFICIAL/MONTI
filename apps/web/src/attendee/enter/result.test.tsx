@@ -3,7 +3,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { encodeEventTopics, numberToHex } from 'viem';
 import { CLOCK_SKEW_SECONDS, CODE_WINDOW_SECONDS, type Hex } from '@monti/shared';
-import { ko } from '../../shared/copy/index';
+import { en } from '../../shared/copy/index';
 import type { ChainLog, LogStage, SubscribeLogsArgs } from '../../shared/chain/subscribeLogs';
 
 const TICKET = `0x${'33'.repeat(20)}` as Hex;
@@ -126,17 +126,17 @@ describe('checkedInTopics', () => {
 describe('<Result /> — the chain', () => {
   it('shows the green on the speculative log and hardens it on the finalized one', async () => {
     await show();
-    expect(screen.getByText(ko.enter.resultWaiting)).toBeInTheDocument();
+    expect(screen.getByText(en.enter.resultWaiting)).toBeInTheDocument();
     expect(subscribeLogs.mock.calls[0]?.[0].address).toBe(TICKET);
 
     act(() => emitLog?.(log('speculative')));
-    expect(screen.getByText(ko.enter.done)).toBeInTheDocument();
+    expect(screen.getByText(en.enter.done)).toBeInTheDocument();
     expect(screen.getByTestId('entry-result')).toHaveAttribute('data-stage', 'speculative');
-    expect(screen.getByText(ko.enter.resultSettling)).toBeInTheDocument();
+    expect(screen.getByText(en.enter.resultSettling)).toBeInTheDocument();
 
     act(() => emitLog?.(log('finalized')));
     expect(screen.getByTestId('entry-result')).toHaveAttribute('data-stage', 'finalized');
-    expect(screen.queryByText(ko.enter.resultSettling)).not.toBeInTheDocument();
+    expect(screen.queryByText(en.enter.resultSettling)).not.toBeInTheDocument();
   });
 
   it('does not let a late speculative log undo a finalized one', async () => {
@@ -151,24 +151,24 @@ describe('<Result /> — the chain', () => {
     await show('7');
     expect(checkInOf).toHaveBeenCalledTimes(1);
     expect(checkInOf).toHaveBeenCalledWith(7n);
-    expect(screen.getByText(ko.enter.done)).toBeInTheDocument();
+    expect(screen.getByText(en.enter.done)).toBeInTheDocument();
     // A check-in already in storage is a recorded fact. Lighting it as still settling would
     // leave "기록하고 있어요" under an entry finalized an hour ago, forever.
     expect(screen.getByTestId('entry-result')).toHaveAttribute('data-stage', 'finalized');
-    expect(screen.queryByText(ko.enter.resultSettling)).not.toBeInTheDocument();
+    expect(screen.queryByText(en.enter.resultSettling)).not.toBeInTheDocument();
   });
 
   it('opens no subscription at all rather than one that matches every log', async () => {
     eventTopic.mockReturnValue(null);
     await show();
     expect(subscribeLogs).not.toHaveBeenCalled();
-    expect(screen.getByText(ko.enter.resultWaiting)).toBeInTheDocument();
+    expect(screen.getByText(en.enter.resultWaiting)).toBeInTheDocument();
   });
 
   it('says nothing when the mount read cannot reach the chain', async () => {
     checkInOf.mockRejectedValue(new Error('offline'));
     await show();
-    expect(screen.getByText(ko.enter.resultWaiting)).toBeInTheDocument();
+    expect(screen.getByText(en.enter.resultWaiting)).toBeInTheDocument();
   });
 });
 
@@ -177,7 +177,7 @@ describe('<Result /> — the push', () => {
     await show();
     expect(registerPush).toHaveBeenCalledWith(ACCOUNT, expect.any(Function));
     act(() => emitPush?.({ tokenId: '42' }));
-    expect(screen.getByText(ko.enter.done)).toBeInTheDocument();
+    expect(screen.getByText(en.enter.done)).toBeInTheDocument();
     // The webhook fires on a finalized event, so there is nothing left to harden.
     expect(screen.getByTestId('entry-result')).toHaveAttribute('data-stage', 'finalized');
   });
@@ -193,7 +193,7 @@ describe('<Result /> — the push', () => {
   it('ignores a push about someone else\'s ticket', async () => {
     await show('42');
     act(() => emitPush?.({ tokenId: '43' }));
-    expect(screen.getByText(ko.enter.resultWaiting)).toBeInTheDocument();
+    expect(screen.getByText(en.enter.resultWaiting)).toBeInTheDocument();
   });
 
   it('registers once across mounts and stays silent when the person refused', async () => {
@@ -204,7 +204,7 @@ describe('<Result /> — the push', () => {
     expect(registerPush).toHaveBeenCalledTimes(1);
     // A refusal is not a sentence: the chain path is the one that decides.
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-    expect(screen.getByText(ko.enter.resultWaiting)).toBeInTheDocument();
+    expect(screen.getByText(en.enter.resultWaiting)).toBeInTheDocument();
   });
 
   it('does not ask for the permission before there is an account to register', async () => {
@@ -222,12 +222,12 @@ describe('<Result /> — the deadline', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(WAITING_DEADLINE_MS - 1_000);
     });
-    expect(screen.getByText(ko.enter.resultWaiting)).toBeInTheDocument();
+    expect(screen.getByText(en.enter.resultWaiting)).toBeInTheDocument();
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_000);
     });
-    expect(screen.getByRole('alert')).toHaveTextContent(ko.enter.notConfirmed);
+    expect(screen.getByRole('alert')).toHaveTextContent(en.enter.notConfirmed);
     expect(WAITING_DEADLINE_MS).toBe((CODE_WINDOW_SECONDS + CLOCK_SKEW_SECONDS) * 1_000);
   });
 
@@ -245,7 +245,7 @@ describe('<Result /> — the deadline', () => {
     });
     // The 65 s is measured from the hand-over. An account arriving mid-wait re-opens the
     // subscription, and must not buy the screen another minute of spinner.
-    expect(screen.getByRole('alert')).toHaveTextContent(ko.enter.notConfirmed);
+    expect(screen.getByRole('alert')).toHaveTextContent(en.enter.notConfirmed);
   });
 
   it('lets the chain overrule the deadline when the log finally lands', async () => {
@@ -254,9 +254,9 @@ describe('<Result /> — the deadline', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(WAITING_DEADLINE_MS);
     });
-    expect(screen.getByRole('alert')).toHaveTextContent(ko.enter.notConfirmed);
+    expect(screen.getByRole('alert')).toHaveTextContent(en.enter.notConfirmed);
     act(() => emitLog?.(log('finalized')));
-    expect(screen.getByText(ko.enter.done)).toBeInTheDocument();
+    expect(screen.getByText(en.enter.done)).toBeInTheDocument();
   });
 });
 

@@ -5,7 +5,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { decodeFunctionData, keccak256, toBytes, type Hex } from 'viem';
 import { ticketAbi } from '../../shared/chain/abis';
 import type { EventDraft, StoredEventDraft } from '../../shared/api/firestore';
-import { ko as sharedKo } from '../../shared/copy/index';
+import { en as sharedEn } from '../../shared/copy/index';
 
 let store: StoredEventDraft[] = [];
 const listEventDrafts = vi.fn(async () => [...store].sort((a, b) => b.updatedAt - a.updatedAt));
@@ -89,7 +89,7 @@ const { CreateEvent } = await import('./CreateEvent');
 const { DraftPublish } = await import('./DraftPublish');
 const { emptyEventDraft, emptyEventDraftTier } = await import('../useEventDraft');
 const { organizerCopy } = await import('../copy');
-const copy = organizerCopy.ko.scene;
+const copy = organizerCopy.en.scene;
 // Dynamic, not a top-level import: the module is mocked, and pulling a named export at the top of
 // the file would run the mock factory before the mocked callables above are initialised. The
 // factory preserves this export (`...(await orig())`), so the real `CallableError` is what both
@@ -138,7 +138,7 @@ const READY: EventDraft = {
   transferable: true,
   transferCutoffHours: 2,
   tiers: [
-    { ...emptyEventDraftTier, name: '일반', supply: 100, maxPerWallet: 2, design: 'c' },
+    { ...emptyEventDraftTier, name: 'General', supply: 100, maxPerWallet: 2, design: 'c' },
     { ...emptyEventDraftTier, name: '학생', supply: 20, maxPerWallet: 1, imageCid: 'bafkart' },
   ],
 };
@@ -232,7 +232,7 @@ describe('the publish path', () => {
     expect(meta.saleStart as bigint).toBeLessThan(meta.saleEnd as bigint);
     expect(Number(meta.saleStart)).toBeCloseTo(Math.floor(Date.now() / 1_000), -1);
     expect(tiers).toEqual([
-      { name: '일반', priceUsdCents: 0n, supply: 100, minted: 0, maxPerWallet: 2, seated: false },
+      { name: 'General', priceUsdCents: 0n, supply: 100, minted: 0, maxPerWallet: 2, seated: false },
       { name: '학생', priceUsdCents: 0n, supply: 20, minted: 0, maxPerWallet: 1, seated: false },
     ]);
 
@@ -362,7 +362,7 @@ describe('when it does not land', () => {
     await create();
     await waitFor(() => expect(
       document.querySelector('.op-progress .steps__step--current .steps__label')?.textContent,
-    ).toBe(sharedKo.op.confirming));
+    ).toBe(sharedEn.op.confirming));
     expect(sendAction).toHaveBeenCalledTimes(1);
     // The relay id is written to the draft before the wait, so a reopen resumes rather than resends.
     await waitFor(() => {
@@ -439,7 +439,7 @@ describe('when it does not land', () => {
     await create();
     await waitFor(() => expect(
       document.querySelector('.op-progress .steps__step--current .steps__label')?.textContent,
-    ).toBe(sharedKo.op.confirming));
+    ).toBe(sharedEn.op.confirming));
     expect(followRelay).toHaveBeenCalledWith(SUBMITTED);
     expect(sendAction).not.toHaveBeenCalled();
   });
@@ -604,7 +604,7 @@ describe('the publish screen', () => {
   };
   const split = (bandBps: number, platformBps = 500): string => JSON.stringify([
     { name: '밴드', account: BAND, bps: bandBps, tag: 'band', platform: false },
-    { name: 'MONTI 플랫폼', account: PLATFORM, bps: platformBps, tag: 'platform', platform: true },
+    { name: 'MONTI platform', account: PLATFORM, bps: platformBps, tag: 'platform', platform: true },
   ]);
   const publishButton = () => screen.getByRole('button', { name: copy.publishScreen.publish });
 
@@ -619,7 +619,7 @@ describe('the publish screen', () => {
     settlementOn = true;
     open({ ...PAID, splitJson: split(9_000) });
     await screen.findByText(copy.publishScreen.splitIntro);
-    expect(await screen.findByText(organizerCopy.ko.settlement.errors.badSum)).toBeInTheDocument();
+    expect(await screen.findByText(organizerCopy.en.settlement.errors.badSum)).toBeInTheDocument();
     expect(publishButton()).toBeDisabled();
   });
 
@@ -628,7 +628,7 @@ describe('the publish screen', () => {
     const user = userEvent.setup();
     open({ ...PAID, splitJson: split(9_000) });
     await screen.findByText(copy.publishScreen.splitIntro);
-    const [bandPercent] = await screen.findAllByLabelText(organizerCopy.ko.settlement.percentLabel);
+    const [bandPercent] = await screen.findAllByLabelText(organizerCopy.en.settlement.percentLabel);
     await user.clear(bandPercent as HTMLElement);
     await user.type(bandPercent as HTMLElement, '95');
     expect(publishButton()).toBeEnabled();
@@ -645,9 +645,9 @@ describe('the publish screen', () => {
     await user.click(publishButton());
 
     const sheet = screen.getByRole('dialog', { name: copy.publishScreen.confirmHeading });
-    expect(sheet).toHaveTextContent('VIP · $30.00');
+    expect(sheet).toHaveTextContent('VIP · $30');
     expect(sheet).toHaveTextContent('밴드 · 95%');
-    expect(sheet).toHaveTextContent('MONTI 플랫폼 · 5%');
+    expect(sheet).toHaveTextContent('MONTI platform · 5%');
     expect(sheet).toHaveTextContent(copy.publishScreen.confirmBody);
     expect(sendAction).not.toHaveBeenCalled();
 
@@ -662,7 +662,7 @@ describe('the publish screen', () => {
     await create();
     await waitFor(() => expect(screen.getByText('landed:/org/new/done/12')).toBeInTheDocument());
     expect(sendAction).toHaveBeenCalledTimes(1);
-    expect(sendAction.mock.calls[0]?.[4]).toEqual({ reasons: ['밴드', 'MONTI 플랫폼'] });
+    expect(sendAction.mock.calls[0]?.[4]).toEqual({ reasons: ['밴드', 'MONTI platform'] });
     expect(createArgs().tiers).toEqual([
       { name: 'VIP', priceUsdCents: 3_000n, supply: 10, minted: 0, maxPerWallet: 1, seated: false },
     ]);

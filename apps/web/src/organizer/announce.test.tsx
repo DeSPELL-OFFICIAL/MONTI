@@ -17,7 +17,7 @@ vi.mock('../shared/api/firestore', () => ({ sendChatMessage: firestore }));
 
 const { organizerCopy } = await import('./copy');
 const { Announce } = await import('./Announce');
-const copy = organizerCopy.ko.announce;
+const copy = organizerCopy.en.announce;
 
 beforeEach(() => {
   pinMessage.mockResolvedValue({ ok: true, messageId: 'm1' });
@@ -128,7 +128,7 @@ describe('the organiser notice', () => {
       Object.assign(new Error('NOT_ORGANIZER_ADMIN'), { code: 'permission-denied' }),
     );
     render(<Announce eventId="5" />);
-    await user.type(screen.getByRole('textbox'), '공지');
+    await user.type(screen.getByRole('textbox'), 'Notice');
     await user.click(screen.getByRole('button', { name: copy.post }));
     expect(await screen.findByText(copy.notAllowed)).toBeInTheDocument();
   });
@@ -139,7 +139,7 @@ describe('the organiser notice', () => {
       Object.assign(new Error('CHAT_CLOSED'), { code: 'failed-precondition' }),
     );
     render(<Announce eventId="5" />);
-    await user.type(screen.getByRole('textbox'), '공지');
+    await user.type(screen.getByRole('textbox'), 'Notice');
     await user.click(screen.getByRole('button', { name: copy.post }));
     expect(await screen.findByText(copy.chatClosed)).toBeInTheDocument();
   });

@@ -154,7 +154,7 @@ describe('saleWindow', () => {
 });
 
 describe('tierProblems', () => {
-  const tier = { ...READY.tiers[0], name: '일반', supply: 100, maxPerWallet: 1 } as EventDraft['tiers'][number];
+  const tier = { ...READY.tiers[0], name: 'General', supply: 100, maxPerWallet: 1 } as EventDraft['tiers'][number];
   const withTiers = (tiers: EventDraft['tiers']): EventDraft => ({ ...READY, tiers });
 
   it('finds nothing wrong with one named, free, countable kind', () => {
@@ -190,7 +190,7 @@ describe('tierProblems', () => {
 });
 
 describe('paid kinds (v2: the price goes on chain at publish)', () => {
-  const tier = { ...READY.tiers[0], name: '일반', supply: 10, maxPerWallet: 1 } as EventDraft['tiers'][number];
+  const tier = { ...READY.tiers[0], name: 'General', supply: 10, maxPerWallet: 1 } as EventDraft['tiers'][number];
   const paid = { ...tier, currency: 'USDC' as const, amount: 30 };
 
   it('lets a priced kind through, and prices it in cents', () => {
@@ -287,7 +287,7 @@ describe('what a kind starts as', () => {
    * under a box nobody had touched the first time 만들기 was pressed.
    */
   it('is named 일반, so the one required field on it is already answered', () => {
-    expect(emptyEventDraftTier.name).toBe('일반');
+    expect(emptyEventDraftTier.name).toBe('General');
     expect(tierProblems(emptyEventDraft)).toEqual([]);
   });
 });

@@ -16,10 +16,10 @@ vi.mock('../shared/ui/a4Crop', async (orig) => ({
 
 const { ArtPicker } = await import('./ArtPicker');
 const { organizerCopy } = await import('./copy');
-const { ko: sharedCopy } = await import('../shared/copy/index');
+const { en: sharedCopy } = await import('../shared/copy/index');
 const { TICKET_ART_PRESETS } = await import('./scene/draftRules');
 
-const copy = organizerCopy.ko.scene.tiers;
+const copy = organizerCopy.en.scene.tiers;
 
 /** Captures the observer the carousel makes, so a test can drive a scroll-snap centre by hand. */
 class IOStub {
@@ -66,7 +66,7 @@ function setup(overrides: Partial<Props> = {}) {
     <ArtPicker
       art={{ preset: 'a' }}
       title="재즈 나이트"
-      tierName="일반"
+      tierName='General'
       onPreset={onPreset}
       onUploaded={onUploaded}
       {...overrides}

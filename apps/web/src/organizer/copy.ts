@@ -572,7 +572,7 @@ const ko = {
 
 const en: typeof ko = {
   home: {
-    title: 'Organiser',
+    title: 'Organizer',
     backToDiscover: 'Back to explore',
 
     orgs: 'Our team',
@@ -581,7 +581,7 @@ const en: typeof ko = {
     become: 'Create a team',
     // The callable answers with the number a second or two before the indexer lists it.
     orgPending: 'A team you just created appears in this list in a moment',
-    noPermission: 'You may not create events. Ask the team owner to give you the permission',
+    noPermission: "You don't have permission to create events. Ask the team owner for access",
 
     events: 'My events',
     eventsEmpty: 'No events yet. Start one with Create below',
@@ -589,7 +589,7 @@ const en: typeof ko = {
     // The list reads the indexed rows only. Titles live on IPFS, and a slow gateway must not
     // hold up rows that are already in hand.
     eventFallback: 'Event #{{id}}',
-    status: { Draft: 'In progress', Published: 'Public', Cancelled: 'Cancelled' },
+    status: { Draft: 'Draft', Published: 'Published', Cancelled: 'Cancelled' },
 
     create: 'Create',
     retry: 'Try again',
@@ -602,8 +602,8 @@ const en: typeof ko = {
     eventId: 'Event number',
     open: 'Open',
     team: 'Team',
-    orgId: 'Organisation number',
-    // The chain holds no name. An organisation with no orgProfiles document goes by number.
+    orgId: 'Organization number',
+    // The chain holds no name. An organization with no orgProfiles document goes by number.
     orgFallback: 'Team #{{id}}',
   },
 
@@ -641,29 +641,29 @@ const en: typeof ko = {
   },
 
   gates: {
-    title: 'Entry terminals',
-    pending: 'Terminals waiting for approval',
-    none: 'No terminal is waiting for approval',
+    title: 'Gate devices',
+    pending: 'Waiting for approval',
+    none: 'No gate devices are waiting for approval',
     register: 'Approve',
-    registerHelp: 'An approved terminal takes entries straight away',
-    registered: 'Approved terminals',
-    noneRegistered: 'No terminal approved yet',
+    registerHelp: 'Once approved, a gate device can check people in right away',
+    registered: 'Approved gate devices',
+    noneRegistered: 'No gate devices approved yet',
     reopen: 'Reopen',
     close: 'Close',
     revoke: 'Retire',
-    revokeConfirm: 'A retired terminal can never take entries again. Retire it?',
+    revokeConfirm: "A retired gate device can't check anyone in again. Retire it?",
     revokeKeep: 'Keep it',
     isOpen: 'Open',
     isClosed: 'Closed',
     isRevoked: 'Retired',
-    gateId: 'Terminal number',
-    gateLabel: 'Terminal {{n}}',
+    gateId: 'Gate number',
+    gateLabel: 'Gate {{n}}',
     gateDetails: 'Details',
-    pendingLabel: 'Terminal',
+    pendingLabel: 'Gate device',
     submittedAt: 'Sent at',
     manual: 'Type it in instead',
     manualSummary: 'Not listed? Type it in instead',
-    manualHelp: 'If the staff app\'s entry is not listed, copy the values under Details on the terminal screen exactly',
+    manualHelp: "If the gate device isn't listed, copy the values under Details on its screen exactly",
     account: 'Device ID',
     kx: 'Check value X',
     ky: 'Check value Y',
@@ -676,12 +676,12 @@ const en: typeof ko = {
       key: 'Copy the check value as 66 characters starting with 0x',
       // The contract only refuses a key whose halves are BOTH zero. A half-zero key is
       // accepted and then verifies no entry at all, so it is refused here instead.
-      halfZero: 'One check value is empty. Please request registration again on the terminal',
-      inUse: 'This terminal is already approved for another event',
-      unknownGate: 'No terminal has that number',
+      halfZero: 'One check value is empty. Request registration again on the gate device',
+      inUse: 'This gate device is already approved for another event',
+      unknownGate: 'No gate has that number',
       unknownEvent: 'No event has that number',
-      alreadyRevoked: 'That terminal is already retired',
-      notAllowed: 'You may not manage the entrances of this event',
+      alreadyRevoked: 'That gate device is already retired',
+      notAllowed: "You don't have permission to manage gates for this event",
       failed: 'Could not send that. Please try again in a moment',
     },
   },
@@ -693,14 +693,14 @@ const en: typeof ko = {
     role: 'Role',
     admin: 'Admin',
     manager: 'Manager',
-    canApprove: 'May approve entry exceptions directly',
-    requestOnly: 'May only file entry exception requests',
+    canApprove: 'Can approve manual check-ins',
+    requestOnly: 'Can only request manual check-ins',
     perms: {
       createEvent: 'Create events and post notices',
-      manageGates: 'Manage entry terminals',
-      approveOverride: 'Approve entry exceptions',
+      manageGates: 'Manage gate devices',
+      approveOverride: 'Approve manual check-ins',
       manageManagers: 'Manage managers',
-      manageBudget: 'Manage costs',
+      manageBudget: 'Manage payouts',
     },
     invited: 'Invitation created. Send the link below to the person it is for',
     link: 'Invitation link',
@@ -721,20 +721,20 @@ const en: typeof ko = {
     },
     grant: 'Give the role',
     grantClose: 'Close',
-    grantHelp: 'Write the account address the invited person gave you. Only the organisation owner can send this last step',
+    grantHelp: 'Write the account address the invited person gave you. Only the organization owner can send this last step',
     account: 'Account address',
     granted: 'The role is in place',
     working: 'Sending',
     check: 'Check now',
-    notOwner: 'Only the organisation owner can give a role',
+    notOwner: 'Only the organization owner can give a role',
     problems: {
-      orgId: 'Write the organisation number as a whole number of 1 or more',
+      orgId: 'Write the organization number as a whole number of 1 or more',
       phone: 'Write the mobile number in international form, starting with +',
       account: 'Copy the account address as 42 characters starting with 0x',
       bits: 'Please pick at least one permission',
-      notAllowed: 'You may not add people to this organisation',
-      notOwner: 'Only the organisation owner can send this',
-      unknownOrg: 'No organisation has that number',
+      notAllowed: 'You may not add people to this organization',
+      notOwner: 'Only the organization owner can send this',
+      unknownOrg: 'No organization has that number',
       notFound: 'No such invitation',
       failed: 'Could not send that. Please try again in a moment',
     },
@@ -744,11 +744,11 @@ const en: typeof ko = {
     title: 'Accept an invitation',
     working: 'Checking the invitation',
     accepted: 'Invitation accepted',
-    ownerMustSend: 'The organisation owner has to send the last step. Give them your account address below',
+    ownerMustSend: 'The organization owner has to send the last step. Give them your account address below',
     owner: 'Owner address',
     yourAccount: 'Your account address',
     role: 'Role',
-    orgId: 'Organisation number',
+    orgId: 'Organization number',
     check: 'Check now',
     done: 'The role is in place',
     waiting: 'This turns to done once the owner has sent it',
@@ -764,17 +764,17 @@ const en: typeof ko = {
 
   dashboard: {
     title: 'Event status',
-    sold: 'Signed up',
+    sold: 'Tickets out',
     remaining: 'Left',
-    checkins: 'Entered',
+    checkins: 'Checked in',
     attendees: 'Attendees',
     none: 'Nobody has signed up yet',
     kyc: 'Identity check',
     kycYes: 'Done',
     kycNo: 'Not done',
-    checkedIn: 'In',
+    checkedIn: 'Checked in',
     notCheckedIn: 'Not yet',
-    gates: 'Entry terminals',
+    gates: 'Gate devices',
     requests: 'Requests',
     notIndexed: 'No event has that number, or it has not been indexed yet',
     failed: 'Could not load the status. Please try again in a moment',
@@ -783,7 +783,7 @@ const en: typeof ko = {
     art: {
       title: 'Ticket pictures',
       help: 'You can change these at any time, even after the event is public',
-      kind: 'Kind {{index}}',
+      kind: 'Type {{index}}',
       change: 'Change',
       close: 'Done',
       // A failed read is not "no picture": saving on top of one would erase uploaded art.
@@ -808,7 +808,7 @@ const en: typeof ko = {
     approveSelected: 'Approve selected',
     approveAll: 'Approve all',
     reject: 'Reject',
-    tier: 'Kind {{tier}}',
+    tier: 'Type {{tier}}',
     working: 'Working',
     confirming: 'Still confirming. Refresh in a moment to see the change',
     failed: 'Could not finish. Please try again in a moment',
@@ -898,15 +898,15 @@ const en: typeof ko = {
     saleHelp: 'Sign-ups open the moment you create the event and close when it ends',
 
     // See the Korean block: one line above the button, and only for somebody with no
-    // organiser yet. The server writes the name and nothing can change it afterwards.
+    // organizer yet. The server writes the name and nothing can change it afterwards.
     org: {
-      label: 'Organiser name',
+      label: 'Organizer name',
       help: 'This name appears on the event. It cannot be changed later.',
       placeholder: 'e.g. Monti Crew',
     },
 
     problems: {
-      title: 'Write a title of 2 to 60 characters',
+      title: 'Titles need 2–60 characters',
       tags: 'Up to five tags, each up to 12 characters',
       body: 'Write the description in 2000 characters or fewer',
       region: 'Please pick a region',
@@ -921,18 +921,18 @@ const en: typeof ko = {
     tiers: {
       title: 'Tickets',
       next: 'Next',
-      add: 'Add a kind',
+      add: 'Add a ticket type',
       remove: 'Remove',
-      kind: 'Kind {{index}}',
+      kind: 'Type {{index}}',
       // The box the founder could not name. The label says what it is the name of.
-      name: 'Ticket kind (e.g. General, VIP)',
+      name: 'Ticket type (e.g. General, VIP)',
       nameHelp: 'This is the name printed on the ticket',
       namePlaceholder: 'General',
-      supply: 'How many',
+      supply: 'Quantity',
       // Quick chips above the quantity box; the group name is kept apart from the field label.
       supplyQuick: 'Quick amounts',
       supplyUnlimited: 'Unlimited',
-      maxPerWallet: 'Most one person may hold',
+      maxPerWallet: 'Limit per person',
       price: 'Price',
       free: 'Free',
       amount: 'Amount',
@@ -955,15 +955,15 @@ const en: typeof ko = {
       // The two receiving methods, shown only while the event is free (plan section A-2).
       receiveMethod: 'How people receive it',
       receiveAuto: 'First come, issued automatically',
-      receiveApproval: 'You get it after the organiser approves',
+      receiveApproval: 'You get it after the organizer approves',
       // Approval is refused by the deployed contract until the 01c redeploy, so it is off until
       // VITE_APPROVAL_MODES opens it.
       approvalSoon: 'Coming soon',
       rules: 'Rules for the whole event',
       // These three live on EventMeta and not on Tier, so a per-kind switch would be a lie.
-      rulesHelp: 'These three cannot differ by kind. There is one of each per event',
+      rulesHelp: 'These apply to every ticket type in the event',
       transferable: 'Can be given to a friend',
-      cutoff: 'Giving closes (hours before the event starts)',
+      cutoff: 'Stop transfers (hours before start)',
       requireKyc: 'Only people who passed the identity check',
       requireKycHelp: 'With this on, only people who finished the ID and face check can get a ticket. Leave it off for casual meetups',
       // Quick start: three presets that set the first kind and the receiving method in one tap.
@@ -971,12 +971,12 @@ const en: typeof ko = {
       // held behind the same flag as the receiving-method chip.
       quickStart: 'Quick start',
       quickFree: 'Free, first come',
-      quickApproval: 'Free, organiser approves',
-      quickPaid: 'Paid',
+      quickApproval: 'Free, organizer approves',
+      quickPaid: 'Paid, general admission',
       // Names for the transparent buttons laid over the preview — edit the picture, the kind, the
       // title and the price straight from the preview.
       editArt: 'Change the ticket picture',
-      editKind: 'Edit the kind name',
+      editKind: 'Edit the ticket type name',
       editTitle: 'Edit the event title',
       editPrice: 'Set the price',
       feeNote: 'MONTI covers the cost of publishing it',
@@ -985,16 +985,16 @@ const en: typeof ko = {
 
 
     done: {
-      title: 'Your event is public',
+      title: 'Your event is live',
       nowPublic: 'Share the link below to invite people',
       manage: 'Open the event screen',
-      link: 'Event address',
-      copy: 'Copy the address',
+      link: 'Event link',
+      copy: 'Copy link',
       copied: 'Copied',
-      copyFailed: 'Could not copy it. Press and hold the address to copy it',
-      qr: 'QR code for the event address',
+      copyFailed: "Couldn't copy it. Press and hold the link to copy it",
+      qr: 'QR code for the event link',
       view: 'See the event',
-      home: 'Organiser home',
+      home: 'Organizer home',
       // The retry lives on this screen. Nobody is sent to a screen that does not exist.
       artFailed: 'The ticket pictures or the venue did not save. Press Save again below. Your draft has been kept until they do',
       retry: 'Save again',
@@ -1010,21 +1010,21 @@ const en: typeof ko = {
       finishing: 'Finishing up',
       // See the Korean block: the decision block's line and buttons at the 45s cap. A timeout is not
       // a failure, and 다시 시도 re-checks the op hash, so pressing twice still makes one event.
-      stuck: 'Still confirming. Try again, or check it later on your organiser screen',
+      stuck: 'Still confirming. Try again, or check it later on your organizer screen',
       checkLater: 'Check later',
     },
 
     publishProblems: {
       notYourOrg: 'You may not create events for this team',
-      orgName: 'Write an organiser name of 2 to 40 characters',
+      orgName: 'Write an organizer name of 2 to 40 characters',
       orgLimit: 'You can have up to three teams. Please use one you already have',
       orgNotActive: 'Please finish signing up first',
-      orgFailed: 'Could not create your organiser. Please try again in a moment',
+      orgFailed: 'Could not create your organizer. Please try again in a moment',
       // The event was made but the receipt did not name it. The draft and the operation hash
       // are kept, and pressing again looks the number up by that hash — it makes no new event.
       noEventId: 'Your event is public. Only its number has not come back yet — press "Publish" once more to look it up. It will not create a second event',
       // Shown while a recorded op that was underpriced or too old is being resent at the current
-      // fee — progress, not a problem the organiser has to fix.
+      // fee — progress, not a problem the organizer has to fix.
       opExpired: 'The earlier request expired — sending again',
       pinFailed: 'Cannot save that right now. Please try again in a moment',
       /** The daily pin quota (resource-exhausted · PIN_QUOTA) — not a mistake to fix, it lifts tomorrow. */
@@ -1033,9 +1033,9 @@ const en: typeof ko = {
       badTags: 'Please check the tags again',
       badPoster: 'Please upload the poster again',
       schedule: 'The end has to come after the start',
-      tiersEmpty: 'Add at least one ticket kind',
+      tiersEmpty: 'Add at least one ticket type',
       paidApproval: 'Paid tickets cannot be issued by approval. Switch to first come, first served under Edit details',
-      notSettlementManager: 'You may not set the split for this team. Ask the team owner for the permission',
+      notSettlementManager: "You don't have permission to set payouts for this team. Ask the team owner for access",
       settlementPaused: 'Paid events cannot be published right now. Please try again in a moment',
       splitInvalid: 'Please check the split rules again',
       failed: 'Could not publish the event. Please try again in a moment',
@@ -1053,7 +1053,7 @@ const en: typeof ko = {
       tierLine: '{{name}} · {{price}}',
       splitLine: '{{name}} · {{percent}}%',
       splitIntro: 'Decide who gets how much of each ticket sale. Each share is paid out automatically once entry is confirmed. It cannot be changed after publishing',
-      linkNote: 'Publishing gives the event its address',
+      linkNote: 'Publishing gives your event a shareable link',
       publish: 'Publish',
       confirmHeading: 'Publish it as it is?',
       confirmBody: 'Once it is public, anyone can see this event and sign up. The details and the split rules cannot be changed afterwards',
@@ -1066,13 +1066,13 @@ const en: typeof ko = {
     },
 
     tierProblems: {
-      tiersTooMany: 'Up to eight kinds',
-      tierName: 'Give every kind a name',
-      tierNameTooLong: 'Write a kind name of 40 characters or fewer',
-      tierSupply: 'Write how many as 1 or more',
-      tierMaxPerWallet: 'Write the per-person limit as a number from 1 to 65535',
-      cutoff: 'Write the giving cut-off as 0 hours or more',
-      tierPrice: 'Write a paid ticket price in whole dollars, $1 or more',
+      tiersTooMany: 'Up to eight ticket types',
+      tierName: 'Give every ticket type a name',
+      tierNameTooLong: 'Keep ticket type names to 40 characters or fewer',
+      tierSupply: 'Quantity must be 1 or more',
+      tierMaxPerWallet: 'The per-person limit must be between 1 and 65535',
+      cutoff: 'The transfer cut-off must be 0 hours or more',
+      tierPrice: 'Set a price in whole dollars, $1 or more',
       paidApproval: 'Paid tickets cannot be issued by approval. Switch to first come, first served',
     },
 
@@ -1118,7 +1118,7 @@ const en: typeof ko = {
 export type OrganizerCopy = typeof ko;
 export const organizerCopy = { ko, en };
 
-/** Typed organiser copy for the current locale. Re-renders when the language changes. */
+/** Typed organizer copy for the current locale. Re-renders when the language changes. */
 export function useOrganizerCopy(): OrganizerCopy {
   return useLocale() === 'en' ? en : ko;
 }

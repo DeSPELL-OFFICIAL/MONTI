@@ -49,15 +49,15 @@ afterEach(() => vi.restoreAllMocks());
 describe('PurchaseSheet', () => {
   it('shows the mock card sheet with the test badge, test notice and the $ amount', () => {
     renderSheet();
-    expect(screen.getByText('테스트 환경')).toBeTruthy();
-    expect(screen.getByText('테스트 결제예요 · 실제로 돈이 빠져나가지 않아요')).toBeTruthy();
-    expect(screen.getByRole('button', { name: '$30.00 결제하기' })).toBeTruthy();
+    expect(screen.getByText('Test environment')).toBeTruthy();
+    expect(screen.getByText('This is a test payment · no real money moves')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Pay $30' })).toBeTruthy();
   });
 
   it('calls purchaseTicket with the mock card payment and lands on 완료', async () => {
     const user = userEvent.setup();
     renderSheet();
-    await user.click(screen.getByRole('button', { name: '$30.00 결제하기' }));
+    await user.click(screen.getByRole('button', { name: 'Pay $30' }));
 
     await waitFor(() => expect(mocks.purchaseTicket).toHaveBeenCalledTimes(1));
     expect(mocks.purchaseTicket).toHaveBeenCalledWith(
@@ -66,13 +66,13 @@ describe('PurchaseSheet', () => {
     // A deposited order (ticket and payment in one step) remembers the token so the receipt can
     // surface on the ticket detail.
     expect(mocks.rememberOrder).toHaveBeenCalledWith('o1', { eventId: '5', tokenId: '42' });
-    expect(await screen.findByText('결제 완료 · 티켓을 받았어요')).toBeTruthy();
-    expect(screen.getByRole('link', { name: '영수증 보기' })).toHaveAttribute('href', '/tickets/42');
+    expect(await screen.findByText('Paid · your ticket is ready')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'See receipt' })).toHaveAttribute('href', '/tickets/42');
   });
 
   it('titles the sheet as a card payment', () => {
     renderSheet();
-    expect(screen.getByRole('dialog', { name: '카드 결제' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Card payment' })).toBeTruthy();
   });
 
   it('lets the person leave a long wait, pointing at 내 티켓 rather than paying twice', async () => {
@@ -81,15 +81,15 @@ describe('PurchaseSheet', () => {
       mocks.purchaseTicket.mockResolvedValue({ orderId: 'o1', relayId: 'o1', status: 'sent' });
       renderSheet();
       await act(async () => {
-        fireEvent.click(screen.getByRole('button', { name: '$30.00 결제하기' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Pay $30' }));
       });
-      expect(screen.getByRole('button', { name: '닫기' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Close' })).toBeDisabled();
       await act(async () => {
         vi.advanceTimersByTime(46_000);
       });
-      expect(screen.getByText('시간이 걸리고 있어요. 결제는 진행 중이고 티켓은 곧 내 티켓에 나타나요.')).toBeTruthy();
-      expect(screen.getByRole('button', { name: '닫기' })).toBeEnabled();
-      expect(screen.getByRole('button', { name: '내 티켓에서 확인하기' })).toBeTruthy();
+      expect(screen.getByText('This is taking a while. Your payment is going through and the ticket will appear in My tickets shortly.')).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Close' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Check My tickets' })).toBeTruthy();
       expect(mocks.purchaseTicket).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
@@ -100,64 +100,64 @@ describe('PurchaseSheet', () => {
     const user = userEvent.setup();
     mocks.purchaseTicket.mockResolvedValue({ orderId: 'o1', relayId: 'r-o1', status: 'sent' });
     renderSheet();
-    await user.click(screen.getByRole('button', { name: '$30.00 결제하기' }));
+    await user.click(screen.getByRole('button', { name: 'Pay $30' }));
 
     // 'sent' keeps the wait open until the purchase relay doc confirms ticket + payment together.
     await waitFor(() => expect(relayListener).not.toBeNull());
     expect(mocks.watchRelayStatus).toHaveBeenCalledWith('r-o1', expect.any(Function), expect.any(Function));
-    expect(screen.queryByText('결제 완료 · 티켓을 받았어요')).toBeNull();
+    expect(screen.queryByText('Paid · your ticket is ready')).toBeNull();
     act(() => relayListener?.({ status: 'confirmed', tokenId: '42' }));
-    expect(await screen.findByText('결제 완료 · 티켓을 받았어요')).toBeTruthy();
+    expect(await screen.findByText('Paid · your ticket is ready')).toBeTruthy();
     expect(mocks.rememberOrder).toHaveBeenLastCalledWith('o1', { eventId: '5', tokenId: '42' });
-    expect(screen.getByRole('link', { name: '영수증 보기' })).toHaveAttribute('href', '/tickets/42');
+    expect(screen.getByRole('link', { name: 'See receipt' })).toHaveAttribute('href', '/tickets/42');
   });
 
   it('says nothing was charged when the in-flight payment fails, and offers the retry', async () => {
     const user = userEvent.setup();
     mocks.purchaseTicket.mockResolvedValue({ orderId: 'o1', relayId: 'o1', status: 'sent' });
     renderSheet();
-    await user.click(screen.getByRole('button', { name: '$30.00 결제하기' }));
+    await user.click(screen.getByRole('button', { name: 'Pay $30' }));
 
     await waitFor(() => expect(relayListener).not.toBeNull());
     act(() => relayListener?.({ status: 'failed', error: { code: 'REVERTED' } }));
-    expect(await screen.findByText('결제가 완료되지 않았어요 · 청구된 금액은 없어요. 다시 시도해 주세요')).toBeTruthy();
+    expect(await screen.findByText("The payment didn't go through · nothing was charged. Please try again")).toBeTruthy();
     // No ticket, no half state: the pay button is back for a fresh attempt.
-    expect(screen.getByRole('button', { name: '$30.00 결제하기' })).toBeEnabled();
-    expect(screen.queryByText('결제 완료 · 티켓을 받았어요')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Pay $30' })).toBeEnabled();
+    expect(screen.queryByText('Paid · your ticket is ready')).toBeNull();
   });
 
   it('names a price mismatch rather than the generic failure', async () => {
     const user = userEvent.setup();
     mocks.purchaseTicket.mockRejectedValue({ code: 'failed-precondition', details: { code: 'PRICE_MISMATCH', expected: 2500 } });
     renderSheet();
-    await user.click(screen.getByRole('button', { name: '$30.00 결제하기' }));
+    await user.click(screen.getByRole('button', { name: 'Pay $30' }));
 
-    expect(await screen.findByText('티켓 값이 바뀌었어요. 새로고침 후 다시 시도해 주세요')).toBeTruthy();
+    expect(await screen.findByText('The price changed. Please refresh and try again')).toBeTruthy();
   });
 
   it.each([
-    ['TREASURY_FUNDS', '지금은 결제를 받을 수 없어요. 잠시 후 다시 시도해 주세요'],
-    ['PAUSED', '지금은 결제를 받을 수 없어요. 잠시 후 다시 시도해 주세요'],
-    ['CONFIG', '지금은 결제를 받을 수 없어요. 잠시 후 다시 시도해 주세요'],
-    ['NOT_PAID_TIER', '티켓 값이 바뀌었어요. 새로고침 후 다시 시도해 주세요'],
-    ['UNKNOWN_TIER', '티켓 값이 바뀌었어요. 새로고침 후 다시 시도해 주세요'],
-    ['SOLD_OUT', '이 종류는 마감됐어요'],
-    ['NOT_ON_SALE', '지금은 받을 수 없어요. 판매 기간을 확인해 주세요.'],
-    ['NOT_PUBLISHED', '지금은 받을 수 없어요. 판매 기간을 확인해 주세요.'],
-    ['EVENT_ENDED', '이미 끝난 행사예요'],
-    ['KYC_REQUIRED', '본인 확인을 마친 뒤에 결제할 수 있어요'],
-    ['LIMIT', '이 행사에서 받을 수 있는 티켓을 이미 다 받았어요.'],
-    ['APPROVAL_REQUIRED', '이 행사는 주최자 승인 후 받을 수 있어요.'],
-    ['DEVICE_LOCKED', '이 휴대폰으로는 지금 받을 수 없어요. 다시 로그인해 주세요.'],
-    ['TOO_MANY_PENDING', '앞선 결제를 처리하고 있어요. 잠시 뒤 내 티켓에서 확인해 주세요'],
-    ['SEND_FAILED', '결제가 완료되지 않았어요 · 청구된 금액은 없어요. 다시 시도해 주세요'],
-    ['REVERTED', '결제가 완료되지 않았어요 · 청구된 금액은 없어요. 다시 시도해 주세요'],
-    ['AUTH_EXPIRED', '결제가 완료되지 않았어요 · 청구된 금액은 없어요. 다시 시도해 주세요'],
+    ['TREASURY_FUNDS', "Payments aren't available right now. Please try again in a moment"],
+    ['PAUSED', "Payments aren't available right now. Please try again in a moment"],
+    ['CONFIG', "Payments aren't available right now. Please try again in a moment"],
+    ['NOT_PAID_TIER', 'The price changed. Please refresh and try again'],
+    ['UNKNOWN_TIER', 'The price changed. Please refresh and try again'],
+    ['SOLD_OUT', 'This ticket type is sold out'],
+    ['NOT_ON_SALE', 'Not available right now. Please check the sale period.'],
+    ['NOT_PUBLISHED', 'Not available right now. Please check the sale period.'],
+    ['EVENT_ENDED', 'This event has already ended'],
+    ['KYC_REQUIRED', 'Please verify your identity before paying'],
+    ['LIMIT', 'You already have every ticket this event allows.'],
+    ['APPROVAL_REQUIRED', 'You can get a ticket after the organizer approves.'],
+    ['DEVICE_LOCKED', "This phone can't get it right now. Please sign in again."],
+    ['TOO_MANY_PENDING', 'Your previous payment is still going through. Check My tickets in a moment'],
+    ['SEND_FAILED', "The payment didn't go through · nothing was charged. Please try again"],
+    ['REVERTED', "The payment didn't go through · nothing was charged. Please try again"],
+    ['AUTH_EXPIRED', "The payment didn't go through · nothing was charged. Please try again"],
   ])('turns the %s refusal into its sentence', async (code, sentence) => {
     const user = userEvent.setup();
     mocks.purchaseTicket.mockRejectedValue({ code: 'failed-precondition', details: { code } });
     renderSheet();
-    await user.click(screen.getByRole('button', { name: '$30.00 결제하기' }));
+    await user.click(screen.getByRole('button', { name: 'Pay $30' }));
 
     expect(await screen.findByText(sentence)).toBeTruthy();
   });
@@ -166,8 +166,8 @@ describe('PurchaseSheet', () => {
     const user = userEvent.setup();
     mocks.purchaseTicket.mockRejectedValue(new Error('network'));
     renderSheet();
-    await user.click(screen.getByRole('button', { name: '$30.00 결제하기' }));
+    await user.click(screen.getByRole('button', { name: 'Pay $30' }));
 
-    expect(await screen.findByText('결제하지 못했어요. 잠시 뒤 다시 시도해 주세요')).toBeTruthy();
+    expect(await screen.findByText("Couldn't pay. Please try again in a moment")).toBeTruthy();
   });
 });

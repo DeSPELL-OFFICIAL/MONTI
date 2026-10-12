@@ -51,7 +51,7 @@ const { TicketDetail } = await import('./Detail');
 const OWNER = `0x${'cd'.repeat(20)}`;
 /** One fixed moment, so the date on the ticket is asserted against the same clock that drew it. */
 const STARTS_AT = 1_790_000_000;
-const STARTS_ON = new Date(STARTS_AT * 1000).toLocaleDateString('ko', { dateStyle: 'medium' });
+const STARTS_ON = new Date(STARTS_AT * 1000).toLocaleDateString('en', { dateStyle: 'medium' });
 const OTHER = `0x${'ef'.repeat(20)}`;
 const NOW = Math.floor(Date.now() / 1000);
 
@@ -83,7 +83,7 @@ const CONTEXT = {
     { id: '7', status: 'Published', imageCid: 'bafkevent7', startsAt: String(STARTS_AT) },
     { id: '9', status: 'Cancelled', imageCid: 'bafkevent9', startsAt: String(STARTS_AT) },
   ],
-  Tier: [tier('7', 0, '일반'), tier('7', 1, '스탠딩'), tier('9', 0, '일반')],
+  Tier: [tier('7', 0, 'General'), tier('7', 1, '스탠딩'), tier('9', 0, 'General')],
   // Both handovers sit on events no held ticket names, so their status arrives one trip later.
   Ticket: [ticket('5', { owner: OTHER, eventId: '8' }), ticket('10', { owner: OTHER, eventId: '12' })],
 };
@@ -139,9 +139,9 @@ function indexerFailure(kind: 'network' | 'http' | 'graphql' | 'empty', message:
   return Object.assign(new Error(message), { name: 'EnvioError', kind });
 }
 
-const COULD_NOT_FETCH = '정보를 가져오지 못했어요. 잠시 뒤 다시 시도해 주세요.';
-const NOT_RIGHT_NOW = '지금 정보를 가져올 수 없어요. 잠시 뒤 다시 시도해 주세요.';
-const GENERIC = '문제가 생겼어요. 잠시 뒤 다시 시도해 주세요.';
+const COULD_NOT_FETCH = 'We could not load that. Please try again in a moment.';
+const NOT_RIGHT_NOW = 'That information is not available right now. Please try again in a moment.';
+const GENERIC = 'Something went wrong. Please try again in a moment.';
 
 beforeEach(() => {
   setSession({ status: 'signedIn', account: OWNER as `0x${string}` });
@@ -184,25 +184,25 @@ function renderDetail(tokenId: string) {
 describe('TicketList', () => {
   it('shows every derived state', async () => {
     renderList();
-    await screen.findByRole('link', { name: /입장 전/ });
-    expect(within(row('1')).getByText('입장 전')).toBeInTheDocument();
-    expect(within(row('2')).getByText('입장 완료')).toBeInTheDocument();
-    expect(within(row('3')).getByText('보내는 중')).toBeInTheDocument();
-    expect(within(row('5')).getByText('친구에게 줌')).toBeInTheDocument();
+    await screen.findByRole('link', { name: /Not used/ });
+    expect(within(row('1')).getByText('Not used')).toBeInTheDocument();
+    expect(within(row('2')).getByText('Checked in')).toBeInTheDocument();
+    expect(within(row('3')).getByText('Sending')).toBeInTheDocument();
+    expect(within(row('5')).getByText('Given away')).toBeInTheDocument();
     // A revoked ticket, a ticket on a called-off event and a ticket handed over out of one.
-    expect(screen.getAllByRole('link', { name: /취소됨/ })).toHaveLength(3);
+    expect(screen.getAllByRole('link', { name: /Cancelled/ })).toHaveLength(3);
   });
 
   it('lets a called-off event outrank 양도됨 even when its status arrives a trip later', async () => {
     renderList();
-    await screen.findAllByRole('link', { name: /취소됨/ });
-    expect(within(row('10')).getByText('취소됨')).toBeInTheDocument();
-    expect(within(row('10')).queryByText('친구에게 줌')).toBeNull();
+    await screen.findAllByRole('link', { name: /Cancelled/ });
+    expect(within(row('10')).getByText('Cancelled')).toBeInTheDocument();
+    expect(within(row('10')).queryByText('Given away')).toBeNull();
   });
 
   it('asks the indexer only for the check-ins, events and handovers its own rows name', async () => {
     renderList();
-    await screen.findByRole('link', { name: /입장 전/ });
+    await screen.findByRole('link', { name: /Not used/ });
     expect(gql).toHaveBeenNthCalledWith(2, expect.stringContaining('TicketContext'), {
       tokenIds: ['1', '2', '3', '4', '6'],
       eventIds: ['7', '9'],
@@ -221,7 +221,7 @@ describe('TicketList', () => {
   it('shows the empty sentence when nothing is owned', async () => {
     gql.mockImplementation(async () => ({ Ticket: [], Offer: [] }));
     renderList();
-    expect(await screen.findByText('아직 티켓이 없어요.')).toBeInTheDocument();
+    expect(await screen.findByText('No tickets yet.')).toBeInTheDocument();
   });
 
   /** An indexer that answered badly is not the same thing as a phone with no connection. */
@@ -230,7 +230,7 @@ describe('TicketList', () => {
     gql.mockRejectedValue(indexerFailure('http', 'HTTP_502'));
     renderList();
     expect(await screen.findByRole('alert')).toHaveTextContent(NOT_RIGHT_NOW);
-    expect(screen.getByRole('button', { name: '다시 시도' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   });
 });
 
@@ -243,17 +243,17 @@ describe('TicketDetail', () => {
 
   it('shows the state, the door guide and the entry button before entry', async () => {
     renderDetail('1');
-    expect(await screen.findByText('입장 전')).toBeInTheDocument();
-    expect(screen.getByText('입구에서 입장하기를 누르고 60초 안에 단말기에 휴대폰을 대세요.')).toBeInTheDocument();
-    expect(screen.getByText('보여줄 코드는 없어요.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '입장하기' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '친구에게 주기' })).toBeInTheDocument();
+    expect(await screen.findByText('Not used')).toBeInTheDocument();
+    expect(screen.getByText('At the door, tap Enter and hold your phone to the reader within 60 seconds.')).toBeInTheDocument();
+    expect(screen.getByText('There is no code to show.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Enter' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Give to a friend' })).toBeInTheDocument();
   });
 
   it('shows the ticket number staff search by, with a copy action', async () => {
     renderDetail('1');
-    expect(await screen.findByText(/티켓 번호/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '번호 복사' })).toBeInTheDocument();
+    expect(await screen.findByText(/Ticket number/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy number' })).toBeInTheDocument();
   });
 
   it('shows a short ticket number up front and keeps the full one under 상세', async () => {
@@ -261,10 +261,10 @@ describe('TicketDetail', () => {
     gql.mockImplementation(async (query: string) =>
       query.includes('OwnedTickets') ? { Ticket: [...OWNED, ticket(tokenId)], Offer: OFFERS } : answerIndexer(query));
     renderDetail(tokenId);
-    const line = await screen.findByText(/티켓 번호/);
+    const line = await screen.findByText(/Ticket number/);
     expect(line).toHaveTextContent('No. 42-8633');
     expect(line).not.toHaveTextContent(tokenId);
-    const details = screen.getByText('상세').closest('details');
+    const details = screen.getByText('Details').closest('details');
     expect(details).not.toBeNull();
     expect(details).toHaveTextContent(tokenId);
     expect(details).not.toHaveAttribute('open');
@@ -272,10 +272,10 @@ describe('TicketDetail', () => {
 
   it('drops the entry and handover buttons once the ticket is used', async () => {
     renderDetail('2');
-    expect(await screen.findByText('입장 완료')).toBeInTheDocument();
-    expect(screen.queryByText('입구에서 입장하기를 누르고 60초 안에 단말기에 휴대폰을 대세요.')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '입장하기' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '친구에게 주기' })).not.toBeInTheDocument();
+    expect(await screen.findByText('Checked in')).toBeInTheDocument();
+    expect(screen.queryByText('At the door, tap Enter and hold your phone to the reader within 60 seconds.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Enter' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Give to a friend' })).not.toBeInTheDocument();
   });
 
   /**
@@ -294,8 +294,8 @@ describe('TicketDetail', () => {
     expect(screen.queryByText(GENERIC)).not.toBeInTheDocument();
 
     // The retry is the point of the branch: the second read succeeds and the ticket appears.
-    await userEvent.click(screen.getByRole('button', { name: '다시 시도' }));
-    expect(await screen.findByText('입장 전')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByText('Not used')).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
@@ -306,8 +306,8 @@ describe('TicketDetail', () => {
   it('keeps the not-found path for a ticket the list simply does not hold', async () => {
     renderDetail('999');
     expect(await screen.findByRole('alert')).toHaveTextContent(GENERIC);
-    expect(screen.queryByRole('button', { name: '다시 시도' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '내 티켓' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Tickets' })).toBeInTheDocument();
   });
 });
 
@@ -319,10 +319,10 @@ describe('TicketDetail', () => {
 describe('ticket art', () => {
   it('bands the ticket that was used, and only that one', async () => {
     renderList();
-    await screen.findByRole('link', { name: /입장 전/ });
-    expect(within(row('2')).getByText('사용됨')).toBeInTheDocument();
-    expect(within(row('1')).queryByText('사용됨')).toBeNull();
-    expect(within(row('3')).queryByText('사용됨')).toBeNull();
+    await screen.findByRole('link', { name: /Not used/ });
+    expect(within(row('2')).getByText('Used')).toBeInTheDocument();
+    expect(within(row('1')).queryByText('Used')).toBeNull();
+    expect(within(row('3')).queryByText('Used')).toBeNull();
   });
 
   /**
@@ -332,15 +332,15 @@ describe('ticket art', () => {
    */
   it('keeps the used art on a ticket that was revoked after it was used', async () => {
     renderList();
-    await screen.findAllByRole('link', { name: /취소됨/ });
-    expect(within(row('4')).getByText('취소됨')).toBeInTheDocument();
-    expect(within(row('4')).getByText('사용됨')).toBeInTheDocument();
+    await screen.findAllByRole('link', { name: /Cancelled/ });
+    expect(within(row('4')).getByText('Cancelled')).toBeInTheDocument();
+    expect(within(row('4')).getByText('Used')).toBeInTheDocument();
   });
 
   it('draws the stored preset, and the bundled one where there is no document', async () => {
     art.docs.set('eventArt/7', { tiers: [{ design: 'c' }] });
     renderList();
-    await screen.findByRole('link', { name: /입장 전/ });
+    await screen.findByRole('link', { name: /Not used/ });
     await waitFor(() => expect(presetIn(row('1'))).toBe('c'));
     // #5 belongs to an event `saveEventArt` has never been called for — the ordinary case.
     expect(presetIn(row('5'))).toBe('a');
@@ -355,7 +355,7 @@ describe('ticket art', () => {
     art.docs.set('eventArt/7', { tiers: [{ design: 'aurora' }] });
     art.docs.set('eventArt/8', { tiers: [{ design: 'c' }] });
     renderList();
-    await screen.findByRole('link', { name: /입장 전/ });
+    await screen.findByRole('link', { name: /Not used/ });
     // The same render honours a key it does know, so this is a fallback and not a dead read.
     await waitFor(() => expect(presetIn(row('5'))).toBe('c'));
     expect(presetIn(row('1'))).toBe('a');
@@ -365,16 +365,16 @@ describe('ticket art', () => {
   it('still draws every row when the art document cannot be read at all', async () => {
     art.refuse = true;
     renderList();
-    await screen.findByRole('link', { name: /입장 전/ });
+    await screen.findByRole('link', { name: /Not used/ });
     expect(presetIn(row('1'))).toBe('a');
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('captions the picture with the event and the ticket kind', async () => {
     renderList();
-    await screen.findByRole('link', { name: /입장 전/ });
+    await screen.findByRole('link', { name: /Not used/ });
     await waitFor(() => expect(within(row('1')).getAllByText('한여름 밤의 재즈').length).toBeGreaterThan(0));
-    expect(within(row('1')).getByText('일반')).toBeInTheDocument();
+    expect(within(row('1')).getByText('General')).toBeInTheDocument();
   });
 
   /**
@@ -384,7 +384,7 @@ describe('ticket art', () => {
    */
   it('prints whose ticket it is, from the profile', async () => {
     renderList();
-    await screen.findByRole('link', { name: /입장 전/ });
+    await screen.findByRole('link', { name: /Not used/ });
     await waitFor(() => expect(within(row('1')).getByText('김태완')).toBeInTheDocument());
     // Every row is the same person's, so every row carries the same name.
     expect(within(row('5')).getByText('김태완')).toBeInTheDocument();
@@ -393,29 +393,29 @@ describe('ticket art', () => {
   it('falls back to a word for somebody who never gave a name', async () => {
     art.docs.set('users/uid-1', { displayName: '' });
     renderList();
-    await screen.findByRole('link', { name: /입장 전/ });
-    await waitFor(() => expect(within(row('1')).getByText('게스트')).toBeInTheDocument());
+    await screen.findByRole('link', { name: /Not used/ });
+    await waitFor(() => expect(within(row('1')).getByText('Guest')).toBeInTheDocument());
     expect(within(row('1')).queryByText('김태완')).toBeNull();
   });
 
   it('falls back to the same word when there is no profile document at all', async () => {
     me.uid = null;
     renderList();
-    await screen.findByRole('link', { name: /입장 전/ });
-    await waitFor(() => expect(within(row('1')).getByText('게스트')).toBeInTheDocument());
+    await screen.findByRole('link', { name: /Not used/ });
+    await waitFor(() => expect(within(row('1')).getByText('Guest')).toBeInTheDocument());
   });
 
   /** The start time comes off the indexer's `Event.startsAt`, formatted for the locale. */
   it('prints the day the event starts', async () => {
     renderList();
-    await screen.findByRole('link', { name: /입장 전/ });
+    await screen.findByRole('link', { name: /Not used/ });
     await waitFor(() => expect(within(row('1')).getAllByText(STARTS_ON).length).toBeGreaterThan(0));
   });
 
   /** A ticket the index has no start time for carries no date — never a placeholder one. */
   it('draws no date for a ticket whose event named no start', async () => {
     renderList();
-    await screen.findAllByRole('link', { name: /취소됨/ });
+    await screen.findAllByRole('link', { name: /Cancelled/ });
     await waitFor(() => expect(within(row('1')).getAllByText(STARTS_ON).length).toBeGreaterThan(0));
     expect(within(row('10')).queryByText(STARTS_ON)).toBeNull();
     // The stub is drawn all the same — the name is on it, the date line simply is not there.
@@ -425,34 +425,34 @@ describe('ticket art', () => {
   /** A gateway that will not answer costs the ticket its title, never its row. */
   it('names a ticket whose event nothing could describe', async () => {
     renderList();
-    await screen.findByRole('link', { name: /입장 전/ });
+    await screen.findByRole('link', { name: /Not used/ });
     // #5's document 404s at the gateway; #10's event was never pinned one to ask about. Both fail.
-    await waitFor(() => expect(within(row('5')).getAllByText('행사 이름을 불러오지 못했어요').length).toBeGreaterThan(0));
-    expect(within(row('10')).getAllByText('행사 이름을 불러오지 못했어요').length).toBeGreaterThan(0);
+    await waitFor(() => expect(within(row('5')).getAllByText("Couldn't load the event name").length).toBeGreaterThan(0));
+    expect(within(row('10')).getAllByText("Couldn't load the event name").length).toBeGreaterThan(0);
     // And #10's event named no tier either, so the kind falls back to a word of its own.
-    expect(within(row('10')).getByText('티켓')).toBeInTheDocument();
+    expect(within(row('10')).getByText('Ticket')).toBeInTheDocument();
   });
 
   it('shows the same ticket, banded, on the detail screen', async () => {
     renderDetail('2');
-    expect(await screen.findByText('입장 완료')).toBeInTheDocument();
-    expect(screen.getByText('사용됨')).toBeInTheDocument();
+    expect(await screen.findByText('Checked in')).toBeInTheDocument();
+    expect(screen.getByText('Used')).toBeInTheDocument();
     await waitFor(() => expect(screen.getAllByText('한여름 밤의 재즈').length).toBeGreaterThan(0));
     expect(presetIn(document)).toBe('a');
   });
 
   it('hands the detail screen the same name and the same date as the list', async () => {
     renderDetail('1');
-    expect(await screen.findByText('입장 전')).toBeInTheDocument();
+    expect(await screen.findByText('Not used')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText('김태완')).toBeInTheDocument());
     expect(screen.getByText(STARTS_ON)).toBeInTheDocument();
   });
 
   it('leaves the band off a ticket the detail screen still lets you enter with', async () => {
     renderDetail('1');
-    expect(await screen.findByText('입장 전')).toBeInTheDocument();
-    expect(screen.queryByText('사용됨')).toBeNull();
-    expect(screen.getByRole('button', { name: '입장하기' })).toBeInTheDocument();
+    expect(await screen.findByText('Not used')).toBeInTheDocument();
+    expect(screen.queryByText('Used')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Enter' })).toBeInTheDocument();
   });
 });
 
@@ -464,17 +464,17 @@ describe('ticket title', () => {
   it('shimmers a placeholder while the name is still loading', async () => {
     fetchEventMetadata.mockImplementation(() => new Promise<never>(() => {}));
     renderList();
-    await screen.findByRole('link', { name: /입장 전/ });
+    await screen.findByRole('link', { name: /Not used/ });
     // The row is here off the indexer; the name is not, so its line shimmers — neither the name nor
     // the failure fallback is shown yet.
     await waitFor(() => expect(row('1').querySelector('.ticket-art__title-skeleton')).not.toBeNull());
     expect(within(row('1')).queryByText('한여름 밤의 재즈')).toBeNull();
-    expect(within(row('1')).queryByText('행사 이름을 불러오지 못했어요')).toBeNull();
+    expect(within(row('1')).queryByText("Couldn't load the event name")).toBeNull();
   });
 
   it('shows the name once it has loaded, and no shimmer', async () => {
     renderList();
-    await screen.findByRole('link', { name: /입장 전/ });
+    await screen.findByRole('link', { name: /Not used/ });
     await waitFor(() => expect(within(row('1')).getAllByText('한여름 밤의 재즈').length).toBeGreaterThan(0));
     expect(row('1').querySelector('.ticket-art__title-skeleton')).toBeNull();
   });
@@ -482,8 +482,8 @@ describe('ticket title', () => {
   it('falls back to the word only once the read has failed', async () => {
     fetchEventMetadata.mockRejectedValue(new Error('IPFS_500'));
     renderList();
-    await screen.findByRole('link', { name: /입장 전/ });
-    await waitFor(() => expect(within(row('1')).getAllByText('행사 이름을 불러오지 못했어요').length).toBeGreaterThan(0));
+    await screen.findByRole('link', { name: /Not used/ });
+    await waitFor(() => expect(within(row('1')).getAllByText("Couldn't load the event name").length).toBeGreaterThan(0));
     expect(row('1').querySelector('.ticket-art__title-skeleton')).toBeNull();
   });
 });

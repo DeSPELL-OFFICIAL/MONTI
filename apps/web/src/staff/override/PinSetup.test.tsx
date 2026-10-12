@@ -7,12 +7,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { fmt } from '../../shared/i18n';
 import { PIN_MIN_LENGTH } from '../constants';
-import { staffKo } from '../copy';
+import { staffEn } from '../copy';
 import { staffDb } from '../snapshot/store';
 import { hasPin } from './pin';
 import { PinStep } from './PinSetup';
 
-const copy = staffKo.setup;
+const copy = staffEn.setup;
 
 beforeEach(async () => {
   await (await staffDb()).delete('settings', 'pin');

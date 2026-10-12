@@ -4,15 +4,15 @@ import { MemoryRouter, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StrictMode, type ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ko } from '../../shared/copy/index';
+import { en } from '../../shared/copy/index';
 import { clearSession, setSession } from '../../shared/session';
 
 const POLL_INTERVAL_MS = 2_000;
 const POLL_LIMIT = 45;
 const KYC_URL = 'https://verify.didit.me/s/abc';
-const TIMEOUT_COPY = '아직 확인 결과가 오지 않았어요. 잠시 뒤 다시 확인해 주세요.';
-const GENERIC_COPY = '문제가 생겼어요. 잠시 뒤 다시 시도해 주세요.';
-const IN_FLIGHT_COPY = '잠시 후 다시 시도해 주세요.';
+const TIMEOUT_COPY = 'The result has not come back yet. Please check again in a moment.';
+const GENERIC_COPY = 'Something went wrong. Please try again in a moment.';
+const IN_FLIGHT_COPY = 'Please try again in a moment.';
 
 // The screen only ever sees a URL and a remover, so the listener is captured here and fired by
 // hand. The matcher is the real one — a mocked matcher is how the dead web leg survived review.
@@ -70,7 +70,7 @@ function renderScreen(entry = '/me/verify') {
 }
 
 function cta() {
-  return screen.getByRole('button', { name: '본인인증 하기' });
+  return screen.getByRole('button', { name: 'Verify my identity' });
 }
 
 /** The person has finished at the hosted page and the app is back in front of them. */
@@ -88,7 +88,7 @@ beforeEach(() => {
 describe('VerifyIdentity', () => {
   it('opens the hosted link and waits for the return before it polls', async () => {
     renderScreen();
-    await userEvent.click(await screen.findByRole('button', { name: '본인인증 하기' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Verify my identity' }));
     expect(openHostedFlow).toHaveBeenCalledWith(KYC_URL);
     // Browser.open resolves on presentation, not on dismissal: polling here burns the ceiling
     // while the person is still holding up their ID.
@@ -122,7 +122,7 @@ describe('VerifyIdentity', () => {
     await userEvent.click(cta());
     expect(await screen.findByText(GENERIC_COPY)).toBeInTheDocument();
     // Nothing here gets better by waiting, so the generic sentence gets no "try again" button.
-    expect(screen.queryByRole('button', { name: '다시 시도' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
   });
 
   it('asks the person to wait when another call already holds the session claim', async () => {
@@ -140,7 +140,7 @@ describe('VerifyIdentity', () => {
     await userEvent.click(cta());
     await screen.findByText(IN_FLIGHT_COPY);
 
-    await userEvent.click(screen.getByRole('button', { name: '다시 시도' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
     // The claim has lapsed, so the second attempt opens the hosted page and the sentence goes.
     expect(startKyc).toHaveBeenCalledTimes(2);
     await waitFor(() => expect(openHostedFlow).toHaveBeenCalledWith(KYC_URL));
@@ -152,7 +152,7 @@ describe('VerifyIdentity', () => {
     renderScreen();
     await userEvent.click(cta());
     await comeBack();
-    expect(await screen.findByText('이미 계정이 있어요. 기존 계정으로 로그인해 주세요.')).toBeInTheDocument();
+    expect(await screen.findByText('You already have an account. Please sign in instead.')).toBeInTheDocument();
   });
 
   it('reports any other failure with the generic rejection copy', async () => {
@@ -160,7 +160,7 @@ describe('VerifyIdentity', () => {
     renderScreen();
     await userEvent.click(cta());
     await comeBack();
-    expect(await screen.findByText('본인 확인에 실패했어요. 다시 시도해 주세요.')).toBeInTheDocument();
+    expect(await screen.findByText('Verification failed. Please try again.')).toBeInTheDocument();
   });
 
   /**
@@ -172,12 +172,12 @@ describe('VerifyIdentity', () => {
   it('hands a refused person the support address, and only then', async () => {
     getSignupStatus.mockResolvedValue({ status: 'rejected', kycLevel: 0, kycReason: 'declined' });
     renderScreen();
-    expect(screen.queryByRole('link', { name: ko.common.contactEmail })).toBeNull();
+    expect(screen.queryByRole('link', { name: en.common.contactEmail })).toBeNull();
 
     await userEvent.click(cta());
     await comeBack();
-    const link = await screen.findByRole('link', { name: ko.common.contactEmail });
-    expect(link).toHaveAttribute('href', `mailto:${ko.common.contactEmail}`);
+    const link = await screen.findByRole('link', { name: en.common.contactEmail });
+    expect(link).toHaveAttribute('href', `mailto:${en.common.contactEmail}`);
   });
 
   it('sends a verified person back to the screen that asked for the check', async () => {
@@ -242,7 +242,7 @@ describe('VerifyIdentity', () => {
     // The blip cost one tick and nothing else: no error sentence, no stuck spinner.
     expect(navigate).toHaveBeenCalledWith('/me', { replace: true });
     expect(getSignupStatus.mock.calls.length).toBeGreaterThan(1);
-    expect(screen.queryByText('문제가 생겼어요. 잠시 뒤 다시 시도해 주세요.')).toBeNull();
+    expect(screen.queryByText('Something went wrong. Please try again in a moment.')).toBeNull();
     vi.useRealTimers();
   });
 
@@ -260,7 +260,7 @@ describe('VerifyIdentity', () => {
     expect(screen.queryByRole('progressbar')).toBeNull();
     expect(screen.getByText(TIMEOUT_COPY)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '다시 시도' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     expect(getSignupStatus.mock.calls.length).toBeGreaterThan(POLL_LIMIT);
     expect(screen.queryByText(TIMEOUT_COPY)).toBeNull();
@@ -298,7 +298,7 @@ describe('VerifyIdentity', () => {
    */
   it('lets a person leave to where they came from instead of getting stuck', async () => {
     renderScreen('/me/verify?returnTo=%2Ftickets%2F42');
-    await userEvent.click(await screen.findByRole('button', { name: ko.kyc.later }));
+    await userEvent.click(await screen.findByRole('button', { name: en.kyc.later }));
     expect(navigate).toHaveBeenCalledWith('/tickets/42');
   });
 

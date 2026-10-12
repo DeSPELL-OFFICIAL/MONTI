@@ -28,12 +28,12 @@ const PRICE = Number(process.env.E2E_PRICE_USD ?? '10');
 const ARTIFACTS = 'e2e/.artifacts';
 const DIAG_PATH = `${ARTIFACTS}/58-refund-guard-diag.json`;
 const PIN = '1357';
-const REFUNDED_LINE = '환불된 티켓이에요 · 입장할 수 없어요';
-const BACK = '티켓으로 돌아가기';
+const REFUNDED_LINE = "Refunded ticket · it can't be used to enter";
+const BACK = 'Back to the ticket';
 const RECIPIENTS = [
-  { role: '아티스트', pct: '60', tag: 'artist', addr: '0x1111111111111111111111111111111111111111' },
-  { role: '공연장', pct: '20', tag: 'venue', addr: '0x2222222222222222222222222222222222222222' },
-  { role: '기획', pct: '15', tag: 'planning', addr: '0x3333333333333333333333333333333333333333' },
+  { role: 'Artist', pct: '60', tag: 'artist', addr: '0x1111111111111111111111111111111111111111' },
+  { role: 'Venue', pct: '20', tag: 'venue', addr: '0x2222222222222222222222222222222222222222' },
+  { role: 'Producer', pct: '15', tag: 'planning', addr: '0x3333333333333333333333333333333333333333' },
 ];
 
 async function usedAt(tokenId: string): Promise<bigint> {
@@ -70,18 +70,18 @@ async function purchase(page: Page, eventId: string, diag: Record<string, unknow
     })();
   });
   await page.goto(`/claim/${eventId}`);
-  const payCta = page.getByRole('button', { name: /결제하고 받기/ });
+  const payCta = page.getByRole('button', { name: /Buy for \$/ });
   await expect(payCta).toBeEnabled({ timeout: 60_000 });
   await payCta.click();
-  const sheet = page.getByRole('dialog', { name: '카드 결제' });
+  const sheet = page.getByRole('dialog', { name: 'Card payment' });
   await expect(sheet).toBeVisible({ timeout: 10_000 });
-  await page.getByPlaceholder('0000 0000 0000 0000 (테스트)').fill('4242424242424242');
-  const payBtn = sheet.getByRole('button', { name: /결제하기/ });
+  await page.getByPlaceholder('0000 0000 0000 0000 (test)').fill('4242424242424242');
+  const payBtn = sheet.getByRole('button', { name: /^Pay \$/ });
   await expect(payBtn).toBeEnabled({ timeout: 10_000 });
   const at = Date.now();
   await payBtn.click();
-  await expect(sheet.getByText('결제 완료 · 티켓을 받았어요', { exact: true })
-    .or(sheet.getByRole('link', { name: /^(영수증 보기|내 티켓 보기)$/ })).first()).toBeVisible({ timeout: 180_000 });
+  await expect(sheet.getByText('Paid · your ticket is ready', { exact: true })
+    .or(sheet.getByRole('link', { name: /^(See receipt|See my tickets)$/ })).first()).toBeVisible({ timeout: 180_000 });
   diag.purchaseLatencyMs = Date.now() - at;
   await expect.poll(() => wire.tokenId, { timeout: 15_000 }).toBeTruthy();
   return wire.tokenId!;
@@ -99,9 +99,9 @@ test('58 · refund guard — refunded ticket cannot enter, transfer, or be admit
     const page = admin.page;
     await ensureAccount(admin);
     const { eventId } = await createDraftAndPublish(page, {
-      personaId: ADMIN.id, orgName: '몬티 환불 가드', title: '환불 가드 데모 v2',
-      intro: '환불된 티켓 입장 차단 확인용 행사입니다.', venue: '서울 테스트홀',
-      tiers: [{ kind: '유료', name: 'GA', supply: 20, price: PRICE }],
+      personaId: ADMIN.id, orgName: 'Monti Refund Guard', title: 'Refund guard demo v2',
+      intro: 'Checks that a refunded ticket cannot get in.', venue: 'Test Hall, Seoul',
+      tiers: [{ kind: 'Paid', name: 'GA', supply: 20, price: PRICE }],
       split: RECIPIENTS,
     });
     diag.eventId = eventId;
@@ -113,12 +113,12 @@ test('58 · refund guard — refunded ticket cannot enter, transfer, or be admit
     const tokenId = await purchase(ap, eventId, diag);
     diag.tokenId = tokenId;
     await ap.goto(`/tickets/${tokenId}`);
-    await expect(ap.getByText('결제 금액 보관 중 · 입장하면 자동으로 나눠 보내요', { exact: true })).toBeVisible({ timeout: 60_000 });
-    await ap.getByRole('button', { name: '환불받기', exact: true }).click();
-    const confirm = ap.getByRole('dialog', { name: '환불할까요?' });
+    await expect(ap.getByText('Payment held · paid out when you check in', { exact: true })).toBeVisible({ timeout: 60_000 });
+    await ap.getByRole('button', { name: 'Get a refund', exact: true }).click();
+    const confirm = ap.getByRole('dialog', { name: 'Refund this ticket?' });
     await expect(confirm).toBeVisible({ timeout: 10_000 });
-    await confirm.getByRole('button', { name: '환불하기', exact: true }).click();
-    await expect(ap.getByText('환불됨', { exact: true })).toBeVisible({ timeout: 120_000 });
+    await confirm.getByRole('button', { name: 'Refund', exact: true }).click();
+    await expect(ap.getByText('Refunded', { exact: true })).toBeVisible({ timeout: 120_000 });
     await shot(ap, 'guard-receipt-refunded');
     const usedBefore = await usedAt(tokenId);
     diag.usedAtBefore = usedBefore.toString();
@@ -164,10 +164,10 @@ test('58 · refund guard — refunded ticket cannot enter, transfer, or be admit
     await startConsole(page, PIN);
     await page.waitForTimeout(4000);
 
-    const openBtn = page.getByRole('button', { name: '수동 승인하기', exact: true });
+    const openBtn = page.getByRole('button', { name: 'Approve by hand', exact: true });
     await expect(openBtn).toBeVisible({ timeout: 60_000 });
     await openBtn.click();
-    const search = page.getByLabel('이름 또는 티켓 번호');
+    const search = page.getByLabel('Name or ticket number');
     await expect(search).toBeVisible({ timeout: 10_000 });
     const last4 = tokenId.slice(-4);
     await search.fill(last4);
@@ -184,9 +184,9 @@ test('58 · refund guard — refunded ticket cannot enter, transfer, or be admit
     let line = '';
     if (resolved) {
       await match.click();
-      await expect(page.getByText('들여보낼 사람', { exact: true })).toBeVisible({ timeout: 5000 });
+      await expect(page.getByText('Letting in', { exact: true })).toBeVisible({ timeout: 5000 });
       await page.getByLabel('PIN', { exact: true }).fill(PIN);
-      const approveBtn = page.getByRole('button', { name: '수동 승인', exact: true });
+      const approveBtn = page.getByRole('button', { name: 'Approve manually', exact: true });
       await expect(approveBtn).toBeVisible({ timeout: 20_000 });
       await shot(page, 'guard-override-confirm');
       const pressedAt = Date.now();
@@ -195,7 +195,7 @@ test('58 · refund guard — refunded ticket cannot enter, transfer, or be admit
       const deadline = Date.now() + 90_000;
       while (Date.now() < deadline) {
         line = (await outcome.innerText().catch(() => '')).trim();
-        if (line.includes('취소된 티켓') || line.includes('들여보냈어요') || relayErrors.length > 0) break;
+        if (line.includes('Ticket cancelled') || line.includes('They are in.') || relayErrors.length > 0) break;
         await page.waitForTimeout(1000);
       }
       await page.waitForTimeout(1500);
@@ -215,7 +215,7 @@ test('58 · refund guard — refunded ticket cannot enter, transfer, or be admit
     expect(last4Matches, 'last four digits find nobody in the snapshot').toHaveLength(0);
     expect(snapshots.some((s) => s.hasRefunded), 'issueSnapshot never carries the refunded token').toBe(false);
     expect(resolved, 'full number resolves (the chain fallback reads only isRevoked)').toBe(true);
-    expect(line, 'override refused as 취소된 티켓').toContain('취소된 티켓');
+    expect(line, 'override refused as 취소된 티켓').toContain('Ticket cancelled');
     expect(JSON.stringify(relayErrors), 'relayAction refused with TICKET_REFUNDED').toContain('TICKET_REFUNDED');
     expect(usedAfter, 'usedAt stays 0 — no on-chain admission').toBe(0n);
   } finally {

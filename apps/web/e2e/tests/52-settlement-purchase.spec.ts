@@ -29,16 +29,16 @@ const EVENT_ID = process.env.EVENT_ID ?? '';
 const PRICE = process.env.E2E_PRICE_USD ?? '30';
 
 /** Card placeholder copy on the mock sheet — a demo field that is never read or sent. */
-const CARD_PLACEHOLDER = '0000 0000 0000 0000 (테스트)';
-const SHEET_NAME = '결제';
-const PAY_RE = /결제하고 받기/;
-/** The sheet's own pay button reads "$30.00 결제하기" (the claim CTA keeps 결제하고 받기). */
-const SHEET_PAY_RE = /결제하기/;
-const DONE_TEXT = '결제 완료 · 티켓을 받았어요';
+const CARD_PLACEHOLDER = '0000 0000 0000 0000 (test)';
+const SHEET_NAME = 'Card payment';
+const PAY_RE = /Buy for \$/;
+/** The sheet's own pay button reads "Pay $30" (the claim CTA reads "Buy for $30"). */
+const SHEET_PAY_RE = /^Pay \$/;
+const DONE_TEXT = 'Paid · your ticket is ready';
 /** The done link opens the new ticket's receipt; 내 티켓 보기 only when no token id came back yet. */
-const TO_TICKETS = /^(영수증 보기|내 티켓 보기)$/;
-const STATUS_HELD = '결제 금액 보관 중 · 입장하면 자동으로 나눠 보내요';
-const RECEIPT_TITLE = '영수증';
+const TO_TICKETS = /^(See receipt|See my tickets)$/;
+const STATUS_HELD = 'Payment held · paid out when you check in';
+const RECEIPT_TITLE = 'Receipt';
 
 interface PurchaseWire {
   account?: string;
@@ -133,7 +133,7 @@ test('52 · v2 settlement step 2 — attendee pays in one purchase and the recei
       if (await doneAlert.isVisible().catch(() => false)) { purchased = true; break; }
       if (await toTickets.isVisible().catch(() => false)) { purchased = true; break; }
       const errTxt = (await errorAlert.allInnerTexts().catch(() => [])).join(' | ').trim();
-      if (errTxt && !errTxt.includes('테스트')) { diag.payError = errTxt; break; }
+      if (errTxt && !/test/i.test(errTxt)) { diag.payError = errTxt; break; }
       await page.waitForTimeout(2000);
     }
     diag.purchased = purchased;
@@ -174,7 +174,7 @@ test('52 · v2 settlement step 2 — attendee pays in one purchase and the recei
     diag.receiptHeld = held;
 
     // The deposit/receipt tx hash sits on the 결제 기록 원본 link (in a <details>), href = explorer/tx/<hash>.
-    const receiptLink = page.getByRole('link', { name: '결제 기록 원본', exact: true });
+    const receiptLink = page.getByRole('link', { name: 'Payment record', exact: true });
     const href = await receiptLink.getAttribute('href').catch(() => null);
     const txFromHref = href?.match(/\/tx\/(0x[0-9a-fA-F]+)/)?.[1];
     if (txFromHref) wire.txHash = wire.txHash ?? txFromHref;

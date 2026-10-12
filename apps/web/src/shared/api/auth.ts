@@ -1,4 +1,5 @@
-// The ONLY file that touches Firebase phone sign-in or @capacitor-firebase/authentication.
+// The ONLY file that touches Firebase sign-in (phone, and open mode's anonymous user) or
+// @capacitor-firebase/authentication.
 //
 // Two paths, one reason each:
 //   - Web uses the Firebase JS SDK's `signInWithPhoneNumber` with an invisible
@@ -17,6 +18,7 @@ import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
 import {
   PhoneAuthProvider,
   RecaptchaVerifier,
+  signInAnonymously,
   signInWithCredential,
   signInWithPhoneNumber,
 } from 'firebase/auth';
@@ -213,4 +215,22 @@ export async function confirmOtp(verificationId: string, code: string): Promise<
   // The credential is rebuilt from the id rather than held in a ConfirmationResult, so a reload
   // between the two screens still confirms: the id survives in sessionStorage, the object does not.
   await signInWithCredential(getFirebaseAuth(), PhoneAuthProvider.credential(verificationId, code));
+}
+
+/**
+ * Open mode (`VITE_AUTH_MODE=open`): the Firebase user `/start` signs up with. Whoever is already
+ * signed in — a phone user, or the anonymous user of a start that was interrupted by a reload — is
+ * reused, so a second tap continues the same person instead of minting another. Otherwise an
+ * anonymous user is created; Firebase persists it (IndexedDB) like any other, which is what keeps
+ * the visitor signed in on this browser. `reused` tells the caller whether there may already be a
+ * person behind it worth asking about.
+ */
+export async function ensureFirebaseUser(): Promise<{ reused: boolean }> {
+  const auth = getFirebaseAuth();
+  // A tap that lands before Firebase has restored the persisted user would otherwise mint a second
+  // anonymous user over the first.
+  await auth.authStateReady();
+  if (auth.currentUser) return { reused: true };
+  await signInAnonymously(auth);
+  return { reused: false };
 }

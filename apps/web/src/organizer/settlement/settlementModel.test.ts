@@ -97,12 +97,12 @@ describe('splitJson — the draft carries the rows as one string', () => {
     const json = serializeSplit(validSplit());
     expect(JSON.parse(json)).toEqual([
       { name: '아티스트', account: ACCT_A, bps: 9000, tag: 'artist', platform: false },
-      { name: 'MONTI 플랫폼', account: PLATFORM, bps: 1000, tag: 'platform', platform: true },
+      { name: 'MONTI platform', account: PLATFORM, bps: 1000, tag: 'platform', platform: true },
     ]);
     const back = parseSplit(json, PLATFORM);
     expect(back.map(({ id: _id, ...row }) => row)).toEqual([
       { name: '아티스트', account: ACCT_A, bps: 9000, tag: 'artist', platform: false },
-      { name: 'MONTI 플랫폼', account: PLATFORM, bps: 1000, tag: 'platform', platform: true },
+      { name: 'MONTI platform', account: PLATFORM, bps: 1000, tag: 'platform', platform: true },
     ]);
     expect(new Set(back.map((row) => row.id)).size).toBe(2);
   });

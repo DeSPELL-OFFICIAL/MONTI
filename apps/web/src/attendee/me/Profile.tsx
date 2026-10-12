@@ -2,13 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
 import { Alert, Button, Card, ContactLink, Field, Screen, Spinner } from '../../shared/ui';
-import { fmt, setLocale, useCopy, useLocale } from '../../shared/i18n';
-import type { Locale } from '../../shared/copy/index';
+import { fmt, useCopy, useLocale } from '../../shared/i18n';
 import { api } from '../../shared/api/functions';
 import { getFirebaseAuth } from '../../shared/api/firebase';
 import { MAX_DISPLAY_NAME_CHARS, saveUserProfile } from '../../shared/api/firestore';
 import { useDisplayName } from '../../shared/displayName';
-import { getConfig } from '../../shared/config';
+import { authMode, getConfig } from '../../shared/config';
 import { useSession } from '../../shared/session';
 import { useOrganizerEntry } from '../../organizer/useOrganizerEntry';
 import { Nickname } from './Nickname';
@@ -241,30 +240,22 @@ function DeleteAccount() {
 
 export function Profile() {
   const copy = useCopy();
-  const locale = useLocale();
   const session = useSession();
   const explorerBase = getConfig().explorerUrl;
-
-  async function chooseLocale(next: Locale): Promise<void> {
-    await setLocale(next);
-    // The stored copy is a convenience for the server's own messages; failing to save it must
-    // not undo the language the person just picked on this device.
-    await saveUserProfile({ locale: next }).catch(() => undefined);
-  }
 
   return (
     <Screen title={copy.me.title}>
       <KycStatus />
       <DisplayName />
       <Nickname />
-      <Field label={copy.me.language}>
-        <select value={locale} onChange={(event) => void chooseLocale(event.target.value as Locale)}>
-          <option value="ko">{copy.me.languageKo}</option>
-          <option value="en">{copy.me.languageEn}</option>
-        </select>
-      </Field>
-      <DeviceLock />
-      <NewDevice />
+      {/* Both are about a phone — locking a lost one, moving to a new one — and an open-mode
+          identity (VITE_AUTH_MODE=open) lives in this browser with no phone behind it. */}
+      {authMode() === 'open' ? null : (
+        <>
+          <DeviceLock />
+          <NewDevice />
+        </>
+      )}
       <p>
         <a href={`${explorerBase}/address/${session.account ?? ''}`}>{copy.me.publicRecord}</a>
       </p>

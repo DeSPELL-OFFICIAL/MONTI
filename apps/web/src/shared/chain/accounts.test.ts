@@ -42,8 +42,9 @@ const client = createPublicClient({
   }),
 });
 
-const { getAttendeeAccount, resetAccounts } = await import('./accounts');
+const { getAttendeeAccount, getStaffAccount, resetAccounts, NotSignedIn } = await import('./accounts');
 const { storeCredential, clearCredential } = await import('../passkey');
+const { setSession } = await import('../session');
 
 describe('getAttendeeAccount', () => {
   it('asks the deployed factory the exact question registerPasskey asks it', async () => {
@@ -101,5 +102,45 @@ describe('getAttendeeAccount memo', () => {
     const third = await getAttendeeAccount();
     expect(third).not.toBe(first);
     expect(calls.length).toBe(before + 2);
+  });
+});
+
+describe('getAttendeeAccount account resolution', () => {
+  const CLAIM = '0xd4cd24c045bfb8d40408a65c3ac6175c4f1d2f22' as Hex;
+  const PERSON = `0x${'11'.repeat(32)}`;
+
+  it('open mode: takes the account from the session claim, with no passkey on the device', async () => {
+    resetAccounts();
+    clearCredential();
+    setSession({ status: 'signedIn', personId: PERSON, account: CLAIM });
+    const before = calls.length;
+
+    expect((await getAttendeeAccount()).address).toBe(getAddress(CLAIM));
+    expect((await getStaffAccount()).address).toBe(getAddress(CLAIM));
+    // No factory round trip and no passkey lookup: the claim is the account.
+    expect(calls.length).toBe(before);
+  });
+
+  it('phone mode: the session claim and the passkey record name the same account', async () => {
+    resetAccounts();
+    clearCredential();
+    storeCredential({ id: 'cred', publicKey: `0x04${X}${Y}`, transports: ['internal'], attestationJson: '{}' });
+
+    // Before the session hydrates, the passkey record is the fallback…
+    setSession({ status: 'loading' });
+    const fromPasskey = (await getAttendeeAccount()).address;
+    expect(fromPasskey).toBe(getAddress(PREDICTED));
+
+    // …and once signed in, the claim the server minted for that passkey gives the same address.
+    setSession({ status: 'signedIn', personId: PERSON, account: PREDICTED });
+    expect((await getAttendeeAccount()).address).toBe(fromPasskey);
+  });
+
+  it('no session and no passkey: a NotSignedIn error, not a passkey failure', async () => {
+    resetAccounts();
+    clearCredential();
+    setSession({ status: 'anonymous' });
+
+    await expect(getAttendeeAccount()).rejects.toBeInstanceOf(NotSignedIn);
   });
 });

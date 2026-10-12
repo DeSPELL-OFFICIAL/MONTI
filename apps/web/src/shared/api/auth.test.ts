@@ -18,14 +18,27 @@ const signInWithPhoneNumberWeb = vi.fn(async () => ({ verificationId: 'web-vid' 
 const signInWithCredential = vi.fn(async () => ({}));
 const credential = vi.fn((verificationId: string, code: string) => ({ verificationId, code }));
 
+const signInAnonymously = vi.fn(async () => ({}));
+
 vi.mock('firebase/auth', () => ({
   RecaptchaVerifier,
+  signInAnonymously,
   signInWithPhoneNumber: signInWithPhoneNumberWeb,
   signInWithCredential,
   PhoneAuthProvider: { credential },
 }));
 
-const fakeAuth = { name: 'test-auth', settings: { appVerificationDisabledForTesting: false } };
+const fakeAuth: {
+  name: string;
+  settings: { appVerificationDisabledForTesting: boolean };
+  currentUser: unknown;
+  authStateReady: () => Promise<void>;
+} = {
+  name: 'test-auth',
+  settings: { appVerificationDisabledForTesting: false },
+  currentUser: null,
+  authStateReady: async () => undefined,
+};
 vi.mock('./firebase', () => ({ getFirebaseAuth: () => fakeAuth }));
 
 const isNativePlatform = vi.fn(() => false);
@@ -219,5 +232,24 @@ describe('failure mapping', () => {
   it('never guesses at something it does not recognise', () => {
     expect(phoneAuthProblem(new Error('PHONE_VERIFICATION_TIMEOUT'))).toBe('unknown');
     expect(phoneAuthProblem(null)).toBe('unknown');
+  });
+});
+
+describe('ensureFirebaseUser (open mode)', () => {
+  it('signs in anonymously when nobody is signed in', async () => {
+    const { ensureFirebaseUser } = await import('./auth');
+    fakeAuth.currentUser = null;
+    signInAnonymously.mockClear();
+    expect(await ensureFirebaseUser()).toEqual({ reused: false });
+    expect(signInAnonymously).toHaveBeenCalledWith(fakeAuth);
+  });
+
+  it('reuses the persisted user (phone or anonymous) rather than minting another', async () => {
+    const { ensureFirebaseUser } = await import('./auth');
+    fakeAuth.currentUser = { uid: 'kept' };
+    signInAnonymously.mockClear();
+    expect(await ensureFirebaseUser()).toEqual({ reused: true });
+    expect(signInAnonymously).not.toHaveBeenCalled();
+    fakeAuth.currentUser = null;
   });
 });

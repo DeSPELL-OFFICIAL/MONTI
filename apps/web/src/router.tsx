@@ -1,11 +1,20 @@
-import { Navigate, Outlet, type RouteObject, useLocation, useOutlet } from 'react-router-dom';
+import { useContext, useRef, type ReactNode } from 'react';
+import {
+  Navigate,
+  Outlet,
+  type RouteObject,
+  UNSAFE_LocationContext as LocationContext,
+  useLocation,
+  useOutlet,
+} from 'react-router-dom';
 import { BottomTabs } from './shared/ui';
 import { useRegistration } from './shared/registration';
 import { useDeviceHealth } from './shared/deviceHealth';
 import { useSession } from './shared/session';
 import { Spinner } from './shared/ui';
-import { AnimatePresence, m, useReducedMotion } from './shared/motion';
+import { AnimatePresence, m, useIsPresent, useReducedMotion } from './shared/motion';
 import { TAB_PATHS } from './shared/tabRoots';
+import { authMode } from './shared/config';
 
 /**
  * The screen slides in from the right and the one it replaces slides out to the left — 240ms of
@@ -20,6 +29,22 @@ import { TAB_PATHS } from './shared/tabRoots';
  * with the content under it (and, being outside the transformed element, keeps its fixed
  * position anchored to the viewport).
  */
+/**
+ * A screen sliding out is still mounted, and without this it would keep reading the LIVE location
+ * — the one the router has already moved on to. Every location-driven effect in it then re-runs
+ * against the new URL: `/start` lost its `?returnTo=` and navigated to `/` right after sending the
+ * visitor to their shared link, and the guards redirected the screen being entered to itself.
+ * While present the screen sees the live location; once exiting it keeps the last one it saw, the
+ * same "frozen router" an exiting route gets in any animated-routes setup.
+ */
+function FreezeLocationWhenExiting({ children }: { children: ReactNode }) {
+  const present = useIsPresent();
+  const live = useContext(LocationContext);
+  const seen = useRef(live);
+  if (present) seen.current = live;
+  return <LocationContext.Provider value={seen.current}>{children}</LocationContext.Provider>;
+}
+
 function TabShell() {
   const location = useLocation();
   const outlet = useOutlet();
@@ -39,7 +64,7 @@ function TabShell() {
             exit={{ opacity: 0, x: -24 }}
             transition={{ duration: 0.24, ease: [0.22, 0.61, 0.36, 1] }}
           >
-            {outlet}
+            <FreezeLocationWhenExiting>{outlet}</FreezeLocationWhenExiting>
           </m.div>
         </AnimatePresence>
       )}
@@ -53,13 +78,12 @@ export function RequireSession() {
   const location = useLocation();
   if (session.status === 'loading') return <Spinner />;
   if (session.status === 'anonymous') {
-    // The route transition keeps this (exiting) screen mounted for its slide-out, and it then reads
-    // the new location: without this it would bounce `/login` to itself and nest the target.
-    if (location.pathname === '/login') return null;
+    // Open mode has no sign-in screen: the one-tap start is where an identity comes from.
+    const entry = authMode() === 'open' ? '/start' : '/login';
     // Where they were going rides along, so a claim link opened signed out comes back to the
     // claim after sign-in or signup rather than landing on 내 티켓.
     const returnTo = encodeURIComponent(`${location.pathname}${location.search}`);
-    return <Navigate to={`/login?returnTo=${returnTo}`} replace />;
+    return <Navigate to={`${entry}?returnTo=${returnTo}`} replace />;
   }
   return <FinishSignupFirst />;
 }
@@ -77,8 +101,9 @@ function FinishSignupFirst() {
   const registration = useRegistration();
   const location = useLocation();
   if (registration === 'pending') {
+    const finishAt = authMode() === 'open' ? '/start' : '/signup/register';
     const returnTo = encodeURIComponent(`${location.pathname}${location.search}`);
-    return <Navigate to={`/signup/register?returnTo=${returnTo}`} replace />;
+    return <Navigate to={`${finishAt}?returnTo=${returnTo}`} replace />;
   }
   return <HealthyDeviceFirst registrationDone={registration === 'done'} />;
 }
@@ -112,6 +137,22 @@ function ToRegister() {
   return <Navigate to={`/signup/register${search}`} replace />;
 }
 
+/**
+ * The phone-mode entry screens (`/login`, `/signup/phone|verify|register`). In open mode
+ * (`VITE_AUTH_MODE=open`) none of them can be finished — there is no phone and no passkey — so each
+ * forwards to `/start`, carrying the query so a `returnTo` still brings the visitor back.
+ */
+function PhoneModeOnly({ children }: { children: ReactNode }) {
+  const { search } = useLocation();
+  if (authMode() === 'open') return <Navigate to={`/start${search}`} replace />;
+  return <>{children}</>;
+}
+
+/** `/recover`: an SMS check in phone mode, a fresh start on this browser in open mode. */
+function RecoverByMode() {
+  return authMode() === 'open' ? <RecoverOpen /> : <Recover />;
+}
+
 // 각 화면은 뒤 태스크에서 실제 구현으로 교체된다. 여기서는 라우트 표를 확정한다.
 import { Discover } from './attendee/discover/Discover';
 import { EventDetail } from './attendee/discover/EventDetail';
@@ -123,6 +164,8 @@ import { KycCallback } from './attendee/me/KycCallback';
 import { Register } from './attendee/signup/Register';
 import { Recover } from './attendee/signup/Recover';
 import { Done } from './attendee/signup/Done';
+import { Start } from './attendee/start/Start';
+import { RecoverOpen } from './attendee/start/RecoverOpen';
 import { Claim } from './attendee/claim/Claim';
 import { TicketList } from './attendee/tickets/List';
 import { TicketDetail } from './attendee/tickets/Detail';
@@ -148,16 +191,18 @@ export const routes: RouteObject[] = [
       { path: '/events/:eventId', element: <EventDetail /> },
       // Public on purpose: a shareable, no-login record of how one event's revenue is split.
       { path: '/settlement/:eventId', element: <Settlement /> },
-      { path: '/login', element: <Login /> },
-      { path: '/signup/phone', element: <Phone /> },
-      { path: '/signup/verify', element: <Verify /> },
-      { path: '/signup/register', element: <Register /> },
+      { path: '/login', element: <PhoneModeOnly><Login /></PhoneModeOnly> },
+      // Open mode's one-tap identity (VITE_AUTH_MODE=open). Public: it is where identities start.
+      { path: '/start', element: <Start /> },
+      { path: '/signup/phone', element: <PhoneModeOnly><Phone /></PhoneModeOnly> },
+      { path: '/signup/verify', element: <PhoneModeOnly><Verify /></PhoneModeOnly> },
+      { path: '/signup/register', element: <PhoneModeOnly><Register /></PhoneModeOnly> },
       { path: '/signup/passkey', element: <ToRegister /> },
       { path: '/signup/device', element: <ToRegister /> },
       { path: '/signup/done', element: <Done /> },
       // Public on purpose: recovery runs on a fresh phone that has only a phone session, not a
       // passkey session, so it must sit outside RequireSession next to the other signup screens.
-      { path: '/recover', element: <Recover /> },
+      { path: '/recover', element: <RecoverByMode /> },
       // Where the link in an invite text lands. Public on purpose: the person it was sent to
       // is usually not signed in yet, and this screen is what starts their signup.
       { path: '/i/:inviteId', element: <InviteLanding /> },

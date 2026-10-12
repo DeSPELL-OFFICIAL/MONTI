@@ -25,14 +25,14 @@ vi.mock('react-router-dom', async (orig) => ({
 const { CallableError } = await import('../shared/api/functions');
 const { organizerCopy } = await import('./copy');
 const { Become } = await import('./Become');
-const { ko } = await import('../shared/copy');
-const copy = organizerCopy.ko.become;
+const { en } = await import('../shared/copy');
+const copy = organizerCopy.en.become;
 /**
  * The sentence for every refusal the table does not name. It is the shared one, not an
  * organiser sentence: since T-UX-8 this arm goes through `describeFailure`, which writes from
  * `common` — and would write the offline or the indexer line instead, if either were true.
  */
-const GENERIC = ko.common.error;
+const GENERIC = en.common.error;
 
 function open() {
   render(
@@ -221,7 +221,7 @@ describe('what the server refuses', () => {
       createOrganizerForMe.mockRejectedValue(new Error('Failed to fetch'));
       await press();
 
-      expect(await screen.findByText(ko.common.offlineRetry)).toBeInTheDocument();
+      expect(await screen.findByText(en.common.offlineRetry)).toBeInTheDocument();
       expect(screen.queryByText(GENERIC)).not.toBeInTheDocument();
     } finally {
       Reflect.deleteProperty(navigator, 'onLine');

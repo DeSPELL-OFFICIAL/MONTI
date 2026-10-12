@@ -6,10 +6,10 @@ import { BottomTabs, Card, Countdown, KycBadge, Screen, Sheet } from './index';
 
 describe('ui primitives', () => {
   it('Screen renders a main landmark with the mobile max width', () => {
-    render(<Screen title="내 티켓">body</Screen>);
+    render(<Screen title="My tickets">body</Screen>);
     const main = screen.getByRole('main');
     expect(main).toHaveClass('screen');
-    expect(screen.getByRole('heading', { name: '내 티켓' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'My tickets' })).toBeInTheDocument();
   });
 
   it('Card is a titled glass section, and a bare pane without a title', () => {
@@ -40,8 +40,8 @@ describe('ui primitives', () => {
         <BottomTabs />
       </MemoryRouter>,
     );
-    expect(screen.getByRole('link', { name: '내 티켓' })).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('link', { name: '탐색' })).not.toHaveAttribute('aria-current');
+    expect(screen.getByRole('link', { name: 'Tickets' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: 'Explore' })).not.toHaveAttribute('aria-current');
   });
 
   /**
@@ -58,7 +58,7 @@ describe('ui primitives', () => {
     const glyphs = container.querySelectorAll('svg.tabbar__icon');
     expect(glyphs).toHaveLength(4);
     for (const glyph of glyphs) expect(glyph).toHaveAttribute('aria-hidden', 'true');
-    expect(screen.getByRole('link', { name: '탐색' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Explore' })).toBeInTheDocument();
   });
 
   /**
@@ -68,22 +68,22 @@ describe('ui primitives', () => {
    */
   it('KycBadge shows only what the event asks of a signed-out visitor', () => {
     render(<KycBadge required level={0} signedIn={false} />);
-    expect(screen.getByText('본인인증 필수')).toBeInTheDocument();
-    expect(screen.queryByText('인증 전')).toBeNull();
-    expect(screen.queryByText('인증 완료')).toBeNull();
+    expect(screen.getByText('Verification required')).toBeInTheDocument();
+    expect(screen.queryByText('Not verified')).toBeNull();
+    expect(screen.queryByText('Verified')).toBeNull();
   });
 
   it('KycBadge puts an unverified person next to what the event asks', () => {
     render(<KycBadge required level={0} signedIn />);
-    expect(screen.getByText('본인인증 필수')).toBeInTheDocument();
-    expect(screen.getByText('인증 전')).toBeInTheDocument();
+    expect(screen.getByText('Verification required')).toBeInTheDocument();
+    expect(screen.getByText('Not verified')).toBeInTheDocument();
   });
 
   it('KycBadge says so once the person is verified', () => {
     render(<KycBadge required level={1} signedIn />);
-    expect(screen.getByText('본인인증 필수')).toBeInTheDocument();
-    expect(screen.getByText('인증 완료')).toBeInTheDocument();
-    expect(screen.queryByText('인증 전')).toBeNull();
+    expect(screen.getByText('Verification required')).toBeInTheDocument();
+    expect(screen.getByText('Verified')).toBeInTheDocument();
+    expect(screen.queryByText('Not verified')).toBeNull();
   });
 
   it('KycBadge draws nothing for an event that never asked', () => {

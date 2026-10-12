@@ -24,9 +24,9 @@ import { getClaim, getEvent, markPublished, recordClaim, recordEvent, recordPers
  */
 const APPROVAL = process.env.E2E_APPROVAL === '1';
 
-const FREE_TITLE = '무료 선착순 테스트 행사';
-const SOLDOUT_TITLE = '5석 한정 마감 테스트';
-const APPROVAL_TITLE = '관리자 승인 테스트 행사';
+const FREE_TITLE = 'Free first-come test event';
+const SOLDOUT_TITLE = '5-seat sell-out test';
+const APPROVAL_TITLE = 'Approval-only test event';
 
 const now = (): string => new Date().toISOString();
 
@@ -108,11 +108,11 @@ test.describe('MONTI persona harness (admin + 9 users)', () => {
     // v2: draft → 공개 is ONE publishEvent, and the event is Published on chain when it returns.
     const free = await createDraftAndPublish(admin.page, {
       personaId: ADMIN.id,
-      orgName: '몬티 크루',
+      orgName: 'Monti Crew',
       title: FREE_TITLE,
-      intro: 'E2E 자동화가 만든 무료 선착순 행사입니다. 누구나 바로 티켓을 받을 수 있어요.',
-      venue: '서울 성수동 테스트홀',
-      tiers: [{ kind: '무료', mode: '선착순', name: '일반', supply: 100 }],
+      intro: 'A free first-come event made by the E2E run. Anyone can get a ticket right away.',
+      venue: 'Test Hall, Seongsu, Seoul',
+      tiers: [{ kind: 'Free', mode: 'first-come', name: 'General', supply: 100 }],
     });
     expect(free.eventId).toBeTruthy();
     recordEvent('free', { id: free.eventId, published: true, title: FREE_TITLE });
@@ -122,11 +122,11 @@ test.describe('MONTI persona harness (admin + 9 users)', () => {
     if (APPROVAL) {
       const appr = await createDraftAndPublish(admin.page, {
         personaId: ADMIN.id,
-        orgName: '몬티 크루',
+        orgName: 'Monti Crew',
         title: APPROVAL_TITLE,
-        intro: 'E2E 자동화가 만든 관리자 승인 행사입니다. 신청 후 승인되면 발급됩니다.',
-        venue: '서울 성수동 테스트홀',
-        tiers: [{ kind: '무료', mode: '관리자 승인', name: '일반', supply: 100 }],
+        intro: 'An approval-only event made by the E2E run. Tickets are issued once a request is approved.',
+        venue: 'Test Hall, Seongsu, Seoul',
+        tiers: [{ kind: 'Free', mode: 'approval', name: 'General', supply: 100 }],
       });
       expect(appr.eventId).toBeTruthy();
       recordEvent('approval', { id: appr.eventId, published: true, title: APPROVAL_TITLE });
@@ -225,11 +225,11 @@ test.describe('MONTI persona harness (admin + 9 users)', () => {
     const admin = await ensureSession(browser, ADMIN);
     const soldOut = await createDraftAndPublish(admin.page, {
       personaId: ADMIN.id,
-      orgName: '몬티 크루',
+      orgName: 'Monti Crew',
       title: SOLDOUT_TITLE,
-      intro: `E2E 자동화가 만든 ${SOLDOUT_SUPPLY}석 한정 행사입니다. ${SOLDOUT_SUPPLY}명이 받으면 마감됩니다.`,
-      venue: '서울 성수동 테스트홀',
-      tiers: [{ kind: '무료', mode: '선착순', name: '일반', supply: SOLDOUT_SUPPLY }],
+      intro: `A ${SOLDOUT_SUPPLY}-seat event made by the E2E run. It sells out after ${SOLDOUT_SUPPLY} people.`,
+      venue: 'Test Hall, Seongsu, Seoul',
+      tiers: [{ kind: 'Free', mode: 'first-come', name: 'General', supply: SOLDOUT_SUPPLY }],
     });
     expect(soldOut.eventId).toBeTruthy();
     const soldOutId = soldOut.eventId;

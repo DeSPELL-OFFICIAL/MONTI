@@ -49,7 +49,7 @@ vi.mock('react-router-dom', async (orig) => ({
 }));
 
 const EVENT = { id: '5', orgId: '9', requireKyc: true };
-const TIER = { id: '5-0', eventId: '5', idx: 0, name: '일반', supply: 100, minted: 1, maxPerWallet: 2, seated: false };
+const TIER = { id: '5-0', eventId: '5', idx: 0, name: 'General', supply: 100, minted: 1, maxPerWallet: 2, seated: false };
 const TIER_TWO = { ...TIER, id: '5-1', idx: 1, name: 'VIP' };
 /** The address the identity check sends back, exactly as the sheet writes it. */
 const RESUME = '/claim/5?intent=claim&tier=0';
@@ -133,14 +133,14 @@ describe('Claim', () => {
   it('opens the verification sheet instead of claiming when the event requires kyc', async () => {
     kycLevel.value = 0;
     renderClaim();
-    await userEvent.click(await screen.findByRole('button', { name: '티켓 받기' }));
-    expect(await screen.findByText('이 행사는 본인인증이 필요해요')).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole('button', { name: 'Get a ticket' }));
+    expect(await screen.findByText('This event requires identity verification')).toBeInTheDocument();
     expect(relayClaim).not.toHaveBeenCalled();
   });
 
   it('submits a relayed claim for the selected tier in claim mode', async () => {
     renderClaim();
-    await userEvent.click(await screen.findByRole('button', { name: '티켓 받기' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Get a ticket' }));
     await waitFor(() => expect(relayClaim).toHaveBeenCalled());
     expect(buildClaimAuth).toHaveBeenCalledWith(expect.objectContaining({ eventId: '5', tier: 0, account: ACCOUNT }));
     expect(relayClaim).toHaveBeenCalledWith({ mode: 'claim', auth: AUTH, deviceSig: DEVICE_SIG });
@@ -148,9 +148,9 @@ describe('Claim', () => {
 
   it('confirms a claim the callable already saw land, with a real 완료 state', async () => {
     renderClaim();
-    await userEvent.click(await screen.findByRole('button', { name: '티켓 받기' }));
-    expect(await screen.findByText('티켓을 받았어요 · 내 티켓에 있어요')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '내 티켓 보기' })).toHaveAttribute('href', '/tickets');
+    await userEvent.click(await screen.findByRole('button', { name: 'Get a ticket' }));
+    expect(await screen.findByText("You got your ticket · It's in My tickets")).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'View my ticket' })).toHaveAttribute('href', '/tickets');
     // The relayer answered `confirmed`, so no relay-doc wait was needed.
     expect(watchRelay).not.toHaveBeenCalled();
     expect(navigate).not.toHaveBeenCalledWith('/tickets');
@@ -159,34 +159,34 @@ describe('Claim', () => {
   it('follows the relay doc to 완료 when the callable only accepts the claim', async () => {
     relayClaim.mockResolvedValue({ relayId: 'r1', status: 'sent' });
     renderClaim();
-    await userEvent.click(await screen.findByRole('button', { name: '티켓 받기' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Get a ticket' }));
     await waitFor(() => expect(watchRelay).toHaveBeenCalledWith('r1', expect.any(Function), expect.any(Function)));
     await emitRelay({ status: 'confirmed', tokenId: '77' });
-    expect(await screen.findByText('티켓을 받았어요 · 내 티켓에 있어요')).toBeInTheDocument();
+    expect(await screen.findByText("You got your ticket · It's in My tickets")).toBeInTheDocument();
   });
 
   it('reassures near the button that it is free and MONTI handles it', async () => {
     renderClaim();
-    await screen.findByRole('button', { name: '티켓 받기' });
-    expect(screen.getByText('무료예요 · MONTI가 대신 처리해요')).toBeInTheDocument();
+    await screen.findByRole('button', { name: 'Get a ticket' });
+    expect(screen.getByText("It's free · MONTI handles it for you")).toBeInTheDocument();
   });
 
   it('shows the generic failure sentence when the relay fails with an unknown code', async () => {
     relayClaim.mockResolvedValue({ relayId: 'r1', status: 'sent' });
     renderClaim();
-    await userEvent.click(await screen.findByRole('button', { name: '티켓 받기' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Get a ticket' }));
     await waitFor(() => expect(watchRelay).toHaveBeenCalled());
     await emitRelay({ status: 'failed', error: { code: 'INTERNAL', message: 'boom' } });
-    expect(await screen.findByText('티켓을 받지 못했어요. 잠시 뒤 다시 시도해 주세요.')).toBeInTheDocument();
+    expect(await screen.findByText('Could not get the ticket. Please try again shortly.')).toBeInTheDocument();
   });
 
   it('maps a known relay failure code to its own sentence', async () => {
     relayClaim.mockResolvedValue({ relayId: 'r1', status: 'sent' });
     renderClaim();
-    await userEvent.click(await screen.findByRole('button', { name: '티켓 받기' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Get a ticket' }));
     await waitFor(() => expect(watchRelay).toHaveBeenCalled());
     await emitRelay({ status: 'failed', error: { code: 'SOLD_OUT', message: 'gone' } });
-    expect(await screen.findByText('이 종류는 마감됐어요. 다른 종류를 골라 주세요.')).toBeInTheDocument();
+    expect(await screen.findByText('This type is sold out. Please pick another one.')).toBeInTheDocument();
   });
 
   it('rebuilds with the current nonce and retries once on BAD_NONCE', async () => {
@@ -194,8 +194,8 @@ describe('Claim', () => {
       .mockRejectedValueOnce(callableError('BAD_NONCE', { nonce: '7' }))
       .mockResolvedValueOnce({ relayId: 'r2', status: 'confirmed', tokenId: '78' });
     renderClaim();
-    await userEvent.click(await screen.findByRole('button', { name: '티켓 받기' }));
-    expect(await screen.findByText('티켓을 받았어요 · 내 티켓에 있어요')).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole('button', { name: 'Get a ticket' }));
+    expect(await screen.findByText("You got your ticket · It's in My tickets")).toBeInTheDocument();
     expect(relayClaim).toHaveBeenCalledTimes(2);
     // The rebuild carried the nonce the server reported, and only one retry ever fires.
     expect(buildClaimAuth).toHaveBeenLastCalledWith(expect.objectContaining({ nonce: 7n }));
@@ -204,9 +204,9 @@ describe('Claim', () => {
   it('keeps the button down while a claim is still confirming, so a second tap cannot claim twice', async () => {
     relayClaim.mockResolvedValue({ relayId: 'r1', status: 'sent' });
     renderClaim();
-    const cta = await screen.findByRole('button', { name: '티켓 받기' });
+    const cta = await screen.findByRole('button', { name: 'Get a ticket' });
     await userEvent.click(cta);
-    const busy = await screen.findByRole('button', { name: '받는 중이에요' });
+    const busy = await screen.findByRole('button', { name: 'Getting your ticket' });
     expect(busy).toBeDisabled();
     await userEvent.click(busy);
     expect(relayClaim).toHaveBeenCalledTimes(1);
@@ -226,30 +226,30 @@ describe('Claim', () => {
       throw Object.assign(new Error('REQUEST_FAILED'), { name: 'EnvioError', kind: 'network' });
     });
     renderClaim();
-    expect(await screen.findByRole('alert')).toHaveTextContent('정보를 가져오지 못했어요. 잠시 뒤 다시 시도해 주세요.');
-    expect(screen.getByRole('button', { name: '다시 시도' })).toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent('We could not load that. Please try again in a moment.');
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   });
 
   it('claims nothing on a tier nobody may hold, the way the contract reads maxPerWallet 0', async () => {
     tiers.rows = [{ ...TIER, maxPerWallet: 0 }];
     renderClaim();
-    expect(await screen.findByText('이 행사에서 받을 수 있는 티켓을 이미 다 받았어요.')).toBeInTheDocument();
-    expect(await screen.findByRole('button', { name: '티켓 받기' })).toBeDisabled();
+    expect(await screen.findByText('You already have every ticket this event allows.')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Get a ticket' })).toBeDisabled();
     expect(relayClaim).not.toHaveBeenCalled();
   });
 
   it('leaves a sold-out type unclaimable with the reason on the screen', async () => {
     tiers.rows = [{ ...TIER, supply: 100, minted: 100 }];
     renderClaim();
-    expect(await screen.findByText('이 종류는 마감됐어요. 다른 종류를 골라 주세요.')).toBeInTheDocument();
-    expect(await screen.findByRole('button', { name: '티켓 받기' })).toBeDisabled();
+    expect(await screen.findByText('This type is sold out. Please pick another one.')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Get a ticket' })).toBeDisabled();
   });
 
   it('leaves a called-off event unclaimable with the reason on the screen', async () => {
     event.row = { ...EVENT, status: 'Cancelled' };
     renderClaim();
-    expect(await screen.findByText('취소된 행사예요.')).toBeInTheDocument();
-    expect(await screen.findByRole('button', { name: '티켓 받기' })).toBeDisabled();
+    expect(await screen.findByText('This event was cancelled.')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Get a ticket' })).toBeDisabled();
   });
 
   it('blocks the button and points at 내 티켓 once the per-wallet limit is reached', async () => {
@@ -261,9 +261,9 @@ describe('Claim', () => {
     ];
     renderClaim();
     // held (2) >= maxPerWallet (2): the pre-block fires before a 받기 the chain would only revert.
-    expect(await screen.findByText('이미 받았어요 · 내 티켓에서 확인하세요')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '내 티켓 보기' })).toHaveAttribute('href', '/tickets');
-    expect(await screen.findByRole('button', { name: '티켓 받기' })).toBeDisabled();
+    expect(await screen.findByText('You already have your tickets for this event. Check My tickets.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'View my ticket' })).toHaveAttribute('href', '/tickets');
+    expect(await screen.findByRole('button', { name: 'Get a ticket' })).toBeDisabled();
     expect(relayClaim).not.toHaveBeenCalled();
   });
 
@@ -273,8 +273,8 @@ describe('Claim', () => {
     // One held, maxPerWallet 2: under the cap, so no pre-block and the button still acts.
     ownedTickets.rows = [{ id: '11', eventId: '5', tier: 0, owner, transfers: 0, revoked: false }];
     renderClaim();
-    expect(await screen.findByRole('button', { name: '티켓 받기' })).toBeEnabled();
-    expect(screen.queryByText('이미 받았어요 · 내 티켓에서 확인하세요')).toBeNull();
+    expect(await screen.findByRole('button', { name: 'Get a ticket' })).toBeEnabled();
+    expect(screen.queryByText('You already have your tickets for this event. Check My tickets.')).toBeNull();
   });
 
   /**
@@ -298,11 +298,11 @@ describe('Claim', () => {
     });
     renderClaim();
     // Event loaded, count still in flight: the primary button reads 확인 중… and cannot be tapped.
-    const waiting = await screen.findByRole('button', { name: '확인 중…' });
+    const waiting = await screen.findByRole('button', { name: 'Checking…' });
     expect(waiting).toBeDisabled();
     releaseHeld();
     // Count landed below the cap: the button becomes the real 받기 and acts again.
-    expect(await screen.findByRole('button', { name: '티켓 받기' })).toBeEnabled();
+    expect(await screen.findByRole('button', { name: 'Get a ticket' })).toBeEnabled();
   });
 });
 
@@ -316,9 +316,9 @@ describe('Claim · resuming after the identity check', () => {
     kycLevel.value = 0;
     tiers.rows = [TIER, TIER_TWO];
     renderClaim();
-    await userEvent.selectOptions(await screen.findByLabelText('티켓 종류'), '1');
-    await userEvent.click(screen.getByRole('button', { name: '티켓 받기' }));
-    await userEvent.click(await screen.findByRole('button', { name: '본인인증 하기' }));
+    await userEvent.selectOptions(await screen.findByLabelText('Ticket type'), '1');
+    await userEvent.click(screen.getByRole('button', { name: 'Get a ticket' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Verify my identity' }));
     expect(navigate).toHaveBeenCalledWith(
       `/me/verify?returnTo=${encodeURIComponent('/claim/5?intent=claim&tier=1')}`,
     );
@@ -328,9 +328,9 @@ describe('Claim · resuming after the identity check', () => {
     kycLevel.value = 0;
     tiers.rows = [TIER, TIER_TWO];
     renderClaim();
-    await userEvent.selectOptions(await screen.findByLabelText('티켓 종류'), '1');
-    await userEvent.click(screen.getByRole('button', { name: '티켓 받기' }));
-    await userEvent.click(await screen.findByRole('button', { name: '본인인증 하기' }));
+    await userEvent.selectOptions(await screen.findByLabelText('Ticket type'), '1');
+    await userEvent.click(screen.getByRole('button', { name: 'Get a ticket' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Verify my identity' }));
 
     // What the verification screen reads back out of its own address when it is done.
     const [sentTo] = navigate.mock.calls[0] as [string];
@@ -344,7 +344,7 @@ describe('Claim · resuming after the identity check', () => {
   it('picks the type the address asks for rather than the first one', async () => {
     tiers.rows = [TIER, TIER_TWO];
     renderClaim('/claim/5?tier=1');
-    expect(await screen.findByLabelText('티켓 종류')).toHaveValue('1');
+    expect(await screen.findByLabelText('Ticket type')).toHaveValue('1');
   });
 
   it('finishes the claim by itself, and clears the address before it starts', async () => {
@@ -379,7 +379,7 @@ describe('Claim · resuming after the identity check', () => {
     const tree = claimTree(RESUME);
     const { rerender } = render(tree);
     await waitFor(() => expect(relayClaim).toHaveBeenCalledTimes(1));
-    expect(await screen.findByRole('button', { name: '받는 중이에요' })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'Getting your ticket' })).toBeDisabled();
     rerender(tree);
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(relayClaim).toHaveBeenCalledTimes(1);
@@ -387,7 +387,7 @@ describe('Claim · resuming after the identity check', () => {
 
   it('claims nothing without the intent, however the person arrived', async () => {
     renderClaim('/claim/5?tier=0');
-    expect(await screen.findByRole('button', { name: '티켓 받기' })).toBeEnabled();
+    expect(await screen.findByRole('button', { name: 'Get a ticket' })).toBeEnabled();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(relayClaim).not.toHaveBeenCalled();
   });
@@ -395,17 +395,17 @@ describe('Claim · resuming after the identity check', () => {
   it('claims nothing for somebody the check has not passed yet', async () => {
     kycLevel.value = 0;
     renderClaim(RESUME);
-    await screen.findByRole('button', { name: '티켓 받기' });
+    await screen.findByRole('button', { name: 'Get a ticket' });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(relayClaim).not.toHaveBeenCalled();
     // The sheet is not thrown up either: nobody tapped anything.
-    expect(screen.queryByText('이 행사는 본인인증이 필요해요')).toBeNull();
+    expect(screen.queryByText('This event requires identity verification')).toBeNull();
   });
 
   it('waits for the verification level instead of reading the "still asking" zero as a no', async () => {
     kycLevel.loading = true;
     renderClaim(RESUME);
-    await screen.findByRole('button', { name: '티켓 받기' });
+    await screen.findByRole('button', { name: 'Get a ticket' });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(relayClaim).not.toHaveBeenCalled();
     // The address is untouched, so the claim still resumes once the answer lands.
@@ -415,7 +415,7 @@ describe('Claim · resuming after the identity check', () => {
   it('claims nothing when this person already holds every ticket the event allows', async () => {
     tiers.rows = [{ ...TIER, maxPerWallet: 0 }];
     renderClaim(RESUME);
-    expect(await screen.findByText('이 행사에서 받을 수 있는 티켓을 이미 다 받았어요.')).toBeInTheDocument();
+    expect(await screen.findByText('You already have every ticket this event allows.')).toBeInTheDocument();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(relayClaim).not.toHaveBeenCalled();
   });
@@ -423,7 +423,7 @@ describe('Claim · resuming after the identity check', () => {
   it('claims nothing when the type sold out while the person was verifying', async () => {
     tiers.rows = [{ ...TIER, supply: 100, minted: 100 }];
     renderClaim(RESUME);
-    expect(await screen.findByText('이 종류는 마감됐어요. 다른 종류를 골라 주세요.')).toBeInTheDocument();
+    expect(await screen.findByText('This type is sold out. Please pick another one.')).toBeInTheDocument();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(relayClaim).not.toHaveBeenCalled();
   });
@@ -431,7 +431,7 @@ describe('Claim · resuming after the identity check', () => {
   it('claims nothing when the event was called off while the person was verifying', async () => {
     event.row = { ...EVENT, status: 'Cancelled' };
     renderClaim(RESUME);
-    expect(await screen.findByText('취소된 행사예요.')).toBeInTheDocument();
+    expect(await screen.findByText('This event was cancelled.')).toBeInTheDocument();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(relayClaim).not.toHaveBeenCalled();
   });
@@ -453,11 +453,11 @@ describe('Claim · approval mode', () => {
   it('asks with request mode instead of claiming, and stays to show the request', async () => {
     // The request lands (confirmed) but the indexer row has not surfaced yet: 접수 · 확인 중.
     renderClaim();
-    await userEvent.click(await screen.findByRole('button', { name: '신청하기' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Request a ticket' }));
     await waitFor(() => expect(relayClaim).toHaveBeenCalled());
     expect(relayClaim).toHaveBeenCalledWith({ mode: 'request', auth: AUTH, deviceSig: DEVICE_SIG });
     // The request landed but its row has not surfaced yet: a reassuring 접수 · 확인 중, not nothing.
-    expect(await screen.findByText('신청을 접수했어요 · 확인 중')).toBeInTheDocument();
+    expect(await screen.findByText('Request received · confirming')).toBeInTheDocument();
     // A request is not a claim: approval decides the ticket later, so it never leaves for /tickets.
     expect(navigate).not.toHaveBeenCalledWith('/tickets');
   });
@@ -465,8 +465,8 @@ describe('Claim · approval mode', () => {
   it('shows the pending state and takes it back with the request id', async () => {
     requests.rows = [REQUEST];
     renderClaim();
-    expect(await screen.findByText('신청 완료 · 승인을 기다리고 있어요')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: '신청 취소' }));
+    expect(await screen.findByText('Request sent · waiting for approval')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel request' }));
     await waitFor(() => expect(sendAction).toHaveBeenCalled());
     // The cancel is relayed now (design §5), through the generic relay client, not relayClaim.
     const [kind, target, data] = sendAction.mock.calls[0]!;
@@ -478,31 +478,31 @@ describe('Claim · approval mode', () => {
   it('sends the approved attendee to their issued ticket', async () => {
     requests.rows = [{ ...REQUEST, status: 'Approved', tokenId: '77' }];
     renderClaim();
-    expect(await screen.findByText('승인됐어요. 티켓을 받았어요')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '내 티켓 보기' })).toHaveAttribute('href', '/tickets');
-    expect(screen.queryByRole('button', { name: '신청하기' })).not.toBeInTheDocument();
+    expect(await screen.findByText('Approved. You got your ticket')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'View my ticket' })).toHaveAttribute('href', '/tickets');
+    expect(screen.queryByRole('button', { name: 'Request a ticket' })).not.toBeInTheDocument();
   });
 
   it('lets a rejected or self-cancelled attendee ask again', async () => {
     requests.rows = [{ ...REQUEST, status: 'Rejected' }];
     renderClaim();
-    expect(await screen.findByText('이번엔 승인되지 않았어요')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '신청하기' })).toBeInTheDocument();
+    expect(await screen.findByText('Not approved this time')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Request a ticket' })).toBeInTheDocument();
   });
 
   it('names the approval-only refusal rather than the generic sentence', async () => {
     relayClaim.mockRejectedValue(callableError('APPROVAL_REQUIRED'));
     renderClaim();
-    await userEvent.click(await screen.findByRole('button', { name: '신청하기' }));
-    expect(await screen.findByText('이 행사는 주최자 승인 후 받을 수 있어요.')).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole('button', { name: 'Request a ticket' }));
+    expect(await screen.findByText('You can get a ticket after the organizer approves.')).toBeInTheDocument();
   });
 
   it('opens the verification sheet before requesting when the event needs kyc', async () => {
     event.row = { ...EVENT, requireKyc: true, approvalRequired: true };
     kycLevel.value = 0;
     renderClaim();
-    await userEvent.click(await screen.findByRole('button', { name: '신청하기' }));
-    expect(await screen.findByText('이 행사는 본인인증이 필요해요')).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole('button', { name: 'Request a ticket' }));
+    expect(await screen.findByText('This event requires identity verification')).toBeInTheDocument();
     expect(relayClaim).not.toHaveBeenCalled();
   });
 });

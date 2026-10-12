@@ -34,22 +34,22 @@ const EVENT_ID = process.env.E2E_TRANSFER_EVENT ?? '6';
 const SENDER: Persona = USERS[0]!; // persona-02
 const RECIPIENT: Persona = USERS[6]!; // persona-08
 
-/** Copy strings, verbatim from apps/web/src (tickets/transfer in ko.ts). */
+/** Copy strings, verbatim from apps/web/src (tickets/transfer in en.ts). */
 const C = {
-  ticketsTitle: '내 티켓',
-  transfer: '친구에게 주기',
-  byPhone: '전화번호',
-  findCta: '찾기',
-  confirmTitle: '이 분에게 줄까요?',
-  confirmCta: '친구에게 주기',
-  confirming: '아직 확인 중이에요. 잠시 뒤 내 티켓에서 확인해 주세요.',
-  inviteTitle: '아직 가입하지 않은 번호예요',
-  inviteCta: '초대 문자 보내기',
-  inviteSent: '초대를 보냈어요. 상대가 가입하면 티켓이 자동으로 전달됩니다.',
-  inboxTitle: '친구가 보낸 티켓',
-  accept: '받기',
-  accepted: '티켓을 받았어요',
-  stateBefore: '입장 전',
+  ticketsTitle: 'My tickets',
+  transfer: 'Give to a friend',
+  byPhone: 'Phone',
+  findCta: 'Find',
+  confirmTitle: 'Give the ticket to this person?',
+  confirmCta: 'Give to a friend',
+  confirming: 'Still confirming. Please check My tickets in a moment.',
+  inviteTitle: 'This number has not signed up yet',
+  inviteCta: 'Send invite by text',
+  inviteSent: 'Invite sent. The ticket moves automatically once they sign up.',
+  inboxTitle: 'From friends',
+  accept: 'Accept',
+  accepted: 'Ticket received',
+  stateBefore: 'Not used',
 } as const;
 
 interface OwnedRow {

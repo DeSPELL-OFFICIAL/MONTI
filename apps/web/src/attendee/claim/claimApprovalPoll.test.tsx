@@ -25,7 +25,7 @@ vi.mock('react-router-dom', async (orig) => ({
 }));
 
 const EVENT = { id: '5', orgId: '9', requireKyc: false, approvalRequired: true };
-const TIER = { id: '5-0', eventId: '5', idx: 0, name: '일반', supply: 100, minted: 1, maxPerWallet: 2, seated: false };
+const TIER = { id: '5-0', eventId: '5', idx: 0, name: 'General', supply: 100, minted: 1, maxPerWallet: 2, seated: false };
 /** The one dial these tests turn: what the indexer currently holds for this person's request. */
 const requests: { rows: Array<Record<string, unknown>> } = { rows: [] };
 async function answerIndexer(query: string) {
@@ -104,33 +104,33 @@ describe('Claim · approval mode re-polls the indexer', () => {
     renderClaim();
     await flush();
 
-    fireEvent.click(screen.getByRole('button', { name: '신청하기' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Request a ticket' }));
     await flush();
     // The request landed but the row has not surfaced yet: a reassuring "받았어요 · 확인 중", not nothing.
-    expect(screen.getByText('신청을 접수했어요 · 확인 중')).toBeInTheDocument();
+    expect(screen.getByText('Request received · confirming')).toBeInTheDocument();
     expect(relayClaim).toHaveBeenCalledTimes(1);
 
     // The row appears on the first backoff poll.
     requests.rows = [REQUEST];
     await vi.advanceTimersByTimeAsync(2_000);
     await flush();
-    expect(screen.getByText('신청 완료 · 승인을 기다리고 있어요')).toBeInTheDocument();
+    expect(screen.getByText('Request sent · waiting for approval')).toBeInTheDocument();
 
     // While Pending it keeps looking; an approval flips it live without a reload.
     const pendingPollBefore = myRequestCalls();
     requests.rows = [{ ...REQUEST, status: 'Approved', tokenId: '77' }];
-    await advanceUntil('승인됐어요. 티켓을 받았어요', 30_000);
+    await advanceUntil('Approved. You got your ticket', 30_000);
     expect(myRequestCalls()).toBeGreaterThan(pendingPollBefore); // the pending poll fired
-    expect(screen.getByText('승인됐어요. 티켓을 받았어요')).toBeInTheDocument();
+    expect(screen.getByText('Approved. You got your ticket')).toBeInTheDocument();
     expect(relayClaim).toHaveBeenCalledTimes(1);
   });
 
   it('pauses polling while the tab is hidden and resumes when it comes back', async () => {
     renderClaim();
     await flush();
-    fireEvent.click(screen.getByRole('button', { name: '신청하기' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Request a ticket' }));
     await flush();
-    expect(screen.getByText('신청을 접수했어요 · 확인 중')).toBeInTheDocument();
+    expect(screen.getByText('Request received · confirming')).toBeInTheDocument();
 
     // Hidden: even a minute of ticks asks the indexer nothing.
     setHidden(true);
@@ -143,6 +143,6 @@ describe('Claim · approval mode re-polls the indexer', () => {
     setHidden(false);
     document.dispatchEvent(new Event('visibilitychange'));
     await flush();
-    expect(screen.getByText('신청 완료 · 승인을 기다리고 있어요')).toBeInTheDocument();
+    expect(screen.getByText('Request sent · waiting for approval')).toBeInTheDocument();
   });
 });

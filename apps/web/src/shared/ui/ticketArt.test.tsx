@@ -20,7 +20,7 @@ describe('TicketArt', () => {
    */
   it('draws a different backdrop for each of the twelve presets', () => {
     const drawings = PRESETS.map((preset) => {
-      const { unmount } = render(<TicketArt art={{ preset }} title="재즈 나이트" tierName="일반" />);
+      const { unmount } = render(<TicketArt art={{ preset }} title="재즈 나이트" tierName='General' />);
       const markup = backdrop().innerHTML;
       unmount();
       return markup;
@@ -32,7 +32,7 @@ describe('TicketArt', () => {
   /** An uploaded picture is a CID, and the gateway host is configuration, never a literal here. */
   it('reads an uploaded picture through the configured gateway', () => {
     const cid = 'bafkreiabcticketart';
-    const { container } = render(<TicketArt art={{ imageCid: cid }} title="재즈 나이트" tierName="일반" />);
+    const { container } = render(<TicketArt art={{ imageCid: cid }} title="재즈 나이트" tierName='General' />);
     const image = container.querySelector('image');
     expect(image?.getAttribute('href')).toBe(`${getConfig().ipfsGateway}${cid}`);
   });
@@ -48,11 +48,11 @@ describe('TicketArt', () => {
         title="재즈 나이트"
         tierName="스탠딩"
         holder="김태완"
-        dateText="2026. 10. 13."
+        dateText="Oct 13, 2026"
       />,
     );
     expect(container.querySelector('svg')).toBeInTheDocument();
-    for (const text of ['재즈 나이트', '스탠딩', '김태완', '2026. 10. 13.']) {
+    for (const text of ['재즈 나이트', '스탠딩', '김태완', 'Oct 13, 2026']) {
       expect(screen.getByText(text).tagName.toLowerCase()).toBe('text');
     }
   });
@@ -65,19 +65,19 @@ describe('TicketArt', () => {
   });
 
   it('keeps the band off a ticket that has not been used', () => {
-    const { container } = render(<TicketArt art={{ preset: 'b' }} title="재즈 나이트" tierName="일반" />);
+    const { container } = render(<TicketArt art={{ preset: 'b' }} title="재즈 나이트" tierName='General' />);
     expect(container.querySelector('.ticket-art__band')).toBeNull();
-    expect(screen.queryByText('사용됨')).toBeNull();
-    expect(screen.getByRole('img', { name: '재즈 나이트 · 일반 티켓 그림' })).toBeInTheDocument();
+    expect(screen.queryByText('Used')).toBeNull();
+    expect(screen.getByRole('img', { name: '재즈 나이트 · General ticket art' })).toBeInTheDocument();
   });
 
   it('paints the band, in copy, once the ticket has been used', () => {
     const { container } = render(
-      <TicketArt art={{ preset: 'b' }} title="재즈 나이트" tierName="일반" used />,
+      <TicketArt art={{ preset: 'b' }} title="재즈 나이트" tierName='General' used />,
     );
-    expect(container.querySelector('.ticket-art__band')).toHaveTextContent('사용됨');
+    expect(container.querySelector('.ticket-art__band')).toHaveTextContent('Used');
     // A screen reader gets the state too — it cannot see a red band across the picture.
-    expect(screen.getByRole('img', { name: '재즈 나이트 · 일반 티켓 그림 · 사용됨' })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: '재즈 나이트 · General ticket art · used' })).toBeInTheDocument();
   });
 
   /**
@@ -87,12 +87,12 @@ describe('TicketArt', () => {
    */
   it('greys out the untouched original only while used is set', () => {
     const { container, rerender } = render(
-      <TicketArt art={{ preset: 'c' }} title="재즈 나이트" tierName="일반" />,
+      <TicketArt art={{ preset: 'c' }} title="재즈 나이트" tierName='General' />,
     );
     const before = backdrop().innerHTML;
     expect(backdrop().getAttribute('style')).toBeNull();
 
-    rerender(<TicketArt art={{ preset: 'c' }} title="재즈 나이트" tierName="일반" used />);
+    rerender(<TicketArt art={{ preset: 'c' }} title="재즈 나이트" tierName='General' used />);
     expect(backdrop().getAttribute('style')).toContain('grayscale(1) contrast(.9)');
     expect(backdrop().innerHTML).toBe(before);
     // The filter is on the picture and nowhere near the band that has to stay red.
@@ -108,7 +108,7 @@ describe('TicketArt', () => {
       <TicketArt
         art={{ preset: 'a' }}
         title='<script>alert(1)</script> & "x"'
-        tierName="일반"
+        tierName='General'
       />,
     );
     expect(container.querySelector('script')).toBeNull();
@@ -133,7 +133,7 @@ describe('TicketArt', () => {
     globalThis.IntersectionObserver = MockIO as unknown as typeof IntersectionObserver;
     try {
       const { container } = render(
-        <TicketArt art={{ preset: 'a' }} title="재즈 나이트" tierName="일반" animated />,
+        <TicketArt art={{ preset: 'a' }} title="재즈 나이트" tierName='General' animated />,
       );
       const frame = container.querySelector('.ticket-art');
       expect(frame).not.toBeNull();
@@ -161,7 +161,7 @@ describe('TicketArt', () => {
     const original = globalThis.IntersectionObserver;
     globalThis.IntersectionObserver = MockIO as unknown as typeof IntersectionObserver;
     try {
-      render(<TicketArt art={{ preset: 'a' }} title="재즈 나이트" tierName="일반" />);
+      render(<TicketArt art={{ preset: 'a' }} title="재즈 나이트" tierName='General' />);
       expect(seen).toHaveLength(0);
     } finally {
       globalThis.IntersectionObserver = original;

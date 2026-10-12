@@ -63,24 +63,24 @@ test('56 · settlement step 5 — attendee B buys then refunds before admission'
 
     await ensureAccount(user);
     await page.goto(`/claim/${EVENT_ID}`);
-    const payCta = page.getByRole('button', { name: /결제하고 받기/ });
+    const payCta = page.getByRole('button', { name: /Buy for \$/ });
     await expect(payCta).toBeVisible({ timeout: 60_000 });
     await expect(payCta).toBeEnabled({ timeout: 30_000 });
     await shot(page, 'refund-attendee-claim-paid-cta');
     expect((await payCta.innerText()).trim(), `CTA shows $${PRICE}`).toContain(`$${PRICE}`);
     await payCta.click();
-    const sheet = page.getByRole('dialog', { name: '카드 결제' });
+    const sheet = page.getByRole('dialog', { name: 'Card payment' });
     await expect(sheet).toBeVisible({ timeout: 10_000 });
-    await page.getByPlaceholder('0000 0000 0000 0000 (테스트)').fill('4242424242424242');
+    await page.getByPlaceholder('0000 0000 0000 0000 (test)').fill('4242424242424242');
     // The sheet's own button reads "$30.00 결제하기"; the claim CTA behind it keeps 결제하고 받기.
-    const payBtn = sheet.getByRole('button', { name: /결제하기/ });
+    const payBtn = sheet.getByRole('button', { name: /^Pay \$/ });
     await expect(payBtn).toBeEnabled({ timeout: 10_000 });
     await shot(page, 'refund-attendee-payment-card-filled');
     const payClickAt = Date.now();
     const treasuryBefore = await monBalance(TREASURY);
     await payBtn.click();
-    const doneAlert = sheet.getByText('결제 완료 · 티켓을 받았어요', { exact: true });
-    const toTickets = sheet.getByRole('link', { name: /^(영수증 보기|내 티켓 보기)$/ });
+    const doneAlert = sheet.getByText('Paid · your ticket is ready', { exact: true });
+    const toTickets = sheet.getByRole('link', { name: /^(See receipt|See my tickets)$/ });
     let purchased = false; const pd = Date.now() + 180_000;
     while (Date.now() < pd) { if (await doneAlert.isVisible().catch(() => false) || await toTickets.isVisible().catch(() => false)) { purchased = true; break; } await page.waitForTimeout(2000); }
     diag.purchased = purchased; diag.wire = { ...wire };
@@ -94,8 +94,8 @@ test('56 · settlement step 5 — attendee B buys then refunds before admission'
     diag.tokenId = tokenId; diag.attendeeAccount = wire.account;
 
     await page.goto(`/tickets/${tokenId}`);
-    await expect(page.getByRole('heading', { name: '영수증', exact: true })).toBeVisible({ timeout: 45_000 });
-    const heldLine = page.getByText('결제 금액 보관 중 · 입장하면 자동으로 나눠 보내요', { exact: true });
+    await expect(page.getByRole('heading', { name: 'Receipt', exact: true })).toBeVisible({ timeout: 45_000 });
+    const heldLine = page.getByText('Payment held · paid out when you check in', { exact: true });
     let held = false; const hd = Date.now() + 60_000;
     while (Date.now() < hd) { if (await heldLine.isVisible().catch(() => false)) { held = true; break; } await page.waitForTimeout(2000); }
     diag.receiptHeld = held;
@@ -103,24 +103,24 @@ test('56 · settlement step 5 — attendee B buys then refunds before admission'
     await shot(page, 'refund-attendee-receipt-held-with-refund-button');
     expect(held, 'receipt reads 보관 중 before refund').toBe(true);
 
-    const refundBtn = page.getByRole('button', { name: '환불받기', exact: true });
+    const refundBtn = page.getByRole('button', { name: 'Get a refund', exact: true });
     await expect(refundBtn).toBeVisible({ timeout: 20_000 });
     const refundClickedAtMs = Date.now();
     diag.refundClickedAt = new Date().toISOString();
     await refundBtn.click();
     // 환불받기 only opens the confirm sheet; the irreversible step is 환불하기 on it.
-    const confirmSheet = page.getByRole('dialog', { name: '환불할까요?' });
+    const confirmSheet = page.getByRole('dialog', { name: 'Refund this ticket?' });
     await expect(confirmSheet).toBeVisible({ timeout: 10_000 });
     await shot(page, 'refund-attendee-confirm-sheet');
-    await confirmSheet.getByRole('button', { name: '환불하기', exact: true }).click();
+    await confirmSheet.getByRole('button', { name: 'Refund', exact: true }).click();
     await page.waitForTimeout(400);
     await shot(page, 'refund-attendee-refunding');
-    const refundedLine = page.getByText('환불됨', { exact: true });
+    const refundedLine = page.getByText('Refunded', { exact: true });
     let refunded = false; const fd = Date.now() + 120_000;
     while (Date.now() < fd) { if (await refundedLine.isVisible().catch(() => false)) { refunded = true; break; } await page.waitForTimeout(2500); }
     diag.refunded = refunded; diag.refundObservedAt = new Date().toISOString();
     // The success line is recorded, not asserted: it lives only until the screen is left.
-    diag.refundDoneShown = await page.getByText('환불했어요', { exact: true }).isVisible().catch(() => false);
+    diag.refundDoneShown = await page.getByText('Refunded', { exact: true }).isVisible().catch(() => false);
     diag.refundUiLatencyMs = Date.now() - refundClickedAtMs;
     diag.wire = { ...wire };
     console.log(`[56] refunded=${refunded} refundTxHash=${wire.refundTxHash ?? '(none)'} uiLatencyMs=${diag.refundUiLatencyMs}`);
@@ -131,10 +131,10 @@ test('56 · settlement step 5 — attendee B buys then refunds before admission'
     // Step 3 — negative check: reload the direct ticket URL (built from chain). The receipt must
     // still read 환불됨, the 환불받기 button must be gone, and the ticket must not be admittable.
     await page.goto(`/tickets/${tokenId}`);
-    await expect(page.getByRole('heading', { name: '영수증', exact: true })).toBeVisible({ timeout: 45_000 });
+    await expect(page.getByRole('heading', { name: 'Receipt', exact: true })).toBeVisible({ timeout: 45_000 });
     let refundedPersists = false; const rd = Date.now() + 60_000;
     while (Date.now() < rd) { if (await refundedLine.isVisible().catch(() => false)) { refundedPersists = true; break; } await page.waitForTimeout(2000); }
-    const refundBtnGone = (await page.getByRole('button', { name: '환불받기', exact: true }).count()) === 0;
+    const refundBtnGone = (await page.getByRole('button', { name: 'Get a refund', exact: true }).count()) === 0;
     diag.reload = { refundedPersists, refundBtnGone };
     console.log(`[56] reload: refundedPersists=${refundedPersists} refundBtnGone=${refundBtnGone}`);
     await page.screenshot({ path: `${ARTIFACTS}/56-refund-reload.png`, fullPage: true }).catch(() => undefined);

@@ -9,11 +9,11 @@ describe('event themes', () => {
    * numbers; it may never move one.
    */
   it('keeps what 0 to 3 already mean on chain', () => {
-    const names = themeLabels(ko);
-    expect(names[0]).toBe('공연');
-    expect(names[1]).toBe('모임');
-    expect(names[2]).toBe('전시');
-    expect(names[3]).toBe('기타');
+    const names = themeLabels(en);
+    expect(names[0]).toBe('Concert');
+    expect(names[1]).toBe('Meetup');
+    expect(names[2]).toBe('Exhibition');
+    expect(names[3]).toBe('Other');
     // 기타 is shown last even though its number is fourth.
     expect(THEME_CODES.at(-1)).toBe(3);
   });
@@ -31,7 +31,7 @@ describe('event themes', () => {
         expect(names[code], `theme ${code}`).toBeTruthy();
       }
     }
-    expect(new Set(Object.values(themeLabels(ko))).size).toBe(12);
+    expect(new Set(Object.values(themeLabels(en))).size).toBe(12);
   });
 
   it('reads a stored number back only when it is one of them', () => {

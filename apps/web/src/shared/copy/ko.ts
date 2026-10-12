@@ -278,7 +278,6 @@ export const ko = {
     nicknameTaken: '이미 쓰는 별명이에요.', nicknameSaved: '별명을 저장했어요',
     nicknameInvalid: '영문 소문자, 숫자, 밑줄만 3~20자로 써 주세요.',
     nicknameNeedsAccount: '가입을 먼저 마쳐 주세요.',
-    language: '언어', languageKo: '한국어', languageEn: 'English',
     lockDevice: '휴대폰 잠금', lockCta: '지금 잠그기', locked: '잠겨 있어요',
     lockBody: '잠그면 이 휴대폰으로는 입장할 수 없어요. 휴대폰을 잃어버렸을 때 쓰세요.',
     lockWorking: '잠그고 있어요', lockFailed: '잠그지 못했어요. 잠시 뒤 다시 시도해 주세요.',

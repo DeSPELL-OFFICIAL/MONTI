@@ -14,7 +14,7 @@ test('smoke: admin signs up end to end', async ({ browser }) => {
     await ensureAccount(session);
     // Signed in and on 탐색: the FAB and the tab bar are both here for a real session.
     await session.page.goto('/');
-    await expect(session.page.getByRole('button', { name: '행사 만들기', exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(session.page.getByRole('button', { name: 'Create an event', exact: true })).toBeVisible({ timeout: 30_000 });
   } finally {
     await closePersona(session);
   }

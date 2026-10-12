@@ -36,6 +36,25 @@ describe('firebaseSessionHydrator', () => {
     expect(await hydrate()).toEqual([{ status: 'signedIn', personId: PERSON_ID, account: ACCOUNT }]);
   });
 
+  /**
+   * Open mode (VITE_AUTH_MODE=open): the visitor is a Firebase *anonymous* user whose token the
+   * server stamped with the same two claims. Firebase persists that user like any other, so a
+   * returning visitor is signed in by this rule alone — the provider is never consulted.
+   */
+  it('treats an anonymous-provider user carrying the claims as signed in', async () => {
+    getIdTokenResult.mockResolvedValue({
+      claims: { personId: PERSON_ID, account: ACCOUNT, firebase: { sign_in_provider: 'anonymous' } },
+      signInProvider: 'anonymous',
+    });
+    authUser = { getIdTokenResult, isAnonymous: true } as typeof authUser;
+    expect(await hydrate()).toEqual([{ status: 'signedIn', personId: PERSON_ID, account: ACCOUNT }]);
+  });
+
+  it('is anonymous for an anonymous-provider user before the server stamped the claims', async () => {
+    getIdTokenResult.mockResolvedValue({ claims: { firebase: { sign_in_provider: 'anonymous' } } });
+    expect(await hydrate()).toEqual([{ status: 'anonymous' }]);
+  });
+
   it('clears both identifiers when the user signs out', async () => {
     authUser = null;
     expect(await hydrate()).toEqual([{ status: 'anonymous' }]);

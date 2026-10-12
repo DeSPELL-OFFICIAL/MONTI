@@ -8,9 +8,9 @@ import type { EventDraft, StoredEventDraft } from '../../shared/api/firestore';
  * The poster after the founder's phone test: one modal, and then an upload that runs behind a
  * scene nobody is waiting on (plan section D). Every test here is about that handover — the
  * bytes on screen, the modal closing, the scene staying usable, a refusal that keeps the bytes
- * and `다음` waiting rather than refusing.
+ * and 'Next' waiting rather than refusing.
  *
- * `다음` only moves to the publish screen (v2: the scene never touches the chain). What is under
+ * 'Next' only moves to the publish screen (v2: the scene never touches the chain). What is under
  * test is whether that move is reached and what the draft looked like when it was.
  */
 let store: StoredEventDraft[] = [];
@@ -52,7 +52,7 @@ vi.mock('../../shared/ui/a4Crop', async (orig) => ({
   })),
 }));
 
-/** Where `다음` landed, and the poster the draft mirror carried at that moment. */
+/** Where 'Next' landed, and the poster the draft mirror carried at that moment. */
 let landedPoster: string | null = null;
 function PublishProbe() {
   const path = useLocation().pathname;
@@ -70,8 +70,8 @@ const { CreateEvent } = await import('./CreateEvent');
 const { posterUrl } = await import('../../shared/ui');
 const { emptyEventDraft } = await import('../useEventDraft');
 const { organizerCopy } = await import('../copy');
-const { ko: sharedCopy } = await import('../../shared/copy/index');
-const copy = organizerCopy.ko.scene;
+const { en: sharedCopy } = await import('../../shared/copy/index');
+const copy = organizerCopy.en.scene;
 
 /** Everything an event needs except the picture — so the poster is the only thing left. */
 const ALMOST: EventDraft = {
