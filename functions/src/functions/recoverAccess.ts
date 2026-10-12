@@ -4,9 +4,9 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { warn } from 'firebase-functions/logger';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import type { FunctionsErrorCode } from 'firebase-functions/v2/https';
-import { getAddress, parseAbi } from 'viem';
-import { COINBASE_SMART_WALLET_FACTORY_ADDRESS, ROTATION_COOLDOWN_SECONDS, identityAbi, type Hex } from '@monti/shared';
+import { ROTATION_COOLDOWN_SECONDS, identityAbi, type Hex } from '@monti/shared';
 import { ATTESTER_PK, PHONE_INDEX_KEY, RP_ID, expectedOrigins } from '../config.js';
+import { predictAccount } from '../lib/account.js';
 import { sendSerialized } from '../lib/attesterLock.js';
 import { awaitFinalized, deployment, publicClient, sendAttesterTx } from '../lib/chain.js';
 import { mintSessionClaims } from '../lib/claims.js';
@@ -27,16 +27,6 @@ import { CHALLENGE_RE, challengeFromClientData, coseToP256, ownerBytes } from '.
 const B32_RE = /^0x[0-9a-fA-F]{64}$/;
 const ZERO32 = `0x${'00'.repeat(32)}`;
 const ZERO_ADDR = '0x0000000000000000000000000000000000000000';
-/**
- * counterfactual 계정 주소 계산용 최소 팩토리 ABI(설계 §3·§7, registerPasskey 와 동일).
- * 팩토리 주소는 정적 상수 `COINBASE_SMART_WALLET_FACTORY_ADDRESS`(설계 §7) 다.
- */
-const coinbaseFactoryAbi = parseAbi([
-  'function getAddress(bytes[] owners, uint256 nonce) view returns (address)',
-]);
-
-/** 사람마다 계정은 하나뿐이라 팩토리 nonce 는 항상 0이다(registerPasskey 와 같은 값). */
-const ACCOUNT_NONCE = 0n;
 /** ES256(P-256) 외의 알고리즘은 받지 않는다. 스마트 계정 검증기가 P-256 밖에 못 쓴다. */
 const SUPPORTED_ALGORITHMS = [-7];
 /** 어테스테이션 CA 는 신뢰하지 않는다. 자기 서명(`packed`)과 무증명(`none`)만 받는다. */
@@ -249,14 +239,7 @@ export const recoverAccess = onCall(
 
     // 13. 새 패스키가 소유자인 스마트 계정 주소를 팩토리에서 계산한다(registerPasskey 와 동일).
     const contracts = deployment();
-    const newAccount = getAddress(
-      (await publicClient().readContract({
-        address: COINBASE_SMART_WALLET_FACTORY_ADDRESS,
-        abi: coinbaseFactoryAbi,
-        functionName: 'getAddress',
-        args: [[owner], ACCOUNT_NONCE],
-      })) as string,
-    ) as Hex;
+    const newAccount = await predictAccount(owner);
 
     // 14. 같은 계정으로의 회전은 의미가 없다 — 새 패스키가 옛 패스키와 같은 키였다는 뜻이다.
     if (newAccount.toLowerCase() === oldAccount.toLowerCase()) {

@@ -2,6 +2,7 @@ import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import type { Hex, PersonStatus } from '@monti/shared';
 import { ALLOWED_TRANSITIONS, PASSKEYS, PERSONS, USERS, db } from '../lib/db.js';
 import type { KycDeclineReason } from '../lib/didit.js';
+import { authMode, type AuthMode } from '../config.js';
 
 /** 닫힌 네 값. `lib/didit.ts` 의 `declineReason` 이 쓴 것만 여기로 나간다. */
 const DECLINE_REASONS: readonly string[] = [
@@ -39,6 +40,11 @@ export interface SignupStatusResult {
    */
   displayName?: string;
   personId?: Hex;
+  /**
+   * 서버의 가입 방식(`AUTH_MODE`). 웹은 이 값으로 전화번호·패스키 단계를 그릴지 고른다 —
+   * `open` 이면 익명 로그인 → `startSignup` → `registerIdentity` 로 끝난다.
+   */
+  authMode: AuthMode;
 }
 
 const NOT_STARTED = { status: 'none', hasPasskey: false, hasAccount: false } as const;
@@ -83,7 +89,7 @@ function narrowKycReason(value: unknown): KycDeclineReason | undefined {
  * 패스키를 붙였는지, 계정 주소가 정해졌는지, 본인인증 레벨, 그리고 `registerPasskey` 에
  * 다시 실어 보낼 `personId`. 전화번호·이름·사진·KYC 세션 링크 같은 개인정보는 절대 나가지 않는다.
  *
- * 호출자는 **Firebase 전화 사용자**다. 가입 도중이라 아직 패스키 세션(`account` 클레임)이 없어서
+ * 호출자는 **Firebase 전화 사용자**(open 모드에서는 익명 사용자도)다. 가입 도중이라 아직 패스키 세션(`account` 클레임)이 없어서
  * `resolveCallerAccount` 를 쓸 수 없고, 읽는 문서는 언제나 그 uid 의 것뿐이다.
  */
 export const getSignupStatus = onCall(async (request): Promise<SignupStatusResult> => {
@@ -96,10 +102,10 @@ export const getSignupStatus = onCall(async (request): Promise<SignupStatusResul
   const displayName = narrowDisplayName(user.get('displayName'));
   const named = displayName ? { displayName } : {};
 
-  if (!personId) return { ...NOT_STARTED, ...named };
+  if (!personId) return { ...NOT_STARTED, ...named, authMode: authMode() };
 
   const person = await db.collection(PERSONS).doc(personId).get();
-  if (!person.exists) return { ...NOT_STARTED, ...named };
+  if (!person.exists) return { ...NOT_STARTED, ...named, authMode: authMode() };
 
   // 패스키는 사람 문서가 아니라 `passkeys` 에 있다. `account` 와 따로 읽는 이유는,
   // 둘이 어긋난 상태(계정 주소만 남고 자격증명이 지워진 기기 교체 도중)가 실제로 있기 때문이다.
@@ -116,5 +122,6 @@ export const getSignupStatus = onCall(async (request): Promise<SignupStatusResul
     ...(kycReason ? { kycReason } : {}),
     ...named,
     personId,
+    authMode: authMode(),
   };
 });

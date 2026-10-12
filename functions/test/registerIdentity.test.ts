@@ -10,6 +10,8 @@ const PERSON_ID = `0x${'aa'.repeat(32)}`;
 const X = `0x${'11'.repeat(32)}`;
 const Y = `0x${'22'.repeat(32)}`;
 const ACCOUNT = '0x9999999999999999999999999999999999999999';
+/** 팩토리가 돌려주는 기기 키 소유 계정(소문자). 서버는 체크섬으로 바꿔 적어야 한다. */
+const DEVICE_ACCOUNT_RAW = '0x52908400098527886e0f7030069857d2e4169ee7';
 const IDENTITY = '0x1111111111111111111111111111111111111111';
 const TX = '0xabc';
 const OTHER_TX = '0xdef';
@@ -149,8 +151,9 @@ const sendAttesterTx = vi.fn(async (_tx: AttesterTx) => guard(TX));
 // `publicClient()` 를 통째로 가짜로 바꾸므로, 인자는 실제 호출부가 넘기는 모양 그대로 적는다 —
 // 빈 인자로 두면 `mock.calls[0][0]` 이 타입상 존재하지 않는 칸이 된다.
 const readContract = vi.fn(
-  async (_args: { address: Hex; abi: Abi; functionName: string; args: readonly unknown[] }) =>
-    guard(false),
+  async (args: { address: Hex; abi: Abi; functionName: string; args: readonly unknown[] }) =>
+    // 팩토리 `getAddress` 는 open 모드에서만 불린다(기기 키 소유 계정 예측). 나머지는 `isMember`.
+    guard(args.functionName === 'getAddress' ? DEVICE_ACCOUNT_RAW : false),
 );
 const waitForTransactionReceipt = vi.fn(async () => guard({ status: 'success', blockNumber: 100n }));
 const awaitFinalized = vi.fn(async (_blockNumber: bigint) => guard(undefined));
@@ -163,6 +166,10 @@ vi.mock('../src/lib/chain.js', () => ({
 }));
 
 const { registerIdentity } = await import('../src/functions/registerIdentity.js');
+const { predictAccount } = await import('../src/lib/account.js');
+const { ownerBytes } = await import('../src/lib/webauthn.js');
+const { COINBASE_SMART_WALLET_FACTORY_ADDRESS } = await import('@monti/shared');
+const { getAddress } = await import('viem');
 const functionsTest = (await import('firebase-functions-test')).default();
 const wrapped = functionsTest.wrap(registerIdentity);
 
@@ -189,6 +196,7 @@ beforeEach(() => {
   waitForTransactionReceipt.mockClear();
   awaitFinalized.mockClear();
   setCustomUserClaims.mockClear();
+  delete process.env.AUTH_MODE;
   seedCaller();
   seedPerson();
 });
@@ -528,5 +536,69 @@ describe('registerIdentity — the session claims follow the chain', () => {
       'PERSON_MISMATCH',
     );
     expect(setCustomUserClaims).not.toHaveBeenCalled();
+  });
+});
+
+describe('registerIdentity — AUTH_MODE=open derives the account from the device key', () => {
+  const DEVICE_ACCOUNT = getAddress(DEVICE_ACCOUNT_RAW);
+
+  beforeEach(() => {
+    process.env.AUTH_MODE = 'open';
+    docs.clear();
+    seedCaller();
+    write(`persons/${PERSON_ID}`, { status: 'pending', kycLevel: 0, authMode: 'open' });
+  });
+
+  it('asks the factory for the account owned by x||y of the device key, exactly as the shared helper does', async () => {
+    const result = await call();
+    expect(result.txHash).toBe(TX);
+
+    const factoryCalls = readContract.mock.calls.filter(([args]) => args.functionName === 'getAddress');
+    expect(factoryCalls).toHaveLength(1);
+    expect(factoryCalls[0]![0]).toMatchObject({
+      address: COINBASE_SMART_WALLET_FACTORY_ADDRESS,
+      args: [[ownerBytes(X as Hex, Y as Hex)], 0n],
+    });
+    // 같은 소유자로 공용 helper 를 부른 결과와 한 글자도 다르지 않다.
+    await expect(predictAccount(ownerBytes(X as Hex, Y as Hex))).resolves.toBe(DEVICE_ACCOUNT);
+
+    const person = snapshot(`persons/${PERSON_ID}`);
+    expect(person.get('account')).toBe(DEVICE_ACCOUNT);
+    expect(person.get('accountOwner')).toBe('device');
+    expect(person.get('status')).toBe('active');
+    expect(sendAttesterTx.mock.calls[0]![0].args).toEqual([PERSON_ID, DEVICE_ACCOUNT, X, Y, 0]);
+    expect(snapshot(`devices/${DEVICE_ACCOUNT}`).get('deviceX')).toBe(X);
+    expect(setCustomUserClaims).toHaveBeenCalledWith(auth.uid, { personId: PERSON_ID, account: DEVICE_ACCOUNT });
+  });
+
+  it('keeps a passkey account that is already there and never asks the factory', async () => {
+    write(`persons/${PERSON_ID}`, { account: ACCOUNT }, { merge: true });
+    await call();
+    expect(readContract.mock.calls.some(([args]) => args.functionName === 'getAddress')).toBe(false);
+    const person = snapshot(`persons/${PERSON_ID}`);
+    expect(person.get('account')).toBe(ACCOUNT);
+    expect(person.get('accountOwner')).toBeUndefined();
+    expect(sendAttesterTx.mock.calls[0]![0].args[1]).toBe(ACCOUNT);
+  });
+
+  it('is idempotent: a repeat call reuses the stored account and sends once', async () => {
+    const first = await call();
+    const second = await call();
+    expect(second.txHash).toBe(first.txHash);
+    expect(sendAttesterTx).toHaveBeenCalledTimes(1);
+    expect(readContract.mock.calls.filter(([args]) => args.functionName === 'getAddress')).toHaveLength(1);
+  });
+
+  it('still refuses a caller registering somebody else', async () => {
+    seedCaller(`0x${'bb'.repeat(32)}`);
+    await expect(call()).rejects.toThrow('PERSON_MISMATCH');
+    expect(snapshot(`persons/${PERSON_ID}`).get('account')).toBeUndefined();
+  });
+
+  it('keeps PASSKEY_REQUIRED when the flag is back to phone', async () => {
+    process.env.AUTH_MODE = 'phone';
+    await expect(call()).rejects.toThrow('PASSKEY_REQUIRED');
+    expect(snapshot(`persons/${PERSON_ID}`).get('account')).toBeUndefined();
+    expect(sendAttesterTx).not.toHaveBeenCalled();
   });
 });

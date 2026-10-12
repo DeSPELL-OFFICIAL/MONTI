@@ -146,7 +146,7 @@ export const createTransferInvite = onCall(
     if (user.get('phoneHmac') === phoneIndex) {
       throw new HttpsError('invalid-argument', 'SELF_TRANSFER');
     }
-    const locale: Locale = user.get('locale') === 'en' ? 'en' : 'ko';
+    const locale: Locale = user.get('locale') === 'ko' ? 'ko' : 'en'; // 영어가 기본이다. 'ko' 로 적힌 사람만 한국어
 
     const contracts = deployment();
     const pc = publicClient();

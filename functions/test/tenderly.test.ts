@@ -313,7 +313,7 @@ describe('tenderlyWebhook', () => {
     expect(res.body).toBe('ok:1');
   });
 
-  it('pushes 입장 완료 to the owner device on CheckedIn, and no-ops without a token', async () => {
+  it('pushes Checked in to the owner device on CheckedIn, and no-ops without a token', async () => {
     chain.ownerOf.set('7', OWNER);
     write(`${DEVICES}/${OWNER}`, { pushToken: 'fcm-1' });
 
@@ -322,7 +322,7 @@ describe('tenderlyWebhook', () => {
     expect(send).toHaveBeenCalledTimes(1);
     expect(send.mock.calls[0]?.[0]).toMatchObject({
       token: 'fcm-1',
-      notification: { title: '입장 완료' },
+      notification: { title: 'Checked in', body: 'Your ticket is now checked in.' },
       data: { tokenId: '7' },
     });
 

@@ -2,24 +2,11 @@ import { verifyRegistrationResponse } from '@simplewebauthn/server';
 import type { RegistrationResponseJSON } from '@simplewebauthn/server';
 import { FieldValue } from 'firebase-admin/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
-import { getAddress, parseAbi } from 'viem';
-import { COINBASE_SMART_WALLET_FACTORY_ADDRESS, type Hex } from '@monti/shared';
+import type { Hex } from '@monti/shared';
 import { RP_ID, expectedOrigins } from '../config.js';
-import { publicClient } from '../lib/chain.js';
+import { predictAccount } from '../lib/account.js';
 import { AUTH_CHALLENGES, PASSKEYS, PERSONS, USERS, db } from '../lib/db.js';
 import { CHALLENGE_RE, challengeFromClientData, coseToP256, ownerBytes } from '../lib/webauthn.js';
-
-/**
- * Coinbase Smart Wallet 팩토리의 counterfactual 주소 계산에 필요한 최소 ABI(설계 §3·§7).
- * 4337 은 폐기됐지만 계정은 여전히 counterfactual 이라 이 view 로 주소만 예측한다. 팩토리
- * 주소는 정적 상수 `COINBASE_SMART_WALLET_FACTORY_ADDRESS`(설계 §7) 다.
- */
-const coinbaseFactoryAbi = parseAbi([
-  'function getAddress(bytes[] owners, uint256 nonce) view returns (address)',
-]);
-
-/** 사람마다 계정은 하나뿐이라 팩토리 nonce 는 항상 0이다. 기기 추가는 소유자 추가지 새 계정이 아니다. */
-const ACCOUNT_NONCE = 0n;
 
 /** ES256(P-256) 외의 알고리즘은 받지 않는다. 스마트 계정 검증기가 P-256 밖에 못 쓴다. */
 const SUPPORTED_ALGORITHMS = [-7];
@@ -132,13 +119,7 @@ export const registerPasskey = onCall(
       throw new HttpsError('permission-denied', 'ATTESTATION_REJECTED');
     }
 
-    const predicted = await publicClient().readContract({
-      address: COINBASE_SMART_WALLET_FACTORY_ADDRESS,
-      abi: coinbaseFactoryAbi,
-      functionName: 'getAddress',
-      args: [[owner], ACCOUNT_NONCE],
-    });
-    const account = getAddress(predicted as string);
+    const account = await predictAccount(owner);
 
     // 패스키와 계정 주소는 같이 태어난다. 둘 중 하나만 남는 상태는 없다.
     await db.runTransaction(async (tx) => {

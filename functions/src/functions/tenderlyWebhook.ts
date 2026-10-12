@@ -60,7 +60,7 @@ async function pushCheckedIn(tokenId: bigint, late = false): Promise<void> {
   try {
     await getMessaging().send({
       token,
-      notification: { title: '입장 완료', body: '티켓이 입장 완료로 바뀌었습니다.' },
+      notification: { title: 'Checked in', body: 'Your ticket is now checked in.' },
       data: { ...data } as Record<string, string>,
     });
   } catch (error) {

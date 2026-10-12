@@ -99,15 +99,15 @@ describe('getSignupStatus', () => {
 
   it('answers status none for a uid that never started, instead of an error', async () => {
     // 로그인만 하고 `startSignup` 을 부르지 않은 uid — 재개할 가입이 없다.
-    expect(await call('uid-9')).toEqual({ status: 'none', hasPasskey: false, hasAccount: false });
+    expect(await call('uid-9')).toEqual({ status: 'none', hasPasskey: false, hasAccount: false, authMode: 'phone' });
 
     // 사용자 문서는 있지만 personId 가 없는 반쪽 상태도 같다.
     docs.set(`${USERS}/uid-1`, { locale: 'ko' });
-    expect(await call()).toEqual({ status: 'none', hasPasskey: false, hasAccount: false });
+    expect(await call()).toEqual({ status: 'none', hasPasskey: false, hasAccount: false, authMode: 'phone' });
 
     // personId 는 있는데 사람 문서가 없다(지워졌다) — 역시 재개할 것이 없다.
     docs.set(`${USERS}/uid-1`, { personId: PERSON_ID });
-    expect(await call()).toEqual({ status: 'none', hasPasskey: false, hasAccount: false });
+    expect(await call()).toEqual({ status: 'none', hasPasskey: false, hasAccount: false, authMode: 'phone' });
   });
 
   it('reports a brand-new signup as pending with no passkey and no account', async () => {
@@ -118,6 +118,7 @@ describe('getSignupStatus', () => {
       hasAccount: false,
       kycLevel: 0,
       personId: PERSON_ID,
+      authMode: 'phone',
     });
   });
 
@@ -130,6 +131,7 @@ describe('getSignupStatus', () => {
       hasAccount: true,
       kycLevel: 0,
       personId: PERSON_ID,
+      authMode: 'phone',
     });
   });
 
@@ -149,6 +151,7 @@ describe('getSignupStatus', () => {
         hasAccount: true,
         kycLevel: 1,
         personId: PERSON_ID,
+        authMode: 'phone',
       });
     }
   });
@@ -173,7 +176,7 @@ describe('getSignupStatus', () => {
       kyc: { provider: 'didit', sessionId: 'sess-1', url: 'https://verify.didit.me/s/sess-1', status: 'open' },
     });
     const result = await call();
-    expect(Object.keys(result).sort()).toEqual(['hasAccount', 'hasPasskey', 'kycLevel', 'personId', 'status']);
+    expect(Object.keys(result).sort()).toEqual(['authMode', 'hasAccount', 'hasPasskey', 'kycLevel', 'personId', 'status']);
     const json = JSON.stringify(result);
     expect(json).not.toContain('enc:');
     expect(json).not.toContain('didit');
@@ -201,6 +204,7 @@ describe('getSignupStatus', () => {
       hasPasskey: false,
       hasAccount: false,
       displayName: '김태완',
+      authMode: 'phone',
     });
   });
 
@@ -245,5 +249,25 @@ describe('getSignupStatus', () => {
 
     signedUp({ status: 'active' });
     expect((await call()).kycReason).toBeUndefined();
+  });
+});
+
+describe('getSignupStatus — AUTH_MODE', () => {
+  it('tells the web which signup flow the server runs', async () => {
+    const saved = process.env.AUTH_MODE;
+    try {
+      process.env.AUTH_MODE = 'open';
+      expect(await call('uid-anon')).toEqual({
+        status: 'none',
+        hasPasskey: false,
+        hasAccount: false,
+        authMode: 'open',
+      });
+      signedUp({ account: ACCOUNT });
+      expect(await call()).toMatchObject({ status: 'pending', hasAccount: true, authMode: 'open' });
+    } finally {
+      if (saved === undefined) delete process.env.AUTH_MODE;
+      else process.env.AUTH_MODE = saved;
+    }
   });
 });

@@ -19,6 +19,19 @@ export const ANDROID_APK_KEY_HASH = defineString('ANDROID_APK_KEY_HASH', { defau
  * 로컬 주소를 코드에 박아 두면 그 origin 이 운영 서버에서도 패스키를 통과시킨다.
  */
 export const DEV_ORIGINS = defineString('DEV_ORIGINS', { default: '' });
+/**
+ * 가입 방식. `phone`(기본) 은 전화번호 인증 → 패스키 → 기기 키 등록이다.
+ * `open` 은 Firebase 익명 로그인만으로 `startSignup` 을 받고, 패스키 없이 **기기 키**로
+ * 계정 주소를 정한다(`registerIdentity`). 전화번호 사용자는 `open` 에서도 그대로 받는다.
+ * `open` 이 아닌 값(빈 값 포함)은 전부 `phone` 이다.
+ */
+export const AUTH_MODE = defineString('AUTH_MODE', { default: 'phone' });
+
+export type AuthMode = 'phone' | 'open';
+
+export function authMode(): AuthMode {
+  return AUTH_MODE.value().trim() === 'open' ? 'open' : 'phone';
+}
 export const CHAIN_ID = defineString('CHAIN_ID', { default: String(MONAD_TESTNET_CHAIN_ID) });
 export const RPC_URL = defineString('RPC_URL', { default: MONAD_TESTNET_RPC_URL });
 export const ENVIO_GRAPHQL_URL = defineString('ENVIO_GRAPHQL_URL', {
