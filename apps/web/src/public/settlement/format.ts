@@ -6,14 +6,15 @@ export function usdFromBaseUnits(raw: string | bigint | null | undefined): strin
   return formatUsd(Number(value) / 1_000_000);
 }
 
-/** USD cents (the per-tier price the server stores) -> "$30.00". */
+/** USD cents (the per-tier price the server stores) -> "$30". */
 export function usdFromCents(cents: number): string {
   return formatUsd((Number.isFinite(cents) ? cents : 0) / 100);
 }
 
-/** One dollar amount, always two decimals — the reader never sees six. */
+/** One dollar amount: "$30" when whole, otherwise two decimals — the reader never sees six. */
 export function formatUsd(dollars: number): string {
-  return `$${dollars.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const whole = Number.isInteger(Math.round(dollars * 100) / 100);
+  return `$${dollars.toLocaleString('en-US', { minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: 2 })}`;
 }
 
 /** Basis points -> a percentage a person reads: 1500 -> "15%", 1250 -> "12.5%". */
@@ -51,7 +52,7 @@ export function buildReasonLookup(recipients: ReadableRecipient[]): ReasonLookup
   const byHash = new Map<string, string>();
   const byAccount = new Map<string, string>();
   recipients.forEach((recipient, index) => {
-    const label = recipient.reason || recipient.tag || `수령인 ${index + 1}`;
+    const label = recipient.reason || recipient.tag || `Recipient ${index + 1}`;
     if (recipient.account) byAccount.set(recipient.account.toLowerCase(), label);
     if (recipient.reason) byHash.set(reasonHashOf(recipient.reason).toLowerCase(), label);
   });
@@ -70,7 +71,7 @@ export function reasonForPayout(
   return (
     lookup.byHash.get((payout.reasonHash ?? '').toLowerCase()) ??
     lookup.byAccount.get((payout.recipient ?? '').toLowerCase()) ??
-    `수령인 ${index + 1}`
+    `Recipient ${index + 1}`
   );
 }
 

@@ -31,12 +31,12 @@ test('51 · settlement step 3 — public rules render + attendee 결제하고 �
 
     // 3a. Public settlement page renders the confirmed rules (no login).
     await page.goto(`/settlement/${EVENT_ID}`);
-    const rulesTitle = page.getByText('이 행사의 수익은 이렇게 나뉩니다', { exact: true });
-    const emptyTitle = page.getByText('주최자가 정산 규칙을 아직 확정하지 않았어요', { exact: true });
+    const rulesTitle = page.getByText('How this event’s revenue is split', { exact: true });
+    const emptyTitle = page.getByText('The organizer hasn’t locked in the payout rules yet', { exact: true });
     await expect(rulesTitle).toBeVisible({ timeout: 30_000 });
     await expect(emptyTitle).toHaveCount(0);
     diag.publicRulesRendered = true;
-    diag.platformLabelVisible = await page.getByText('MONTI 플랫폼', { exact: true }).first().isVisible().catch(() => false);
+    diag.platformLabelVisible = await page.getByText('MONTI platform', { exact: true }).first().isVisible().catch(() => false);
     console.log(`[51] /settlement/${EVENT_ID} rules rendered=true platformLabel=${diag.platformLabelVisible}`);
     await page.screenshot({ path: `${ARTIFACTS}/51-settlement-public.png`, fullPage: true }).catch(() => undefined);
 
@@ -47,22 +47,22 @@ test('51 · settlement step 3 — public rules render + attendee 결제하고 �
 
     // The priced CTA reads "결제하고 받기 $30.00" once the held/pending counts resolve (before that it
     // shows 확인 중… and is disabled, so match on the pay copy to wait past that transient state).
-    const payCta = page.getByRole('button', { name: /결제하고 받기/ });
+    const payCta = page.getByRole('button', { name: /Buy for \$/ });
     await expect(payCta).toBeVisible({ timeout: 45_000 });
     await expect(payCta).toBeEnabled({ timeout: 30_000 });
     const ctaText = (await payCta.innerText()).trim();
     diag.ctaText = ctaText;
     console.log(`[51] attendee CTA = ${JSON.stringify(ctaText)}`);
-    expect(ctaText, 'CTA must be the priced pay button').toContain('결제하고 받기');
+    expect(ctaText, 'CTA must be the priced pay button').toContain('Buy for');
     expect(ctaText, 'CTA must show the $30 price').toContain('$30');
 
     // 3c. Tap it → the mock card sheet (결제) opens. Do NOT submit (treasury USDC = 0 → BLOCKED-USDC).
     await payCta.click();
-    const sheetTitle = page.getByRole('heading', { name: '카드 결제', exact: true });
+    const sheetTitle = page.getByRole('heading', { name: 'Card payment', exact: true });
     await expect(sheetTitle).toBeVisible({ timeout: 10_000 });
-    const cardField = page.getByPlaceholder('0000 0000 0000 0000 (테스트)');
+    const cardField = page.getByPlaceholder('0000 0000 0000 0000 (test)');
     diag.sheetOpened = await cardField.isVisible().catch(() => false);
-    diag.testNoticeVisible = await page.getByText('테스트 결제예요 · 실제로 돈이 빠져나가지 않아요', { exact: true }).isVisible().catch(() => false);
+    diag.testNoticeVisible = await page.getByText('This is a test payment · no real money moves', { exact: true }).isVisible().catch(() => false);
     console.log(`[51] purchase sheet opened=${diag.sheetOpened} testNotice=${diag.testNoticeVisible} (NOT submitted)`);
     await page.screenshot({ path: `${ARTIFACTS}/51-attendee-sheet.png`, fullPage: true }).catch(() => undefined);
     expect(diag.sheetOpened, 'mock card sheet must open').toBe(true);

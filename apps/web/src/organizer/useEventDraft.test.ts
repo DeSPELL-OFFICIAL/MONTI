@@ -246,10 +246,10 @@ describe('opening the scene', () => {
 
   it('reads a ticket kind back at its own type too', () => {
     const { tiers } = normalizeEventDraft({
-      tiers: [{ name: '일반', supply: '백장', currency: '원', design: 7 }],
+      tiers: [{ name: 'General', supply: '백장', currency: '원', design: 7 }],
     });
     expect(tiers[0]).toEqual({
-      name: '일반', supply: 0, maxPerWallet: 0,
+      name: 'General', supply: 0, maxPerWallet: 0,
       currency: 'free', amount: 0, design: 'a', imageCid: '',
     });
   });
@@ -272,7 +272,7 @@ describe('opening the scene', () => {
  * Plan section F-2. The debounce, the ten minutes and the four unload events were all already
  * here; what was missing was a way to ask for a write and be told it happened.
  */
-describe('임시 저장', () => {
+describe('Save draft', () => {
   it('runs the pending write now rather than two seconds from now', async () => {
     const view = await openDraft();
     act(() => view.result.current.patch({ title: '재즈 나이트' }));

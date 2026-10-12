@@ -2,14 +2,14 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import { staffKo } from '../copy';
+import { staffEn } from '../copy';
 import { QueueScreen, type QueueScreenProps } from './QueueScreen';
 import type { ReconciledEntry } from './reconcile';
 
 const TS = 1_700_000_000;
 
 /** The time the screen prints, computed the way the screen computes it. */
-const at = (ts: number) => new Date(ts * 1000).toLocaleTimeString('ko-KR');
+const at = (ts: number) => new Date(ts * 1000).toLocaleTimeString('en-US');
 
 function entry(over: Partial<ReconciledEntry> & { id: string; tokenId: string }): ReconciledEntry {
   return {
@@ -44,8 +44,8 @@ describe('queue screen', () => {
     });
 
     // `sent` counts as waiting: an op with no receipt is as unaccounted for as one not yet sent.
-    expect(screen.getByText('대기 2건 · 기록 완료 1건 · 충돌 1건 · 멈춤 1건')).toBeInTheDocument();
-    expect(screen.queryByText(staffKo.queue.empty)).not.toBeInTheDocument();
+    expect(screen.getByText('Waiting 2 · Recorded 1 · Conflicts 1 · Stopped 1')).toBeInTheDocument();
+    expect(screen.queryByText(staffEn.queue.empty)).not.toBeInTheDocument();
   });
 
   it('names the gate that won and the time it recorded the tap', () => {
@@ -53,8 +53,8 @@ describe('queue screen', () => {
       entries: [entry({ id: '4', tokenId: '103', status: 'conflict', firstGateId: '9', firstTs: TS })],
     });
 
-    expect(screen.getByText(`티켓 103 · 9번 게이트가 ${at(TS)}에 먼저 받았어요`)).toBeInTheDocument();
-    expect(screen.getByText(staffKo.queue.conflictsHint)).toBeInTheDocument();
+    expect(screen.getByText(`Ticket 103 · gate 9 took it first at ${at(TS)}`)).toBeInTheDocument();
+    expect(screen.getByText(staffEn.queue.conflictsHint)).toBeInTheDocument();
   });
 
   it("says an organizer's manual override was exactly that, naming no gate that tapped", () => {
@@ -64,8 +64,8 @@ describe('queue screen', () => {
       ],
     });
 
-    expect(screen.getByText(`티켓 103 · 7번 게이트에서 ${at(TS)}에 수동 승인됐어요`)).toBeInTheDocument();
-    expect(screen.queryByText(/먼저 받았어요/)).not.toBeInTheDocument();
+    expect(screen.getByText(`Ticket 103 · approved by hand at gate 7 at ${at(TS)}`)).toBeInTheDocument();
+    expect(screen.queryByText(/took it first/)).not.toBeInTheDocument();
   });
 
   it('offers no retry on a conflict, because there is nothing left to send', async () => {
@@ -73,7 +73,7 @@ describe('queue screen', () => {
       entries: [entry({ id: '4', tokenId: '103', status: 'conflict', firstGateId: '9', firstTs: TS })],
     });
 
-    expect(screen.queryByRole('button', { name: staffKo.queue.retry })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: staffEn.queue.retry })).not.toBeInTheDocument();
     expect(onRetry).not.toHaveBeenCalled();
   });
 
@@ -87,19 +87,19 @@ describe('queue screen', () => {
       ],
     });
 
-    const parked = screen.getByRole('list', { name: staffKo.queue.parkedTitle });
+    const parked = screen.getByRole('list', { name: staffEn.queue.parkedTitle });
     const rows = within(parked).getAllByRole('listitem');
     expect(rows).toHaveLength(4);
-    expect(within(rows[0]!).getByText(staffKo.queue.reasonLateWindow)).toBeInTheDocument();
-    expect(within(rows[1]!).getByText(staffKo.queue.reasonNotDeployed)).toBeInTheDocument();
-    expect(within(rows[2]!).getByText(staffKo.queue.reasonResendExhausted)).toBeInTheDocument();
-    expect(within(rows[3]!).getByText(staffKo.queue.reasonOther)).toBeInTheDocument();
+    expect(within(rows[0]!).getByText(staffEn.queue.reasonLateWindow)).toBeInTheDocument();
+    expect(within(rows[1]!).getByText(staffEn.queue.reasonNotDeployed)).toBeInTheDocument();
+    expect(within(rows[2]!).getByText(staffEn.queue.reasonResendExhausted)).toBeInTheDocument();
+    expect(within(rows[3]!).getByText(staffEn.queue.reasonOther)).toBeInTheDocument();
     // An error nobody has a sentence for is still shown, so a field report can name it.
     expect(within(rows[3]!).getByText('fetch failed')).toBeInTheDocument();
     // …and a mark that does have one is not printed raw beside it.
     expect(within(rows[2]!).queryByText('RESEND_EXHAUSTED')).not.toBeInTheDocument();
 
-    await userEvent.click(within(rows[0]!).getByRole('button', { name: staffKo.queue.retry }));
+    await userEvent.click(within(rows[0]!).getByRole('button', { name: staffEn.queue.retry }));
     expect(onRetry).toHaveBeenCalledExactlyOnceWith('5');
   });
 
@@ -114,23 +114,23 @@ describe('queue screen', () => {
 
     // The one in flight says so; the other is held rather than hidden, so the list does not move
     // under the thumb of someone tapping down a queue.
-    expect(screen.getByRole('button', { name: staffKo.queue.retrying })).toBeDisabled();
-    expect(screen.getByRole('button', { name: staffKo.queue.retry })).toBeDisabled();
+    expect(screen.getByRole('button', { name: staffEn.queue.retrying })).toBeDisabled();
+    expect(screen.getByRole('button', { name: staffEn.queue.retry })).toBeDisabled();
   });
 
   it('asks for a reconciliation pass, and says so while one is running', async () => {
     const { onReconcile } = renderQueue();
-    await userEvent.click(screen.getByRole('button', { name: staffKo.queue.reconcile }));
+    await userEvent.click(screen.getByRole('button', { name: staffEn.queue.reconcile }));
     expect(onReconcile).toHaveBeenCalledOnce();
 
     renderQueue({ busy: true });
-    expect(screen.getByRole('button', { name: staffKo.queue.reconciling })).toBeDisabled();
+    expect(screen.getByRole('button', { name: staffEn.queue.reconciling })).toBeDisabled();
   });
 
   it('says the queue is empty rather than showing three empty lists', () => {
     renderQueue();
-    expect(screen.getByText(staffKo.queue.empty)).toBeInTheDocument();
-    expect(screen.queryByText(staffKo.queue.conflictsTitle)).not.toBeInTheDocument();
-    expect(screen.queryByText(staffKo.queue.parkedTitle)).not.toBeInTheDocument();
+    expect(screen.getByText(staffEn.queue.empty)).toBeInTheDocument();
+    expect(screen.queryByText(staffEn.queue.conflictsTitle)).not.toBeInTheDocument();
+    expect(screen.queryByText(staffEn.queue.parkedTitle)).not.toBeInTheDocument();
   });
 });

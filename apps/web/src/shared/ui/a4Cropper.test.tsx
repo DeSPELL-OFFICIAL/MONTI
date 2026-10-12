@@ -4,7 +4,7 @@ import {
   A4Cropper, A4_HEIGHT, A4_MAX_BYTES, A4_QUALITY, A4_QUALITY_RESCUE, A4_WIDTH, cropToA4,
   sourceRect, turnedSize, type CropSource,
 } from './index';
-import { ko } from '../copy/index';
+import { en } from '../copy/index';
 
 /**
  * jsdom has neither `createImageBitmap` nor a canvas that encodes, so both are handed in —
@@ -154,8 +154,8 @@ describe('cropToA4', () => {
 describe('A4Cropper', () => {
   it('starts as a file input and shows no frame until a picture is picked', () => {
     const { container } = render(<A4Cropper onCropped={vi.fn()} />);
-    expect(screen.getByLabelText(ko.poster.pick)).toHaveAttribute('type', 'file');
-    expect(screen.getByLabelText(ko.poster.pick)).toHaveAttribute('accept', 'image/jpeg,image/png,image/webp');
+    expect(screen.getByLabelText(en.poster.pick)).toHaveAttribute('type', 'file');
+    expect(screen.getByLabelText(en.poster.pick)).toHaveAttribute('accept', 'image/jpeg,image/png,image/webp');
     expect(container.querySelector('.a4-frame')).toBeNull();
   });
 });

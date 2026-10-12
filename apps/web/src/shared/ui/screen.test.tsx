@@ -9,10 +9,10 @@ import { Screen } from './Screen';
 const routes = [
   { path: '/', element: <Screen title="홈">홈 본문</Screen> },
   { path: '/tickets', element: <Screen title="내 티켓">티켓 본문</Screen> },
-  { path: '/chats', element: <Screen title="대화">대화 본문</Screen> },
-  { path: '/me', element: <Screen title="프로필">프로필 본문</Screen> },
-  { path: '/tickets/:id', element: <Screen title="티켓 상세">상세 본문</Screen> },
-  { path: '/org/new', element: <Screen title="행사 만들기">만들기 본문</Screen> },
+  { path: '/chats', element: <Screen title='Chats'>대화 본문</Screen> },
+  { path: '/me', element: <Screen title='Profile'>프로필 본문</Screen> },
+  { path: '/tickets/:id', element: <Screen title='Ticket 상세'>상세 본문</Screen> },
+  { path: '/org/new', element: <Screen title='Create an event'>만들기 본문</Screen> },
 ];
 
 function mount(entries: string[], index?: number) {
@@ -21,7 +21,7 @@ function mount(entries: string[], index?: number) {
   return router;
 }
 
-const backButton = () => screen.queryByRole('button', { name: '뒤로' });
+const backButton = () => screen.queryByRole('button', { name: 'Back' });
 
 describe('Screen back bar', () => {
   it('renders the back bar on a stack (non-tab) route', () => {

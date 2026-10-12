@@ -84,7 +84,7 @@ const SLOW_AFTER_MS = 10_000;
  * to `shared/copy`: this one screen is the only place a retry is waited out, and the copy files
  * are outside this change's scope.
  */
-const REGISTER_BUSY_LINE = '잠시 붐벼요 · 다시 시도 중…';
+const REGISTER_BUSY_LINE = "It's busy right now · retrying…";
 
 /**
  * The registration challenge, minted **before** the tap and kept fresh for as long as the

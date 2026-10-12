@@ -50,11 +50,11 @@ const { CreateEvent } = await import('./CreateEvent');
 const { fmt } = await import('../../shared/i18n');
 const { THEME_CODES } = await import('../../shared/eventThemes');
 const { toLocalInput } = await import('./datetime');
-const { ko: sharedCopy } = await import('../../shared/copy/index');
+const { en: sharedCopy } = await import('../../shared/copy/index');
 const { EVENT_DRAFT_KEY, emptyEventDraft, emptyEventDraftTier, nextWeekendStart } = await import('../useEventDraft');
 const { organizerCopy } = await import('../copy');
 const { PROBLEM_SECTION, MAX_BODY_CHARS, MAX_TAG_CHARS } = await import('./draftRules');
-const copy = organizerCopy.ko.scene;
+const copy = organizerCopy.en.scene;
 
 /** Where a navigation landed, so the route SCENE 1 hands over to is checked and not guessed. */
 function Probe() {
@@ -159,7 +159,7 @@ describe('the scene layout', () => {
     await waitFor(() => expect(listEventDrafts).toHaveBeenCalled());
     // The ticket screen is gone: its one kind is a section here (plan section B-1), and it
     // starts named, so nothing on this screen is a required box that opens empty.
-    expect(screen.getByLabelText(copy.tiers.name)).toHaveValue('일반');
+    expect(screen.getByLabelText(copy.tiers.name)).toHaveValue('General');
     expect(screen.getByLabelText(copy.tiers.supply)).toHaveValue('100');
   });
 
@@ -375,7 +375,7 @@ describe('tags and the two visibility switches', () => {
     await user.type(screen.getByLabelText(copy.tagAdd), '재즈{Enter}');
     expect(mirror().tags).toEqual(['재즈', '라이브']);
 
-    await user.click(screen.getByRole('button', { name: '재즈 빼기' }));
+    await user.click(screen.getByRole('button', { name: 'Remove 재즈' }));
     expect(mirror().tags).toEqual(['라이브']);
   });
 

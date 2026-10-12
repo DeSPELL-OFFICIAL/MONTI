@@ -18,11 +18,11 @@ test('public surface: discover, event detail, signup entry, login', async ({ bro
   try {
     // 탐색 (Discover) — public event list + FAB.
     await page.goto('/');
-    await expect(page.getByRole('heading', { name: '탐색' })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole('heading', { name: 'Explore' })).toBeVisible({ timeout: 30_000 });
     await page.waitForTimeout(2500);
     const cards = await page.locator('.event-card').count();
     notes.discoverEventCards = cards;
-    notes.fabVisible = await page.getByRole('button', { name: '행사 만들기', exact: true }).isVisible();
+    notes.fabVisible = await page.getByRole('button', { name: 'Create an event', exact: true }).isVisible();
     notes.discoverText = (await page.locator('main.screen').innerText()).slice(0, 1500);
     await page.screenshot({ path: `${SHOTS}/10-discover.png`, fullPage: true });
 
@@ -38,15 +38,15 @@ test('public surface: discover, event detail, signup entry, login', async ({ bro
 
     // Signup entry — the phone screen (up to, not through, reCAPTCHA).
     await page.goto('/signup/phone');
-    await expect(page.getByRole('heading', { name: '휴대폰 번호를 입력해 주세요' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Enter your phone number' })).toBeVisible();
     notes.phoneScreenText = (await page.locator('main.screen').innerText()).slice(0, 800);
-    await page.getByLabel('휴대폰 번호를 입력해 주세요', { exact: true }).fill('01000000001');
+    await page.getByLabel('Enter your phone number', { exact: true }).fill('01000000001');
     await page.screenshot({ path: `${SHOTS}/12-signup-phone.png`, fullPage: true });
 
     // Login screen.
     await page.goto('/login');
-    await expect(page.getByRole('heading', { name: '로그인' })).toBeVisible();
-    await expect(page.getByRole('button', { name: '처음이에요 · 휴대폰 번호로 시작하기' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'New here? Start with your phone number' })).toBeVisible();
     notes.loginText = (await page.locator('main.screen').innerText()).slice(0, 600);
     await page.screenshot({ path: `${SHOTS}/13-login.png`, fullPage: true });
 

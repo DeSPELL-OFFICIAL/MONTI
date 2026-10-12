@@ -146,7 +146,7 @@ const { useGate } = await import('./useGate');
 const { GATE_CODE_ROTATE_MS, GATE_OPEN_RECHECK_MS, GATE_OPEN_STALE_MS, GATE_STATUS_POLL_MS } =
   await import('../constants');
 const { DRY_RUN_MARK } = await import('../types');
-const { staffKo } = await import('../copy');
+const { staffEn } = await import('../copy');
 
 // --- the attendee, with a key that really signs -------------------------------------------------
 const devicePrivate = p256.utils.randomPrivateKey();
@@ -953,7 +953,7 @@ describe('manual approval', () => {
     await act(async () => {
       await result.current.submitOverride('4821', 1, TOKEN_ID);
     });
-    expect(result.current.override).toMatchObject({ status: 'failed', detail: staffKo.override.denied });
+    expect(result.current.override).toMatchObject({ status: 'failed', detail: staffEn.override.denied });
   });
 
   it('shows an approver the open requests, and approves one at the gate it was filed from', async () => {
@@ -1021,7 +1021,7 @@ describe('manual approval', () => {
       await result.current.submitOverride('4821', 1, TOKEN_ID);
     });
     expect(sendAction).not.toHaveBeenCalled();
-    expect(result.current.override?.detail).toBe(staffKo.override.pinLocked.replace('{{seconds}}', '60'));
+    expect(result.current.override?.detail).toBe(staffEn.override.pinLocked.replace('{{seconds}}', '60'));
   });
 
   it('tells an account the chain refuses, without signing anything', async () => {
@@ -1035,7 +1035,7 @@ describe('manual approval', () => {
       await result.current.submitOverride('4821', 1, TOKEN_ID);
     });
     expect(sendAction).not.toHaveBeenCalled();
-    expect(result.current.override).toMatchObject({ status: 'failed', detail: staffKo.override.denied });
+    expect(result.current.override).toMatchObject({ status: 'failed', detail: staffEn.override.denied });
   });
 
   /**
@@ -1132,7 +1132,7 @@ describe('manual approval', () => {
     });
     expect(result.current.override).toMatchObject({
       status: 'failed',
-      detail: staffKo.override.cancelled,
+      detail: staffEn.override.cancelled,
     });
   });
 
@@ -1149,7 +1149,7 @@ describe('manual approval', () => {
     });
     expect(result.current.override).toMatchObject({
       status: 'failed',
-      detail: staffKo.override.unreachable,
+      detail: staffEn.override.unreachable,
       route: 'manualOverride',
     });
   });

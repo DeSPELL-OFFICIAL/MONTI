@@ -3,10 +3,9 @@ import { cleanup } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, vi } from 'vitest';
 import { initI18n } from './src/shared/i18n';
 
-// Component tests assert Korean copy; initialise i18next for real instead of
-// relying on react-i18next's uninitialised stub falling back to ko by accident.
+// The app is English-only; initialise i18next for real so react-i18next is not a stub.
 beforeAll(async () => {
-  await initI18n('ko');
+  await initI18n();
 });
 
 /**

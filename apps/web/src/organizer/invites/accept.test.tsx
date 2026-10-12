@@ -26,7 +26,7 @@ vi.mock('../../shared/api/functions', async (orig) => ({
 
 const { organizerCopy } = await import('../copy');
 const { AcceptInvite } = await import('./Accept');
-const copy = organizerCopy.ko.invite;
+const copy = organizerCopy.en.invite;
 
 function open() {
   render(

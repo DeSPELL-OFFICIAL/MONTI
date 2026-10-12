@@ -3,22 +3,23 @@ import { timed } from '../fixtures/timings';
 import { attachRelayCapture } from './relay-capture';
 
 const C = {
-  claimCta: '티켓 받기',
-  requestCta: '신청하기',
-  working: '받는 중이에요',
+  claimCta: 'Get a ticket',
+  requestCta: 'Request a ticket',
+  working: 'Getting your ticket',
   // Success is now an in-place 완료 state on the claim screen (ClaimFlow phase 'done'),
   // not a silent navigate('/tickets') — plan T-SIMP-1 ③. This copy is how a claim reads as landed.
-  done: '티켓을 받았어요 · 내 티켓에 있어요',
-  requesting: '신청하는 중이에요',
-  limit: '이 행사에서 받을 수 있는 티켓을 이미 다 받았어요.',
-  alreadyHave: '이미 받았어요 · 내 티켓에서 확인하세요',
-  soldOut: '이 종류는 마감됐어요. 다른 종류를 골라 주세요.',
-  confirming: '아직 확인 중이에요. 잠시 뒤 내 티켓에서 확인해 주세요.',
-  failed: '티켓을 받지 못했어요. 잠시 뒤 다시 시도해 주세요.',
-  pending: '신청 완료 · 승인을 기다리고 있어요',
-  approved: '승인됐어요. 티켓을 받았어요',
-  ticketsTab: '내 티켓',
-  ticketsEmpty: '아직 티켓이 없어요.',
+  done: "You got your ticket · It's in My tickets",
+  requesting: 'Sending your request',
+  limit: 'You already have every ticket this event allows.',
+  alreadyHave: 'You already have your tickets for this event. Check My tickets.',
+  soldOut: 'This type is sold out. Please pick another one.',
+  confirming: 'Still confirming. Your ticket will show up under My tickets shortly.',
+  failed: 'Could not get the ticket. Please try again shortly.',
+  pending: 'Request sent · waiting for approval',
+  approved: 'Approved. You got your ticket',
+  ticketsTab: 'Tickets',
+  ticketsTitle: 'My tickets',
+  ticketsEmpty: 'No tickets yet.',
 } as const;
 
 export type ClaimOutcome = 'claimed' | 'confirming' | 'limit' | 'soldout' | 'failed';
@@ -157,11 +158,11 @@ export async function seesApproved(page: Page, eventId: string): Promise<boolean
 }
 
 const R = {
-  title: '신청 관리',
-  empty: '기다리는 신청이 없어요',
-  approveSelected: '선택 승인',
-  approveAll: '전체 승인',
-  confirming: '아직 확인 중이에요. 잠시 뒤 새로고침하면 반영돼요',
+  title: 'Requests',
+  empty: 'No requests are waiting',
+  approveSelected: 'Approve selected',
+  approveAll: 'Approve all',
+  confirming: 'Still confirming. Refresh in a moment to see the change',
 } as const;
 
 /** Wait for the pending list to settle after a decision: rows removed, empty, or confirming. */
@@ -210,7 +211,7 @@ export async function approveAll(admin: Page, eventId: string): Promise<void> {
 export async function myTickets(page: Page, personaId: string): Promise<number> {
   return timed(personaId, 'my-tickets', async () => {
     await page.goto('/tickets');
-    await expect(page.getByRole('heading', { name: C.ticketsTab })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole('heading', { name: C.ticketsTitle })).toBeVisible({ timeout: 30_000 });
     // Let the list settle (indexer read).
     await page.waitForTimeout(1500);
     return page.locator('.ticket-row').count();
@@ -228,7 +229,7 @@ export async function hasTicketFor(page: Page, title: string): Promise<boolean> 
   let anyRow = false;
   while (Date.now() < deadline) {
     await page.goto('/tickets');
-    await expect(page.getByRole('heading', { name: C.ticketsTab })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole('heading', { name: C.ticketsTitle })).toBeVisible({ timeout: 30_000 });
     await page.waitForTimeout(2500);
     anyRow = (await page.locator('.ticket-row__art [aria-label]').count()) > 0;
     const art = page.locator('.ticket-row__art [aria-label]');

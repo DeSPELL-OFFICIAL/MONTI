@@ -171,7 +171,7 @@ export const UNLIMITED_SUPPLY = UINT32_MAX;
  * (`settlement.ts` `usdcAddress`) and the vault allows only it (`tokenAllowed`), so the card offers
  * no choice: it shows one plain line and stores this value.
  */
-export const PAID_CURRENCY = 'USDC' as const;
+export const PAID_CURRENCY = 'USDC' as const; // copy-lint-ignore: currency code, never shown
 
 /** One named rule of SCENE 2; `organizer/copy.ts` owns a sentence for each. */
 export type TierProblem =

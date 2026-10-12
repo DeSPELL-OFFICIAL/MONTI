@@ -44,8 +44,8 @@ const { TicketSection } = await import('./TicketSection');
 const { EVENT_DRAFT_KEY, emptyEventDraft, emptyEventDraftTier } = await import('../useEventDraft');
 const { organizerCopy } = await import('../copy');
 const { TICKET_ART_PRESETS, UNLIMITED_SUPPLY } = await import('./draftRules');
-const { ko: sharedCopy } = await import('../../shared/copy/index');
-const copy = organizerCopy.ko.scene;
+const { en: sharedCopy } = await import('../../shared/copy/index');
+const copy = organizerCopy.en.scene;
 
 /**
  * The one big preview above the carousel, told apart from the twelve live tiles inside it: these
@@ -70,7 +70,7 @@ const READY: EventDraft = {
   venue: '서울 용산구 한남동',
   startsAt: 1_900_000_000,
   endsAt: 1_900_010_000,
-  tiers: [{ ...emptyEventDraftTier, name: '일반' }],
+  tiers: [{ ...emptyEventDraftTier, name: 'General' }],
 };
 
 function open(draft: EventDraft = READY, id = 'd-42'): void {
@@ -90,7 +90,7 @@ function mirror(): EventDraft {
 }
 
 async function ready(): Promise<void> {
-  await waitFor(() => expect(screen.getByLabelText(copy.tiers.name)).toHaveValue('일반'));
+  await waitFor(() => expect(screen.getByLabelText(copy.tiers.name)).toHaveValue('General'));
 }
 
 beforeAll(() => {
@@ -145,7 +145,7 @@ describe('the kinds', () => {
   it('removes the kind that was asked for and leaves the rest in order', async () => {
     const user = userEvent.setup();
     open({ ...READY, tiers: [
-      { ...emptyEventDraftTier, name: '일반' },
+      { ...emptyEventDraftTier, name: 'General' },
       { ...emptyEventDraftTier, name: '학생' },
     ] });
     await waitFor(() => expect(screen.getAllByRole('heading', { level: 3 })).toHaveLength(2));
@@ -190,7 +190,7 @@ describe('the 무료 | 유료 segment', () => {
     // The (i) tooltip beside the limit, in the exact words the founder asked for.
     expect(screen.getByText(copy.tiers.limitTip)).toBeInTheDocument();
     // One plain line instead of currency chips — and no currency code anywhere on the card.
-    expect(screen.getByText('결제 통화 · 달러($) · 테스트 결제')).toBeInTheDocument();
+    expect(screen.getByText('Currency · US dollars ($) · test payment')).toBeInTheDocument();
     for (const currency of ['MON', 'USDT', 'USDC']) {
       expect(screen.queryByRole('button', { name: currency })).toBeNull();
       expect(screen.queryByText(currency)).toBeNull();
@@ -305,7 +305,7 @@ describe('the picture', () => {
   it('draws all four strings on the draft preview', async () => {
     open({ ...READY, tiers: [{ ...emptyEventDraftTier, name: '학생' }] });
     await waitFor(() => expect(screen.getByLabelText(copy.tiers.name)).toHaveValue('학생'));
-    const day = new Date(READY.startsAt * 1000).toLocaleDateString('ko', { dateStyle: 'medium' });
+    const day = new Date(READY.startsAt * 1000).toLocaleDateString('en', { dateStyle: 'medium' });
     await waitFor(() => expect(within(preview()).getByText('김태완')).toBeInTheDocument());
     for (const text of ['재즈 나이트', '학생', day]) {
       expect(within(preview()).getByText(text)).toBeInTheDocument();
@@ -314,7 +314,7 @@ describe('the picture', () => {
 
   /** A draft nobody has given a start time draws no date at all, rather than inventing one. */
   it('draws no date on a draft with no start time yet', async () => {
-    const day = new Date(READY.startsAt * 1000).toLocaleDateString('ko', { dateStyle: 'medium' });
+    const day = new Date(READY.startsAt * 1000).toLocaleDateString('en', { dateStyle: 'medium' });
     open({ ...READY, startsAt: 0 });
     await ready();
     await waitFor(() => expect(within(preview()).getByText('김태완')).toBeInTheDocument());
@@ -354,7 +354,7 @@ describe('the rules that belong to the event', () => {
   });
 });
 
-describe('다음', () => {
+describe('Next', () => {
   /** The event fields are in the same scroll now, so a missing one is named where it is. */
   it('names the missing event field rather than sending anybody to a second screen', async () => {
     open({ ...READY, title: '' });
@@ -448,7 +448,7 @@ describe('the preview is the form', () => {
     const onEditTitle = vi.fn();
     render(
       <TicketSection
-        draft={{ ...emptyEventDraft, title: '재즈 나이트', tiers: [{ ...emptyEventDraftTier, name: '일반' }] }}
+        draft={{ ...emptyEventDraft, title: '재즈 나이트', tiers: [{ ...emptyEventDraftTier, name: 'General' }] }}
         patch={vi.fn()}
         problems={[]}
         onEditTitle={onEditTitle}

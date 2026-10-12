@@ -24,19 +24,19 @@ import { CHECK_IN_ERRORS, isGateDenyCode, type CheckInError, type DenyCode } fro
 
 /** The short line the screen shows. One per DENY code, and every one of them reachable. */
 export const DENY_LABELS: Record<DenyCode, string> = {
-  ALREADY_USED: '이미 입장',
-  WRONG_EVENT: '다른 공연 티켓',
-  REVOKED: '취소된 티켓',
-  EXPIRED_CODE: '시간 초과 · 다시 대세요',
-  NO_TICKET: '티켓 없음',
-  GATE_CLOSED: '게이트가 닫혀 있음',
-  GATE_MISMATCH: '이 단말기의 게이트가 아님',
-  EVENT_ENDED: '행사 종료',
-  EVENT_CANCELLED: '취소된 공연',
-  DEVICE_LOCKED: '기기 잠김',
-  DEVICE_MISMATCH: '등록된 기기가 아님',
-  TX_FAILED: '전송 실패',
-  UNKNOWN_REVERT: '알 수 없는 거절',
+  ALREADY_USED: 'Already checked in',
+  WRONG_EVENT: 'Ticket for another event',
+  REVOKED: 'Ticket cancelled',
+  EXPIRED_CODE: 'Timed out · tap again',
+  NO_TICKET: 'No ticket',
+  GATE_CLOSED: 'Gate is closed',
+  GATE_MISMATCH: 'Wrong gate for this device',
+  EVENT_ENDED: 'Event has ended',
+  EVENT_CANCELLED: 'Event cancelled',
+  DEVICE_LOCKED: 'Phone locked',
+  DEVICE_MISMATCH: 'Not a registered phone',
+  TX_FAILED: "Couldn't send",
+  UNKNOWN_REVERT: 'Refused (unknown reason)',
 };
 
 /**
@@ -82,12 +82,12 @@ export const CHECK_IN_DENY: Record<CheckInError, DenyCode> = {
  * fine and the terminal is pointed at the wrong gate.
  */
 const DENY_DETAILS: Partial<Record<CheckInError, string>> = {
-  EventNotPublished: '아직 공개되지 않은 공연입니다. 주최자에게 문의하세요.',
-  GateMismatch: '이 단말기는 다른 게이트로 등록돼 있습니다. 설정을 확인하세요.',
-  DeviceLocked: '관객 기기 키가 잠겨 있습니다. 관객에게 앱 재설정을 안내하세요.',
-  NotMember: '이 단말기가 주최 팀에 등록돼 있지 않습니다. 관객 잘못이 아니니 주최자에게 문의하세요.',
-  Unauthorized: '이 단말기에게 그 권한이 없습니다. 관객 잘못이 아니니 주최자에게 문의하세요.',
-  BadGateSignature: '이 단말기의 게이트 인증 키가 등록된 키와 다릅니다. 관객 잘못이 아니니 주최자에게 문의하세요.',
+  EventNotPublished: "This event isn't published yet. Ask the organizer.",
+  GateMismatch: "This gate device is set up for a different gate. Check its settings.",
+  DeviceLocked: "The guest's phone is locked. Ask them to reset the app.",
+  NotMember: "This gate device isn't on the organizer's team. It's not the guest's fault — ask the organizer.",
+  Unauthorized: "This gate device isn't allowed to do that. It's not the guest's fault — ask the organizer.",
+  BadGateSignature: "This gate device doesn't match the one registered. It's not the guest's fault — ask the organizer.",
 };
 
 /** `name` → 4-byte selector, computed from the generated ABI's own parameter types. */
@@ -165,7 +165,7 @@ export function mapRevertToDenyCode(
   }
   // No reason bytes at all: the op never produced a revert — it was dropped, timed out, or
   // failed at the EntryPoint before the call ran. Different from an unreadable reason.
-  return { code: 'TX_FAILED', detail: message ?? '원인 미상' };
+  return { code: 'TX_FAILED', detail: message ?? 'Unknown cause' };
 }
 
 /** The two fields a `CallableError` carries that decide a check-in refusal: the server's own

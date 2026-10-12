@@ -31,7 +31,7 @@ const MOBILE = {
   deviceScaleFactor: 3,
   isMobile: true,
   hasTouch: true,
-  locale: 'ko-KR',
+  locale: 'en-US',
   timezoneId: 'Asia/Seoul',
 } as const;
 
@@ -64,12 +64,12 @@ describe('MONTI screenshot tour (390×844)', () => {
 
   /** Answer the create scene's resume question, if it asks, with a fresh (empty) draft. */
   async function freshScene(page: Page): Promise<void> {
-    const fresh = page.getByRole('button', { name: '새로 만들기', exact: true });
+    const fresh = page.getByRole('button', { name: 'Start a new one', exact: true });
     if (await fresh.isVisible({ timeout: 5000 }).catch(() => false)) {
       await fresh.evaluate((el) => (el as HTMLButtonElement).click()).catch(() => undefined);
       await fresh.waitFor({ state: 'hidden', timeout: 10_000 }).catch(() => undefined);
     }
-    await page.getByRole('heading', { name: '행사 만들기' }).first().waitFor({ state: 'visible', timeout: 20_000 }).catch(() => undefined);
+    await page.getByRole('heading', { name: 'Create an event' }).first().waitFor({ state: 'visible', timeout: 20_000 }).catch(() => undefined);
   }
 
   test.afterAll(async () => {
@@ -104,11 +104,11 @@ describe('MONTI screenshot tour (390×844)', () => {
 
       // --- Discover, signed out then in ---
       const out = await signedOut.newPage();
-      await nav(out, '/', '탐색');
+      await nav(out, '/', 'Explore');
       await shoot(out, '10-discover-signed-out', 'Discover (탐색), signed out');
       await out.close();
 
-      await nav(holder.page, '/', '탐색');
+      await nav(holder.page, '/', 'Explore');
       await shoot(holder.page, '11-discover-signed-in', 'Discover (탐색), signed in as persona-02');
 
       // --- Event detail: holder vs non-holder ---
@@ -119,8 +119,8 @@ describe('MONTI screenshot tour (390×844)', () => {
       await shoot(nonHolder.page, `13-event-detail-non-holder`, `Event ${EVENT_ID} detail as a non-holder (persona-08)`);
 
       // --- Claim inline sheet (opened, never sent) ---
-      const getTicket = nonHolder.page.getByRole('button', { name: '티켓 받기', exact: true })
-        .or(nonHolder.page.getByRole('button', { name: '신청하기', exact: true }));
+      const getTicket = nonHolder.page.getByRole('button', { name: 'Get a ticket', exact: true })
+        .or(nonHolder.page.getByRole('button', { name: 'Request a ticket', exact: true }));
       if (await getTicket.first().isVisible({ timeout: 10_000 }).catch(() => false)) {
         await getTicket.first().click().catch(() => undefined);
         await nonHolder.page.waitForTimeout(1200);
@@ -128,7 +128,7 @@ describe('MONTI screenshot tour (390×844)', () => {
       await shoot(nonHolder.page, '14-claim-sheet', 'Claim inline sheet on the event detail');
 
       // --- 내 티켓 list + one ticket detail ---
-      await nav(holder.page, '/tickets', '내 티켓');
+      await nav(holder.page, '/tickets', 'My tickets');
       await shoot(holder.page, '15-tickets-list', '내 티켓 list');
       const firstRow = holder.page.locator('a.ticket-row').first();
       if (await firstRow.isVisible({ timeout: 10_000 }).catch(() => false)) {
@@ -138,13 +138,13 @@ describe('MONTI screenshot tour (390×844)', () => {
       }
 
       // --- Profile, verify ---
-      await nav(holder.page, '/me', '프로필');
+      await nav(holder.page, '/me', 'Profile');
       await shoot(holder.page, '17-profile', 'Profile (프로필)');
-      await nav(holder.page, '/me/verify', '신분증과 얼굴을 확인할게요');
+      await nav(holder.page, '/me/verify', 'Let us check your ID and face');
       await shoot(holder.page, '18-verify', 'Identity verification screen');
 
       // --- Organiser home ---
-      await nav(admin.page, '/org', '주최자');
+      await nav(admin.page, '/org', 'Organizer');
       await shoot(admin.page, '20-organizer-home', 'Organiser home (주최자)');
 
       // --- Create scene: top, tickets section, poster dialog ---
@@ -153,8 +153,8 @@ describe('MONTI screenshot tour (390×844)', () => {
       await shoot(admin.page, '21-create-top', 'Create scene — top');
       await admin.page.locator('#scene-tickets').scrollIntoViewIfNeeded().catch(() => undefined);
       await shoot(admin.page, '22-create-tickets', 'Create scene — tickets section');
-      const posterBtn = admin.page.getByRole('button', { name: '포스터 올리기', exact: true })
-        .or(admin.page.getByRole('button', { name: '포스터 바꾸기', exact: true }));
+      const posterBtn = admin.page.getByRole('button', { name: 'Add a poster', exact: true })
+        .or(admin.page.getByRole('button', { name: 'Change the poster', exact: true }));
       if (await posterBtn.first().isVisible({ timeout: 8000 }).catch(() => false)) {
         await posterBtn.first().evaluate((el) => (el as HTMLButtonElement).click()).catch(() => undefined);
         await admin.page.locator('dialog.poster-modal').waitFor({ state: 'visible', timeout: 8000 }).catch(() => undefined);
@@ -164,9 +164,9 @@ describe('MONTI screenshot tour (390×844)', () => {
       }
 
       // --- Created / publish screen, requests screen ---
-      await nav(admin.page, `/org/new/done/${EVENT_ID}`, '행사를 만들었어요');
+      await nav(admin.page, `/org/new/done/${EVENT_ID}`, 'Your event is live');
       await shoot(admin.page, '24-created-publish', 'Created / publish screen');
-      await nav(admin.page, `/org/events/${REQUESTS_EVENT}/requests`, '신청 관리');
+      await nav(admin.page, `/org/events/${REQUESTS_EVENT}/requests`, 'Requests');
       await shoot(admin.page, '25-requests', `Requests screen (Event ${REQUESTS_EVENT})`);
 
       // --- One narrow pass of the create scene (360×740) ---

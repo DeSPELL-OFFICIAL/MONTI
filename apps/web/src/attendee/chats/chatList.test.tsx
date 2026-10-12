@@ -2,7 +2,7 @@ import { act, render, renderHook, screen, waitFor } from '@testing-library/react
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
-import { ko } from '../../shared/copy/index';
+import { en } from '../../shared/copy/index';
 import type { MyTicket } from '../tickets/useTickets';
 
 const DAY = 86_400;
@@ -109,27 +109,27 @@ describe('ChatList', () => {
     renderList();
     const links = await screen.findAllByRole('link');
     expect(links.map((link) => link.getAttribute('href'))).toEqual(['/chats/7', '/chats/5']);
-    expect(screen.getByText(ko.chats.reorderHint)).toBeInTheDocument();
+    expect(screen.getByText(en.chats.reorderHint)).toBeInTheDocument();
   });
 
   it('marks a closed room and says nothing else about it', async () => {
     rooms = { 5: { closed: true, endsAt: now() - 60 }, 7: null };
     renderList();
     await waitFor(() => expect(screen.getByText(/5/)).toBeInTheDocument());
-    expect(screen.getByText(new RegExp(ko.chats.closed))).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(en.chats.closed))).toBeInTheDocument();
   });
 
   it('says so when there is nothing to show', async () => {
     tickets = [];
     renderList();
-    expect(await screen.findByText(ko.chats.empty)).toBeInTheDocument();
+    expect(await screen.findByText(en.chats.empty)).toBeInTheDocument();
   });
 
   it('does not claim the list is empty while the tickets are still on their way', async () => {
     useMyTickets.mockImplementation(() => ({ data: undefined, isLoading: true }));
     renderList();
-    await waitFor(() => expect(screen.getByText(ko.chats.title)).toBeInTheDocument());
-    expect(screen.queryByText(ko.chats.empty)).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(en.chats.title)).toBeInTheDocument());
+    expect(screen.queryByText(en.chats.empty)).not.toBeInTheDocument();
   });
 
   it('waits out a press before it treats a touch as a drag, so a tap is still a tap', async () => {

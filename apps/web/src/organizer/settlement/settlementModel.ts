@@ -30,7 +30,7 @@ export function newRowId(): string {
 
 /** The fixed MONTI platform row, 5% by default, pointing at the configured platform wallet. */
 export function platformRow(account: string): RecipientRow {
-  return { id: 'platform', name: 'MONTI 플랫폼', account, bps: DEFAULT_PLATFORM_BPS, tag: PLATFORM_TAG, platform: true };
+  return { id: 'platform', name: 'MONTI platform', account, bps: DEFAULT_PLATFORM_BPS, tag: PLATFORM_TAG, platform: true };
 }
 
 export function blankRow(): RecipientRow {

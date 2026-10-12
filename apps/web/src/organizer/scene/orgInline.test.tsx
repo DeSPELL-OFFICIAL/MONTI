@@ -62,7 +62,7 @@ vi.mock('../../shared/config', async (orig) => ({
 const { DraftPublish } = await import('./DraftPublish');
 const { emptyEventDraft, emptyEventDraftTier } = await import('../useEventDraft');
 const { organizerCopy } = await import('../copy');
-const copy = organizerCopy.ko.scene;
+const copy = organizerCopy.en.scene;
 
 function Probe() {
   return <p>{`landed:${useLocation().pathname}`}</p>;
@@ -86,7 +86,7 @@ const READY: EventDraft = {
   venue: '서울 용산구 한남동',
   startsAt: 1_900_000_000,
   endsAt: 1_900_010_000,
-  tiers: [{ ...emptyEventDraftTier, name: '일반' }],
+  tiers: [{ ...emptyEventDraftTier, name: 'General' }],
 };
 
 function open(draft: EventDraft = READY, id = 'd-42'): void {

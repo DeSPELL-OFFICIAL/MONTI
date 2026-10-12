@@ -89,6 +89,23 @@ describe('BANNED_ATTENDEE_WORDS', () => {
       'transaction',
       'blockchain',
       'monad',
+      'wallets',
+      'tokens',
+      'transactions',
+      'minted',
+      'minting',
+      'crypto',
+      'coin',
+      'coins',
+      'web3',
+      'on-chain',
+      'onchain',
+      'signature',
+      'hash',
+      'usdc',
+      'private key',
+      'public key',
+      'seed phrase',
     ]);
   });
 });

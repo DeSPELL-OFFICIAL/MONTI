@@ -73,7 +73,7 @@ describe('Phone screen', () => {
   it('normalises a Korean number to E.164 and moves to the code step', async () => {
     render(<MemoryRouter><Phone /></MemoryRouter>);
     await userEvent.type(screen.getByRole('textbox'), '01012345678');
-    await userEvent.click(screen.getByRole('button', { name: '인증번호 받기' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Send code' }));
     // The screen hands its abort signal down so leaving mid-send cancels the native listeners.
     expect(sendOtp).toHaveBeenCalledWith('+821012345678', { signal: expect.any(AbortSignal) });
     expect(navigate).toHaveBeenCalledWith({ pathname: '/signup/verify', search: '' });
@@ -83,25 +83,25 @@ describe('Phone screen', () => {
     renderScreen(<Phone />);
     await userEvent.selectOptions(screen.getByRole('combobox'), '+1');
     await userEvent.type(screen.getByRole('textbox'), '6505550101');
-    await userEvent.click(screen.getByRole('button', { name: '인증번호 받기' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Send code' }));
     expect(sendOtp).toHaveBeenCalledWith('+16505550101', { signal: expect.any(AbortSignal) });
   });
 
   it('refuses a number that cannot be E.164 without spending a send', async () => {
     renderScreen(<Phone />);
     await userEvent.type(screen.getByRole('textbox'), '0101');
-    await userEvent.click(screen.getByRole('button', { name: '인증번호 받기' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Send code' }));
     expect(sendOtp).not.toHaveBeenCalled();
     expect(navigate).not.toHaveBeenCalled();
-    expect(await screen.findByRole('alert')).toHaveTextContent('번호를 다시 확인해 주세요.');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Please check that number.');
   });
 
   it('says so plainly when phone sign-in is not switched on in the project', async () => {
     sendOtp.mockRejectedValueOnce(firebaseError('auth/operation-not-allowed'));
     renderScreen(<Phone />);
     await userEvent.type(screen.getByRole('textbox'), '01012345678');
-    await userEvent.click(screen.getByRole('button', { name: '인증번호 받기' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('지금은 문자 인증을 쓸 수 없어요.');
+    await userEvent.click(screen.getByRole('button', { name: 'Send code' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Text verification is unavailable right now.');
     expect(navigate).not.toHaveBeenCalled();
   });
 });
@@ -111,7 +111,7 @@ describe('Verify screen', () => {
     seedSignup({ verificationId: 'vid', phoneE164: PHONE });
     renderScreen(<Verify />);
     await userEvent.type(screen.getByRole('textbox'), '123456');
-    await userEvent.click(screen.getByRole('button', { name: '확인' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Verify' }));
     expect(confirmOtp).toHaveBeenCalledWith('vid', '123456');
     expect(startSignup).toHaveBeenCalled();
     expect(navigate).toHaveBeenCalledWith('/signup/passkey');
@@ -123,8 +123,8 @@ describe('Verify screen', () => {
     confirmOtp.mockRejectedValueOnce(firebaseError('auth/invalid-verification-code'));
     renderScreen(<Verify />);
     await userEvent.type(screen.getByRole('textbox'), '000000');
-    await userEvent.click(screen.getByRole('button', { name: '확인' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('인증번호가 맞지 않아요.');
+    await userEvent.click(screen.getByRole('button', { name: 'Verify' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('That code is not right.');
     expect(startSignup).not.toHaveBeenCalled();
     expect(navigate).not.toHaveBeenCalled();
   });
@@ -135,14 +135,14 @@ describe('Verify screen', () => {
     renderScreen(<Verify />);
 
     expect(screen.getByRole('timer')).toHaveTextContent('60');
-    expect(screen.queryByRole('button', { name: '다시 보내기' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Resend' })).toBeNull();
 
     // One second per act: the next timer is only armed after React flushes the state update.
     for (let tick = 0; tick < 60; tick += 1) {
       act(() => { vi.advanceTimersByTime(1000); });
     }
 
-    const resend = screen.getByRole('button', { name: '다시 보내기' });
+    const resend = screen.getByRole('button', { name: 'Resend' });
     vi.useRealTimers();
     fireEvent.click(resend);
     await waitFor(() =>
@@ -157,10 +157,10 @@ describe('Verify screen', () => {
     );
     renderScreen(<Verify />);
     await userEvent.type(screen.getByRole('textbox'), '123456');
-    await userEvent.click(screen.getByRole('button', { name: '확인' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Verify' }));
     expect(navigate).toHaveBeenCalledWith('/login', {
       replace: true,
-      state: { notice: '이미 가입된 번호예요. 로그인해 주세요.' },
+      state: { notice: 'This number already has an account. Please sign in.' },
     });
   });
 
@@ -169,13 +169,13 @@ describe('Verify screen', () => {
     startSignup.mockRejectedValueOnce(Object.assign(new Error('INTERNAL'), { code: 'internal' }));
     renderScreen(<Verify />);
     await userEvent.type(screen.getByRole('textbox'), '123456');
-    await userEvent.click(screen.getByRole('button', { name: '확인' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Verify' }));
 
     // The digits were spent, so the failure is the server's — blaming the code would hide it.
-    expect(await screen.findByRole('alert')).toHaveTextContent('문제가 생겼어요.');
-    expect(screen.queryByText('인증번호가 맞지 않아요.')).toBeNull();
+    expect(await screen.findByRole('alert')).toHaveTextContent('Something went wrong.');
+    expect(screen.queryByText('That code is not right.')).toBeNull();
 
-    await userEvent.click(screen.getByRole('button', { name: '확인' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Verify' }));
     expect(confirmOtp).toHaveBeenCalledTimes(1);
     expect(startSignup).toHaveBeenCalledTimes(2);
     expect(navigate).toHaveBeenCalledWith('/signup/passkey');
@@ -195,7 +195,7 @@ describe('sign-in return target', () => {
   it('carries returnTo across the code step so the exit can honour it', async () => {
     renderAt(<Phone />, '/signup/phone?returnTo=%2Fstaff%2Fsetup');
     await userEvent.type(screen.getByRole('textbox'), '01012345678');
-    await userEvent.click(screen.getByRole('button', { name: '인증번호 받기' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Send code' }));
     expect(navigate).toHaveBeenCalledWith({ pathname: '/signup/verify', search: 'returnTo=%2Fstaff%2Fsetup' });
   });
 
@@ -203,7 +203,7 @@ describe('sign-in return target', () => {
     seedSignup({ verificationId: 'vid', phoneE164: PHONE });
     renderAt(<Verify />, '/signup/verify?returnTo=%2Fstaff%2Fsetup');
     await userEvent.type(screen.getByRole('textbox'), '123456');
-    await userEvent.click(screen.getByRole('button', { name: '확인' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Verify' }));
     await waitFor(() => expect(navigate).toHaveBeenCalledWith('/staff/setup'));
     expect(navigate).not.toHaveBeenCalledWith('/signup/passkey');
   });
@@ -212,7 +212,7 @@ describe('sign-in return target', () => {
     seedSignup({ verificationId: 'vid', phoneE164: PHONE });
     renderAt(<Verify />, '/signup/verify');
     await userEvent.type(screen.getByRole('textbox'), '123456');
-    await userEvent.click(screen.getByRole('button', { name: '확인' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Verify' }));
     await waitFor(() => expect(navigate).toHaveBeenCalledWith('/signup/passkey'));
   });
 
@@ -222,7 +222,7 @@ describe('sign-in return target', () => {
       seedSignup({ verificationId: 'vid', phoneE164: PHONE });
       renderAt(<Verify />, `/signup/verify?returnTo=${hostile}`);
       await userEvent.type(screen.getByRole('textbox'), '123456');
-      await userEvent.click(screen.getByRole('button', { name: '확인' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Verify' }));
       await waitFor(() => expect(navigate).toHaveBeenCalledWith('/signup/passkey'));
     },
   );

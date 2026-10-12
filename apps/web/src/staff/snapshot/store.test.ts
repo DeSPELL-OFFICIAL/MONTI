@@ -39,7 +39,7 @@ const ticket: SnapshotTicket = {
   photoJpegB64: 'AAA=',
   displayName: '김입장',
   tier: 0,
-  tierName: '일반',
+  tierName: 'General',
   seat: '',
   checkedIn: false,
 };

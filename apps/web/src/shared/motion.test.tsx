@@ -44,7 +44,7 @@ describe('motion foundation', () => {
   it('renders the target screen through the animated route region', async () => {
     // `/login` is public, so no session is needed to reach it through the shell.
     const { container } = renderAt('/login');
-    expect(await screen.findByRole('heading', { name: '로그인' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
     // The screen came through the sliding wrapper, not a bare outlet.
     expect(container.querySelector('.route-view')).not.toBeNull();
   });
@@ -53,7 +53,7 @@ describe('motion foundation', () => {
     reduceMotion(true);
     const { container } = renderAt('/login');
     // The same screen is on the page...
-    expect(await screen.findByRole('heading', { name: '로그인' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
     // ...but the transform wrapper is gone: the outlet is rendered straight, an instant cut.
     expect(container.querySelector('.route-view')).toBeNull();
   });

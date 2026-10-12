@@ -35,9 +35,9 @@ const PIN = '2468';
 
 /** 60 + 20 + 15 = 95%, plus the locked MONTI row's 5% = 100%. */
 const RECIPIENTS = [
-  { role: '아티스트', pct: '60', tag: 'artist', addr: '0x1111111111111111111111111111111111111111' },
-  { role: '공연장', pct: '20', tag: 'venue', addr: '0x2222222222222222222222222222222222222222' },
-  { role: '기획', pct: '15', tag: 'planning', addr: '0x3333333333333333333333333333333333333333' },
+  { role: 'Artist', pct: '60', tag: 'artist', addr: '0x1111111111111111111111111111111111111111' },
+  { role: 'Venue', pct: '20', tag: 'venue', addr: '0x2222222222222222222222222222222222222222' },
+  { role: 'Producer', pct: '15', tag: 'planning', addr: '0x3333333333333333333333333333333333333333' },
 ];
 
 /** Every organiser-side write this page sends: relayAction kinds, plus createOrganizerForMe. */
@@ -81,16 +81,16 @@ test('55 · v2 settlement chain — publish 1 · purchase 1 · gate 1 · overrid
     const r0 = await monBalance(RELAYER);
     diag.relayerStart = fmtMon(r0);
     const created = await createDraftAndPublish(page, {
-      personaId: ADMIN.id, orgName: '몬티 정산 테스트', title: '정산 데모 공연 v2',
-      intro: '트랜잭션 다이어트 데모 행사입니다.', venue: '서울 테스트홀',
-      tiers: [{ kind: '유료', name: 'VIP', supply: 50, price: PRICE }],
+      personaId: ADMIN.id, orgName: 'Monti Payout Test', title: 'Payout demo show v2',
+      intro: 'A demo event for the payout flow.', venue: 'Test Hall, Seoul',
+      tiers: [{ kind: 'Paid', name: 'VIP', supply: 50, price: PRICE }],
       split: RECIPIENTS,
     });
     const eventId = created.eventId;
     diag.eventId = eventId;
     diag.publishLatencyMs = created.publishMs;
     diag.publishWrites = [...organizerWrites];
-    recordEvent('free', { id: eventId, published: true, title: '정산 데모 공연 v2' });
+    recordEvent('free', { id: eventId, published: true, title: 'Payout demo show v2' });
     const r1 = await monBalance(RELAYER);
     diag.costPublish = fmtMon(r0 - r1);
     console.log(`[55] STEP1 event=${eventId} publish=${fmtMon(r0 - r1)} MON in ${created.publishMs}ms writes=${organizerWrites.join(',')}`);
@@ -124,17 +124,17 @@ test('55 · v2 settlement chain — publish 1 · purchase 1 · gate 1 · overrid
     await aPage.waitForTimeout(4000);
     await shot(aPage, 'attendee-event-detail');
     await aPage.goto(`/claim/${eventId}`);
-    const payCta = aPage.getByRole('button', { name: /결제하고 받기/ });
+    const payCta = aPage.getByRole('button', { name: /Buy for \$/ });
     await expect(payCta).toBeVisible({ timeout: 60_000 });
     await expect(payCta).toBeEnabled({ timeout: 30_000 });
     diag.ctaText = (await payCta.innerText()).trim();
     await shot(aPage, 'attendee-claim-paid-cta');
     expect(diag.ctaText as string, `CTA shows $${PRICE}`).toContain(`$${PRICE}`);
     await payCta.click();
-    const sheet = aPage.getByRole('dialog', { name: '카드 결제' });
+    const sheet = aPage.getByRole('dialog', { name: 'Card payment' });
     await expect(sheet).toBeVisible({ timeout: 10_000 });
-    await aPage.getByPlaceholder('0000 0000 0000 0000 (테스트)').fill('4242424242424242');
-    const payBtn = sheet.getByRole('button', { name: /결제하기/ });
+    await aPage.getByPlaceholder('0000 0000 0000 0000 (test)').fill('4242424242424242');
+    const payBtn = sheet.getByRole('button', { name: /^Pay \$/ });
     await expect(payBtn).toBeEnabled({ timeout: 10_000 });
     await shot(aPage, 'attendee-payment-card-filled');
     const t0 = await monBalance(TREASURY);
@@ -143,9 +143,9 @@ test('55 · v2 settlement chain — publish 1 · purchase 1 · gate 1 · overrid
     await payBtn.click();
     await aPage.waitForTimeout(1000);
     await shot(aPage, 'attendee-payment-processing');
-    const doneAlert = sheet.getByText('결제 완료 · 티켓을 받았어요', { exact: true });
-    const toTickets = sheet.getByRole('link', { name: /^(영수증 보기|내 티켓 보기)$/ });
-    const notCharged = sheet.getByText(/결제가 완료되지 않았어요/);
+    const doneAlert = sheet.getByText('Paid · your ticket is ready', { exact: true });
+    const toTickets = sheet.getByRole('link', { name: /^(See receipt|See my tickets)$/ });
+    const notCharged = sheet.getByText(/The payment didn't go through/);
     let purchased = false;
     const pd = Date.now() + 180_000;
     while (Date.now() < pd) {
@@ -169,8 +169,8 @@ test('55 · v2 settlement chain — publish 1 · purchase 1 · gate 1 · overrid
     diag.attendeeAccount = wire.account;
 
     await aPage.goto(`/tickets/${tokenId}`);
-    await expect(aPage.getByRole('heading', { name: '영수증', exact: true })).toBeVisible({ timeout: 45_000 });
-    const heldLine = aPage.getByText('결제 금액 보관 중 · 입장하면 자동으로 나눠 보내요', { exact: true });
+    await expect(aPage.getByRole('heading', { name: 'Receipt', exact: true })).toBeVisible({ timeout: 45_000 });
+    const heldLine = aPage.getByText('Payment held · paid out when you check in', { exact: true });
     const held = await heldLine.waitFor({ state: 'visible', timeout: 60_000 }).then(() => true).catch(() => false);
     diag.receiptHeld = held;
     await shot(aPage, 'attendee-receipt-held');
@@ -198,7 +198,7 @@ test('55 · v2 settlement chain — publish 1 · purchase 1 · gate 1 · overrid
     expect(override.result, `manual override lands on 들여보냈어요 (lastDetail=${override.lastDetail})`).toBe('approved');
 
     // =========================== STEP 4 — receipt flips to 정산 완료 ===========================
-    const releasedLine = aPage.getByText('정산 완료 · 정해진 비율대로 나눠 보냈어요', { exact: true });
+    const releasedLine = aPage.getByText('Paid out · split by the agreed shares', { exact: true });
     let released = false;
     const rd = Date.now() + 120_000;
     while (Date.now() < rd) {

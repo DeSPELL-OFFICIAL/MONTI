@@ -33,7 +33,7 @@ const SETTLEMENT = {
   policy: {
     recipients: [
       { account: ACC_A, bps: 7000, reason: '공연팀', tag: '아티스트' },
-      { account: ACC_B, bps: 2000, reason: '대관료', tag: '장소' },
+      { account: ACC_B, bps: 2000, reason: '대관료', tag: 'Where' },
     ],
     platformBps: 500,
   },
@@ -107,15 +107,15 @@ describe('public settlement page', () => {
     renderPage();
 
     expect(await screen.findByText('테스트 콘서트')).toBeInTheDocument();
-    expect(screen.getByText('이 행사의 수익은 이렇게 나뉩니다')).toBeInTheDocument();
+    expect(screen.getByText('How this event’s revenue is split')).toBeInTheDocument();
     // recipients, platform and the leftover reserve each read as a percentage
     expect(screen.getByText('70%')).toBeInTheDocument();
     expect(screen.getByText('공연팀')).toBeInTheDocument();
-    expect(screen.getByText('MONTI 플랫폼')).toBeInTheDocument();
-    expect(screen.getByText('예비비')).toBeInTheDocument();
+    expect(screen.getByText('MONTI platform')).toBeInTheDocument();
+    expect(screen.getByText('Reserve')).toBeInTheDocument();
     // live tiles are present with their counts summed by status from the escrow rows
-    expect(screen.getByText('입장 후 정산 완료')).toBeInTheDocument();
-    expect(screen.getByText('노쇼 정산')).toBeInTheDocument();
+    expect(screen.getByText('Paid out after check-in')).toBeInTheDocument();
+    expect(screen.getByText('No-show payouts')).toBeInTheDocument();
   });
 
   it('labels a payout by the human reason behind its on-chain hash', async () => {
@@ -125,7 +125,7 @@ describe('public settlement page', () => {
     );
     renderPage();
 
-    expect(await screen.findByText('$25.00')).toBeInTheDocument();
+    expect(await screen.findByText('$25')).toBeInTheDocument();
     // '공연팀' appears both as a rule row and as this payout's role.
     expect(screen.getAllByText('공연팀').length).toBeGreaterThanOrEqual(2);
   });
@@ -137,7 +137,7 @@ describe('public settlement page', () => {
     );
     renderPage();
 
-    expect(await screen.findByText('주최자가 정산 규칙을 아직 확정하지 않았어요')).toBeInTheDocument();
+    expect(await screen.findByText('The organizer hasn’t locked in the payout rules yet')).toBeInTheDocument();
   });
 
   it('appends a new payout and highlights only the arrival on the next poll', async () => {
@@ -149,7 +149,7 @@ describe('public settlement page', () => {
     );
     const client = renderPage();
 
-    await screen.findByText('$25.00');
+    await screen.findByText('$25');
     // nothing on the initial batch is highlighted
     expect(document.querySelector('.payout-row.is-new')).toBeNull();
 
@@ -172,6 +172,6 @@ describe('public settlement page', () => {
     });
     renderPage();
 
-    await waitFor(() => expect(screen.getByText('지금은 현황을 불러올 수 없어요')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Can’t load the live numbers right now')).toBeInTheDocument());
   });
 });

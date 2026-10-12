@@ -8,7 +8,7 @@ import { SettlementSection } from './SettlementSection';
 
 const PLATFORM = `0x${'cc'.repeat(20)}`;
 const ARTIST = `0x${'a1'.repeat(20)}`;
-const copy = organizerCopy.ko.settlement;
+const copy = organizerCopy.en.settlement;
 
 const BASE = {
   VITE_CHAIN_ID: '10143',
@@ -61,7 +61,7 @@ describe('the settlement summary on the dashboard', () => {
       policy: {
         recipients: [
           { account: ARTIST, bps: 9_500, reason: '밴드', tag: 'band' },
-          { account: PLATFORM, bps: 500, reason: 'MONTI 플랫폼', tag: 'platform' },
+          { account: PLATFORM, bps: 500, reason: 'MONTI platform', tag: 'platform' },
         ],
         platformBps: 500,
       },
@@ -70,8 +70,8 @@ describe('the settlement summary on the dashboard', () => {
     });
     renderSection();
     expect(await screen.findByText('밴드 · 95%')).toBeInTheDocument();
-    expect(screen.getByText('MONTI 플랫폼 · 5%')).toBeInTheDocument();
-    expect(screen.getByText('VIP · $30.00')).toBeInTheDocument();
+    expect(screen.getByText('MONTI platform · 5%')).toBeInTheDocument();
+    expect(screen.getByText('VIP · $30')).toBeInTheDocument();
     expect(screen.getByText(copy.frozenNote)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: copy.publicLink })).toHaveAttribute('href', '/settlement/1001');
     expect(screen.queryByRole('button')).toBeNull();
@@ -90,11 +90,11 @@ describe('the settlement summary on the dashboard', () => {
     renderSection();
     expect(await screen.findByText('band · 95%')).toBeInTheDocument();
     expect(screen.getByText('platform · 5%')).toBeInTheDocument();
-    expect(screen.getByText('VIP · $30.00')).toBeInTheDocument();
+    expect(screen.getByText('VIP · $30')).toBeInTheDocument();
   });
 
   it('draws nothing for a free event, which carries no policy', async () => {
-    const { container } = renderSection([{ id: '1001-0', name: '일반', priceUsdCents: '0' }]);
+    const { container } = renderSection([{ id: '1001-0', name: 'General', priceUsdCents: '0' }]);
     await vi.waitFor(() => expect(readChainPolicy).toHaveBeenCalled());
     await vi.waitFor(() => expect(container.textContent).toBe(''));
   });

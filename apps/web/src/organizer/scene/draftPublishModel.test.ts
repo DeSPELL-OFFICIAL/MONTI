@@ -11,11 +11,11 @@ const NOW = 1_800_000_000;
 const FREE: EventDraft = {
   ...emptyEventDraft,
   orgId: '9', title: '재즈 나이트', startsAt: 1_900_000_000,
-  tiers: [{ ...emptyEventDraftTier, name: '일반' }],
+  tiers: [{ ...emptyEventDraftTier, name: 'General' }],
 };
 const PAID: EventDraft = {
   ...FREE,
-  tiers: [{ ...emptyEventDraftTier, name: '일반' }, { ...emptyEventDraftTier, name: 'VIP', currency: 'USDC', amount: 30 }],
+  tiers: [{ ...emptyEventDraftTier, name: 'General' }, { ...emptyEventDraftTier, name: 'VIP', currency: 'USDC', amount: 30 }],
 };
 const GOOD_SPLIT = serializeSplit([
   { id: 'b', name: '밴드', account: BAND, bps: 9_500, tag: 'band' },
@@ -27,7 +27,7 @@ describe('publishView', () => {
   it('lets a free draft publish with no split rules at all', () => {
     const view = publishView(FREE, ON);
     expect(view).toMatchObject({ paid: false, split: null, rows: [], blocker: '', publishable: true });
-    expect(view.tiers).toEqual([{ name: '일반', priceUsdCents: 0 }]);
+    expect(view.tiers).toEqual([{ name: 'General', priceUsdCents: 0 }]);
   });
 
   it('holds a paid draft until its split adds up to 100%', () => {
@@ -39,7 +39,7 @@ describe('publishView', () => {
 
     const set = publishView({ ...PAID, splitJson: GOOD_SPLIT }, ON);
     expect(set).toMatchObject({ blocker: '', publishable: true });
-    expect(set.tiers).toEqual([{ name: '일반', priceUsdCents: 0 }, { name: 'VIP', priceUsdCents: 3_000 }]);
+    expect(set.tiers).toEqual([{ name: 'General', priceUsdCents: 0 }, { name: 'VIP', priceUsdCents: 3_000 }]);
   });
 
   it('keeps the platform row at 5% or more', () => {
@@ -82,7 +82,7 @@ describe('publishSplit', () => {
     expect(publishSplit({ ...PAID, splitJson: GOOD_SPLIT }, PLATFORM)).toEqual({
       recipients: [
         { account: BAND, bps: 9_500, reason: '밴드', tag: 'band' },
-        { account: PLATFORM, bps: 500, reason: 'MONTI 플랫폼', tag: 'platform' },
+        { account: PLATFORM, bps: 500, reason: 'MONTI platform', tag: 'platform' },
       ],
       platformBps: 500,
     });

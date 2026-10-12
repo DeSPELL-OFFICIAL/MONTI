@@ -20,7 +20,7 @@ describe('scanText', () => {
 
   it('is case insensitive', () => {
     expect(scanText('a.tsx', 'Your WALLET is ready')).toHaveLength(1);
-    expect(scanText('a.tsx', 'Minted on Monad')).toHaveLength(1);
+    expect(scanText('a.tsx', 'Minted on Monad')).toHaveLength(2);
   });
 
   it('reports the 1-based line and column', () => {

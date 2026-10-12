@@ -51,7 +51,7 @@ export interface Persona {
  * to the role, so a persona keeps its name whether it is the admin or an attendee on a given run.
  */
 const DISPLAY_NAMES = [
-  '관리자 몬티', '서준', '지우', '하윤', '도윤', '서연', '민준', '지호', '수아', '예준',
+  'Monti Admin', 'Seojun', 'Jiwoo', 'Hayun', 'Doyun', 'Seoyeon', 'Minjun', 'Jiho', 'Sua', 'Yejun',
 ] as const;
 
 function persona(index: number, role: 'admin' | 'user', offset: number): Persona {
@@ -61,7 +61,7 @@ function persona(index: number, role: 'admin' | 'user', offset: number): Persona
     id: `persona-${suffix}`,
     phone: `+82100000${dialled}`,
     national: `0100000${dialled}`,
-    displayName: DISPLAY_NAMES[index - 1] ?? `페르소나 ${suffix}`,
+    displayName: DISPLAY_NAMES[index - 1] ?? `Persona ${suffix}`,
     role,
   };
 }

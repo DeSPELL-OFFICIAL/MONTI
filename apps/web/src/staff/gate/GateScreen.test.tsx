@@ -12,7 +12,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { GateResponseWire } from '@monti/shared';
 
-import { staffKo } from '../copy';
+import { staffEn } from '../copy';
 import type { GateRegistration } from '../setup/useGateRegistration';
 import type { UseGateParams, UseGateResult } from './useGate';
 
@@ -68,7 +68,7 @@ const TICKET = {
   photoJpegB64: '',
   displayName: '김입장',
   tier: 0,
-  tierName: '일반',
+  tierName: 'General',
   seat: '',
   checkedIn: false,
 } as const;
@@ -148,8 +148,8 @@ describe('before the gate may take a tap', () => {
   it('stops taking taps on a gate the organizer has not opened', () => {
     gate.mockReturnValue(running({ gateOpen: false }));
     renderGate();
-    expect(screen.getByText(staffKo.setup.notOpen)).toBeInTheDocument();
-    expect(screen.queryByText(staffKo.ready.tap)).not.toBeInTheDocument();
+    expect(screen.getByText(staffEn.setup.notOpen)).toBeInTheDocument();
+    expect(screen.queryByText(staffEn.ready.tap)).not.toBeInTheDocument();
   });
 
   /**
@@ -176,7 +176,7 @@ describe('before the gate may take a tap', () => {
     registration.mockReturnValue(registered({ revoked: true }));
     gate.mockReturnValue(running({ gateOpen: true }));
     renderGate();
-    expect(screen.getByRole('alert')).toHaveTextContent(staffKo.setup.revoked);
+    expect(screen.getByRole('alert')).toHaveTextContent(staffEn.setup.revoked);
   });
 });
 
@@ -186,27 +186,27 @@ describe('the running console', () => {
     renderGate();
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(String(7n));
     expect(screen.getByText('가을 밤 콘서트')).toBeInTheDocument();
-    expect(screen.getByText(staffKo.ready.tap)).toBeInTheDocument();
+    expect(screen.getByText(staffEn.ready.tap)).toBeInTheDocument();
   });
 
   it('says a browser cannot be a tap terminal, and keeps 수동 승인 in reach', () => {
     gate.mockReturnValue(running({ emulationUnavailable: true }));
     renderGate();
     expect(
-      screen.getByText('이 브라우저에서는 단말기 모드를 쓸 수 없어요. 수동 승인으로 입장을 처리해 주세요.'),
+      screen.getByText('This browser cannot work as a tap terminal. Please admit people with manual approval.'),
     ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: staffKo.override.open })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: staffEn.override.open })).toBeInTheDocument();
   });
 
   it('says nothing about it on a phone that emulates a card', () => {
     renderGate();
-    expect(screen.queryByText(staffKo.ready.unavailable)).not.toBeInTheDocument();
+    expect(screen.queryByText(staffEn.ready.unavailable)).not.toBeInTheDocument();
   });
 
   it('names the event by number until the first guest list lands', () => {
     gate.mockReturnValue(running({ eventTitle: '' }));
     renderGate();
-    expect(screen.getByText(`${staffKo.setup.eventLabel} 42`)).toBeInTheDocument();
+    expect(screen.getByText(`${staffEn.setup.eventLabel} 42`)).toBeInTheDocument();
   });
 });
 
@@ -217,19 +217,19 @@ describe('the way to what the gate still owes', () => {
    */
   it('opens the queue screen', async () => {
     renderGate();
-    await userEvent.click(screen.getByRole('button', { name: new RegExp(staffKo.queue.title) }));
+    await userEvent.click(screen.getByRole('button', { name: new RegExp(staffEn.queue.title) }));
     expect(await screen.findByText('QUEUE SCREEN')).toBeInTheDocument();
   });
 
   it('carries the count, so a staff member sees the debt without opening anything', () => {
     gate.mockReturnValue(running({ pendingCount: 2, parkedCount: 3 }));
     renderGate();
-    expect(screen.getByRole('button', { name: `${staffKo.queue.title} 5` })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: `${staffEn.queue.title} 5` })).toBeInTheDocument();
   });
 
   it('says nothing about a count when the gate owes nothing', () => {
     renderGate();
-    expect(screen.getByRole('button', { name: staffKo.queue.title })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: staffEn.queue.title })).toBeInTheDocument();
   });
 });
 
@@ -243,15 +243,15 @@ describe('the QR fallback', () => {
     };
     scanGateResponse.mockResolvedValue(response);
     renderGate();
-    await userEvent.click(screen.getByRole('button', { name: staffKo.qr.scanButton }));
+    await userEvent.click(screen.getByRole('button', { name: staffEn.qr.scanButton }));
     await waitFor(() => expect(handleResponse).toHaveBeenCalledWith(response));
   });
 
   it('says what to do about a camera it could not use', async () => {
     scanGateResponse.mockRejectedValue(new ScanError(SCAN_ERROR.permissionDenied));
     renderGate();
-    await userEvent.click(screen.getByRole('button', { name: staffKo.qr.scanButton }));
-    expect(await screen.findByText(staffKo.qr.cameraDenied)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: staffEn.qr.scanButton }));
+    expect(await screen.findByText(staffEn.qr.cameraDenied)).toBeInTheDocument();
     expect(handleResponse).not.toHaveBeenCalled();
   });
 
@@ -259,9 +259,9 @@ describe('the QR fallback', () => {
   it('says nothing when the staff member simply closed the camera', async () => {
     scanGateResponse.mockRejectedValue(new ScanCancelled());
     renderGate();
-    await userEvent.click(screen.getByRole('button', { name: staffKo.qr.scanButton }));
+    await userEvent.click(screen.getByRole('button', { name: staffEn.qr.scanButton }));
     await waitFor(() => expect(scanGateResponse).toHaveBeenCalled());
-    for (const line of [staffKo.qr.cameraDenied, staffKo.qr.failed, staffKo.qr.notGateCode]) {
+    for (const line of [staffEn.qr.cameraDenied, staffEn.qr.failed, staffEn.qr.notGateCode]) {
       expect(screen.queryByText(line)).not.toBeInTheDocument();
     }
   });
@@ -280,14 +280,14 @@ describe('manual approval', () => {
    */
   it('is offered with no tap on screen at all', async () => {
     renderGate();
-    await userEvent.click(screen.getByRole('button', { name: staffKo.override.open }));
+    await userEvent.click(screen.getByRole('button', { name: staffEn.override.open }));
     expect(openOverride).toHaveBeenCalledTimes(1);
   });
 
   it('is offered on a refusal, which is the usual way in', async () => {
     gate.mockReturnValue(running({ state: 'deny', deny: 'EXPIRED_CODE', ticket: TICKET }));
     renderGate();
-    await userEvent.click(screen.getByRole('button', { name: staffKo.override.open }));
+    await userEvent.click(screen.getByRole('button', { name: staffEn.override.open }));
     expect(openOverride).toHaveBeenCalledTimes(1);
   });
 
@@ -295,7 +295,7 @@ describe('manual approval', () => {
   it('is not offered while a check-in is still confirming', () => {
     gate.mockReturnValue(running({ state: 'confirming', ticket: TICKET }));
     renderGate();
-    expect(screen.queryByRole('button', { name: staffKo.override.open })).toBeNull();
+    expect(screen.queryByRole('button', { name: staffEn.override.open })).toBeNull();
   });
 
   it('hands the dialog a way to search the guest list', async () => {
@@ -303,7 +303,7 @@ describe('manual approval', () => {
     searchGuests.mockReturnValue(found as never);
     gate.mockReturnValue(running({ state: 'override' }));
     renderGate();
-    await userEvent.type(screen.getByLabelText(staffKo.override.searchLabel), '박');
+    await userEvent.type(screen.getByLabelText(staffEn.override.searchLabel), '박');
     expect(searchGuests).toHaveBeenCalledWith('박');
     expect(screen.getByRole('button', { name: /박관객/ })).toBeInTheDocument();
   });
@@ -311,24 +311,24 @@ describe('manual approval', () => {
   it('shows one dialog and no second button once it is open', () => {
     gate.mockReturnValue(running({ state: 'override', ticket: TICKET }));
     renderGate();
-    expect(screen.getByRole('dialog', { name: staffKo.override.title })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: staffKo.override.open })).toBeNull();
+    expect(screen.getByRole('dialog', { name: staffEn.override.title })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: staffEn.override.open })).toBeNull();
   });
 
   it('hands the PIN and the reason to the hook, and says what the chain said this staff may do', async () => {
     gate.mockReturnValue(running({ state: 'override', ticket: TICKET, canApprove: true }));
     renderGate();
-    expect(screen.getByRole('button', { name: staffKo.override.approve })).toBeInTheDocument();
-    await userEvent.type(screen.getByLabelText(staffKo.override.pin), '4821');
-    await userEvent.click(screen.getByRole('button', { name: staffKo.override.approve }));
+    expect(screen.getByRole('button', { name: staffEn.override.approve })).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText(staffEn.override.pin), '4821');
+    await userEvent.click(screen.getByRole('button', { name: staffEn.override.approve }));
     expect(submitOverride).toHaveBeenCalledWith('4821', 1, TICKET.tokenId, {});
   });
 
   it('offers only a request when the chain says this account may not approve', () => {
     gate.mockReturnValue(running({ state: 'override', ticket: TICKET, canApprove: false }));
     renderGate();
-    expect(screen.getByRole('button', { name: staffKo.override.request })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: staffKo.override.approve })).toBeNull();
+    expect(screen.getByRole('button', { name: staffEn.override.request })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: staffEn.override.approve })).toBeNull();
   });
 });
 
@@ -342,14 +342,14 @@ describe('a door open on a remembered answer', () => {
   it('runs, and marks itself stale in the banner rather than between two buttons', () => {
     gate.mockReturnValue(running({ gateOpen: true, gateOpenStale: true }));
     renderGate();
-    const notice = screen.getByText(staffKo.setup.gateOpenStale);
+    const notice = screen.getByText(staffEn.setup.gateOpenStale);
     expect(notice).toBeInTheDocument();
     expect(notice.closest('.gate__banner')).not.toBeNull();
-    expect(screen.getByRole('button', { name: staffKo.qr.scanButton })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: staffEn.qr.scanButton })).toBeInTheDocument();
   });
 
   it('says nothing when the chain answered for itself', () => {
     renderGate();
-    expect(screen.queryByText(staffKo.setup.gateOpenStale)).toBeNull();
+    expect(screen.queryByText(staffEn.setup.gateOpenStale)).toBeNull();
   });
 });

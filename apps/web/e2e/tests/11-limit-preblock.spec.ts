@@ -24,10 +24,10 @@ import { loadScenarioState } from '../utils/scenario-state';
  * cause — UI, owner casing in the query, or indexer lag — can be read off the evidence.
  */
 
-const ALREADY_HAVE = '이미 받았어요 · 내 티켓에서 확인하세요';
-const LIMIT_REACHED = '이 행사에서 받을 수 있는 티켓을 이미 다 받았어요.';
-const SOLD_OUT = '이 종류는 마감됐어요. 다른 종류를 골라 주세요.';
-const CLAIM_CTA = '티켓 받기';
+const ALREADY_HAVE = 'You already have your tickets for this event. Check My tickets.';
+const LIMIT_REACHED = 'You already have every ticket this event allows.';
+const SOLD_OUT = 'This type is sold out. Please pick another one.';
+const CLAIM_CTA = 'Get a ticket';
 
 const EVENT_IDS = (process.env.E2E_LIMIT_EVENTS ?? '6,10').split(',').map((s) => s.trim()).filter(Boolean);
 const TARGET: Persona[] = USERS.slice(0, 3); // persona-02, persona-03, persona-04
@@ -85,7 +85,7 @@ test.describe('MONTI limit pre-block (live check e, post-fix)', () => {
         // the SECOND, warm, caught it). Visiting 내 티켓 once makes `held` known before the claim
         // screens render, so the check measures the steady state the fix is about, not the cold race.
         await page.goto('/tickets');
-        await page.getByRole('heading', { name: '내 티켓' }).waitFor({ state: 'visible', timeout: 60_000 }).catch(() => undefined);
+        await page.getByRole('heading', { name: 'My tickets' }).waitFor({ state: 'visible', timeout: 60_000 }).catch(() => undefined);
         await page.waitForTimeout(3000);
 
         for (const eventId of EVENT_IDS) {

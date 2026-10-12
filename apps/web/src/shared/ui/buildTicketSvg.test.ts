@@ -83,7 +83,7 @@ describe('fitLine', () => {
 
   it('leaves a name and a kind that already fit exactly as they are', () => {
     expect(fitLine('김태완', 46)).toBe('김태완');
-    expect(fitLine('일반', 34, 4)).toBe('일반');
+    expect(fitLine('General', 34, 4)).toBe('General');
     expect(fitLine('Taewan Kim', 46)).toBe('Taewan Kim');
   });
 
@@ -106,7 +106,7 @@ describe('escapeXml', () => {
 });
 
 describe('buildTicketSvg', () => {
-  const base = { title: '재즈 나이트', tierName: '일반' };
+  const base = { title: '재즈 나이트', tierName: 'General' };
 
   it('draws one document per preset and no two of the twelve alike', () => {
     const drawings = Object.keys(TICKET_BACKDROPS).map((preset) =>
@@ -127,8 +127,8 @@ describe('buildTicketSvg', () => {
   });
 
   it('carries the event, the kind, the holder and the date', () => {
-    const svg = buildTicketSvg({ ...base, holder: '김태완', dateText: '2026. 10. 13.' });
-    for (const text of ['재즈 나이트', '일반', '김태완', '2026. 10. 13.']) {
+    const svg = buildTicketSvg({ ...base, holder: '김태완', dateText: 'Oct 13, 2026' });
+    for (const text of ['재즈 나이트', 'General', '김태완', 'Oct 13, 2026']) {
       expect(svg).toContain(`>${text}</text>`);
     }
   });
@@ -157,13 +157,13 @@ describe('buildTicketSvg', () => {
   });
 
   it('greys the backdrop and bands the ticket only once it has been used', () => {
-    const clean = buildTicketSvg({ ...base, usedLabel: '사용됨' });
+    const clean = buildTicketSvg({ ...base, usedLabel: 'Used' });
     expect(clean).not.toContain('grayscale');
-    expect(clean).not.toContain('사용됨');
+    expect(clean).not.toContain('Used');
 
-    const spent = buildTicketSvg({ ...base, used: true, usedLabel: '사용됨' });
+    const spent = buildTicketSvg({ ...base, used: true, usedLabel: 'Used' });
     expect(spent).toContain('filter: grayscale(1) contrast(.9)');
-    expect(spent).toContain('사용됨');
+    expect(spent).toContain('Used');
   });
 
   /** The words are white on all twelve backdrops; the scrim is what makes that legible. */
@@ -175,7 +175,7 @@ describe('buildTicketSvg', () => {
   });
 
   it('names the Korean fallback chain on every string it draws', () => {
-    const svg = buildTicketSvg({ ...base, holder: '김태완', dateText: '2026. 10. 13.' });
+    const svg = buildTicketSvg({ ...base, holder: '김태완', dateText: 'Oct 13, 2026' });
     const faces = svg.match(/font-family="[^"]+"/g) ?? [];
     expect(faces.length).toBeGreaterThan(0);
     expect(new Set(faces).size).toBe(1);
