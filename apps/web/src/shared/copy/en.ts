@@ -151,6 +151,7 @@ export const en: typeof ko = {
     refundedState: "Refunded ticket · it can't be used to enter",
     ticketNumber: 'Ticket number', numberPrefix: 'No.', copyNumber: 'Copy number', numberCopied: 'Copied',
     numberDetails: 'Details', numberFull: 'Full number',
+    backToTicket: 'Back to the ticket',
   },
   claim: {
     cta: 'Get a ticket', checking: 'Checking…', working: 'Getting your ticket', done: "You got your ticket · It's in My Tickets", tierLabel: 'Ticket type',

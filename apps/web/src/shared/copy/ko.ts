@@ -160,6 +160,8 @@ export const ko = {
     // 수동 승인에서 스태프가 찾는 번호. 짧은 번호(끝 네 자리 굵게)만 보이고 전체 번호는 '상세' 안에 둔다.
     ticketNumber: '티켓 번호', numberPrefix: 'No.', copyNumber: '번호 복사', numberCopied: '복사했어요',
     numberDetails: '상세', numberFull: '전체 번호',
+    // 환불·사용·취소된 티켓으로 입장·선물 화면을 직접 열었을 때 돌아가는 단추.
+    backToTicket: '티켓으로 돌아가기',
   },
   claim: {
     cta: '티켓 받기', checking: '확인 중…', working: '받는 중이에요', done: '티켓을 받았어요 · 내 티켓에 있어요', tierLabel: '티켓 종류',
