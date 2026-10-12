@@ -61,7 +61,8 @@ describe('protocol timings', () => {
     expect(MIGRATE_DELAY_SECONDS).toBe(86_400);
     expect(HCE_AID).toBe('D2760000850101');
     expect(QR_PREFIX).toBe('MONTI1:');
-    expect(FIREBASE_REGION).toBe('us-east1');
+    // v2 runs side by side with v1 (us-east1) under its own codebase until the cut-over.
+    expect(FIREBASE_REGION).toBe('us-east4');
   });
 
   it('pins the social limits shared by rules and server code', () => {

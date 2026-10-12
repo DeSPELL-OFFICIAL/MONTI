@@ -209,10 +209,6 @@ const checkedInLate = (tokenId: bigint) =>
   ]);
 const registered = (personId: Hex, account: Hex) =>
   montiLog(IDENTITY, identityAbi, 'Registered', { personId, account });
-const nicknameSet = (account: Hex, nickname: string) =>
-  montiLog(IDENTITY, identityAbi, 'NicknameSet', { account, nicknameHash: `0x${'cc'.repeat(32)}` }, 'string nickname', [
-    nickname,
-  ]);
 const transfer = (from: Hex, to: Hex, tokenId: bigint, address: string = TICKET) =>
   montiLog(address, ticketAbi, 'Transfer', { from, to, tokenId });
 const offerAccepted = (tokenId: bigint) =>
@@ -407,16 +403,6 @@ describe('tenderlyWebhook', () => {
     const stranger = `0x${'bb'.repeat(32)}` as Hex;
     await deliver([registered(stranger, OWNER)]);
     expect(snapshot(`${PERSONS}/${stranger}`).exists).toBe(false);
-  });
-
-  it('mirrors the chain nickname onto the matching users document', async () => {
-    chain.personOf.set(OWNER.toLowerCase(), PERSON);
-    write(`${USERS}/uid-1`, { personId: PERSON });
-    write(`${USERS}/uid-2`, { personId: `0x${'bb'.repeat(32)}` });
-
-    await deliver([nicknameSet(OWNER, '몽티')]);
-    expect(snapshot(`${USERS}/uid-1`).get('nickname')).toBe('몽티');
-    expect(snapshot(`${USERS}/uid-2`).get('nickname')).toBeUndefined();
   });
 
   it('drops the sender from the event chat only when no ticket is left', async () => {

@@ -18,6 +18,7 @@ const ACCOUNT = getAddress(ACCOUNT_LOWER);
 const OTHER_ACCOUNT = `0x${'22'.repeat(20)}` as Hex;
 const TICKET = `0x${'ce'.repeat(20)}` as Hex;
 const IDENTITY = `0x${'1d'.repeat(20)}` as Hex;
+const VAULT = `0x${'5a'.repeat(20)}` as Hex;
 const RELAYER = `0x${'fa'.repeat(20)}` as Hex;
 const TX_HASH = `0x${'ab'.repeat(32)}` as Hex;
 const DEVICE_SIG = `0x${'cd'.repeat(64)}` as Hex;
@@ -33,6 +34,8 @@ let member = true;
 let locked = false;
 let chainNonce = 0n;
 let usedAtChain = 0;
+/** 금고 escrowOf.status — 0 None · 1 Held · 2 Released · 3 Refunded. */
+let escrowStatus = 0;
 
 const fake = createFakeFirestore();
 
@@ -42,6 +45,7 @@ const readContract = vi.fn(async ({ functionName }: { functionName: string }) =>
   if (functionName === 'claimNonce') return chainNonce;
   if (functionName === 'usedAt') return usedAtChain;
   if (functionName === 'eventOrg') return ORG_ID;
+  if (functionName === 'escrowOf') return [VAULT, 0n, VAULT, 0n, escrowStatus];
   throw new Error(`UNEXPECTED_READ:${functionName}`);
 });
 const estimateContractGas = vi.fn(async () => 215_000n);
@@ -60,7 +64,7 @@ vi.mock('../src/lib/db.js', () => ({
 
 vi.mock('../src/lib/chain.js', () => ({
   publicClient: () => ({ readContract, estimateContractGas, waitForTransactionReceipt }),
-  deployment: () => ({ ticket: TICKET, identity: IDENTITY }),
+  deployment: () => ({ ticket: TICKET, identity: IDENTITY, settlementVault: VAULT }),
 }));
 
 vi.mock('../src/lib/relayer.js', () => ({
@@ -133,6 +137,7 @@ beforeEach(() => {
   locked = false;
   chainNonce = 0n;
   usedAtChain = 0;
+  escrowStatus = 0;
   readContract.mockClear();
   estimateContractGas.mockClear();
   waitForTransactionReceipt.mockClear();
@@ -275,6 +280,31 @@ describe('relayCheckIn', () => {
     });
     expect(sendRelayed).not.toHaveBeenCalled();
     expect(fake.docs.has(`admissions/${EVENT_ID}/tokens/${TOKEN_ID}`)).toBe(false);
+  });
+
+  it('refuses a refunded ticket with REVOKED before simulating — nothing sent, no admission', async () => {
+    escrowStatus = 3;
+    await expect(checkIn({ data: checkInReq(), auth } as never)).rejects.toMatchObject({
+      code: 'failed-precondition',
+      message: 'REVOKED',
+      details: { code: 'REVOKED', reason: 'TICKET_REFUNDED' },
+    });
+    expect(estimateContractGas).not.toHaveBeenCalled();
+    expect(sendRelayed).not.toHaveBeenCalled();
+    expect(fake.docs.has(`admissions/${EVENT_ID}/tokens/${TOKEN_ID}`)).toBe(false);
+    expect(fake.docs.has(`relays/${CHECKIN_RELAY_ID}`)).toBe(false);
+  });
+
+  it.each([
+    [0, 'free (never escrowed)'],
+    [1, 'held'],
+    [2, 'released'],
+  ])('admits normally when escrow status is %i (%s)', async (status) => {
+    escrowStatus = status;
+    const res = (await checkIn({ data: checkInReq(), auth } as never)) as { status: string };
+    expect(res.status).toBe('confirmed');
+    expect(sendRelayed).toHaveBeenCalledTimes(1);
+    expect(readContract).toHaveBeenCalledWith(expect.objectContaining({ address: VAULT, functionName: 'escrowOf', args: [TOKEN_ID] }));
   });
 
   it('is idempotent — an existing confirmed check-in relay returns confirmed', async () => {

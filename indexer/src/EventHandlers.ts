@@ -60,7 +60,6 @@ Identity.Registered.handler(async ({ event, context }) => {
   context.IdentityAccount.set({
     id: addr(event.params.account),
     personId: event.params.personId,
-    nickname: undefined,
     kycLevel: 0,
     deviceX: ZERO32,
     deviceY: ZERO32,
@@ -86,7 +85,6 @@ Identity.KycLevelSet.handler(async ({ event, context }) => {
  *
  * 옮기는 것과 옮기지 않는 것을 갈라 두는 게 이 핸들러의 전부다:
  * - 사람(`personId`)과 kycLevel(`_kycLevel[personId]`)은 사람에 붙으므로 따라간다.
- * - 닉네임은 두 함수 모두 `_nicknameOf` 를 활성 계정으로 옮기므로 따라간다.
  * - **기기(x/y/locked/updatedAt)는 계정별이라 따라가지 않는다.** `rotateAccount` 는
  *   새 계정의 `_devices` 를 건드리지 않아 체인 위에서 0 이고(첫 `setActiveDevice`
  *   까지), `cancelRotation` 은 되돌린 계정의 잠금을 **일부러** 풀지 않는다
@@ -100,7 +98,7 @@ Identity.KycLevelSet.handler(async ({ event, context }) => {
  * 없다고 지나가지 않는다 — `Registered` 가 구독 시작 블록보다 앞선 계정이라도
  * 회전한 뒤의 **현재 계정**은 인덱스에 있어야 하고, 이 이벤트가 `personId` 를
  * 싣고 있어 지어낸 값 없이 행을 세울 수 있다. 그때 kycLevel 은 0 에서 시작하고
- * 다음 `KycLevelSet` 이 맞춘다(닉네임은 비어 있다).
+ * 다음 `KycLevelSet` 이 맞춘다. (v2: 닉네임은 체인 밖 Firestore `nicknames` 에 있다.)
  */
 Identity.AccountRotated.handler(async ({ event, context }) => {
   const from = addr(event.params.oldAccount);
@@ -109,12 +107,9 @@ Identity.AccountRotated.handler(async ({ event, context }) => {
   // 회전 취소는 이미 행이 있는 계정으로 되돌아온다.
   const target = await context.IdentityAccount.get(to);
 
-  if (previous) context.IdentityAccount.set({ ...previous, nickname: undefined });
-
   context.IdentityAccount.set({
     id: to,
     personId: event.params.personId,
-    nickname: previous?.nickname ?? target?.nickname,
     kycLevel: previous?.kycLevel ?? target?.kycLevel ?? 0,
     deviceX: target?.deviceX ?? ZERO32,
     deviceY: target?.deviceY ?? ZERO32,
@@ -152,12 +147,6 @@ Identity.DeviceLocked.handler(async ({ event, context }) => {
   const current = await context.IdentityAccount.get(addr(event.params.account));
   if (!current) return;
   context.IdentityAccount.set({ ...current, locked: event.params.locked });
-});
-
-Identity.NicknameSet.handler(async ({ event, context }) => {
-  const current = await context.IdentityAccount.get(addr(event.params.account));
-  if (!current) return;
-  context.IdentityAccount.set({ ...current, nickname: event.params.nickname });
 });
 
 // ──────────────────────────── Organizers ────────────────────────────
@@ -439,22 +428,6 @@ Ticket.EventCreated.handler(async ({ event, context }) => {
 });
 
 /**
- * `updateEventMeta` 는 Draft 인 공연에서만 되고 `orgId` 는 지킨다(Ticket.sol:210).
- * 그래서 여기서도 orgId·creator·status 는 그대로 두고 메타와 티어만 갈아 끼운다.
- */
-Ticket.EventMetaUpdated.handler(async ({ event, context }) => {
-  const eventId = event.params.eventId;
-  const current = await context.Event.get(eventId.toString());
-  if (!current) return;
-  const { meta, tiers } = await context.effect(readEventState, {
-    eventId,
-    blockNumber: BigInt(event.block.number),
-  });
-  context.Event.set({ ...current, ...metaColumns(meta) });
-  await writeTiers(context, eventId, tiers);
-});
-
-/**
  * 0/1/2/3 → Draft/Published/Cancelled/Ended. 모르는 코드는 **던지지 않는다** —
  * 인덱서가 멈추면 공연 하나가 아니라 체인 전체가 멈춘다. 로그만 남기고 지나간다.
  */
@@ -585,7 +558,6 @@ Ticket.ManualOverride.handler(async ({ event, context }) => {
     approver: addr(event.params.approver),
     role: Number(event.params.role),
     reason: Number(event.params.reason),
-    requested: false,
   });
   context.CheckIn.set({
     id,
@@ -599,19 +571,6 @@ Ticket.ManualOverride.handler(async ({ event, context }) => {
   });
   const ticket = await context.Ticket.get(id);
   if (ticket) context.Ticket.set({ ...ticket, checkIn_id: id });
-});
-
-/** 요청은 입장이 아니다 — 체크인 행을 만들지 않는다. role 은 `ROLE_NONE`(0). */
-Ticket.OverrideRequested.handler(async ({ event, context }) => {
-  context.Override.set({
-    id: `${event.transaction.hash}-${event.logIndex}`,
-    tokenId: event.params.tokenId,
-    gateId: event.params.gateId,
-    approver: addr(event.params.requester),
-    role: 0,
-    reason: Number(event.params.reason),
-    requested: true,
-  });
 });
 
 Ticket.Revoked.handler(async ({ event, context }) => {
@@ -759,9 +718,10 @@ Ticket.ClaimRejected.handler(async ({ event, context }) => {
 // ──────────────────────────── SettlementVault ────────────────────────────
 
 /**
- * 프로그래머블 정산 레이어(설계 2026-10-01). 공개 정산 페이지가 읽을 정책·에스크로·지급을
- * 인덱싱한다. 금고는 코어 넷과 **분리된** 스탠드얼론이라, 아직 배포되지 않았거나(설정에 없음)
- * 배포되었어도 코어 인덱싱과 독립적으로 붙는다.
+ * 프로그래머블 정산 레이어. 공개 정산 페이지가 읽을 정책·에스크로·지급을 인덱싱한다.
+ * v2: 금고는 코어와 같은 배포에 들어가고, `PolicySet` 은 유료 `Ticket.publishEvent` 안에서
+ * (`EventCreated → EventStatusChanged(1) → PolicySet`), `Deposited` 는 원자 `purchase` 안에서
+ * (`Transfer → Claimed → Deposited`) 같은 tx 로 온다 — 핸들러는 순서 그대로 처리한다.
  *
  * **등록은 조건부다.** `generated.SettlementVault` 는 config.yaml 에 금고 컨트랙트가 들어온
  * 뒤(= 배포 + 재생성)에만 존재한다. 그 전에는 `undefined` 라 여기서 아무 핸들러도 달지

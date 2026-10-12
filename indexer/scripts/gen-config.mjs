@@ -59,10 +59,10 @@ const CONTRACTS = [
       'RotationCancelled',
       'DeviceChanged',
       'DeviceLocked',
-      'NicknameSet',
       'KycLevelSet',
     ],
     reserved: [],
+    // v2: 닉네임은 체인 밖(Firestore `nicknames`)으로 옮겨 Identity 에 NicknameSet 이 없다.
     // 어테스터 키 교체는 체인 밖 운영 사건이고 대응 엔티티가 없다.
     ignored: ['AttesterChanged'],
   },
@@ -88,7 +88,6 @@ const CONTRACTS = [
     events: [
       'EventCreated',
       'EventStatusChanged',
-      'EventMetaUpdated',
       'Claimed',
       // 01c: 승인제 클레임. requestClaim → ClaimRequested 로 Pending 을 열고,
       // approveClaims → ClaimApproved(+tokenId) 로 Approved, rejectClaims/cancelRequest
@@ -103,7 +102,6 @@ const CONTRACTS = [
       // `CheckedIn` 과 같은 트랜잭션에 **먼저** 온다 — 입장 수는 `CheckedIn` 으로 세고,
       // 이것으로 `CheckIn.late` 를 true 로 올린다.
       'CheckedInLate',
-      'OverrideRequested',
       'ManualOverride',
       'Revoked',
       'Migrated',
@@ -118,20 +116,14 @@ const CONTRACTS = [
     ignored: ['Approval', 'ApprovalForAll', 'EIP712DomainChanged'],
   },
   {
-    // SettlementVault — 프로그래머블 정산 레이어(설계 2026-10-01). 코어 넷과 달리 공유 ABI
-    // 내보내기가 아직 없어 ABI 를 indexer/ 안에 벤더해 두고 거기서 읽는다
-    // (src/vendored/settlement-vault-abi.json). 배포 파일에 `settlementVault` 키가 없으면
-    // (아직 배포 전) 조용히 건너뛴다 — 코어 인덱싱은 그대로다. 키가 들어오면 그때 구독한다.
+    // SettlementVault — 프로그래머블 정산 레이어. v2 에서는 코어와 **같은 배포**(같은 블록)에
+    // 들어가므로 네트워크 start_block 을 그대로 쓴다. ABI 는 핸들러의 `getPolicy` 호출용으로
+    // indexer/ 안에 벤더한 소스(src/vendored/settlement-vault-abi.json, v2 K1 동결본)에서 읽는다.
+    // v2 이벤트 출처: PolicySet = Ticket.publishEvent(유료) 안에서, Deposited = purchase 안에서.
     name: 'SettlementVault',
     addressKey: 'settlementVault',
-    optional: true,
     abiFile: join('src', 'vendored', 'settlement-vault-abi.json'),
     abiKey: 'abi',
-    // 금고는 코어 재배포(블록 66724502)보다 **나중에** 배포되므로 자기 시작 블록이 따로 있다.
-    // Envio 는 컨트랙트별 start_block 을 지원한다(evm.schema.json) — 네트워크 start_block 은
-    // 코어 그대로 두고 금고만 자기 배포 블록부터 스캔한다. 배포 파일의 `settlementVaultBlock`
-    // 을 쓰고, 없으면 코어 `block` 으로 안전하게 내려간다(금고는 그 전에 이벤트가 없다).
-    startBlockKey: 'settlementVaultBlock',
     events: [
       'PolicySet',
       'Deposited',
@@ -231,14 +223,6 @@ const pending = [];
 for (const contract of CONTRACTS) {
   const address = deployment[contract.addressKey];
   if (!address) {
-    // optional 컨트랙트(= 금고)는 배포 전이면 조용히 건너뛴다. 코어 넷은 반드시 있어야 하므로
-    // 없으면 예전처럼 크게 실패한다.
-    if (contract.optional) {
-      console.log(
-        `[gen-config] ${contract.name} 미배포 — 배포 파일에 "${contract.addressKey}" 키가 없어 건너뛴다.`,
-      );
-      continue;
-    }
     throw new Error(`[gen-config] 배포 파일에 "${contract.addressKey}" 키가 없다.`);
   }
   const { abi, path } = await loadContractAbi(contract);
@@ -261,19 +245,9 @@ for (const contract of CONTRACTS) {
     ].join('\n'),
   );
 
-  // 금고처럼 startBlockKey 가 있는 컨트랙트만 자기 start_block 을 단다. 배포 파일에 그 블록이
-  // 있으면 그 값, 없으면 코어 `block` 으로 안전하게 내려간다. 코어 넷은 네트워크 start_block 을
-  // 그대로 쓴다(컨트랙트 start_block 없음).
-  const networkLines = [
-    `      - name: ${contract.name}`,
-    '        address:',
-    `          - "${address}"`,
-  ];
-  if (contract.startBlockKey) {
-    const contractStart = deployment[contract.startBlockKey] ?? deployment.block;
-    networkLines.push(`        start_block: ${contractStart}`);
-  }
-  networkBlocks.push(networkLines.join('\n'));
+  networkBlocks.push(
+    [`      - name: ${contract.name}`, '        address:', `          - "${address}"`].join('\n'),
+  );
 }
 
 // RPC 를 주 소스로 쓸 때만 나온다. 없으면 HyperSync 가 소스다.

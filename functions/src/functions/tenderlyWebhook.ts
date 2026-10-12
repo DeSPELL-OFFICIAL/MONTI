@@ -2,7 +2,6 @@ import { getMessaging } from 'firebase-admin/messaging';
 import { onRequest } from 'firebase-functions/v2/https';
 import {
   EVENT_STATUS_BY_CODE,
-  identityAbi,
   ticketAbi,
   type CheckInPush,
   type Hex,
@@ -17,7 +16,6 @@ import {
   PENDING_GATES,
   PERSONS,
   TRANSFER_INVITES,
-  USERS,
   assertStatusTransition,
   db,
 } from '../lib/db.js';
@@ -82,20 +80,6 @@ async function markRegistered(personId: Hex): Promise<void> {
   if (current === 'active') return;
   assertStatusTransition(current ?? 'pending', 'active');
   await ref.set({ status: 'active' }, { merge: true });
-}
-
-/** 체인이 원본이다. users.nickname 은 채팅 표시용 캐시일 뿐이라 이벤트로만 갱신한다. */
-async function mirrorNickname(account: Hex, nickname: string): Promise<void> {
-  const personId = await publicClient().readContract({
-    address: deployment().identity,
-    abi: identityAbi,
-    functionName: 'personOf',
-    args: [account],
-  });
-  const users = await db.collection(USERS).where('personId', '==', personId as string).limit(1).get();
-  const doc = users.docs[0];
-  if (!doc) return;
-  await doc.ref.set({ nickname }, { merge: true });
 }
 
 /**
@@ -233,9 +217,6 @@ async function applyEvent(event: DecodedEvent, events: readonly DecodedEvent[]):
       break;
     case 'Registered':
       await markRegistered(event.args.personId as Hex);
-      break;
-    case 'NicknameSet':
-      await mirrorNickname(event.args.account as Hex, event.args.nickname as string);
       break;
     case 'Transfer':
       await dropChatMemberIfTicketless(event.args.from as Hex, event.args.tokenId as bigint);

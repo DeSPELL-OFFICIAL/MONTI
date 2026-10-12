@@ -151,28 +151,26 @@ type CheckIn {
   block: BigInt!
 }
 
-# Ticket.ManualOverride(tokenId, gateId, approver, role, reason) — requested false;
-# Ticket.OverrideRequested(tokenId, gateId, requester, reason) — requested true,
-# role 0. Neither event carries eventId: join through the paired CheckIn or Ticket.
+# Ticket.ManualOverride(tokenId, gateId, approver, role, reason). The event carries no
+# eventId: join through the paired CheckIn or Ticket. (v2: override *requests* live
+# off-chain in Firestore `overrideRequests`; there is no OverrideRequested event.)
 type Override {
   id: ID!            # txHash-logIndex
   tokenId: BigInt! @index
   gateId: BigInt! @index
   approver: String!
-  role: Int!         # 0 requester, 1 approver (owner or admin), 2 manager
+  role: Int!         # 1 approver (owner or admin), 2 manager
   reason: Int!
-  requested: Boolean!
 }
 
 # 01b 의 `RotationCancelled(personId, account)` 는 `AccountRotated` 를 **함께**
 # emit 하므로 "현재 계정" 로직이 그대로 맞다. 감사 로그일 뿐 새 열은 없다.
 # Identity.Registered(personId, account) creates the row; AccountRotated moves it,
 # DeviceChanged fills deviceX/deviceY, DeviceLocked sets locked,
-# NicknameSet sets nickname, KycLevelSet sets kycLevel.
+# KycLevelSet sets kycLevel. (v2: nicknames are off-chain in Firestore `nicknames`.)
 type IdentityAccount {
   id: ID!            # account address
   personId: String!
-  nickname: String
   kycLevel: Int!     # 0 = number verified only, 1 = ID + face verified
   deviceX: String!
   deviceY: String!

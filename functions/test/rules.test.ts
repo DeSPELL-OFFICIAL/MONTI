@@ -56,6 +56,9 @@ beforeEach(async () => {
     await db.doc('admissions/7/tokens/42').set({ status: 'passing', gateId: 'g1', relayId: 'r1' });
     await db.doc('settlements/42').set({ policyHash: '0x00', policy: { recipients: [], platformBps: 2000 } });
     await db.doc('orders/o1').set({ personId: '0xaa', account: ACCOUNT, eventId: '42', tier: 0, status: 'deposited' });
+    await db.doc('overrideRequests/q1').set({
+      eventId: '1001', tokenId: '1', gateId: '3', reason: 2, requesterAccount: ACCOUNT, requesterPersonId: '0xaa', status: 'open',
+    });
   });
 });
 
@@ -534,6 +537,21 @@ describe('eventDrafts/{uid}/drafts/{draftId}', () => {
       art: { imageCid: `bafk${'c'.repeat(55)}` },
     }));
     await assertSucceeds(owner().doc(MINE).update({ tiers: eight }));
+    // v2: 같은 저장에 정산 규칙(splitJson, 상한 꽉 채움)이 실려도 예산 안에 들어와야 한다.
+    await assertSucceeds(owner().doc(MINE).update({ tiers: eight, splitJson: 'x'.repeat(4000) }));
+  });
+
+  // v2 정산 규칙 편집기의 수취인 표. JSON 문자열 한 칸이고 4000자가 상한이다.
+  it('caps splitJson at 4000 characters and only as a string', async () => {
+    const db = owner();
+    const split = JSON.stringify([
+      { name: '공연자', account: `0x${'33'.repeat(20)}`, bps: 9500, tag: 'artist', platform: false },
+      { name: 'MONTI', account: `0x${'44'.repeat(20)}`, bps: 500, tag: 'platform', platform: true },
+    ]);
+    await assertSucceeds(db.doc(MINE).update({ splitJson: split }));
+    await assertSucceeds(db.doc(MINE).update({ splitJson: 'x'.repeat(4000) }));
+    await assertFails(db.doc(MINE).update({ splitJson: 'x'.repeat(4001) }));
+    await assertFails(db.doc(MINE).update({ splitJson: [{ bps: 10000 }] }));
   });
 
   // 통화는 체인이 아는 네 가지뿐이다. 마지막 줄은 두 번째 칸도 실제로 검사된다는 확인이다 —
@@ -687,5 +705,39 @@ describe('orders/{orderId}', () => {
   it('blocks client writes even by the owner (server-only)', async () => {
     await assertFails(buyer().doc('orders/o1').set({ status: 'refunded' }, { merge: true }));
     await assertFails(buyer().doc('orders/o2').set({ personId: '0xaa', status: 'pending' }));
+  });
+});
+
+describe('nicknames/{name}', () => {
+  it('blocks client reads and writes (server-only book)', async () => {
+    await env.withSecurityRulesDisabled(async (context) => {
+      await context.firestore().doc('nicknames/alex').set({ personId: '0xaa', account: ACCOUNT, display: 'Alex' });
+    });
+    const client = env.authenticatedContext('uid-1', { account: ACCOUNT, personId: '0xaa' }).firestore();
+    await assertFails(client.doc('nicknames/alex').get());
+    await assertFails(client.doc('nicknames/alex').set({ personId: '0xaa' }, { merge: true }));
+    await assertFails(client.doc('nicknames/bob').set({ personId: '0xaa', account: ACCOUNT }));
+    await assertFails(env.unauthenticatedContext().firestore().doc('nicknames/alex').get());
+  });
+});
+
+describe('overrideRequests/{requestId}', () => {
+  function requester() {
+    return env.authenticatedContext('uid-1', { account: ACCOUNT, personId: '0xaa' }).firestore();
+  }
+
+  it('lets the requesting staff member read their own request', async () => {
+    await assertSucceeds(requester().doc('overrideRequests/q1').get());
+  });
+
+  it("blocks reading another person's request and anonymous reads", async () => {
+    const other = env.authenticatedContext('uid-2', { account: '0x02', personId: '0xbb' }).firestore();
+    await assertFails(other.doc('overrideRequests/q1').get());
+    await assertFails(env.unauthenticatedContext().firestore().doc('overrideRequests/q1').get());
+  });
+
+  it('blocks client writes even by the requester (server-only)', async () => {
+    await assertFails(requester().doc('overrideRequests/q1').set({ status: 'approved' }, { merge: true }));
+    await assertFails(requester().doc('overrideRequests/q2').set({ requesterPersonId: '0xaa', status: 'open' }));
   });
 });

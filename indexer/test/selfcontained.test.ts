@@ -48,7 +48,10 @@ describe('config.yaml pins the current deployment', () => {
 
     // 은퇴한 Ticket 주소가 어디든 남아 있으면 인덱서는 그 계약을 스캔하다 조용히 0건을
     // 낸다. previous[] 의 어떤 Ticket 주소도 config 에 없어야 한다.
-    for (const past of deployment.previous) {
+    // v2 배포 파일에는 previous[] 가 없다(전면 재배포) — 있으면 그 주소들이 빠졌는지 본다.
+    const previous = (deployment as { previous?: { ticket?: string }[] }).previous ?? [];
+    for (const past of previous) {
+      if (!past.ticket) continue;
       expect(config).not.toContain(past.ticket);
     }
 
@@ -62,30 +65,22 @@ describe('config.yaml pins the current deployment', () => {
     // 배포 파일에 있는 셋 말고는 아무 주소도 감시하지 않는다 — 다음 재배포 때 이 테스트가
     // 저절로 따라온다.
     const watched = [...config.matchAll(/^ {10}- "(0x[0-9a-fA-F]{40})"$/gm)].map((m) => m[1]);
-    const vault = (deployment as Record<string, unknown>).settlementVault as string | undefined;
+    const vault = (deployment as Record<string, unknown>).settlementVault as string;
     expect(watched).toEqual([
       deployment.identity,
       deployment.organizers,
       deployment.ticket,
-      // 금고는 배포된 뒤에만(배포 파일에 settlementVault 키가 있을 때) config 에 들어온다.
-      ...(vault ? [vault] : []),
+      vault,
     ]);
   });
 
-  // SettlementVault 는 배포되면(배포 파일에 settlementVault 키) 자기 컨트랙트와 start_block 을
-  // 달고, 아직이면 깨끗이 빠진다. 두 경우를 벤더된 배포 파일 모양으로 가린다.
-  it('includes SettlementVault with its own start_block once deployed, else skips it', async () => {
+  // v2: 금고는 코어와 같은 배포라 자기 start_block 이 없고 언제나 구독된다.
+  it('includes SettlementVault without a contract start_block', async () => {
     const config = await readFile(join(process.cwd(), 'config.yaml'), 'utf8');
-    const dep = deployment as Record<string, unknown>;
-    const vault = dep.settlementVault as string | undefined;
-    if (vault) {
-      expect(config).toContain(`"${vault}"`);
-      expect(config).toContain('- event: PolicySet(uint256 indexed eventId');
-      const vaultStart = (dep.settlementVaultBlock as number | undefined) ?? deployment.block;
-      expect(config).toContain(`        start_block: ${vaultStart}`);
-    } else {
-      expect(config).not.toContain('name: SettlementVault');
-    }
+    const vault = (deployment as Record<string, unknown>).settlementVault as string;
+    expect(config).toContain(`"${vault}"`);
+    expect(config).toContain('- event: PolicySet(uint256 indexed eventId');
+    expect(config).not.toMatch(/^ {8}start_block:/m);
   });
 
   // 01b 가 더한 두 이벤트는 더 이상 "ABI 대기"가 아니다 — 실제로 구독해야 한다.

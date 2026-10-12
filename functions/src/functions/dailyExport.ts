@@ -31,10 +31,10 @@ export const EXPORT_ENTITIES = [
     fields: 'id eventId requestId requester tier status tokenId requestedAt decidedAt txHash',
   },
   { entity: 'CheckIn', fields: 'id gateId ts nonceHash manual late txHash block' },
-  { entity: 'Override', fields: 'id tokenId gateId approver role reason requested' },
+  { entity: 'Override', fields: 'id tokenId gateId approver role reason' },
   {
     entity: 'IdentityAccount',
-    fields: 'id personId nickname kycLevel deviceX deviceY locked deviceUpdatedAt',
+    fields: 'id personId kycLevel deviceX deviceY locked deviceUpdatedAt',
   },
   { entity: 'Offer', fields: 'id from commitment expiresAt status' },
 ] as const;

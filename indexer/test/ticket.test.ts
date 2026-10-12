@@ -197,30 +197,6 @@ describe('Ticket handlers — events and tiers', () => {
     expect(lastBlockTag).toBe(`0x${BLOCK.toString(16)}`);
   });
 
-  it('replaces meta and tiers on EventMetaUpdated and drops the tiers that went away', async () => {
-    const mockDb = await created();
-    metaReply = { ...META, imageCid: 'bafkrenewcid', requireKyc: false };
-    tiersReply = [{ ...TIERS[0], name: '단일', supply: 50 }];
-    try {
-      const after = await Ticket.EventMetaUpdated.processEvent({
-        event: Ticket.EventMetaUpdated.createMockEvent({ eventId: EVENT_ID, ...at(OTHER_TX) }),
-        mockDb,
-      });
-      expect(after.entities.Event.get('11')).toMatchObject({
-        imageCid: 'bafkrenewcid',
-        requireKyc: false,
-        orgId: 5n,
-        creator: alice,
-        status: 'Draft',
-      });
-      expect(after.entities.Tier.get('11-0')).toMatchObject({ name: '단일', supply: 50n });
-      expect(after.entities.Tier.get('11-1')).toBeUndefined();
-    } finally {
-      metaReply = META;
-      tiersReply = TIERS;
-    }
-  });
-
   it('maps EventStatusChanged codes to names and never throws on an unknown one', async () => {
     let mockDb = await created();
     expect(mockDb.entities.Event.get('11')?.status).toBe('Draft');
@@ -464,7 +440,6 @@ describe('Ticket handlers — check-ins and overrides', () => {
       approver: bob,
       role: 1,
       reason: 2,
-      requested: false,
     });
     expect(mockDb.entities.CheckIn.get('7')).toMatchObject({ manual: true, nonceHash: ZERO32 });
 
@@ -575,31 +550,6 @@ describe('Ticket handlers — check-ins and overrides', () => {
       mockDb: seeded,
     });
     expect(otherTx.entities.CheckIn.get('7')?.late).toBe(false);
-  });
-
-  it('writes a requested Override on OverrideRequested', async () => {
-    const after = await Ticket.OverrideRequested.processEvent({
-      event: Ticket.OverrideRequested.createMockEvent({
-        tokenId: TOKEN,
-        gateId: 3n,
-        requester: BOB,
-        reason: 2n,
-        ...at(TX, 9),
-      }),
-      mockDb: MockDb.createMockDb(),
-    });
-
-    expect(after.entities.Override.get(`${TX}-9`)).toEqual({
-      id: `${TX}-9`,
-      tokenId: TOKEN,
-      gateId: 3n,
-      approver: bob,
-      role: 0,
-      reason: 2,
-      requested: true,
-    });
-    // 요청은 입장이 아니다 — CheckIn 을 만들지 않는다.
-    expect(after.entities.CheckIn.get('7')).toBeUndefined();
   });
 });
 

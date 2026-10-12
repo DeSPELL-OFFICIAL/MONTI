@@ -23,8 +23,8 @@ afterEach(() => {
 });
 
 describe('config', () => {
-  it('pins the Seoul region for every function', () => {
-    expect(REGION).toBe('us-east1');
+  it('pins the v2 region for every function', () => {
+    expect(REGION).toBe('us-east4');
   });
 
   /**

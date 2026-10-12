@@ -13,7 +13,9 @@ export { listPendingGates, submitPendingGate } from './functions/pendingGates.js
 export { listPinned, pinMessage } from './functions/pinMessage.js';
 export { lockDevice, startDeviceChange } from './functions/device.js';
 export { loginChallenge, loginVerify } from './functions/login.js';
+export { resolveNicknames, setNickname } from './functions/nickname.js';
 export { pinEventImage, pinEventMetadata } from './functions/organizer.js';
+export { listOverrideRequests, requestOverride } from './functions/overrideRequests.js';
 export { reconcilePending } from './functions/reconcilePending.js';
 export { relayClaim, relayCheckIn } from './functions/relay.js';
 export { relayAction } from './functions/relayAction.js';
@@ -23,7 +25,7 @@ export { saveEventArt } from './functions/eventArt.js';
 export { registerPasskey } from './functions/registerPasskey.js';
 export { recoverAccess } from './functions/recoverAccess.js';
 export { resolveRecipient } from './functions/resolveRecipient.js';
-export { purchaseTicket, refundOrder, relaySetPolicy } from './functions/settlement.js';
+export { purchaseTicket, refundOrder } from './functions/settlement.js';
 export { startKyc } from './functions/startKyc.js';
 export { startSignup } from './functions/startSignup.js';
 export { tenderlyWebhook } from './functions/tenderlyWebhook.js';

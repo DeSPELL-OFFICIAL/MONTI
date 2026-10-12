@@ -20,7 +20,6 @@ describe('schema.graphql', () => {
 
   it('carries the delta fields', async () => {
     const schema = await readFile(schemaPath, 'utf8');
-    expect(schema).toContain('nickname: String');
     expect(schema).toContain('category: Int!');
     expect(schema).toContain('regionCode: String!');
     expect(schema).toContain('status: String!');
@@ -37,6 +36,13 @@ describe('schema.graphql', () => {
 
   // `open` 은 Envio codegen 이 EE210 으로 거절하는 예약어다(ReScript 키워드).
   // 컨트랙트 뷰 `isOpenGate` 와 이름을 맞춘다.
+  // v2: 닉네임·승인 요청은 체인 밖(Firestore)으로 옮겨 해당 열이 없다.
+  it('drops the columns v2 moved off-chain', async () => {
+    const schema = await readFile(schemaPath, 'utf8');
+    expect(schema).not.toMatch(/^\s+nickname:/m);
+    expect(schema).not.toMatch(/^\s+requested:/m);
+  });
+
   it('uses no Envio reserved keyword as a field name', async () => {
     const schema = await readFile(schemaPath, 'utf8');
     expect(schema).toContain('isOpen: Boolean!');

@@ -202,6 +202,9 @@ service cloud.firestore {
         && capped('body', 5000)
         && capped('description', 5000)
         && capped('posterCid', 80)
+        // v2 정산 규칙 편집기(설계 §5): 수취인 표를 JSON 문자열 한 칸으로 둔다. 목록·맵으로 두면
+        // 위 표현식 예산을 칸마다 또 치르므로 문자열 상한 하나로 막는다(최대 10명 × 사유 80자 여유).
+        && capped('splitJson', 4000)
         && listCapped('tags', 5)
         && listCapped('tiers', 8)
         && stampOk()
@@ -281,6 +284,22 @@ service cloud.firestore {
     match /orders/{orderId} {
       allow read: if signedIn() && request.auth.token.personId == resource.data.personId;
       allow write: if false;
+    }
+
+    // 수동 입장 승인 요청(v2 설계 §6, P4). **요청한 본인만 읽는다** — 스태프 화면이 자기 요청의
+    // 승인 여부를 구독한다(토큰의 personId 클레임 == 문서의 requesterPersonId). 승인권자의 목록은
+    // 체인 권한을 묻는 콜러블(`listOverrideRequests`) 몫이다 — 규칙은 체인을 읽지 못한다.
+    // 쓰기는 서버(`requestOverride`·manualOverride 확정 훅) 전용이다.
+    match /overrideRequests/{requestId} {
+      allow read: if signedIn() && request.auth.token.personId == resource.data.requesterPersonId;
+      allow write: if false;
+    }
+
+    // 닉네임 장부(v2 설계 §7, P5). **서버 전용** — 유일성은 `setNickname` 트랜잭션이 지키고,
+    // 이름→사람 조회(`resolveRecipient`)와 계정→이름 조회(`resolveNicknames`)도 콜러블로만 한다.
+    // 클라이언트가 읽을 수 있으면 personId 가 새고, 쓸 수 있으면 남의 이름을 빼앗는다.
+    match /nicknames/{name} {
+      allow read, write: if false;
     }
 
     // persons, passkeys, kycSessions, invites, phoneIndex, transferInvites, authChallenges 포함 전부 거부.

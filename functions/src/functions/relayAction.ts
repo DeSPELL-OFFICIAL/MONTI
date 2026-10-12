@@ -12,7 +12,7 @@ import {
   type Abi,
   type TransactionReceipt,
 } from 'viem';
-import { forwarderAbi, identityAbi, organizersAbi, ticketAbi, type Hex } from '@monti/shared';
+import { forwarderAbi, identityAbi, organizersAbi, settlementVaultAbi, ticketAbi, type Hex } from '@monti/shared';
 import { RELAYER_PK } from '../config.js';
 import { resolveCallerAccount } from '../lib/auth.js';
 import { deployment, publicClient } from '../lib/chain.js';
@@ -20,6 +20,8 @@ import { RELAYS, USERS, db } from '../lib/db.js';
 import { getRelayerAccount, sendRelayed } from '../lib/relayer.js';
 import { actionFor, type ActionEntry, type ActionTarget } from '../lib/actionAllowlist.js';
 import { recordUsage } from '../lib/usage.js';
+import { REFUNDED_ACTION_CODE, isRefunded } from '../lib/escrowGuard.js';
+import { decodePublish, postConfirm, type ActionResult } from '../lib/postConfirm.js';
 
 /**
  * 설계 §4 C1 — **제네릭 릴레이 콜러블**. Phase 1 발급/입장을 뺀 나머지 스폰서드 동작(주최자
@@ -59,15 +61,39 @@ export interface RelayActionRequest {
   /** ForwardRequest. `from` 은 서버가 세션 계정으로 덮어쓴다(본문 값은 신뢰하지 않는다). */
   req: { from: string; to: string; nonce: string; deadline: string; data: string };
   deviceSig: string;
-  /** 회계/문서용 라벨 + allowlist 키(예: 'createEvent'). */
+  /** 회계/문서용 라벨 + allowlist 키(예: 'publishEvent'). */
   kind: string;
+  /** `publishEvent` 전용: 수취인별 사유 원문(각 ≤80자, 수취인 수와 같은 길이). 정산 거울에만 남는다. */
+  reasons?: string[];
 }
 export interface RelayActionResult {
   relayId: string;
   status: 'sent' | 'confirmed';
   txHash?: string;
   /** 확정 시 대상 이벤트에서 뽑은 값(kind 별). */
-  result?: { eventId?: string; gateId?: string; orgId?: string; tokenIds?: string[] };
+  result?: ActionResult;
+}
+
+/** 사유 한 줄 상한(설계 §4). */
+const REASON_MAX = 80;
+
+/**
+ * `reasons` 검증. publishEvent 에만 받고, 있으면 수취인 수와 길이가 같아야 한다 — 어긋나면
+ * 거울이 사유를 엉뚱한 수취인에게 붙인다. 해시 대조(위조 걸러내기)는 확정 훅이 한다.
+ */
+function requireReasons(kind: string, raw: unknown, data: Hex): string[] | undefined {
+  if (raw === undefined) return undefined;
+  const bad = () => new HttpsError('invalid-argument', 'BAD_REASONS', { code: 'BAD_REASONS' });
+  if (kind !== 'publishEvent') throw bad();
+  if (!Array.isArray(raw) || !raw.every((r) => typeof r === 'string' && r.length <= REASON_MAX)) throw bad();
+  let recipients: number;
+  try {
+    recipients = decodePublish(data).policy.recipients.length;
+  } catch {
+    throw new HttpsError('invalid-argument', 'BAD_DATA');
+  }
+  if (raw.length !== recipients) throw bad();
+  return raw as string[];
 }
 
 // ─────────────────────────────────────── forwarder revert → details.code
@@ -182,7 +208,7 @@ async function assertUnderPendingLimit(personId: Hex): Promise<void> {
 /**
  * kind 별 회계 scope 를 어떻게 얻는가(설계 §4). 조직 동작은 `org:{orgId}`, 관객/신원 동작은
  * `person:{personId}`. orgId 의 출처가 kind 마다 다르다:
- *  - orgStruct : createEvent 의 EventInit.orgId (calldata 디코드)
+ *  - orgStruct : publishEvent 의 EventMeta.orgId (calldata 디코드)
  *  - orgArg    : setAdmin/setManager 의 첫 인자 orgId (calldata 디코드)
  *  - event     : 첫 인자 eventId -> `Ticket.eventOrg(eventId)`
  *  - token     : 첫 인자 tokenId -> `eventOf` -> `eventOrg`
@@ -191,17 +217,14 @@ async function assertUnderPendingLimit(personId: Hex): Promise<void> {
  */
 type ScopeSource = 'person' | 'orgStruct' | 'orgArg' | 'event' | 'token' | 'gate';
 const SCOPE_SOURCE: Record<string, ScopeSource> = {
-  createEvent: 'orgStruct',
+  publishEvent: 'orgStruct',
   setAdmin: 'orgArg',
   setManager: 'orgArg',
-  publishEvent: 'event',
   cancelEvent: 'event',
-  updateEventMeta: 'event',
   approveClaims: 'event',
   rejectClaims: 'event',
   registerGate: 'event',
   revoke: 'token',
-  requestOverride: 'token',
   manualOverride: 'token',
   openGate: 'gate',
   closeGate: 'gate',
@@ -212,7 +235,6 @@ const SCOPE_SOURCE: Record<string, ScopeSource> = {
   safeTransferFrom: 'person',
   cancelRequest: 'person',
   migrate: 'person',
-  setNickname: 'person',
   cancelRotation: 'person',
   createOrganizer: 'person',
 };
@@ -274,38 +296,6 @@ async function assertUnderOrgLimit(orgId: string): Promise<void> {
   }
 }
 
-/** 확정 영수증에서 kind 별 결과를 뽑는다(설계 §4). 못 뽑으면 undefined — 실패로 보지 않는다. */
-function decodeResult(kind: string, logs: readonly unknown[]): RelayActionResult['result'] | undefined {
-  try {
-    if (kind === 'createEvent') {
-      const l = parseEventLogs({ abi: ticketAbi, logs: logs as never, eventName: 'EventCreated' }) as { args: { eventId?: bigint } }[];
-      const eventId = l[0]?.args.eventId;
-      return eventId === undefined ? undefined : { eventId: eventId.toString() };
-    }
-    if (kind === 'registerGate') {
-      const l = parseEventLogs({ abi: organizersAbi, logs: logs as never, eventName: 'GateRegistered' }) as { args: { gateId?: bigint } }[];
-      const gateId = l[0]?.args.gateId;
-      return gateId === undefined ? undefined : { gateId: gateId.toString() };
-    }
-    if (kind === 'createOrganizer') {
-      const l = parseEventLogs({ abi: organizersAbi, logs: logs as never, eventName: 'OrganizerCreated' }) as { args: { orgId?: bigint } }[];
-      const orgId = l[0]?.args.orgId;
-      return orgId === undefined ? undefined : { orgId: orgId.toString() };
-    }
-    if (kind === 'approveClaims') {
-      const l = parseEventLogs({ abi: ticketAbi, logs: logs as never, eventName: 'ClaimApproved' }) as { args: { tokenId?: bigint } }[];
-      const tokenIds = l
-        .map((e) => e.args.tokenId)
-        .filter((t): t is bigint => t !== undefined)
-        .map((t) => t.toString());
-      return tokenIds.length ? { tokenIds } : undefined;
-    }
-  } catch {
-    return undefined;
-  }
-  return undefined;
-}
-
 /**
  * 확정 훅 — **현재는 로그만 남긴다**. C1 후속(사용량 원장 `usage/{orgId}` + 조직 레이트리밋,
  * 설계 §4)이 여기에 붙는다. relayDoc·영수증을 받아 `gasUsed×price` 를 누적할 깨끗한 이음새다.
@@ -324,6 +314,34 @@ async function onConfirmed(
   await recordUsage(relayDoc.scope, relayDoc.kind, receipt).catch((cause) =>
     info('relayAction.usage.failed', { relayId: relayDoc.relayId, reason: (cause as Error).message }),
   );
+}
+
+/**
+ * 환불된 티켓 방어선(escrowGuard). 금고 refund 뒤에도 티켓은 소유자에게 남고 revoke 되지 않으므로,
+ * 입장(수동 입장)·양도(오퍼 생성/수락·직접 전송) kind 는 대상 tokenId 의 escrow 를 한 번 읽어
+ * Refunded 면 시뮬 전에 거절한다. 값 = calldata 에서 tokenId 가 있는 인자 위치.
+ */
+const REFUND_GUARDED: Record<string, number> = {
+  manualOverride: 0,
+  createOffer: 0,
+  acceptOffer: 0,
+  safeTransferFrom: 2,
+};
+
+async function assertNotRefunded(kind: string, target: ActionTarget, data: Hex): Promise<void> {
+  const index = REFUND_GUARDED[kind];
+  if (index === undefined) return;
+  let tokenId: bigint;
+  try {
+    const decoded = decodeFunctionData({ abi: targetAbi(target), data });
+    tokenId = (decoded.args ?? [])[index] as bigint;
+  } catch {
+    return; // 디코드 못 하는 calldata 는 아래 시뮬이 revert 로 거른다.
+  }
+  if (typeof tokenId !== 'bigint') return;
+  if (await isRefunded(tokenId)) {
+    throw new HttpsError('failed-precondition', REFUNDED_ACTION_CODE, { code: REFUNDED_ACTION_CODE, reason: 'TICKET_REFUNDED' });
+  }
 }
 
 // ─────────────────────────────────────── relayAction
@@ -358,6 +376,7 @@ export const relayAction = onCall({ secrets: [RELAYER_PK] }, async (request): Pr
   if (selector !== entry.selector) {
     throw new HttpsError('failed-precondition', 'SELECTOR_NOT_ALLOWED', { code: 'SELECTOR_NOT_ALLOWED' });
   }
+  const reasons = requireReasons(kind, body.reasons, data);
 
   // deadline 창: (now, now+15분]. 과거면 EXPIRED, 너무 멀면 재생 창을 넓혀 거절.
   const nowSec = BigInt(Math.floor(Date.now() / 1000));
@@ -397,13 +416,19 @@ export const relayAction = onCall({ secrets: [RELAYER_PK] }, async (request): Pr
     // status === 'failed' → 같은 nonce 로 재시도 허용(아래로 진행).
   }
 
+  await assertNotRefunded(kind, entry.target, data);
   await assertUnderPendingLimit(personId);
 
   // ForwardRequest 는 서버가 정한 from/to 로 짓는다(본문의 from/to 는 이미 검증/무시).
   const forwardReq = { from: account, to: target, nonce, deadline, data };
 
   // 가스 쓰기 전 시뮬 + 가스 추정. forwarder+대상 abi 를 합쳐 두 계열 revert 를 이름으로 디코딩.
-  const simAbi = [...forwarderAbi, ...targetAbi(entry.target)] as unknown as Abi;
+  // publishEvent 는 금고(setPolicyByTicket) 오류가 Ticket 을 거쳐 버블되므로 금고 ABI 도 넣는다.
+  const simAbi = [
+    ...forwarderAbi,
+    ...targetAbi(entry.target),
+    ...(kind === 'publishEvent' ? settlementVaultAbi : []),
+  ] as unknown as Abi;
   let gasEstimate: bigint;
   try {
     gasEstimate = (await pc.estimateContractGas({
@@ -430,6 +455,9 @@ export const relayAction = onCall({ secrets: [RELAYER_PK] }, async (request): Pr
     to: target,
     ...(orgId ? { orgId } : {}),
     forwardNonce: nonce.toString(),
+    // 확정 훅을 재실행할 수 있게 입력을 남긴다(대사가 같은 훅을 다시 부른다).
+    data,
+    ...(reasons ? { reasons } : {}),
     idemKey: relayId,
     status: 'pending',
     createdAt: FieldValue.serverTimestamp(),
@@ -472,20 +500,9 @@ export const relayAction = onCall({ secrets: [RELAYER_PK] }, async (request): Pr
 
   // Forwarded 를 디코딩해 릴레이 성사를 확인하고, 회계용 kind 는 대상 이벤트에서 결과를 뽑는다.
   const forwardedLogs = parseEventLogs({ abi: forwarderAbi, logs: receipt.logs, eventName: 'Forwarded' });
-  const result = decodeResult(kind, receipt.logs);
   await onConfirmed({ relayId, kind, personId, account, scope }, receipt);
-
-  // 스태프 수동입장(manualOverride)도 usedAt 을 체인에 쓰지만 분배는 settlementSweep(5분) 전까지 밀린다.
-  // 게이트 경로(relay.ts §3)처럼 입장 확정 직후 그 토큰 에스크로를 분배한다 — tokenId 는 calldata 에서,
-  // eventId 는 토큰 레이아웃(상위 160비트 = tokenId >> 96)에서. 느슨한 결합·실패 무시, sweep 이 백업한다.
-  if (kind === 'manualOverride') {
-    await import('./settlement.js')
-      .then((m) => {
-        const tokenId = ((decodeFunctionData({ abi: ticketAbi, data }).args ?? []) as readonly unknown[])[0] as bigint;
-        return m.onCheckInConfirmed(tokenId >> 96n, tokenId);
-      })
-      .catch((cause) => info('relayAction.release.failed', { relayId, reason: (cause as Error).message }));
-  }
+  // 확정 훅(lib/postConfirm.ts) — 대사(reconcileRelays)가 타임아웃 뒤에 다시 부르는 바로 그 함수다.
+  const result = await postConfirm({ relayId, kind, account, data, ...(reasons ? { reasons } : {}), txHash: sent.hash }, receipt);
 
   await ref.set(
     { status: 'confirmed', confirmedAt: FieldValue.serverTimestamp(), ...(result ? { result } : {}) },

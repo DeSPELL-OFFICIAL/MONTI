@@ -87,12 +87,21 @@ async function defaultReadContract({ functionName, args }: ReadArgs) {
 
 const readContract = vi.fn(defaultReadContract);
 
+const VAULT = '0x4444444444444444444444444444444444444444';
+/** 금고에서 환불(escrow status 3)된 tokenId. 나머지는 status 0(무료·escrow 없음). */
+const refundedIds = new Set<string>();
+type MulticallArgs = { contracts: { address: string; functionName: string; args: readonly [bigint] }[] };
+const multicall = vi.fn(async ({ contracts }: MulticallArgs) =>
+  contracts.map(({ args }) => [VAULT, 0n, VAULT, 0n, refundedIds.has(args[0].toString()) ? 3 : 0]),
+);
+
 vi.mock('../src/lib/chain.js', () => ({
-  publicClient: () => ({ readContract }),
+  publicClient: () => ({ readContract, multicall }),
   deployment: () => ({
     identity: '0x1111111111111111111111111111111111111111',
     organizers: '0x2222222222222222222222222222222222222222',
     ticket: '0x3333333333333333333333333333333333333333',
+    settlementVault: VAULT,
   }),
 }));
 
@@ -150,18 +159,21 @@ const ticketRow: TicketRow = {
 };
 
 /**
- * 티켓 목록은 쪽 단위로, 닉네임은 물어본 계정 그대로 돌려준다.
- * 두 질의를 이름으로 갈라 답한다.
+ * 닉네임 장부(Firestore, v2 P5). 물어본 계정마다 같은 이름을 돌려준다 — `null` 이면 아무도 없다.
+ * 인덱서에는 이제 닉네임이 없다.
  */
+let nicknameBook: string | null = 'alex';
+const nicknamesByAccount = vi.fn(
+  async (accounts: readonly string[]) =>
+    new Map(nicknameBook === null ? [] : accounts.map((a) => [a.toLowerCase(), nicknameBook as string] as const)),
+);
+vi.mock('../src/lib/nicknames.js', () => ({ nicknamesByAccount }));
+
+/** 티켓 목록은 쪽 단위로 돌려주고, 닉네임 장부의 답을 함께 정한다. */
 function envioAnswers(pages: TicketRow[][] = [[ticketRow]], nickname: string | null = 'alex') {
   let page = 0;
-  return async (query: string, variables?: Record<string, unknown>) => {
-    if (query.includes('IdentityAccount')) {
-      const accounts = (variables?.accounts as string[] | undefined) ?? [];
-      return { rows: accounts.map((id) => ({ id, nickname })) };
-    }
-    return { rows: pages[page++] ?? [] };
-  };
+  nicknameBook = nickname;
+  return async () => ({ rows: pages[page++] ?? [] });
 }
 
 function rowsOf(count: number, owner = OWNER.toLowerCase()): TicketRow[] {
@@ -221,11 +233,14 @@ beforeEach(() => {
   decryptField.mockImplementation(async (envelope: string, aad?: string) => `plain:${envelope}:${aad}`);
   readContract.mockClear();
   readContract.mockImplementation(defaultReadContract);
+  refundedIds.clear();
+  multicall.mockClear();
   firestoreWrites.mockClear();
   logInfo.mockClear();
   logWarn.mockClear();
   fetchMock.mockClear();
   envioQuery.mockClear();
+  nicknamesByAccount.mockClear();
   envioQuery.mockImplementation(envioAnswers() as never);
   docs.set(`persons/${PERSON_ID}`, {
     status: 'active',
@@ -378,6 +393,44 @@ describe('issueSnapshot', () => {
     expect(requireStaffForGate).not.toHaveBeenCalled();
   });
 
+  it('drops refunded tickets (vault escrow Refunded) like revoked ones, without opening their photos', async () => {
+    envioQuery.mockImplementation(envioAnswers([rowsOf(3)]) as never);
+    refundedIds.add('2');
+    const snapshot = await callIssue();
+    expect(snapshot.tickets.map((t) => t.tokenId)).toEqual(['1', '3']);
+    // 한 쪽 = Multicall3 한 번. 거르기 전 모든 행의 escrowOf 를 묻는다.
+    expect(multicall).toHaveBeenCalledTimes(1);
+    const { contracts } = multicall.mock.calls[0]![0];
+    expect(contracts.map((c) => [c.address, c.functionName, c.args[0]])).toEqual([
+      [VAULT, 'escrowOf', 1n],
+      [VAULT, 'escrowOf', 2n],
+      [VAULT, 'escrowOf', 3n],
+    ]);
+    expect(multicall.mock.calls[0]![0]).toMatchObject({
+      allowFailure: false,
+      batchSize: 0,
+      multicallAddress: '0xcA11bde05977b3631167028862bE2a173976CA11',
+    });
+    expect(decryptField).toHaveBeenCalledTimes(2);
+    expect(auditRecord()).toMatchObject({ tickets: 2, photos: 2, outcome: 'ok' });
+  });
+
+  it('keeps free-tier and paid-but-not-refunded tickets', async () => {
+    envioQuery.mockImplementation(envioAnswers([rowsOf(2)]) as never);
+    const snapshot = await callIssue();
+    expect(snapshot.tickets.map((t) => t.tokenId)).toEqual(['1', '2']);
+  });
+
+  it('keeps paging past a page whose last row was refunded', async () => {
+    envioQuery.mockImplementation(envioAnswers([rowsOf(SNAPSHOT_MAX_TICKETS), []]) as never);
+    refundedIds.add(String(SNAPSHOT_MAX_TICKETS));
+    const snapshot = await callIssue();
+    expect(snapshot.tickets).toHaveLength(SNAPSHOT_MAX_TICKETS - 1);
+    // 커서는 거르기 전 마지막 행이다 — 두 번째 쪽을 그 id 뒤에서 묻는다.
+    expect(envioCalls('Ticket(')).toHaveLength(2);
+    expect(envioCalls('Ticket(')[1]![1]).toMatchObject({ cursor: String(SNAPSHOT_MAX_TICKETS) });
+  });
+
   it('reads every page of tickets so a big event is not silently truncated', async () => {
     envioQuery.mockImplementation(envioAnswers([rowsOf(SNAPSHOT_MAX_TICKETS), []]) as never);
     const snapshot = await callIssue();
@@ -390,10 +443,11 @@ describe('issueSnapshot', () => {
   it('asks for each nickname once across the whole event, not once per page', async () => {
     envioQuery.mockImplementation(envioAnswers([rowsOf(SNAPSHOT_MAX_TICKETS), []]) as never);
     await callIssue();
-    const nicknameCalls = envioCalls('IdentityAccount');
-    expect(nicknameCalls).toHaveLength(1);
+    expect(nicknamesByAccount).toHaveBeenCalledTimes(1);
     // 같은 주인이 500장을 들고 있어도 계정은 한 번만 묻는다.
-    expect(nicknameCalls[0]![1]).toMatchObject({ accounts: [OWNER.toLowerCase()] });
+    expect(nicknamesByAccount).toHaveBeenCalledWith([OWNER.toLowerCase()]);
+    // 인덱서에는 닉네임을 묻지 않는다(v2 P5).
+    expect(envioCalls('IdentityAccount')).toHaveLength(0);
   });
 
   it('leaves the display name empty when the account has no nickname', async () => {
@@ -402,17 +456,14 @@ describe('issueSnapshot', () => {
     expect(snapshot.tickets[0]!.displayName).toBe('');
   });
 
-  it('matches a checksummed indexer id, because both sides are lowercased', async () => {
-    // 인덱서가 id 를 체크섬 형태로 써도 조회가 빗나가면 안 된다(Task 36 은 소문자로 쓴다).
-    envioQuery.mockImplementation((async (query: string) => {
-      if (query.includes('IdentityAccount')) return { rows: [{ id: MIXED, nickname: 'alex' }] };
-      return { rows: [{ ...ticketRow, owner: MIXED }] };
-    }) as never);
+  it('matches a checksummed owner, because both sides are lowercased', async () => {
+    // 인덱서가 owner 를 체크섬 형태로 줘도 장부 조회가 빗나가면 안 된다.
+    envioQuery.mockImplementation(envioAnswers([[{ ...ticketRow, owner: MIXED }]]) as never);
     const snapshot = await callIssue();
     expect(snapshot.tickets[0]!.account).toBe(MIXED);
     expect(snapshot.tickets[0]!.displayName).toBe('alex');
     // 물어볼 때도 소문자로 보낸다.
-    expect(envioCalls('IdentityAccount')[0]![1]).toMatchObject({ accounts: [MIXED.toLowerCase()] });
+    expect(nicknamesByAccount).toHaveBeenCalledWith([MIXED.toLowerCase()]);
   });
 
   describe('a person document that is missing', () => {

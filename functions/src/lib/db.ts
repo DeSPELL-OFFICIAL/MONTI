@@ -74,9 +74,10 @@ export const USAGE = 'usage';
 
 /**
  * 공연별 **정산 장부 미러**(설계 2026-10-01 §5). 문서 id 는 `eventId`(십진 문자열)이고 값은
- * `{ policy:{recipients:[{account,bps,reason,tag}],platformBps}, policyHash, priceUsdCentsByTier,
+ * `{ orgId, policy:{recipients:[{account,bps,reason,tag}],platformBps}, policyHash, priceUsdCentsByTier,
  * setBy, txHash, updatedAt }` 다. **공개 읽기**(공개 정산 현황 페이지) — 권위는 온체인/인덱서이고
- * 이 문서는 표시용 거울이다. 쓰는 길은 서버(`relaySetPolicy`) 하나다.
+ * 이 문서는 표시용 거울이다. 쓰는 길은 relayAction `publishEvent` 확정 훅(`lib/postConfirm.ts`) 하나다 —
+ * 콜러블이 확정을 못 보면 `reconcileRelays` 가 같은 훅을 다시 돌린다.
  */
 export const SETTLEMENTS = 'settlements';
 /**
@@ -86,6 +87,23 @@ export const SETTLEMENTS = 'settlements';
  * createdAt, updatedAt }`. **본인만 읽는다**(firestore.rules), 쓰는 길은 서버 전용이다.
  */
 export const ORDERS = 'orders';
+
+/**
+ * 수동 입장 승인 **요청**(v2 설계 §6, P4). 문서 id 는 자동 id 이고 값은 `{ eventId, tokenId, gateId,
+ * reason, note?, requesterAccount, requesterPersonId, status:'open'|'approved', approvedBy?,
+ * approvedTxHash?, createdAt, approvedAt?, expireAt }`. 요청은 체인에 올리지 않는다 — 승인 자체는
+ * 기존 `manualOverride` 릴레이 1건이고, 그 확정이 같은 tokenId 의 open 요청을 `approved` 로 닫는다.
+ * `expireAt`(+24h) 에 TTL 정책이 걸린다. 쓰기는 서버 전용, 읽기는 요청자 본인만(firestore.rules).
+ */
+export const OVERRIDE_REQUESTS = 'overrideRequests';
+
+/**
+ * 닉네임 장부(v2 설계 §7, P5). 문서 id 는 소문자 정규형(`^[a-z0-9_]{3,20}$`)이고 값은
+ * `{ personId, account(소문자), display, updatedAt }` 다. 유일성은 문서 id 와 트랜잭션이 지킨다 —
+ * 체인 `Identity` 의 닉네임은 v2 에서 사라진다. 주인 키는 회전해도 그대로인 `personId` 이고,
+ * `account` 는 표시용 역조회 칸이라 `recoverAccess` 가 회전 때 갱신한다. **서버 전용**이다.
+ */
+export const NICKNAMES = 'nicknames';
 
 /**
  * 릴레이 상태·대기 테이블 컬렉션 이름. 정의는 `relayTypes.ts` 한 곳이고(웹과 공유), 여기서
@@ -120,6 +138,8 @@ export const ALLOWED_COLLECTIONS = [
   USAGE,
   SETTLEMENTS,
   ORDERS,
+  OVERRIDE_REQUESTS,
+  NICKNAMES,
   RELAYS,
   ADMISSIONS,
   ADMISSION_TOKENS,

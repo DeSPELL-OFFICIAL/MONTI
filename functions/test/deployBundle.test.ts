@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { beforeAll, describe, expect, it } from 'vitest';
 // @ts-expect-error — 빌드 스크립트는 타입 선언이 없는 .mjs 다(tsconfig 의 include 밖).
 import { bundleDeploy } from '../esbuild.config.mjs';
+import deployment10143 from '../../packages/shared/src/deployments/10143.json' with { type: 'json' };
 
 const execFileAsync = promisify(execFile);
 const functionsDir = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -59,7 +60,8 @@ describe('deploy bundle', () => {
     // ABI 와 배포 주소는 JSON import 라 번들에 리터럴로 박혀야 한다.
     // 하나라도 런타임 파일 읽기로 남으면 Cloud Functions 에서 JSON 이 없어 죽는다.
     expect(bundleSource).toContain('deviceUpdatedAt'); // Identity ABI 항목
-    expect(bundleSource).toContain('0x961a895b47Cf200C14acf38F5689979FF5bd8133'); // 10143 identity
+    // 10143 identity — 현재 배포 기록(v2 rc1: 0x1EDFE1BC…4B27)에서 읽는다. 재배포 때 손댈 필요가 없다.
+    expect(bundleSource).toContain(deployment10143.identity);
     expect(bundleSource).not.toMatch(/readFileSync\(.*(abi|deployments)/i);
     expect(bundleSource).not.toMatch(/import\(\s*["'`]/); // 동적 import 로 빠져나간 모듈이 없다
   });

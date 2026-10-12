@@ -14,6 +14,20 @@ const abiFor = (t: ActionTarget): Abi =>
 const functionsOf = (abi: Abi): AbiFunction[] =>
   (abi as readonly { type: string }[]).filter((i): i is AbiFunction => i.type === 'function');
 
+describe('actionAllowlist — v2 off-chain moves', () => {
+  it('no longer relays requestOverride (v2 P4: requests live in Firestore)', () => {
+    expect(ACTION_ALLOWLIST.requestOverride).toBeUndefined();
+    const present = new Set(Object.values(ACTION_ALLOWLIST).map((e) => e.selector));
+    expect(present.has(toFunctionSelector('function requestOverride(uint256,uint256,uint8)'))).toBe(false);
+  });
+
+  it('no longer relays setNickname (v2 P5: nicknames live in Firestore)', () => {
+    expect(ACTION_ALLOWLIST.setNickname).toBeUndefined();
+    const present = new Set(Object.values(ACTION_ALLOWLIST).map((e) => e.selector));
+    expect(present.has(toFunctionSelector('function setNickname(bytes32,string)'))).toBe(false);
+  });
+});
+
 describe('actionAllowlist ↔ generated ABI (drift guard)', () => {
   it('every allowlisted signature is self-consistent (toFunctionSelector(signature) === selector)', () => {
     for (const [kind, entry] of Object.entries(ACTION_ALLOWLIST)) {

@@ -16,7 +16,7 @@ import {
   db,
 } from '../lib/db.js';
 import { sendSetKycLevel } from '../lib/kycLevel.js';
-import { sweepRelays } from './reconcileRelays.js';
+import { sweepRelays, sweepUnhookedRelays } from './reconcileRelays.js';
 import { settlementSweep } from './settlement.js';
 
 const ZERO = '0x0000000000000000000000000000000000000000';
@@ -513,6 +513,7 @@ export const reconcilePending = onSchedule(
       ['pendingGates', sweepPendingGates],
       ['abandonedKyc', sweepAbandonedKyc],
       ['relays', sweepRelays],
+      ['relaysUnhooked', () => sweepUnhookedRelays()],
       ['settlement', settlementSweep],
     ] as const;
 
