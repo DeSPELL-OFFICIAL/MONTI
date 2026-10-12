@@ -437,6 +437,27 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
 .tier-list li:first-child { padding-top: 0; }
 .tier-list li:last-child { padding-bottom: 0; border-bottom: 0; }
 .muted { color: var(--ink-2); font-size: var(--t-cap); line-height: var(--t-cap-lh); }
+/* The organiser's per-type status: a real table (the global `table` rule makes tables a scroll
+   block), with a gutter between columns and the counts kept on one line. The type name takes what
+   is left and ends in an ellipsis rather than running into the counts (max-width 0 + width 100%
+   is what lets an auto-layout cell truncate). */
+.status-table { display: table; width: 100%; border-collapse: collapse; margin: 0 0 var(--s-3); }
+.status-table td {
+  padding: var(--s-2) 0; border-bottom: 1px solid var(--glass-hairline);
+  white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+.status-table td:first-child { width: 100%; max-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.status-table td + td { padding-left: var(--s-4); text-align: right; color: var(--ink-2); }
+.status-table tr:last-child td { border-bottom: 0; }
+/* An attendee row: the event-list card, name left (one line, ellipsis), status chips right. The two
+   chips stack in a fixed column so neither ever wraps mid-word on a 390px screen. */
+.attendee-list { margin-top: var(--s-2); }
+.attendee-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); }
+.attendee-row__name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.attendee-row__chips { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: var(--s-1); }
+.attendee-row__chips .badge { margin-left: 0; white-space: nowrap; }
+/* The notice form and the list of posted notices are two sections' worth apart. */
+h3.announce__posted { margin-top: var(--s-5); }
 
 /* ── badges, chips, tags ───────────────────────────────────────────────────────────────── */
 .badge {
@@ -667,6 +688,9 @@ a { color: var(--brand-ink); text-decoration-thickness: 1px; text-underline-offs
 .ticket-number__digits { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
 .ticket-number__digits strong { font-size: 1.125rem; }
 /* A full identifier under a 상세: wraps anywhere, copy button beside it. */
+/* The full number in 4-digit groups: it wraps at the spaces between groups, and only splits a group
+   if one group alone is wider than the line. */
+.ticket-number__full { font-variant-numeric: tabular-nums; word-break: normal; overflow-wrap: anywhere; }
 .copy-value__text { word-break: break-all; }
 .copy-value__button,
 .ticket-number__copy {

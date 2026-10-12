@@ -6,7 +6,7 @@ import { describeFailure } from '../../shared/errors';
 import { useTicketArtProps } from './useTicketArt';
 import { useTicketDetail } from './useTicketDetail';
 import { useStateLabel } from './List';
-import { deriveDetailView, shortTicketNumber } from './ticketState';
+import { deriveDetailView, groupDigits, shortTicketNumber } from './ticketState';
 import { Receipt } from '../purchase/Receipt';
 
 /**
@@ -99,7 +99,11 @@ export function TicketDetail() {
       <details className="more">
         <summary>{copy.tickets.numberDetails}</summary>
         <p className="muted">{copy.tickets.numberFull}</p>
-        <p className="ticket-number__digits">{tokenId}</p>
+        {/* Shown in 4-digit groups so a narrow screen wraps it between groups, never leaving one
+            digit alone on a line. Display only: the copy button above copies the raw `tokenId`. */}
+        <p className="ticket-number__digits ticket-number__full" data-value={tokenId}>
+          {groupDigits(tokenId)}
+        </p>
       </details>
       {refunded ? (
         <p>{copy.tickets.refundedState}</p>

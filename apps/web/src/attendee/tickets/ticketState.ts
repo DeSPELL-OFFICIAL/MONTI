@@ -75,3 +75,8 @@ export function shortTicketNumber(tokenId: string): { lead: string; tail: string
   const cut = Math.max(0, tokenId.length - TICKET_NUMBER_TAIL);
   return { lead: tokenId.slice(Math.max(0, cut - TICKET_NUMBER_LEAD), cut), tail: tokenId.slice(cut) };
 }
+
+/** `1234567890` → `1234 5678 90`: four-digit groups from the left, for reading only. */
+export function groupDigits(digits: string): string {
+  return digits.replace(/(\d{4})(?=\d)/g, '$1 ');
+}

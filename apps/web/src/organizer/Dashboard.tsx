@@ -155,11 +155,11 @@ export function Dashboard() {
           {busy ? <Alert tone="info">{life.working}</Alert> : null}
 
           <h2>{dash.title}</h2>
-          <table>
+          <table className="status-table">
             <tbody>
               {tiers.map((tier) => (
                 <tr key={tier.id}>
-                  <td>{tier.name}</td>
+                  <td title={tier.name}>{tier.name}</td>
                   <td>
                     {dash.sold} {tier.minted}
                   </td>
@@ -180,13 +180,25 @@ export function Dashboard() {
           <h2>{dash.attendees}</h2>
           {attendeesLoading ? <Spinner /> : null}
           {!attendeesLoading && attendees.length === 0 ? <p>{dash.none}</p> : null}
-          <ul style={{ listStyle: 'none', padding: 0 }}>
-            {attendees.map((row) => (
-              <li key={row.tokenId}>
-                {attendeeLabel(row, dash.guest)} · {row.checkedIn ? dash.checkedIn : dash.notCheckedIn} · {dash.kyc}{' '}
-                {row.kycLevel >= 1 ? dash.kycYes : dash.kycNo}
-              </li>
-            ))}
+          <ul className="event-list attendee-list">
+            {attendees.map((row) => {
+              const label = attendeeLabel(row, dash.guest);
+              return (
+                <li key={row.tokenId} className="attendee-row">
+                  <span className="attendee-row__name" title={label}>
+                    {label}
+                  </span>
+                  <span className="attendee-row__chips">
+                    <span className={`badge${row.checkedIn ? ' badge--ok' : ''}`}>
+                      {row.checkedIn ? dash.checkedIn : dash.notCheckedIn}
+                    </span>
+                    <span className={`badge${row.kycLevel >= 1 ? ' badge--ok' : ''}`}>
+                      {dash.kyc} {row.kycLevel >= 1 ? dash.kycYes : dash.kycNo}
+                    </span>
+                  </span>
+                </li>
+              );
+            })}
           </ul>
 
           {/* Shown whatever the status is: the picture is the one part of a ticket that stays

@@ -107,7 +107,7 @@ export function Announce({ eventId }: { eventId: string }) {
         {copy.post}
       </Button>
 
-      <h3>{copy.posted}</h3>
+      <h3 className="announce__posted">{copy.posted}</h3>
       {loading ? <Alert tone="info">{copy.loading}</Alert> : null}
       {loadFailed ? <Alert tone="warn">{copy.loadFailed}</Alert> : null}
       {/* Only a list that is genuinely empty says so — a failed load already said its piece. */}

@@ -266,8 +266,21 @@ describe('TicketDetail', () => {
     expect(line).not.toHaveTextContent(tokenId);
     const details = screen.getByText('Details').closest('details');
     expect(details).not.toBeNull();
-    expect(details).toHaveTextContent(tokenId);
+    // Shown in 4-digit groups so it wraps between groups, never with one digit left on its own line.
+    expect(details).toHaveTextContent('7930 7390 6767 7860 1931 1374 9428 633');
     expect(details).not.toHaveAttribute('open');
+  });
+
+  it('copies the full number ungrouped, whatever the screen shows', async () => {
+    const tokenId = '79545075164321394943918126137353';
+    gql.mockImplementation(async (query: string) =>
+      query.includes('OwnedTickets') ? { Ticket: [...OWNED, ticket(tokenId)], Offer: OFFERS } : answerIndexer(query));
+    const user = userEvent.setup();
+    const writeText = vi.spyOn(navigator.clipboard, 'writeText');
+    renderDetail(tokenId);
+    await user.click(await screen.findByRole('button', { name: 'Copy number' }));
+    expect(writeText).toHaveBeenCalledWith(tokenId);
+    expect(screen.getByText('7954 5075 1643 2139 4943 9181 2613 7353')).toHaveAttribute('data-value', tokenId);
   });
 
   it('drops the entry and handover buttons once the ticket is used', async () => {

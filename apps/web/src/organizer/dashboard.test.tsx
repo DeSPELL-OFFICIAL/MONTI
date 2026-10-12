@@ -121,7 +121,19 @@ describe('the organiser dashboard', () => {
       { tokenId: '79545075164321394943918126137350', nickname: '', tier: 0, checkedIn: false, kycLevel: 0 as const },
     ]);
     open();
-    expect(await screen.findByText(new RegExp(`^${dash.guest} · 7954…7350 ·`))).toBeInTheDocument();
+    expect(await screen.findByText(`${dash.guest} · 7954…7350`)).toBeInTheDocument();
+  });
+
+  it('gives each attendee row its name and its two status chips as separate parts', async () => {
+    open();
+    const name = await screen.findByText('alice');
+    const row = name.closest('li');
+    expect(row).toHaveClass('attendee-row');
+    const chips = row?.querySelectorAll('.attendee-row__chips .badge') ?? [];
+    expect([...chips].map((chip) => chip.textContent)).toEqual([dash.checkedIn, `${dash.kyc} ${dash.kycYes}`]);
+    const bob = screen.getByText('bob').closest('li');
+    expect(bob).toHaveTextContent(dash.notCheckedIn);
+    expect(bob).toHaveTextContent(`${dash.kyc} ${dash.kycNo}`);
   });
 
   it('reads the notices at once and shows their empty state while the indexer is still answering', async () => {

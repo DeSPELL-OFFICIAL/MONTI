@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { deriveDetailView, deriveTicketState, shortTicketNumber } from './ticketState';
+import { deriveDetailView, deriveTicketState, groupDigits, shortTicketNumber } from './ticketState';
 
 const base = { ownerIsMe: true, revoked: false, checkIn: null, offer: null, now: 1_790_000_000 };
 
@@ -59,5 +59,13 @@ describe('shortTicketNumber', () => {
   it('leaves a short number whole in the tail', () => {
     expect(shortTicketNumber('42')).toEqual({ lead: '', tail: '42' });
     expect(shortTicketNumber('12345')).toEqual({ lead: '1', tail: '2345' });
+  });
+});
+
+describe('groupDigits', () => {
+  it('splits a number into four-digit groups from the left', () => {
+    expect(groupDigits('79545075164321394943918126137353')).toBe('7954 5075 1643 2139 4943 9181 2613 7353');
+    expect(groupDigits('1234567')).toBe('1234 567');
+    expect(groupDigits('1234')).toBe('1234');
   });
 });
