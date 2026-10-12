@@ -4,6 +4,7 @@ import { Alert, Button, Card, EmptyState, Fab, Field, Screen, Spinner } from '..
 import { fmt, useLocale } from '../shared/i18n';
 import { useSession } from '../shared/session';
 import { formatEventDate } from '../attendee/discover/useEvents';
+import { useEventTitles } from '../shared/envio/useEventTitles';
 import { useOrganizerCopy, type OrganizerCopy } from './copy';
 import { useMyOrgs, useOrgEvents } from './useMyOrgs';
 import { Become } from './Become';
@@ -57,6 +58,10 @@ function OrganizerHome() {
   const orgIds = useMemo(() => orgs.map((org) => org.orgId), [orgs]);
   const { events, isLoading: eventsLoading, isError: eventsError, refetch: refetchEvents } = useOrgEvents(orgIds);
   const mine = selected === undefined ? [] : events.filter((event) => event.orgId === selected.orgId);
+  // The rows are the indexer's and never wait on the gateway: each one is listed by number at once
+  // and takes its name the moment the pinned document answers. The read is shared with the event
+  // screen, so opening one of these names it without a second trip.
+  const titleOf = useEventTitles(mine.map((event) => ({ eventId: event.id, imageCid: event.imageCid })));
 
   return (
     <Screen title={copy.home.title}>
@@ -132,7 +137,9 @@ function OrganizerHome() {
         <ul className="event-list">
           {mine.map((event) => (
             <li key={event.id}>
-              <Link to={`/org/events/${event.id}`}>{fmt(copy.home.eventFallback, { id: event.id })}</Link>
+              <Link to={`/org/events/${event.id}`}>
+                {titleOf(event.id).title || fmt(copy.home.eventFallback, { id: event.id })}
+              </Link>
               <span className="muted"> {statusLabel(event.status, copy.home.status)}</span>
               <p className="muted">{formatEventDate(event.startsAt, locale)}</p>
             </li>

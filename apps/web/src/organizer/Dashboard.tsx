@@ -5,7 +5,8 @@ import { Alert, Button, Screen, Spinner } from '../shared/ui';
 import { api } from '../shared/api/functions';
 import { gql } from '../shared/envio/client';
 import { EVENT_QUERY, type EnvioEvent, type EnvioTier } from '../shared/envio/queries';
-import { fetchEventMetadata } from '../shared/envio/ipfs';
+import { useEventTitles } from '../shared/envio/useEventTitles';
+import { fmt } from '../shared/i18n';
 import { useEventRequests } from '../shared/envio/claimRequests';
 import { Announce } from './Announce';
 import { SettlementSection } from './settlement/SettlementSection';
@@ -38,10 +39,6 @@ export function Dashboard() {
   const [event, setEvent] = useState<EnvioEvent | null>(null);
   const [indexerTiers, setIndexerTiers] = useState<EnvioTier[]>([]);
   const [attendees, setAttendees] = useState<AttendeeRow[]>([]);
-  const [title, setTitle] = useState('');
-  // The metadata read has answered (either way) — until then a missing title is "loading", not
-  // "unnamed".
-  const [metaSettled, setMetaSettled] = useState(false);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   // The cancel confirmation; nothing is sent without it.
@@ -73,27 +70,13 @@ export function Dashboard() {
     };
   }, [eventId, reload]);
 
-  // The event's readable name, for the ticket pictures below — the only thing on this screen
-  // that needs it. It is asked for after the indexer answers because the CID comes from there,
-  // and it never gates the screen: a gateway that will not answer costs the preview its title
-  // and nothing else.
+  // The event's readable name, for the header and the ticket pictures. The CID comes from the
+  // indexer, and the read is the one the organiser home already made for its list (same query
+  // key), so arriving from there names the event at once. It never gates the screen: a gateway
+  // that will not answer costs the header its name and nothing else.
   const imageCid = event?.imageCid ?? '';
-  useEffect(() => {
-    if (imageCid === '') return undefined;
-    let cancelled = false;
-    setMetaSettled(false);
-    void fetchEventMetadata(imageCid)
-      .then((loaded) => {
-        if (!cancelled) setTitle(loaded.title);
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        if (!cancelled) setMetaSettled(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [imageCid]);
+  const titleState = useEventTitles([{ eventId, imageCid }])(eventId);
+  const title = titleState.title;
 
   // 정산 설정's price inputs are keyed to the tiers, and the tiers exist on the chain the moment
   // the event is created — but the hosted indexer can lag it by minutes. Read them from the chain
@@ -115,9 +98,12 @@ export function Dashboard() {
     }
   }
 
+  // Until the name resolves the event goes by its number, never by a blank header.
+  const placeholder = fmt(copy.home.eventFallback, { id: eventId });
+
   if (loading) {
     return (
-      <Screen title={dash.title}>
+      <Screen title={placeholder}>
         <Spinner />
       </Screen>
     );
@@ -132,11 +118,11 @@ export function Dashboard() {
   // chain — they are in the organiser's own draft of the event they just made.
   const draftFallback = event === null ? createdDraftFor(eventId) : null;
   // While the indexer or the title document is still on its way, say so rather than "unnamed".
-  const titleLoading = loading || (imageCid !== '' && !metaSettled);
+  const titleLoading = imageCid !== '' && titleState.status === 'loading';
   const shownTitle = title || draftFallback?.title || (titleLoading ? dash.art.titleLoading : dash.art.untitled);
 
   return (
-    <Screen title={dash.title}>
+    <Screen title={title || draftFallback?.title || placeholder}>
       {failed ? <Alert tone="error">{dash.failed}</Alert> : null}
       {/* The indexer has no row and the chain has no such event either: a number that was mistyped
           on the home screen. When the chain *does* have it (an event created a moment ago), the row
@@ -150,6 +136,7 @@ export function Dashboard() {
       {outcome?.state === 'done' ? <Alert tone="info">{life.cancelled}</Alert> : null}
       {busy ? <Alert tone="info">{life.working}</Alert> : null}
 
+      <h2>{dash.title}</h2>
       <table>
         <tbody>
           {tiers.map((tier) => (
