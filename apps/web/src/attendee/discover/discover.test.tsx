@@ -203,6 +203,18 @@ describe('Discover', () => {
     expect(screen.getByRole('link', { name: /재즈 나이트/ })).toHaveAttribute('href', '/events/1');
   });
 
+  it('keeps the events listed in VITE_HIDDEN_EVENT_IDS off the list, without fetching their metadata', async () => {
+    vi.stubEnv('VITE_HIDDEN_EVENT_IDS', ' 1 , 1003');
+    try {
+      renderDiscover();
+      expect(await screen.findByText('개발자 모임')).toBeInTheDocument();
+      expect(screen.queryByText('재즈 나이트')).toBeNull();
+      expect(fetchEventMetadata).not.toHaveBeenCalledWith('cid-a');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('filters the loaded page by the title search box', async () => {
     renderDiscover();
     expect(await screen.findByText('재즈 나이트')).toBeInTheDocument();

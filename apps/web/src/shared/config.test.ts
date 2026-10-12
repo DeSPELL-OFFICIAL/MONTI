@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getConfig, resetConfig } from './config';
+import { getConfig, hiddenEventIds, resetConfig } from './config';
 
 const BASE = {
   VITE_CHAIN_ID: '10143',
@@ -63,5 +63,18 @@ describe('authMode', () => {
     vi.stubEnv('VITE_AUTH_MODE', 'open');
     expect(authMode()).toBe('open');
     vi.unstubAllEnvs();
+  });
+});
+
+describe('hiddenEventIds', () => {
+  it('is empty when unset or blank', () => {
+    expect(hiddenEventIds().size).toBe(0);
+    vi.stubEnv('VITE_HIDDEN_EVENT_IDS', '');
+    expect(hiddenEventIds().size).toBe(0);
+  });
+
+  it('splits on commas and ignores spaces and empty entries', () => {
+    vi.stubEnv('VITE_HIDDEN_EVENT_IDS', '1001, 1002,,1003 ');
+    expect([...hiddenEventIds()]).toEqual(['1001', '1002', '1003']);
   });
 });

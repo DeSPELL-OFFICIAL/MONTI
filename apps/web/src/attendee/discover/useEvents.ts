@@ -4,6 +4,7 @@ import { gql } from '../../shared/envio/client';
 import { EVENTS_QUERY, type EnvioEvent } from '../../shared/envio/queries';
 import { fetchEventMetadata, type EventMetadata } from '../../shared/envio/ipfs';
 import { isThemeCode } from '../../shared/eventThemes';
+import { hiddenEventIds } from '../../shared/config';
 
 export type DateRange = 'all' | 'today' | 'week' | 'month';
 
@@ -164,17 +165,23 @@ export async function mapWithPool<In, Out>(
   return results;
 }
 
+/** Drops the events this build hides from public lists ({@link hiddenEventIds}). */
+export function withoutHiddenEvents<T extends { id: string }>(events: readonly T[]): T[] {
+  const hidden = hiddenEventIds();
+  return hidden.size === 0 ? [...events] : events.filter((event) => !hidden.has(event.id));
+}
+
 /**
  * One page of published events with each one's metadata document beside it. A document that
  * fails to load becomes null instead of failing the page: an event nobody can name is still an
- * event somebody is looking for.
+ * event somebody is looking for. Hidden events are dropped before their metadata is fetched.
  */
 export function useEvents() {
   return useQuery({
     queryKey: ['events', 'published'],
     queryFn: async (): Promise<DiscoverItem[]> => {
       const { Event } = await gql<{ Event: EnvioEvent[] }>(EVENTS_QUERY, { limit: PAGE_SIZE });
-      return mapWithPool(Event, METADATA_CONCURRENCY, async (event) => ({
+      return mapWithPool(withoutHiddenEvents(Event), METADATA_CONCURRENCY, async (event) => ({
         event,
         metadata: await fetchEventMetadata(event.imageCid).catch(() => null),
       }));

@@ -78,6 +78,16 @@ export function authMode(): AuthMode {
 }
 
 /**
+ * Event ids kept off the public lists (`VITE_HIDDEN_EVENT_IDS`, comma-separated, default empty) —
+ * old test events a build should not advertise. Only the lists hide them; a direct link to
+ * `/events/<id>` or `/settlement/<id>` still opens. Read at call time, like {@link authMode}.
+ */
+export function hiddenEventIds(): ReadonlySet<string> {
+  const raw = optionalEnv('VITE_HIDDEN_EVENT_IDS') ?? '';
+  return new Set(raw.split(',').map((id) => id.trim()).filter(Boolean));
+}
+
+/**
  * Whether the programmable-settlement feature is live for this build. True only when BOTH the
  * vault and the USDC token address are configured — a vault with no token to escrow is a
  * half-wired feature, so the screens stay hidden until both are present. Read at call time, the
